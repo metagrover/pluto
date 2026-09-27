@@ -941,7 +941,7 @@ const previewActionItems: Entity[] = [
     normalized_name: 'send the new pricing sheet to sarah in sales',
     status: 'active',
     due_date: new Date(Date.now() + 2 * 86400000).toISOString(),
-    assigned_to: 'You',
+    assigned_to: 'preview-avery',
     domain_tag: 'work',
     metadata: JSON.stringify({
       commitment_state: 'possible',
@@ -962,7 +962,7 @@ const previewActionItems: Entity[] = [
     normalized_name: 'share the 30-day trial plan with acme corp',
     status: 'active',
     due_date: new Date(Date.now() + 6 * 3600000).toISOString(),
-    assigned_to: 'You',
+    assigned_to: 'preview-avery',
     domain_tag: 'work',
     metadata: JSON.stringify({
       commitment_state: 'confirmed',
@@ -980,7 +980,7 @@ const previewActionItems: Entity[] = [
     normalized_name: 'review the new team invite steps with avery',
     status: 'active',
     due_date: new Date(Date.now() + 48 * 3600000).toISOString(),
-    assigned_to: 'You',
+    assigned_to: 'preview-avery',
     domain_tag: 'work',
     metadata: JSON.stringify({
       commitment_state: 'confirmed',
@@ -1542,7 +1542,7 @@ const createInvokeFallback =
                   "Maya Chen: Let's make sure Sarah has the new pricing sheet before the Acme call.",
               },
             ],
-            related_entity_ids: ['preview-maya'],
+            related_entity_ids: ['preview-maya', 'preview-action-suggested'],
             related_stream_ids: [],
             related_meeting_ids: ['preview-pricing-review'],
             created_at: now,

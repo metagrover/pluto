@@ -131,11 +131,60 @@ describe('Ask Pluto request lifecycle', () => {
     const newConversation = [...container.querySelectorAll('button')].find(
       (button) => button.textContent?.includes('New conversation'),
     ) as HTMLButtonElement;
+    expect(newConversation.parentElement?.classList.contains('sticky')).toBe(
+      true,
+    );
+    expect(newConversation.parentElement?.classList.contains('top-0')).toBe(
+      true,
+    );
     await act(async () => newConversation.click());
+    expect(invoke).toHaveBeenCalledWith('intelligence:query:new-conversation');
     expect(container.textContent).not.toContain(
       'Jordan owns the holdings update.',
     );
     expect(container.textContent).toContain("Hello, I'm Pluto.");
+  });
+
+  it('describes held-back draft statements without blaming the meeting sources', async () => {
+    const invoke = vi.fn((channel: string) =>
+      Promise.resolve(channel === 'intelligence:suggested-queries' ? [] : null),
+    );
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+    const Harness = () => {
+      const [messages, setMessages] = useState<AskPlutoMessage[]>([
+        {
+          id: 'user',
+          role: 'user',
+          content: 'Summarize Punit’s contributions',
+        },
+        {
+          id: 'assistant',
+          role: 'assistant',
+          content: 'Punit asked about the kitchen table.',
+          outcome: 'partial',
+          unsupportedClaimCount: 4,
+          omissionRef: 'opaque-ref',
+        },
+      ]);
+      return (
+        <AskPluto
+          visible
+          onClose={vi.fn()}
+          onOpenMeeting={vi.fn()}
+          messages={messages}
+          setMessages={setMessages}
+        />
+      );
+    };
+
+    await act(async () => root.render(<Harness />));
+    expect(container.textContent).toContain(
+      'Partial answer · 4 draft statements need a closer check',
+    );
+    expect(container.textContent).not.toContain('Left out 4 details');
   });
 
   it('shows request phases, exposes cancellation, and restores the composer', async () => {
@@ -227,17 +276,30 @@ describe('Ask Pluto request lifecycle', () => {
     expect(
       container.querySelector('[data-testid="ask-pluto-loading-shell"]'),
     ).not.toBeNull();
-    expect(
-      container.querySelectorAll('[data-testid="ask-pluto-phase-step"]'),
-    ).toHaveLength(4);
-    expect(container.querySelectorAll('[data-state="complete"]')).toHaveLength(
-      1,
+    const progressDots = container.querySelectorAll<HTMLElement>(
+      '[data-testid="ask-pluto-progress-dot"]',
     );
-    expect(container.querySelectorAll('[data-state="active"]')).toHaveLength(1);
+    expect(progressDots).toHaveLength(4);
+    expect([...progressDots].map((dot) => dot.style.animationDelay)).toEqual([
+      '0ms',
+      '150ms',
+      '300ms',
+      '450ms',
+    ]);
     await act(async () => {
       listeners.get('intelligence:query:status')?.(
         {},
         { requestId, phase: 'writing' },
+      );
+    });
+    expect(container.textContent).toContain('Writing a grounded answer');
+    expect(
+      container.querySelectorAll('[data-testid="ask-pluto-progress-dot"]'),
+    ).toHaveLength(4);
+    await act(async () => {
+      listeners.get('intelligence:query:status')?.(
+        {},
+        { requestId, phase: 'generating' },
       );
     });
     expect(container.textContent).toContain('Writing a grounded answer');
@@ -310,6 +372,58 @@ describe('Ask Pluto request lifecycle', () => {
 
     expect(container.textContent).toContain('Needs review');
     expect(container.textContent).toContain('1 detail could not be verified');
+  });
+
+  it('settles a timed-out request and offers Retry', async () => {
+    const invoke = vi.fn((channel: string) => {
+      if (channel === 'intelligence:suggested-queries')
+        return Promise.resolve([]);
+      if (channel === 'intelligence:query') {
+        return Promise.resolve({
+          status: 'unavailable',
+          answer:
+            'Pluto stopped this answer because it took longer than expected.',
+          citations: [],
+          failureReason: 'timeout',
+        });
+      }
+      return Promise.resolve(null);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+
+    await act(async () => {
+      root.render(
+        <AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />,
+      );
+    });
+    const input = container.querySelector('input') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'What changed?');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector('form')
+        ?.dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+    });
+
+    expect(container.textContent).toContain('Pluto stopped this answer');
+    expect(
+      [...container.querySelectorAll('button')].some(
+        (button) => button.textContent === 'Retry',
+      ),
+    ).toBe(true);
+    expect(
+      container.querySelector('[data-testid="ask-pluto-loading-shell"]'),
+    ).toBeNull();
   });
 
   it('presents citations as a collapsed source disclosure instead of meeting cards', async () => {
@@ -561,7 +675,7 @@ describe('Ask Pluto request lifecycle', () => {
     };
 
     await submit("Summarize today's meetings");
-    expect(container.textContent).toContain('Not enough supporting detail');
+    expect(container.textContent).toContain("I couldn't verify an answer");
     await submit('What went wrong here?');
 
     const queryCalls = invoke.mock.calls.filter(

@@ -112,12 +112,12 @@ it('loads an entity-scoped proposal and keeps exact evidence collapsed', async (
     entityId: 'project-1',
     entityType: 'project',
   });
-  expect(host.textContent).toContain('Prepared updates');
+  expect(host.textContent).toContain('Suggested updates');
   expect(host.textContent).toContain('Milestone');
   expect(host.textContent).toContain('Launch the archive');
   expect(host.querySelector('details')?.open).toBe(false);
 
-  await click('Show source');
+  await click('See meeting note');
   expect(host.querySelector('details')?.open).toBe(true);
   expect(host.textContent).toContain('Archive weekly');
   expect(host.textContent).toContain('Sep 1, 2026');
@@ -282,7 +282,7 @@ it('keeps a confirmed decision absent and reports refresh failures separately', 
   expect(host.textContent).toContain('Update accepted');
   expect(host.textContent).not.toContain('couldn’t save this choice');
   expect(host.textContent).not.toContain('Launch the archive');
-  expect(host.textContent).toContain('couldn’t refresh the dossier');
+  expect(host.textContent).toContain('couldn’t refresh this page');
 
   await act(async () => {
     root.unmount();

@@ -58,16 +58,16 @@ describe('browser IPC capture journal fallback', () => {
     expect(summaries[0]).not.toHaveProperty('analysis_json');
 
     await expect(
-      ipc.invoke('GET_MEETING', 'preview-architecture-docs'),
+      ipc.invoke('GET_MEETING', 'preview-pricing-review'),
     ).resolves.toMatchObject({
-      id: 'preview-architecture-docs',
+      id: 'preview-pricing-review',
       transcript_json: expect.any(String),
       analysis_json: expect.any(String),
     });
     await expect(
-      ipc.invoke('GET_MEETING_STATUS', 'preview-architecture-docs'),
+      ipc.invoke('GET_MEETING_STATUS', 'preview-pricing-review'),
     ).resolves.toMatchObject({
-      id: 'preview-architecture-docs',
+      id: 'preview-pricing-review',
       transcript_status: 'validated',
     });
     await expect(
@@ -76,7 +76,7 @@ describe('browser IPC capture journal fallback', () => {
     await expect(ipc.invoke('GET_DASHBOARD_MEETING_PREVIEWS')).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: 'preview-architecture-docs',
+          id: 'preview-pricing-review',
           dashboard_detail: expect.any(String),
         }),
       ]),
@@ -97,9 +97,9 @@ describe('browser IPC capture journal fallback', () => {
         end: new Date(Date.now() + 86_400_000).toISOString(),
       }),
     ).resolves.toMatchObject([
-      { title: 'Product design review', calendarIdentifier: 'preview-work' },
-      { title: 'Weekly team sync', calendarIdentifier: 'preview-work' },
-      { title: 'Customer research', calendarIdentifier: 'preview-work' },
+      { title: 'Q4 Launch & Customer Pricing', calendarIdentifier: 'preview-work' },
+      { title: 'Acme Corp Customer Sync', calendarIdentifier: 'preview-work' },
+      { title: 'Simple Team Setup Review', calendarIdentifier: 'preview-work' },
     ]);
   });
 
@@ -130,15 +130,12 @@ describe('browser IPC capture journal fallback', () => {
     await expect(
       ipc.invoke('GET_PERSON_BRIEFING', 'preview-avery'),
     ).resolves.toMatchObject({
-      person: { id: 'preview-avery', name: 'Avery Chen' },
+      person: { id: 'preview-avery', name: 'Avery Taylor' },
       meetings: [
-        { title: 'Product review', evidence: 'confirmed' },
-        { title: 'Launch handoff', evidence: 'confirmed' },
-        { title: 'Roadmap planning', evidence: 'mentioned' },
+        { title: 'Q4 Launch & Customer Pricing', evidence: 'confirmed' },
       ],
       commitments: {
-        open: [{ text: 'Send the final launch review' }],
-        delivered: [{ text: 'Shared the prototype walkthrough' }],
+        open: [{ text: 'Finish testing the team invite steps' }],
       },
       knowledgeDoc: {
         scope_type: 'person_context',
@@ -158,7 +155,7 @@ describe('browser IPC capture journal fallback', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: 'preview-avery',
-          name: 'Avery Chen',
+          name: 'Avery Taylor',
           meetingCount: 1,
           openCommitmentCount: 1,
           possibleDuplicateCount: 0,

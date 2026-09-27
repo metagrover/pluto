@@ -121,7 +121,7 @@ describe('structured analysis extraction policy', () => {
     expect(prompt).toContain('screen sharing');
     expect(prompt).toContain('Never report how many topics');
     expect(prompt).toContain('Project kickoff');
-    expect(prompt).toContain('milestones, owners, risks, and next steps');
+    expect(prompt).toContain('milestones, dependencies, risks');
   });
 
   it('uses one strict taxonomy in single-pass, topic, and repair prompts', () => {

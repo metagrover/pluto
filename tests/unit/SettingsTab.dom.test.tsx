@@ -466,4 +466,45 @@ describe('SettingsTab', () => {
 
     act(() => root.unmount());
   });
+
+  it('renders theme options including Terracotta, Coral, Aubergine and handles theme changes', async () => {
+    const setTheme = vi.fn();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <SettingsTab
+          {...defaultProps}
+          initialTab="personal"
+          theme="light"
+          setTheme={setTheme}
+        />,
+      ),
+    );
+
+    const themeButtons = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('button'),
+    );
+    const themeNames = [
+      'Light',
+      'Dark',
+      'Terracotta',
+      'Coral',
+      'Aubergine',
+      'System',
+    ];
+    for (const name of themeNames) {
+      const btn = themeButtons.find((b) => b.textContent?.includes(name));
+      expect(btn).toBeDefined();
+    }
+
+    const terracottaBtn = themeButtons.find(
+      (b) => b.textContent?.includes('Terracotta'),
+    )!;
+    await act(async () => terracottaBtn.click());
+    expect(setTheme).toHaveBeenCalledWith('terracotta');
+
+    act(() => root.unmount());
+  });
 });

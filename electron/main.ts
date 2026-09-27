@@ -491,8 +491,11 @@ import {
 } from './entityPipeline';
 import { IDENTITY_CHANNELS, handleIdentityRequest } from './identityHandlers';
 import { startIdentityReconciliation } from './identityReconciliation';
+import { removeRepeatedAskPlutoClaims } from './intelligence/askPlutoAnswerText';
 import {
+  EXPANSION_FOLLOW_UP_PATTERN,
   describePreviousConversationFailure,
+  detectAttributionDispute,
   inheritConversationScope,
   isDiagnosticConversationFollowUp,
   latestAssistantTurn,
@@ -504,7 +507,20 @@ import {
   parseAskPlutoCorrectionRecords,
   selectRelevantAskPlutoCorrections,
 } from './intelligence/askPlutoCorrections';
+import {
+  askPlutoTimeoutMs,
+  runAskPlutoWithDeadline,
+} from './intelligence/askPlutoDeadline';
 import { classifyAskPlutoFailure } from './intelligence/askPlutoFailures';
+import {
+  clearAskPlutoOmissions,
+  describeUnverifiedAskPlutoOmissions,
+  getAskPlutoOmissionReview,
+  rememberAskPlutoOmissions,
+  selectAdditionalSupportedClaims,
+  selectAskPlutoOmissionContext,
+  uniqueAskPlutoEvidenceMeetings,
+} from './intelligence/askPlutoOmissionReview';
 import {
   type AskPlutoReasoningMode,
   getCrossMeetingCandidateLimit,
@@ -515,8 +531,15 @@ import {
   shouldRestrictToPinnedCurrentComparison,
   shouldRestrictToPriorConversationEvidence,
 } from './intelligence/askPlutoReasoning';
+import {
+  addressConfirmedSelf,
+  resolveAskPlutoSelfReference,
+} from './intelligence/askPlutoSelf';
 import { syncActionTrackerAttentionQueue } from './intelligence/attentionSync';
-import { createValidatedAnswerStream } from './intelligence/citationEngine';
+import {
+  type SafeAnswerPresentation,
+  createValidatedAnswerStream,
+} from './intelligence/citationEngine';
 import {
   queryReferencesCurrentMeeting,
   resolveCurrentMeeting,
@@ -556,7 +579,10 @@ import {
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
   buildMeetingRetrievalResult,
+  buildProjectRecall,
   buildWorkingMemoryOverviewRecall,
+  buildWorkspaceIntelligenceRecall,
+  isPlanningOrPriorityQuery,
   mergeRetrievalResultsByMeeting,
   parseQuery,
   resolveExplicitMeetingScope,
@@ -1193,6 +1219,7 @@ app.whenReady().then(async () => {
         const doc = db.getKnowledgeDocByScope('person_context', personId);
         if (doc) queueKnowledgeDocRefresh(doc.id);
       }
+      invalidateDreamingCatalog();
       if (hasPublishedNotes) {
         for (const win of BrowserWindow.getAllWindows()) {
           if (!win.isDestroyed())
@@ -4264,27 +4291,8 @@ app.whenReady().then(async () => {
     db.getPersonBriefing(String(personId)),
   );
   const personChatEnabled = process.env.PERSON_CHAT_V1 !== 'false';
-  const personChatBoundSpeakers = (personId: string, meetingId: string) => {
-    const canonicalId = db.resolvePersonIdentityId(personId);
-    return (
-      getApplicationDatabase()
-        .prepare(`
-          WITH family(id) AS (
-            SELECT ? UNION SELECT person_id FROM person_aliases
-            WHERE canonical_id = ? AND active = 1
-          )
-          SELECT DISTINCT speaker
-          FROM identity_bindings
-          WHERE meeting_id = ?
-            AND json_valid(payload)
-            AND json_extract(payload, '$.individual') = 1
-            AND json_extract(payload, '$.personId') IN (SELECT id FROM family)
-        `)
-        .all(canonicalId, canonicalId, meetingId) as Array<{ speaker: string }>
-    ).map((row) => row.speaker);
-  };
   const readPersonChatMeeting = getApplicationDatabase().prepare(`
-    SELECT id, title, started_at, created_at, transcript_json, user_notes,
+    SELECT id, title, started_at, created_at, user_notes,
            enhanced_notes, transcript_status, transcript_validated_at
     FROM meetings WHERE id = ?
   `);
@@ -4430,7 +4438,6 @@ app.whenReady().then(async () => {
             readPersonChatMeeting.get(meetingId) as
               | db.PersistedMeeting
               | undefined,
-          getBoundSpeakers: personChatBoundSpeakers,
         });
         const settings = await getAllSettings(db);
         const provider = await getProvider(settings);
@@ -5609,6 +5616,9 @@ app.whenReady().then(async () => {
   // =============================================
   // INTELLIGENCE QUERY HANDLERS (Phase 2)
   // =============================================
+  ipcMain.handle('intelligence:query:new-conversation', (event) => {
+    clearAskPlutoOmissions(event.sender.id);
+  });
   ipcMain.handle(
     'intelligence:query:session-active',
     (event, active: boolean) => {
@@ -5641,6 +5651,14 @@ app.whenReady().then(async () => {
           ? `ask-pluto-${randomUUID()}`
           : input.requestId;
       const controller = new AbortController();
+      const settings = await getAllSettings(db);
+      const isLocalProvider =
+        !settings.llm_provider || settings.llm_provider === 'ollama';
+      const requestTimeoutMs = askPlutoTimeoutMs(
+        typeof input === 'string' ? undefined : input.modeOverride,
+        { isLocal: isLocalProvider },
+      );
+      let recordProgress: (() => void) | undefined;
       const persistedMeetings = db.getMeetings() as db.PersistedMeeting[];
       const priorTurns: AskPlutoConversationTurn[] =
         typeof input === 'string' || !Array.isArray(input.priorTurns)
@@ -5662,6 +5680,17 @@ app.whenReady().then(async () => {
                       .slice(0, 8)
                   : [],
                 ...(turn.outcome ? { outcome: turn.outcome } : {}),
+                ...(typeof turn.unsupportedClaimCount === 'number'
+                  ? { unsupportedClaimCount: turn.unsupportedClaimCount }
+                  : {}),
+                ...(typeof turn.omissionRef === 'string'
+                  ? { omissionRef: turn.omissionRef }
+                  : {}),
+                ...(typeof turn.conversationAnchor === 'string'
+                  ? {
+                      conversationAnchor: turn.conversationAnchor.slice(0, 700),
+                    }
+                  : {}),
                 ...(turn.resolvedScope
                   ? { resolvedScope: turn.resolvedScope }
                   : {}),
@@ -5718,8 +5747,11 @@ app.whenReady().then(async () => {
       let retrievalCompletedAt: number | undefined;
       let providerRequestedAt: number | undefined;
       let providerStartedAt: number | undefined;
+      let rawFirstTokenAt: number | undefined;
       let firstTokenAt: number | undefined;
       let generationCompletedAt: number | undefined;
+      let lastValidatedPresentation: SafeAnswerPresentation | undefined;
+      let conversationAnchor: string | undefined;
       const sendStatus = (phase: AskPlutoQueryStatus['phase']) => {
         if (event.sender.isDestroyed()) return;
         event.sender.send('intelligence:query:status', {
@@ -5753,8 +5785,92 @@ app.whenReady().then(async () => {
           queryText,
           priorTurns,
         );
-        const effectiveQueryText = conversationResolution.retrievalQuery;
-        const parsed = await parseQuery(effectiveQueryText, {
+        conversationAnchor = conversationResolution.retrievalQuery.slice(
+          0,
+          700,
+        );
+        const previousAssistantTurn = latestAssistantTurn(priorTurns);
+        const previousConversationAnswer =
+          conversationResolution.relation !== 'new_topic'
+            ? priorTurns
+                .filter(
+                  (turn) =>
+                    turn.role === 'assistant' && Boolean(turn.content.trim()),
+                )
+                .map((turn) => turn.content)
+                .join('\n') || previousAssistantTurn?.content
+            : undefined;
+        const previousExpansionAnswer =
+          conversationResolution.relation === 'expansion'
+            ? priorTurns
+                .filter(
+                  (turn) =>
+                    turn.role === 'assistant' &&
+                    turn.conversationAnchor === conversationAnchor,
+                )
+                .map((turn) => turn.content)
+                .join('\n') || previousAssistantTurn?.content
+            : undefined;
+        const priorConversationContext =
+          previousConversationAnswer || previousExpansionAnswer;
+        const omissionReview =
+          conversationResolution.relation === 'omission_follow_up'
+            ? getAskPlutoOmissionReview(
+                previousAssistantTurn?.omissionRef,
+                event.sender.id,
+              )
+            : undefined;
+        const effectiveQueryText = omissionReview
+          ? omissionReview.originalQuery
+          : conversationResolution.retrievalQuery;
+        const attributionDispute = detectAttributionDispute(effectiveQueryText);
+        const disputedEntity = attributionDispute?.disputedEntity || null;
+        const isPlanning =
+          isPlanningOrPriorityQuery(queryText) ||
+          (Boolean(conversationResolution.priorQuestion) &&
+            EXPANSION_FOLLOW_UP_PATTERN.test(queryText.trim()) &&
+            isPlanningOrPriorityQuery(
+              conversationResolution.priorQuestion || '',
+            ));
+        if (isPlanning && conversationResolution.task === 'lookup') {
+          conversationResolution.task = 'analysis';
+        }
+        const selfPersonId = db.identityStore.getSelfPersonId();
+        const selfProfile = selfPersonId
+          ? db.identityStore.getProfile()
+          : undefined;
+        const confirmedSelfName =
+          selfProfile?.preferredName.trim() || undefined;
+        const selfReference = resolveAskPlutoSelfReference(
+          effectiveQueryText,
+          confirmedSelfName,
+          selfProfile?.aliases,
+        );
+        if (selfReference.asksIdentity) {
+          return {
+            status: 'answered' as const,
+            answer: confirmedSelfName
+              ? `You're ${confirmedSelfName}.`
+              : "I don't know which person is you yet. Confirm your identity in Pluto, then ask me again.",
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+          };
+        }
+        if (selfReference.refersToSelf && !confirmedSelfName) {
+          return {
+            status: 'answered' as const,
+            answer:
+              "I don't know which person is you yet. Confirm your identity in Pluto so I can find your contributions in meeting evidence.",
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+          };
+        }
+        const retrievalOptionsQuery =
+          conversationResolution.relation === 'omission_follow_up' ||
+          conversationResolution.relation === 'expansion'
+            ? `${selfReference.retrievalQuery}\ngo deeper`
+            : selfReference.retrievalQuery;
+        const parsed = await parseQuery(selfReference.retrievalQuery, {
           signal: controller.signal,
           useModelClassification: false,
         });
@@ -5763,11 +5879,23 @@ app.whenReady().then(async () => {
           persistedMeetings,
         );
         const usePreparedAssigneeRecall = Boolean(
-          assigneeRecall &&
+          !isPlanning &&
+            assigneeRecall &&
             !assigneeRecall.coverageLimited &&
             conversationResolution.relation === 'new_topic',
         );
         const overviewRecall = buildWorkingMemoryOverviewRecall(
+          effectiveQueryText,
+          parsed.entity_mentions,
+        );
+        const workspaceRecall = isPlanning
+          ? buildWorkspaceIntelligenceRecall({
+              query: effectiveQueryText,
+              persistedMeetings,
+              selfPersonId: selfPersonId || undefined,
+            })
+          : null;
+        const projectRecall = buildProjectRecall(
           effectiveQueryText,
           parsed.entity_mentions,
         );
@@ -5806,7 +5934,6 @@ app.whenReady().then(async () => {
               priorTurns,
               conversationResolution.relation,
             );
-        const previousAssistantTurn = latestAssistantTurn(priorTurns);
         if (
           isDiagnosticConversationFollowUp(queryText) &&
           previousAssistantTurn
@@ -6103,6 +6230,20 @@ app.whenReady().then(async () => {
               : []),
           ]),
         ];
+        const expansionMeetingIds =
+          [...priorTurns]
+            .reverse()
+            .find(
+              (turn) =>
+                turn.role === 'assistant' &&
+                turn.conversationAnchor === conversationAnchor &&
+                turn.meetingIds?.length,
+            )?.meetingIds ||
+          (previousAssistantTurn?.meetingIds?.length
+            ? previousAssistantTurn.meetingIds
+            : undefined) ||
+          inheritedScope?.meetingIds ||
+          [];
         const priorPinnedResults =
           priorMeetingIds.length > 0
             ? [...priorMeetingIds]
@@ -6140,6 +6281,8 @@ app.whenReady().then(async () => {
           historicalPinnedResults,
           priorPinnedResults,
           overviewContextUsed ? overviewRecall?.context || [] : [],
+          workspaceRecall?.context || [],
+          projectRecall?.context || [],
         );
         retrievalStartedAt = Date.now();
         const restrictToCurrentMeeting = shouldRestrictToCurrentMeetingEvidence(
@@ -6161,37 +6304,92 @@ app.whenReady().then(async () => {
             currentMeetingRequested,
             historicalCandidateLimit,
           });
+        const isExactWordingRequest =
+          /\b(?:quote|verbatim|word for word|exact(?:ly)?(?: what| how)?|exact words?)\b/i.test(
+            effectiveQueryText,
+          );
+        const synthesizedOnly = !isExactWordingRequest || isPlanning;
         const generalContext = !usePreparedAssigneeRecall
-          ? explicitResolvedScope
+          ? conversationResolution.relation === 'expansion' &&
+            expansionMeetingIds.length > 0
             ? await retrieveContext(parsed, {
-                pinnedResults: explicitlyScopedPinnedResults,
-                query: effectiveQueryText,
-                meetingIds: explicitResolvedScope.meetingIds,
+                query: retrievalOptionsQuery,
+                meetingIds: expansionMeetingIds,
+                synthesizedOnly,
               })
-            : temporalResolvedScope
+            : explicitResolvedScope
               ? await retrieveContext(parsed, {
-                  pinnedResults,
-                  query: effectiveQueryText,
-                  meetingIds: temporalResolvedScope.meetingIds,
+                  pinnedResults: explicitlyScopedPinnedResults,
+                  query: retrievalOptionsQuery,
+                  meetingIds: explicitResolvedScope.meetingIds,
+                  synthesizedOnly,
                 })
-              : restrictToCurrentMeeting && currentPinnedResult
-                ? [currentPinnedResult]
-                : restrictToPinnedCurrentComparison
-                  ? pinnedResults
-                  : restrictToPriorConversation
-                    ? priorPinnedResults
-                    : await retrieveContext(parsed, {
-                        pinnedResults,
-                        query: effectiveQueryText,
-                      })
+              : temporalResolvedScope
+                ? await retrieveContext(parsed, {
+                    pinnedResults,
+                    query: retrievalOptionsQuery,
+                    meetingIds: temporalResolvedScope.meetingIds,
+                    synthesizedOnly,
+                  })
+                : restrictToCurrentMeeting && currentPinnedResult
+                  ? [currentPinnedResult]
+                  : restrictToPinnedCurrentComparison
+                    ? pinnedResults
+                    : restrictToPriorConversation
+                      ? priorPinnedResults
+                      : isPlanning && workspaceRecall
+                        ? parsed.keywords.length > 0
+                          ? await retrieveContext(parsed, {
+                              pinnedResults,
+                              query: retrievalOptionsQuery,
+                              synthesizedOnly: true,
+                            })
+                          : workspaceRecall.context
+                        : await retrieveContext(parsed, {
+                            pinnedResults,
+                            query: retrievalOptionsQuery,
+                            synthesizedOnly,
+                          })
           : [];
-        const context =
-          usePreparedAssigneeRecall && assigneeRecall
+        const generalContextWithFallback =
+          conversationResolution.relation === 'expansion' &&
+          generalContext.length === 0
+            ? priorPinnedResults.filter((result) =>
+                expansionMeetingIds.includes(result.meeting_id),
+              )
+            : generalContext;
+        const omissionContexts = omissionReview
+          ? await Promise.all(
+              omissionReview.claims.slice(0, 6).map(async (claim) => {
+                controller.signal.throwIfAborted();
+                const claimParsed = await parseQuery(claim, {
+                  signal: controller.signal,
+                  useModelClassification: false,
+                });
+                return (
+                  await retrieveContext(claimParsed, {
+                    query: `${claim}\ngo deeper`,
+                    synthesizedOnly,
+                    ...(omissionReview.searchMeetingIds?.length
+                      ? { meetingIds: omissionReview.searchMeetingIds }
+                      : {}),
+                  })
+                ).slice(0, 2);
+              }),
+            )
+          : [];
+        const context = omissionReview
+          ? selectAskPlutoOmissionContext(
+              omissionContexts,
+              generalContextWithFallback,
+            )
+          : usePreparedAssigneeRecall && assigneeRecall
             ? assigneeRecall.context
             : mergeRetrievalResultsByMeeting(
                 assigneeRecall?.context ?? [],
-                generalContext,
+                generalContextWithFallback,
               );
+        const contextMeetings = uniqueAskPlutoEvidenceMeetings(context);
         retrievalCompletedAt = Date.now();
         controller.signal.throwIfAborted();
 
@@ -6212,21 +6410,15 @@ app.whenReady().then(async () => {
                   context.some((result) => result.source_type === 'artifact')
                     ? 'global'
                     : 'meeting_ids',
-                meetingIds: context
-                  .filter((result) => result.source_type !== 'artifact')
-                  .map((result) => result.meeting_id),
+                meetingIds: contextMeetings.map((result) => result.meeting_id),
                 resolvedAt: new Date().toISOString(),
                 source: 'explicit',
               });
         const baseRetrievalSummary: AskPlutoRetrievalSummary =
           explicitRetrievalSummary ||
             temporalRetrievalSummary || {
-              matchedMeetingCount: context.filter(
-                (result) => result.source_type !== 'artifact',
-              ).length,
-              includedMeetingCount: context.filter(
-                (result) => result.source_type !== 'artifact',
-              ).length,
+              matchedMeetingCount: contextMeetings.length,
+              includedMeetingCount: contextMeetings.length,
               preparedEvidenceCount: context.length,
               transcriptOnlyCount: 0,
               omittedMeetingCount: 0,
@@ -6248,15 +6440,17 @@ app.whenReady().then(async () => {
           artifactCount: context.filter(
             (result) => result.source_type === 'artifact',
           ).length,
-          retrievalLevel: assigneeRecall
-            ? 'commitment'
-            : transcriptPassageCount > 0
-              ? 'transcript'
-              : overviewContextUsed
-                ? 'overview'
-                : matchedSectionCount > 0
-                  ? 'section'
-                  : 'note',
+          retrievalLevel: isPlanning
+            ? 'overview'
+            : assigneeRecall
+              ? 'commitment'
+              : transcriptPassageCount > 0
+                ? 'transcript'
+                : overviewContextUsed
+                  ? 'overview'
+                  : matchedSectionCount > 0
+                    ? 'section'
+                    : 'note',
         };
         const retrievalTrace = {
           level: retrievalSummary.retrievalLevel || ('note' as const),
@@ -6266,7 +6460,7 @@ app.whenReady().then(async () => {
             (assigneeRecall
               ? assigneeRecall.mentionedMeetingCount
               : persistedMeetings.length),
-          meetings: context.map((result) => ({
+          meetings: contextMeetings.map((result) => ({
             meetingId: result.meeting_id,
             meetingTitle:
               result.meeting_title || result.mid?.title || 'Untitled meeting',
@@ -6306,8 +6500,13 @@ app.whenReady().then(async () => {
           return {
             status: 'answered' as const,
             answer:
-              assigneeRecall?.answer ??
-              "I couldn't find information about that in your sources.",
+              conversationResolution.relation === 'omission_follow_up'
+                ? describeUnverifiedAskPlutoOmissions(
+                    omissionReview?.claims.length ||
+                      previousAssistantTurn?.unsupportedClaimCount,
+                  )
+                : (assigneeRecall?.answer ??
+                  "I couldn't verify an answer from this search."),
             citations: [],
             currentMeeting: currentMeetingStatus,
             outcome: 'no_evidence' as const,
@@ -6326,26 +6525,62 @@ app.whenReady().then(async () => {
         } else {
           sendStatus('waiting');
         }
+        let visibleValidatedAnswer = '';
         const validatedAnswerStream = createValidatedAnswerStream(
           context,
-          (delta) => {
+          () => {
             if (controller.signal.aborted || event.sender.isDestroyed()) return;
+            const validated = lastValidatedPresentation;
+            if (!validated) return;
+            const nextAnswer = validated.answer;
+            if (
+              !nextAnswer.startsWith(visibleValidatedAnswer) ||
+              nextAnswer.length === visibleValidatedAnswer.length
+            )
+              return;
             firstTokenAt ??= Date.now();
             event.sender.send('intelligence:query:delta', {
               requestId,
-              delta,
+              delta: nextAnswer.slice(visibleValidatedAnswer.length),
             });
+            visibleValidatedAnswer = nextAnswer;
           },
           conversationResolution.task === 'draft'
             ? 'draft'
             : conversationResolution.task === 'analysis'
               ? 'analysis'
               : 'grounded',
+          (presentation) => {
+            const distinct =
+              conversationResolution.task === 'draft'
+                ? presentation
+                : {
+                    ...presentation,
+                    ...removeRepeatedAskPlutoClaims(
+                      presentation.answer,
+                      presentation.citations,
+                      previousExpansionAnswer,
+                    ),
+                  };
+            if (distinct.answer)
+              lastValidatedPresentation = {
+                ...distinct,
+                answer: addressConfirmedSelf(
+                  distinct.answer,
+                  confirmedSelfName,
+                ),
+              };
+          },
+          confirmedSelfName,
         );
         const extractiveAnswer =
-          usePreparedAssigneeRecall && assigneeRecall
-            ? assigneeRecall.answer
-            : buildExtractiveTemporalSummary(effectiveQueryText, context);
+          conversationResolution.relation === 'omission_follow_up' ||
+          conversationResolution.relation === 'expansion' ||
+          selfReference.refersToSelf
+            ? null
+            : usePreparedAssigneeRecall && assigneeRecall
+              ? assigneeRecall.answer
+              : buildExtractiveTemporalSummary(effectiveQueryText, context);
         let answerRaw: string;
         if (
           extractiveAnswer &&
@@ -6375,6 +6610,33 @@ app.whenReady().then(async () => {
               : [],
             formatAskPlutoCorrectionsForPrompt(relevantCorrections),
             conversationResolution.task,
+            omissionReview
+              ? {
+                  claims: omissionReview.claims,
+                  previousAnswer: omissionReview.visibleAnswer,
+                }
+              : undefined,
+            priorConversationContext
+              ? { previousAnswer: priorConversationContext }
+              : undefined,
+            confirmedSelfName,
+            {
+              userProfile: confirmedSelfName
+                ? {
+                    name: confirmedSelfName,
+                    aliases: selfProfile?.aliases,
+                  }
+                : null,
+              disputedEntity,
+              projectContext: projectRecall
+                ? {
+                    name: projectRecall.project.name,
+                    displayTitle: projectRecall.displayTitle,
+                  }
+                : null,
+              isPlanningQuery: isPlanning,
+              synthesizedOnly,
+            },
           );
           console.log(
             `[Pluto] Generating answer via provider: ${provider.name} ...`,
@@ -6384,18 +6646,50 @@ app.whenReady().then(async () => {
             signal: controller.signal,
             mode: reasoningMode,
             onStart: () => {
+              recordProgress?.();
               providerStartedAt ??= Date.now();
               sendStatus('writing');
             },
             onToken: (delta) => {
               if (controller.signal.aborted) return;
+              recordProgress?.();
+              if (!rawFirstTokenAt) {
+                rawFirstTokenAt = Date.now();
+                sendStatus('generating');
+              }
               validatedAnswerStream.push(delta);
             },
           });
         }
+        controller.signal.throwIfAborted();
         generationCompletedAt = Date.now();
 
         let presentation = validatedAnswerStream.finalize(answerRaw);
+        if (
+          presentation.outcome !== 'no_evidence' &&
+          conversationResolution.task !== 'draft'
+        ) {
+          const distinct = removeRepeatedAskPlutoClaims(
+            presentation.answer,
+            presentation.citations,
+            priorConversationContext,
+          );
+          presentation = {
+            ...presentation,
+            ...distinct,
+            ...(conversationResolution.relation === 'expansion' &&
+            !distinct.answer
+              ? {
+                  answer:
+                    "I checked the same meeting again but couldn't find more supported detail to add.",
+                  outcome: 'no_evidence' as const,
+                  citations: [],
+                  unsupportedClaimCount: 0,
+                  unsupportedClaims: [],
+                }
+              : {}),
+          };
+        }
         if (
           conversationResolution.relation === 'expansion' &&
           assigneeRecall &&
@@ -6408,16 +6702,69 @@ app.whenReady().then(async () => {
           if (verifiedRecall.outcome !== 'no_evidence') {
             presentation = {
               ...verifiedRecall,
-              answer: `${verifiedRecall.answer}\n\nThat is the full extent of the explicit assignment evidence I could verify. The retrieved meetings did not establish additional status, rationale, constraints, or related decisions.`,
+              answer: `${verifiedRecall.answer}\n\nThat is the full extent of the explicit assignment evidence I could verify. I could not verify additional status, rationale, constraints, or related decisions in this search.`,
               outcome: 'partial',
               unsupportedClaimCount: 0,
             };
           }
         }
+        if (conversationResolution.relation === 'omission_follow_up') {
+          const earlierAnswer =
+            omissionReview?.visibleAnswer ||
+            previousAssistantTurn?.content ||
+            '';
+          const additional = selectAdditionalSupportedClaims(
+            presentation.citations,
+            earlierAnswer,
+          );
+          presentation = additional.claims.length
+            ? {
+                ...presentation,
+                answer: additional.claims.join(
+                  additional.claims.some((claim) => /^[-*]\s/.test(claim))
+                    ? '\n'
+                    : ' ',
+                ),
+                citations: additional.citations,
+                outcome:
+                  presentation.unsupportedClaimCount > 0
+                    ? 'partial'
+                    : 'answered',
+              }
+            : {
+                ...presentation,
+                answer: describeUnverifiedAskPlutoOmissions(
+                  omissionReview?.claims.length ||
+                    previousAssistantTurn?.unsupportedClaimCount,
+                ),
+                citations: [],
+                outcome: 'no_evidence',
+                unsupportedClaimCount: 0,
+                unsupportedClaims: [],
+              };
+        }
         const coverageLimited = retrievalSummary.omittedMeetingCount > 0;
+        const addressedAnswer = addressConfirmedSelf(
+          presentation.answer,
+          confirmedSelfName,
+        );
         const answer = coverageLimited
-          ? `I found ${retrievalSummary.matchedMeetingCount} meetings, but this answer covers ${retrievalSummary.includedMeetingCount}. Narrow the time period for complete coverage.\n\n${presentation.answer}`
-          : presentation.answer;
+          ? `I found ${retrievalSummary.matchedMeetingCount} meetings, but this answer covers ${retrievalSummary.includedMeetingCount}. Narrow the time period for complete coverage.\n\n${addressedAnswer}`
+          : addressedAnswer;
+        const omissionRef =
+          presentation.outcome === 'partial' &&
+          presentation.unsupportedClaims.length > 0
+            ? rememberAskPlutoOmissions({
+                ownerId: event.sender.id,
+                originalQuery: queryText.trim(),
+                visibleAnswer: answer,
+                claims: presentation.unsupportedClaims,
+                scope: resolvedScope,
+                searchMeetingIds:
+                  explicitResolvedScope?.meetingIds ||
+                  temporalResolvedScope?.meetingIds,
+              })
+            : undefined;
 
         console.log(
           `[Pluto] Query complete. Total duration: ${Date.now() - startTime}ms`,
@@ -6436,25 +6783,44 @@ app.whenReady().then(async () => {
           retrievalTrace,
           trustStatus: presentation.trustStatus,
           unsupportedClaimCount: presentation.unsupportedClaimCount,
+          ...(omissionRef ? { omissionRef } : {}),
         };
       })();
-      const settled = generation.then(
+      const deadlineGeneration = runAskPlutoWithDeadline(
+        generation,
+        controller,
+        Math.max(1, requestTimeoutMs - (Date.now() - startTime)),
+        {
+          onProgressSetup: (fn) => {
+            recordProgress = fn;
+          },
+          idleTimeoutMs: isLocalProvider ? 60_000 : 30_000,
+        },
+      );
+      const settled = deadlineGeneration.then(
         () => undefined,
         () => undefined,
       );
       activeAskPlutoQueries.set(requestId, { controller, settled });
 
       try {
-        const response = await generation;
+        const response = await deadlineGeneration;
         if (response.status === 'answered') {
           sendStatus('citations_ready');
           sendStatus('completed');
         } else if (response.status === 'unavailable') {
           sendStatus('unavailable');
         }
-        return response;
+        return {
+          ...response,
+          ...(conversationAnchor ? { conversationAnchor } : {}),
+        };
       } catch (error) {
-        if (controller.signal.aborted) {
+        if (
+          controller.signal.aborted &&
+          controller.signal.reason instanceof Error &&
+          controller.signal.reason.name === 'AbortError'
+        ) {
           console.log(
             `[Pluto] intelligence:query cancelled after ${Date.now() - startTime}ms [request_id=${requestId}]`,
           );
@@ -6471,13 +6837,28 @@ app.whenReady().then(async () => {
           `[Pluto] intelligence:query failed after ${Date.now() - startTime}ms:`,
           error,
         );
-        sendStatus('failed');
+        sendStatus(failure.reason === 'timeout' ? 'unavailable' : 'failed');
+        if (failure.reason === 'timeout' && lastValidatedPresentation) {
+          return {
+            status: 'unavailable' as const,
+            answer: `${lastValidatedPresentation.answer}\n\n${failure.answer}`,
+            citations: lastValidatedPresentation.citations,
+            currentMeeting: currentMeetingStatus,
+            failureReason: failure.reason,
+            outcome: 'partial' as const,
+            trustStatus: lastValidatedPresentation.trustStatus,
+            unsupportedClaimCount:
+              lastValidatedPresentation.unsupportedClaimCount,
+            ...(conversationAnchor ? { conversationAnchor } : {}),
+          };
+        }
         return {
           status: 'unavailable' as const,
           answer: failure.answer,
           citations: [],
           currentMeeting: currentMeetingStatus,
           failureReason: failure.reason,
+          ...(conversationAnchor ? { conversationAnchor } : {}),
         };
       } finally {
         const finishedAt = Date.now();
@@ -6494,6 +6875,9 @@ app.whenReady().then(async () => {
                 ? retrievalCompletedAt - retrievalStartedAt
                 : null,
             first_token_ms: firstTokenAt ? firstTokenAt - startTime : null,
+            raw_first_token_ms: rawFirstTokenAt
+              ? rawFirstTokenAt - startTime
+              : null,
             generation_ms:
               providerStartedAt && generationCompletedAt
                 ? generationCompletedAt - providerStartedAt

@@ -24,14 +24,6 @@ const scoreText = (queryWords: Set<string>, value: string) => {
   return score;
 };
 
-const safeJson = <T>(value: string | null | undefined): T | null => {
-  if (!value) return null;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return null;
-  }
-};
 
 const compact = (value: string, limit: number) =>
   value.replace(/\s+/g, ' ').trim().slice(0, limit);
@@ -66,39 +58,8 @@ export const routePersonChatIntent = (query: string): PersonChatIntent => {
   return 'personal_recall';
 };
 
-interface TranscriptSegment {
-  speaker?: unknown;
-  text?: unknown;
-}
-
-const personTranscript = (
-  meeting: PersistedMeeting,
-  speakers: Set<string>,
-  queryWords: Set<string>,
-) => {
-  const parsed = safeJson<{ segments?: TranscriptSegment[] }>(
-    meeting.transcript_json,
-  );
-  if (!Array.isArray(parsed?.segments)) return '';
-  return parsed.segments
-    .filter(
-      (segment) =>
-        typeof segment.speaker === 'string' &&
-        typeof segment.text === 'string' &&
-        speakers.has(segment.speaker.toLocaleLowerCase()),
-    )
-    .sort(
-      (left, right) =>
-        scoreText(queryWords, String(right.text)) -
-        scoreText(queryWords, String(left.text)),
-    )
-    .slice(0, 4)
-    .map(
-      (segment) =>
-        `${String(segment.speaker)}: ${compact(String(segment.text), 500)}`,
-    )
-    .join('\n');
-};
+// Raw transcript segments are not used in person chat — only synthesized data
+// (working memory, knowledge doc, enhanced notes, commitments) is surfaced here.
 
 export interface PersonChatContext {
   personName: string;
@@ -112,7 +73,6 @@ export const buildPersonChatContext = (input: {
   detail: PersonBriefingDetail;
   query: string;
   getMeeting: (meetingId: string) => PersistedMeeting | undefined;
-  getBoundSpeakers: (personId: string, meetingId: string) => string[];
 }): PersonChatContext => {
   const { detail, query } = input;
   const queryWords = words(query);
@@ -187,12 +147,7 @@ export const buildPersonChatContext = (input: {
     let excerpt = compact(briefing.context ?? '', 500);
     let body = '';
     if (briefing.evidence === 'confirmed' && meeting) {
-      const speakers = new Set(
-        input
-          .getBoundSpeakers(detail.person.id, briefing.id)
-          .map((speaker) => speaker.toLocaleLowerCase()),
-      );
-      const attributed = personTranscript(meeting, speakers, queryWords);
+      // Only synthesized meeting notes — no raw transcript access.
       const meetingContext = compact(
         meeting.enhanced_notes || meeting.user_notes || briefing.context || '',
         1_200,
@@ -200,13 +155,12 @@ export const buildPersonChatContext = (input: {
       body = [
         `Confirmed conversation: ${briefing.title}`,
         meetingContext
-          ? `Meeting-level context (not necessarily the person's words): ${meetingContext}`
+          ? `Meeting notes: ${meetingContext}`
           : '',
-        attributed ? `Attributed statements:\n${attributed}` : '',
       ]
         .filter(Boolean)
         .join('\n');
-      excerpt ||= compact(attributed || meetingContext, 500);
+      excerpt ||= compact(meetingContext, 500);
     } else if (briefing.evidence === 'scheduled') {
       body = `Scheduled/invited: ${briefing.title}. Attendance is not confirmed.`;
       excerpt ||= 'Scheduled or invited; attendance is not confirmed.';

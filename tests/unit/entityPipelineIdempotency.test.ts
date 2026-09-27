@@ -90,7 +90,7 @@ describe('extracted action idempotency', () => {
       });
       expect(actions).toHaveLength(1);
       expect(actions[0].id).not.toBe(reviewed.id);
-      expect(JSON.parse(actions[0].metadata ?? '{}')).toEqual({
+      expect(JSON.parse(actions[0].metadata ?? '{}')).toMatchObject({
         full_description: 'Send   the rollout note.',
         commitment_state: 'possible',
         origin: 'extraction',

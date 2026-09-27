@@ -48,6 +48,8 @@ export interface AskPlutoMessage {
   isLoading?: boolean;
   trustStatus?: 'grounded' | 'inferred' | 'needs_review';
   unsupportedClaimCount?: number;
+  omissionRef?: string;
+  conversationAnchor?: string;
   retryQuery?: string;
   evidenceState?: 'provisional' | 'processing' | 'failed' | 'completed';
   outcome?: AskPlutoOutcome;
@@ -297,6 +299,15 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                 }
               : {}),
             ...(message.outcome ? { outcome: message.outcome } : {}),
+            ...(message.unsupportedClaimCount
+              ? { unsupportedClaimCount: message.unsupportedClaimCount }
+              : {}),
+            ...(message.omissionRef
+              ? { omissionRef: message.omissionRef }
+              : {}),
+            ...(message.conversationAnchor
+              ? { conversationAnchor: message.conversationAnchor }
+              : {}),
             ...(message.resolvedScope
               ? { resolvedScope: message.resolvedScope }
               : {}),
@@ -343,6 +354,12 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               typeof response === 'string'
                 ? undefined
                 : response.unsupportedClaimCount,
+            omissionRef:
+              typeof response === 'string' ? undefined : response.omissionRef,
+            conversationAnchor:
+              typeof response === 'string'
+                ? undefined
+                : response.conversationAnchor,
             retryQuery:
               typeof response !== 'string' && response.status === 'unavailable'
                 ? submitQuery.trim()
@@ -430,6 +447,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
   const handleNewConversation = () => {
     if (isProcessing) return;
+    void window.ipcRenderer
+      ?.invoke('intelligence:query:new-conversation')
+      .catch(() => undefined);
     setMessages([]);
     setQuery('');
     setCurrentMeeting(null);
@@ -477,7 +497,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   return (
     <div className="flex flex-col flex-1 w-full relative animate-in fade-in duration-300 motion-reduce:animate-none bg-pro-bg">
       {messages.length > 0 ? (
-        <div className="absolute right-4 top-4 z-10 sm:right-8">
+        <div className="sticky top-0 z-20 flex min-h-14 shrink-0 items-center justify-end bg-pro-bg/95 px-4 backdrop-blur-sm sm:px-8">
           <button
             type="button"
             onClick={handleNewConversation}
@@ -495,7 +515,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           role="log"
           aria-label="Conversation with Pluto"
           aria-live="polite"
-          className="flex-1 space-y-10 pb-32 flex flex-col pt-16 w-full"
+          className={`flex-1 space-y-10 pb-32 flex flex-col w-full ${messages.length > 0 ? 'pt-4' : 'pt-16'}`}
         >
           {messages.length === 0 ? (
             <div className="flex flex-col items-start justify-center h-full space-y-8 pb-20 mt-4 animate-in fade-in zoom-in-95 duration-700 motion-reduce:animate-none">
@@ -540,13 +560,6 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               const citationGroups = groupCitationsByMeeting(
                 msg.citations ?? [],
               );
-              const loadingPhaseIndex = msg.content
-                ? 3
-                : requestPhase === 'waiting'
-                  ? 1
-                  : requestPhase === 'writing' || requestPhase === 'generating'
-                    ? 2
-                    : 0;
               return (
                 <div
                   key={msg.id}
@@ -591,28 +604,16 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                                 aria-hidden="true"
                                 className="flex items-center gap-1.5 ml-1 shrink-0"
                               >
-                                {[0, 1, 2, 3].map((step) => {
-                                  const state =
-                                    step < loadingPhaseIndex
-                                      ? 'complete'
-                                      : step === loadingPhaseIndex
-                                        ? 'active'
-                                        : 'pending';
-                                  return (
-                                    <span
-                                      key={step}
-                                      data-testid="ask-pluto-phase-step"
-                                      data-state={state}
-                                      className={`h-1.5 w-1.5 rounded-full transition-all duration-300 ${
-                                        state === 'complete'
-                                          ? 'bg-pro-accent/70'
-                                          : state === 'active'
-                                            ? 'bg-pro-accent scale-110 shadow-[0_0_4px_rgba(21,93,177,0.5)]'
-                                            : 'bg-pro-border dark:bg-white/15'
-                                      }`}
-                                    />
-                                  );
-                                })}
+                                {[0, 1, 2, 3].map((step) => (
+                                  <span
+                                    key={step}
+                                    data-testid="ask-pluto-progress-dot"
+                                    className="pluto-progress-dot h-1.5 w-1.5 rounded-full bg-pro-accent"
+                                    style={{
+                                      animationDelay: `${step * 150}ms`,
+                                    }}
+                                  />
+                                ))}
                               </div>
                             </div>
                           </output>
@@ -667,9 +668,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                           }`}
                         >
                           {msg.outcome === 'no_evidence'
-                            ? 'Not enough supporting detail'
+                            ? "I couldn't verify an answer"
                             : msg.outcome === 'partial'
-                              ? `Limited answer${msg.unsupportedClaimCount ? ` · Left out ${msg.unsupportedClaimCount} ${msg.unsupportedClaimCount === 1 ? 'detail' : 'details'} that could not be verified` : ''}`
+                              ? `Partial answer${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} draft ${msg.unsupportedClaimCount === 1 ? 'statement needs' : 'statements need'} a closer check` : ''}`
                               : msg.evidenceState === 'provisional'
                                 ? 'Provisional live answer'
                                 : msg.trustStatus === 'needs_review'

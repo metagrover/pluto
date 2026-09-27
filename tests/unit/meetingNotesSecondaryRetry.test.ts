@@ -4,6 +4,7 @@ import {
   applyNotesAudit,
   projectAuditedNotes,
 } from '../../electron/llm/meetingNotesAudit';
+import { resolveMeetingNotesTemplateInput } from '../../electron/llm/meetingNotesTemplates';
 import { NOTES_PROMPT_VERSION } from '../../electron/llm/meetingNotesTypes';
 import {
   type MeetingAnalysisRunCoordinatorDb,
@@ -114,7 +115,10 @@ it.each(['secondary', 'automatic'] as const)(
             eligibilityRevision: 'proof',
             userNotesHash: 'notes',
             terms: [],
-            template: 'auto',
+            template: {
+              id: 'auto',
+              revision: resolveMeetingNotesTemplateInput('auto').revision,
+            },
             provider: 'ollama',
             model: 'gemma4:12b',
             thinking: null,
@@ -157,7 +161,7 @@ it.each(['secondary', 'automatic'] as const)(
       db,
       getSettings: async () => {
         await initialization;
-        return {};
+        return { ollama_model: 'gemma4:12b' };
       },
       getProvider: async () => ({ name: 'ollama', generateStructuredAnalysis }),
       runSecondary,

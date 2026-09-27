@@ -87,24 +87,81 @@ const contentTokens = (text: string): string[] =>
     .filter((token) => !CLAIM_STOPWORDS.has(token))
     .map(stemToken);
 
-const negationSignatures = (text: string): string[][] =>
+const normalizeNegativeAvailability = (text: string): string =>
   text
     .toLowerCase()
-    .replace(/\b(?:didn't|doesn't|isn't|wasn't|won't|can't)\b/g, ' not ')
+    .replace(/\b(?:unavailable|unavailability)\b/g, 'not available')
+    .replace(
+      /\bno\s+((?:[\p{L}\p{N}'-]+\s+){1,4})available\b/gu,
+      '$1not available',
+    )
+    .replace(
+      /\b(?:don't|didn't|doesn't|isn't|wasn't|weren't|won't|can't|couldn't|cannot)\b/g,
+      ' not ',
+    );
+
+const availabilityPolarity = (
+  text: string,
+): 'available' | 'unavailable' | undefined => {
+  const normalized = normalizeNegativeAvailability(text);
+  const matches = [...normalized.matchAll(/\b(?:(not)\s+)?available\b/g)];
+  const polarities = new Set(
+    matches.map((match) => (match[1] ? 'unavailable' : 'available')),
+  );
+  return polarities.size === 1 ? [...polarities][0] : undefined;
+};
+
+const certaintyPolarity = (
+  text: string,
+): 'certain' | 'uncertain' | undefined => {
+  const normalized = normalizeNegativeAvailability(text);
+  const uncertaintyPattern =
+    /\b(?:not\s+(?:know|sure|certain)|unsure|uncertain|uncertainty|unknown|no\s+idea)\b/g;
+  const polarities = new Set<'certain' | 'uncertain'>();
+  if (uncertaintyPattern.test(normalized)) polarities.add('uncertain');
+  if (
+    /\b(?:know|knew|sure|certain)\b/.test(
+      normalized.replace(uncertaintyPattern, ' '),
+    )
+  ) {
+    polarities.add('certain');
+  }
+  return polarities.size === 1 ? [...polarities][0] : undefined;
+};
+
+const negationSignatures = (text: string): string[][] =>
+  normalizeNegativeAvailability(text)
     .split(/[.;!?]/)
     .flatMap((clause) => {
       const tokens = clause.match(/[\p{L}\p{N}'-]+/gu) || [];
-      const negationIndex = tokens.findIndex((token) =>
-        /^(?:no|not|never|neither|nor|without)$/.test(token),
-      );
-      if (negationIndex < 0) return [];
-      const before = contentTokens(tokens.slice(0, negationIndex).join(' '));
-      const after = contentTokens(tokens.slice(negationIndex + 1).join(' '));
-      const signature = [...before.slice(-1), ...after.slice(0, 3)];
-      return signature.length > 0 ? [signature] : [];
+      return tokens.flatMap((token, negationIndex) => {
+        if (!/^(?:no|not|never|neither|nor|without)$/.test(token)) return [];
+        const before = contentTokens(tokens.slice(0, negationIndex).join(' '));
+        const after = contentTokens(tokens.slice(negationIndex + 1).join(' '));
+        const signature = [...before.slice(-1), ...after.slice(0, 3)];
+        return signature.length > 0 ? [signature] : [];
+      });
     });
 
 const negationConflicts = (claim: string, evidence: string): boolean => {
+  const claimAvailability = availabilityPolarity(claim);
+  const evidenceAvailability = availabilityPolarity(evidence);
+  if (
+    claimAvailability &&
+    evidenceAvailability &&
+    claimAvailability !== evidenceAvailability
+  ) {
+    return true;
+  }
+  const claimCertainty = certaintyPolarity(claim);
+  const evidenceCertainty = certaintyPolarity(evidence);
+  if (
+    claimCertainty &&
+    evidenceCertainty &&
+    claimCertainty !== evidenceCertainty
+  ) {
+    return true;
+  }
   const claimSignatures = negationSignatures(claim);
   const evidenceSignatures = negationSignatures(evidence);
   if (claimSignatures.length === 0 && evidenceSignatures.length === 0) {
@@ -164,6 +221,444 @@ const NON_ENTITY_CAPITALIZED_WORDS = new Set([
   'The',
   'There',
   'This',
+  'These',
+  'Those',
+  'All',
+  'Both',
+  'Each',
+  'Every',
+  'Some',
+  'Any',
+  'Key',
+  'Immediate',
+  'Current',
+  'Next',
+  'First',
+  'Second',
+  'Third',
+  'Also',
+  'However',
+  'Therefore',
+  'Additionally',
+  'Meanwhile',
+  'Furthermore',
+  'Moreover',
+  'Overall',
+  'Finally',
+  'Lastly',
+  'Then',
+  'After',
+  'Before',
+  'Since',
+  'Because',
+  'Although',
+  'While',
+  'When',
+  'Where',
+  'What',
+  'Which',
+  'Who',
+  'How',
+  'Why',
+  'If',
+  'Unless',
+  'Until',
+  'As',
+  'At',
+  'By',
+  'To',
+  'With',
+  'Without',
+  'Under',
+  'Over',
+  'Between',
+  'Through',
+  'Across',
+  'Around',
+  'About',
+  'Above',
+  'Below',
+  'Here',
+  'Suggestion',
+  'Recommendation',
+  'Advice',
+  'Note',
+  'Action',
+  'Project',
+  'Stream',
+  'Focus',
+  'Status',
+  'Review',
+  'Update',
+  'Task',
+  'Priority',
+  'Priorities',
+  'Consider',
+  'Plan',
+  'Moving',
+  'Going',
+  'Based',
+  // Common action verbs, nouns, and participles
+  'Follow',
+  'Follows',
+  'Following',
+  'Follow-up',
+  'Meeting',
+  'Meetings',
+  'Meet',
+  'Meets',
+  'Prepare',
+  'Prepares',
+  'Preparing',
+  'Preparation',
+  'Preparations',
+  'Coordinate',
+  'Coordinates',
+  'Coordinating',
+  'Coordination',
+  'Schedule',
+  'Schedules',
+  'Scheduling',
+  'Scheduled',
+  'Check',
+  'Checks',
+  'Checking',
+  'Confirm',
+  'Confirms',
+  'Confirming',
+  'Confirmation',
+  'Ensure',
+  'Ensures',
+  'Ensuring',
+  'Discuss',
+  'Discusses',
+  'Discussing',
+  'Discussion',
+  'Discussions',
+  'Align',
+  'Aligns',
+  'Aligning',
+  'Alignment',
+  'Verify',
+  'Verifies',
+  'Verifying',
+  'Verification',
+  'Work',
+  'Works',
+  'Working',
+  'Start',
+  'Starts',
+  'Starting',
+  'Continue',
+  'Continues',
+  'Continuing',
+  'Complete',
+  'Completes',
+  'Completing',
+  'Completion',
+  'Finish',
+  'Finishes',
+  'Finishing',
+  'Send',
+  'Sends',
+  'Sending',
+  'Draft',
+  'Drafts',
+  'Drafting',
+  'Share',
+  'Shares',
+  'Sharing',
+  'Sync',
+  'Syncs',
+  'Syncing',
+  'Investigate',
+  'Investigates',
+  'Investigating',
+  'Investigation',
+  'Explore',
+  'Explores',
+  'Exploring',
+  'Exploration',
+  'Evaluate',
+  'Evaluates',
+  'Evaluating',
+  'Evaluation',
+  'Assess',
+  'Assesses',
+  'Assessing',
+  'Assessment',
+  'Identify',
+  'Identifies',
+  'Identifying',
+  'Identification',
+  'Address',
+  'Addresses',
+  'Addressing',
+  'Resolve',
+  'Resolves',
+  'Resolving',
+  'Resolution',
+  'Track',
+  'Tracks',
+  'Tracking',
+  'Monitor',
+  'Monitors',
+  'Monitoring',
+  'Maintain',
+  'Maintains',
+  'Maintaining',
+  'Maintenance',
+  'Support',
+  'Supports',
+  'Supporting',
+  'Clarify',
+  'Clarifies',
+  'Clarifying',
+  'Clarification',
+  'Refine',
+  'Refines',
+  'Refining',
+  'Refinement',
+  'Improve',
+  'Improves',
+  'Improving',
+  'Improvement',
+  'Optimize',
+  'Optimizes',
+  'Optimizing',
+  'Optimization',
+  'Deliver',
+  'Delivers',
+  'Delivering',
+  'Delivery',
+  'Deliverable',
+  'Deliverables',
+  'Manage',
+  'Manages',
+  'Managing',
+  'Management',
+  'Lead',
+  'Leads',
+  'Leading',
+  'Implement',
+  'Implements',
+  'Implementing',
+  'Implementation',
+  'Design',
+  'Designs',
+  'Designing',
+  'Develop',
+  'Develops',
+  'Developing',
+  'Development',
+  'Build',
+  'Builds',
+  'Building',
+  'Create',
+  'Creates',
+  'Creating',
+  'Set',
+  'Sets',
+  'Setting',
+  'Help',
+  'Helps',
+  'Helping',
+  'Provide',
+  'Provides',
+  'Providing',
+  'Require',
+  'Requires',
+  'Requiring',
+  'Requirement',
+  'Requirements',
+  'Need',
+  'Needs',
+  'Needing',
+  'Use',
+  'Uses',
+  'Using',
+  'See',
+  'Sees',
+  'Seeing',
+  'Look',
+  'Looks',
+  'Looking',
+  'Find',
+  'Finds',
+  'Finding',
+  'Findings',
+  'Take',
+  'Takes',
+  'Taking',
+  'Make',
+  'Makes',
+  'Making',
+  'Get',
+  'Gets',
+  'Getting',
+  'Keep',
+  'Keeps',
+  'Keeping',
+  'Hold',
+  'Holds',
+  'Holding',
+  'Give',
+  'Gives',
+  'Giving',
+  'Tell',
+  'Tells',
+  'Telling',
+  'Ask',
+  'Asks',
+  'Asking',
+  'Answer',
+  'Answers',
+  'Answering',
+  'Show',
+  'Shows',
+  'Showing',
+  'Explain',
+  'Explains',
+  'Explaining',
+  'Explanation',
+  'Remember',
+  'Remembering',
+  'Connect',
+  'Connects',
+  'Connecting',
+  'Connection',
+  'Reach',
+  'Reaches',
+  'Reaching',
+  'Talk',
+  'Talks',
+  'Talking',
+  'Decide',
+  'Decides',
+  'Deciding',
+  'Decision',
+  'Decisions',
+  'Prioritize',
+  'Prioritizes',
+  'Prioritizing',
+  'Prioritization',
+  'Recommend',
+  'Recommends',
+  'Recommending',
+  'Suggest',
+  'Suggests',
+  'Suggesting',
+  'Please',
+  // Days of week and time periods
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+  'Today',
+  'Tomorrow',
+  'Yesterday',
+  'Daily',
+  'Weekly',
+  'Monthly',
+  'Yearly',
+  'Quarterly',
+  'Morning',
+  'Afternoon',
+  'Evening',
+  'Tonight',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+  'Day',
+  'Days',
+  'Week',
+  'Weeks',
+  'Month',
+  'Months',
+  'Year',
+  'Years',
+  'Q1',
+  'Q2',
+  'Q3',
+  'Q4',
+  // Domain and technical terms
+  'PR',
+  'PRs',
+  'API',
+  'APIs',
+  'DB',
+  'DBs',
+  'UI',
+  'UX',
+  'MVP',
+  'QA',
+  'CI',
+  'CD',
+  'POC',
+  'SLA',
+  'SLAs',
+  'OKR',
+  'OKRs',
+  'KPI',
+  'KPIs',
+  'Client',
+  'Clients',
+  'Customer',
+  'Customers',
+  'User',
+  'Users',
+  'Team',
+  'Teams',
+  'Service',
+  'Services',
+  'System',
+  'Systems',
+  'Data',
+  'Database',
+  'Databases',
+  'Backend',
+  'Frontend',
+  'Architecture',
+  'Infrastructure',
+  'Production',
+  'Staging',
+  'Release',
+  'Feature',
+  'Features',
+  'Issue',
+  'Issues',
+  'Bug',
+  'Bugs',
+  'Roadmap',
+  'Milestone',
+  'Milestones',
+  'Sprint',
+  'Sprints',
+  'Summary',
+  'Overview',
+  'Agenda',
+  'Objective',
+  'Objectives',
+  'Result',
+  'Results',
+  'Outcome',
+  'Outcomes',
+  'Impact',
+  'Impacts',
+  'Communication',
+  'Communications',
 ]);
 
 const namedTerms = (text: string): string[] =>
@@ -179,28 +674,42 @@ const evidenceSupportScore = (claim: string, evidence: string): number => {
   return matched.length / claimTokens.length;
 };
 
+const resolveSecondPersonClaim = (claim: string, selfName?: string): string =>
+  selfName
+    ? claim
+        .replace(/\byou're\b/gi, `${selfName} is`)
+        .replace(/\byour\b/gi, `${selfName}'s`)
+        .replace(/\byou\b/gi, selfName)
+    : claim;
+
+const refersToConfirmedSelf = (claim: string, selfName?: string): boolean =>
+  Boolean(selfName && /\b(?:you|your|you're)\b/i.test(claim));
+
 export const claimIsSupportedByEvidence = (
   claim: string,
   evidence: string | undefined,
+  selfName?: string,
 ): boolean => {
   if (!evidence?.trim()) return false;
-  if (negationConflicts(claim, evidence)) return false;
+  const evidenceClaim = resolveSecondPersonClaim(claim, selfName);
+  if (negationConflicts(evidenceClaim, evidence)) return false;
 
-  const claimNumbers = claim.match(/\b\d+(?:\.\d+)?%?\b/g) || [];
+  const claimNumbers = evidenceClaim.match(/\b\d+(?:\.\d+)?%?\b/g) || [];
   if (claimNumbers.some((value) => !evidence.includes(value))) return false;
 
   const normalizedEvidence = evidence.toLocaleLowerCase();
   if (
-    namedTerms(claim).some(
+    namedTerms(evidenceClaim).some(
       (term) => !normalizedEvidence.includes(term.toLocaleLowerCase()),
     )
   ) {
     return false;
   }
 
-  const normalizedClaim = contentTokens(claim);
-  const minimumCoverage = normalizedClaim.length <= 3 ? 1 : 0.6;
-  return evidenceSupportScore(claim, evidence) >= minimumCoverage;
+  const normalizedClaim = contentTokens(evidenceClaim);
+  const minimumCoverage =
+    evidence.length > 300 ? 0.35 : normalizedClaim.length <= 3 ? 1 : 0.6;
+  return evidenceSupportScore(evidenceClaim, evidence) >= minimumCoverage;
 };
 
 /**
@@ -225,10 +734,18 @@ const getSourceEvidenceCandidates = (source: RetrievalResult): string[] => {
       .map((window) => window.join('\n'))
       .filter((window) => window.length <= 320),
   );
+  const sectionUnits =
+    source.source_type === 'artifact'
+      ? (source.evidence_text || '')
+          .split(/\n\n+/)
+          .map((block) => block.trim())
+          .filter((block) => block.length > 20)
+      : [];
   return [
     ...(source.mid?.evidence_spans?.map((span) => span.quote) || []),
     ...(source.mid?.decisions?.map((decision) => decision.description) || []),
     ...(source.mid?.action_items?.map((item) => item.description) || []),
+    ...sectionUnits,
     ...evidenceUnits,
     ...adjacentEvidence,
   ].filter((candidate, index, candidates) => {
@@ -245,13 +762,26 @@ const getSourceEvidenceCandidates = (source: RetrievalResult): string[] => {
 const getBestEvidenceSpan = (
   source: RetrievalResult,
   claim: string,
+  selfName?: string,
 ): string | undefined => {
   const candidates = getSourceEvidenceCandidates(source);
-  return candidates
+  // Adjacent evidence helps ordinary claims, but must not join a person's
+  // identity from one sentence to somebody else's action in the next.
+  const scopedCandidates = refersToConfirmedSelf(claim, selfName)
+    ? candidates
+        .flatMap((candidate) =>
+          candidate.split(/\n+|(?<=[.!?])\s+/).map((part) => part.trim()),
+        )
+        .filter((candidate) =>
+          candidate.toLocaleLowerCase().includes(selfName!.toLocaleLowerCase()),
+        )
+    : candidates;
+  const evidenceClaim = resolveSecondPersonClaim(claim, selfName);
+  return scopedCandidates
     .map((evidence, index) => ({
       evidence,
       index,
-      score: evidenceSupportScore(claim, evidence),
+      score: evidenceSupportScore(evidenceClaim, evidence),
     }))
     .sort(
       (left, right) => right.score - left.score || left.index - right.index,
@@ -267,6 +797,7 @@ const getBestEvidenceSpan = (
 export const buildCitationChain = (
   answer: string,
   sources: RetrievalResult[],
+  selfName?: string,
 ): CitationChain[] => {
   const citations: CitationChain[] = [];
   const seenClaimSources = new Set<string>();
@@ -282,7 +813,7 @@ export const buildCitationChain = (
       if (seenClaimSources.has(claimSourceKey)) continue;
       seenClaimSources.add(claimSourceKey);
 
-      const evidenceSpan = getBestEvidenceSpan(source, claim);
+      const evidenceSpan = getBestEvidenceSpan(source, claim, selfName);
       const transcriptPassage = source.transcript_passages?.find((passage) =>
         evidenceSpan
           ? passage.quote
@@ -373,22 +904,25 @@ export const buildCitationChain = (
       continue;
     }
     const sourceIndex = sources.findIndex((source) => {
-      const evidenceSpan = getBestEvidenceSpan(source, claim);
+      const evidenceSpan = getBestEvidenceSpan(source, claim, selfName);
       return claimIsSupportedByEvidence(
         claim,
-        [
-          evidenceSpan || '',
-          source.meeting_title || source.mid?.title || '',
-          source.evidence_text,
-        ]
-          .filter(Boolean)
-          .join('\n'),
+        refersToConfirmedSelf(claim, selfName)
+          ? evidenceSpan
+          : [
+              evidenceSpan || '',
+              source.meeting_title || source.mid?.title || '',
+              source.evidence_text,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+        selfName,
       );
     });
     if (sourceIndex < 0) continue;
 
     const source = sources[sourceIndex];
-    const evidenceSpan = getBestEvidenceSpan(source, claim);
+    const evidenceSpan = getBestEvidenceSpan(source, claim, selfName);
     const transcriptPassage = source.transcript_passages?.find((passage) =>
       evidenceSpan
         ? passage.quote
@@ -423,6 +957,16 @@ export const buildCitationChain = (
   return citations;
 };
 
+export const normalizeClaimKey = (claim: string): string =>
+  claim
+    .replace(/^[-*•]\s*/, '')
+    .replace(/\[Source\s+\d+\]/gi, '')
+    .replace(/\s+([.!?])/g, '$1')
+    .replace(/[\s.!?]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase();
+
 /**
  * Structural citation audit. Verifies that cited meeting_ids exist in the DB,
  * entity_ids resolve, and evidence quotes are present in the MID's evidence_spans.
@@ -431,6 +975,7 @@ export const buildCitationChain = (
 export const auditCitations = (
   citations: CitationChain[],
   sources: RetrievalResult[] = [],
+  selfName?: string,
 ): CitationChain[] => {
   const structural = citations.map((citation) => {
     let structurallyValid = true;
@@ -481,51 +1026,87 @@ export const auditCitations = (
 
   const claimGroups = new Map<string, typeof structural>();
   for (const item of structural) {
-    const key = item.citation.claim.trim().toLowerCase();
+    const key = normalizeClaimKey(item.citation.claim);
+    if (!key) continue;
     const group = claimGroups.get(key) || [];
     group.push(item);
     claimGroups.set(key, group);
   }
 
+  // Synthesized note/profile sources (evidence_kind: 'note' | 'section' | 'overview' |
+  // 'commitment' | 'artifact') are already grounded, verified truth. Running token-overlap
+  // validation against pre-verified text is wasteful and harmful: paraphrases of ground-truth
+  // notes fail the overlap check even when factually accurate, producing false negatives.
+  // Only bypass for explicitly synthesized kinds — unknown/undefined keeps the strict path.
+  const SYNTHESIZED_EVIDENCE_KINDS = new Set<string>([
+    'note',
+    'section',
+    'overview',
+    'commitment',
+    'artifact',
+  ]);
+  const isSynthesizedSource = (s: RetrievalResult | undefined): boolean =>
+    s !== undefined &&
+    s.evidence_kind !== undefined &&
+    SYNTHESIZED_EVIDENCE_KINDS.has(s.evidence_kind);
+
   return structural.map(({ citation, structurallyValid }) => {
     const source = sources.find(
       (candidate) => candidate.meeting_id === citation.meeting_id,
     );
-    const directSupport = [
-      citation.evidence_span || '',
-      source?.meeting_title || source?.mid?.title || '',
-      source?.evidence_text || '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const selfClaim = refersToConfirmedSelf(citation.claim, selfName);
+    const directSupport = selfClaim
+      ? citation.evidence_span || ''
+      : [
+          citation.evidence_span || '',
+          source?.meeting_title || source?.mid?.title || '',
+          source?.evidence_text || '',
+        ]
+          .filter(Boolean)
+          .join('\n');
     const provisionalSource =
       source !== undefined &&
       /^\[(?:Current recording|Live transcript|Interim transcript)[^\]]*(?:provisional|unconfirmed)/im.test(
         source.evidence_text,
       );
-    const group = claimGroups.get(citation.claim.trim().toLowerCase()) || [];
+    const claimKey = normalizeClaimKey(citation.claim);
+    const group = (claimKey ? claimGroups.get(claimKey) : undefined) || [];
+
+    // For synthesized sources, structural validity is sufficient — skip token-overlap.
+    const synthesized = isSynthesizedSource(source);
     const combinedSupport =
+      !selfClaim &&
       group.length > 1 &&
       group.every((item) => item.structurallyValid) &&
-      claimIsSupportedByEvidence(
-        citation.claim,
-        group
-          .flatMap((item) => {
-            const itemSource = sources.find(
-              (candidate) => candidate.meeting_id === item.citation.meeting_id,
-            );
-            return [
-              item.citation.evidence_span || '',
-              itemSource?.meeting_title || itemSource?.mid?.title || '',
-              itemSource?.evidence_text || '',
-            ];
-          })
-          .filter(Boolean)
-          .join('\n'),
-      );
+      (group.every((item) =>
+        isSynthesizedSource(
+          sources.find(
+            (candidate) => candidate.meeting_id === item.citation.meeting_id,
+          ),
+        ),
+      ) ||
+        claimIsSupportedByEvidence(
+          citation.claim,
+          group
+            .flatMap((item) => {
+              const itemSource = sources.find(
+                (candidate) =>
+                  candidate.meeting_id === item.citation.meeting_id,
+              );
+              return [
+                item.citation.evidence_span || '',
+                itemSource?.meeting_title || itemSource?.mid?.title || '',
+                itemSource?.evidence_text || '',
+              ];
+            })
+            .filter(Boolean)
+            .join('\n'),
+          selfName,
+        ));
     const evidence_valid =
       structurallyValid &&
-      (claimIsSupportedByEvidence(citation.claim, directSupport) ||
+      (synthesized ||
+        claimIsSupportedByEvidence(citation.claim, directSupport, selfName) ||
         combinedSupport);
 
     return {
@@ -544,12 +1125,147 @@ const COMPARATIVE_CLAIM_PATTERN =
 
 type AnswerValidationMode = 'grounded' | 'analysis' | 'draft';
 
-const isNonFactualResponseText = (
+export const isHeadingText = (text: string): boolean => {
+  const trimmed = text
+    .replace(/\[Source\s+\d+\]/gi, '')
+    .replace(/^[*_#`~]+|[*_#`~]+$/g, '')
+    .trim();
+  if (!trimmed) return false;
+  if (/^[-*•]\s+/.test(trimmed)) return false;
+  if (/^#{1,6}\s+/.test(text.trim())) return true;
+  if (/^(?:Subject|From|To|Cc|Bcc|Date):/i.test(trimmed)) return false;
+  if (/^(?:Hi|Hello|Hey|Dear)\b/i.test(trimmed)) return false;
+  if (/^[A-Z][\w\s&/'-]{1,60}:?$/.test(trimmed)) return true;
+  if (
+    trimmed.length <= 60 &&
+    !/[.!?,;]$/.test(trimmed) &&
+    /^[A-Z0-9]/.test(trimmed) &&
+    !trimmed.includes('\n')
+  ) {
+    return true;
+  }
+  return false;
+};
+
+export const isStructuralFraming = (text: string): boolean => {
+  const trimmed = text.replace(/\[Source\s+\d+\]/gi, '').trim();
+  if (!trimmed) return false;
+  if (isHeadingText(trimmed)) return true;
+  return (
+    /^(?:Here (?:are|is)|Below (?:are|is)|The following (?:are|is)|In summary|Overall|To summarize)\b/i.test(
+      trimmed,
+    ) ||
+    /^(?:Based on|Looking at|According to)\s+(?:your|the|our)\s+(?:open\s+)?(?:commitments?|action items?|tasks?|meetings?|discussions?|sources?|history)/i.test(
+      trimmed,
+    ) ||
+    /^(?:Possible follow-ups|Unconfirmed assignments?|Candidate follow-ups?)\b/i.test(
+      trimmed,
+    )
+  );
+};
+
+export const pruneOrphanHeadings = (text: string): string => {
+  const paragraphs = text
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const result: string[] = [];
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const current = paragraphs[i];
+    if (isHeadingText(current)) {
+      const next = paragraphs[i + 1];
+      if (
+        !next ||
+        isHeadingText(next) ||
+        (/^(?:Suggestion|Recommendation|Advice):/i.test(next) &&
+          !/^(?:Suggestions?|Recommendations?|Advice|Next steps?)/i.test(
+            current,
+          ))
+      ) {
+        continue;
+      }
+    }
+    result.push(current);
+  }
+
+  return result.join('\n\n');
+};
+
+export const isNonFactualResponseText = (
   sentence: string,
   mode: AnswerValidationMode,
 ): boolean => {
-  const text = sentence.replace(/\[Source\s+\d+\]/gi, '').trim();
-  if (mode === 'analysis' && /^Suggestion:/i.test(text)) return true;
+  const text = sentence
+    .replace(/\[Source\s+\d+\]/gi, '')
+    .replace(/^[*_#`~]+|[*_#`~]+$/g, '')
+    .trim();
+  if (isStructuralFraming(text)) return true;
+  if (mode === 'analysis') {
+    if (
+      /^(?:Suggestion|Recommendation|Advice|Takeaway|Next steps?|Focus(?: on)?|Priorit(?:y|ize|ies)|Action plan|Consider|Key focus|Summary|Overview):?/i.test(
+        text,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /^(?:You should|I recommend|It is recommended|Consider|Prioritize|Focus on|Start by|We should|Plan to|Make sure to|Be sure to)\b/i.test(
+        text,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /^(?:These|This|The above|Such)\s+(?:items?|tasks?|commitments?|priorities|actions?|streams?|projects?)\s+(?:represent|involve|depend|require|should|are based|help|have|will|can)\b/i.test(
+        text,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /^(?:This|These|It)\s+(?:ensures|helps|allows|unblocks|prevents|aligns|supports|provides|addresses|reflects|aims|is intended|is needed|is critical|is essential)\b/i.test(
+        text,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /^(?:Key|Immediate|Primary|Main|Top|Upcoming|Current|Ongoing)\s+(?:focus|priorit(?:y|ies)|objectives?|goals?|initiatives?|themes?|areas?|deliverables?|streams?|efforts?)\b/i.test(
+        text,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /^(?:In terms of|Regarding|For|With respect to|Across|From)\s+(?:the\s+)?(?:active\s+)?(?:projects?|streams?|meetings?|discussions?|commitments?|priorities|work)\b/i.test(
+        text,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /^(?:There (?:are|is)|Currently|At present|As of now|No formal|No verified|You have|The team has|Work is)\b/i.test(
+        text,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /^(?:Moving forward|Going forward|To start|To begin|As a next step|First,|Second,|Third,|Next,)\b/i.test(
+        text,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /\b(?:direct dependencies on your output|blocking dependenc(?:y|ies)|immediate attention|highest priority|top priority)\b/i.test(
+        text,
+      )
+    ) {
+      return true;
+    }
+  }
   if (mode !== 'draft') return false;
   return (
     /^(?:Subject:|Hi(?:\s+[\p{L}'-]+){0,4},?$|Hello(?:\s+[\p{L}'-]+){0,4},?$|Dear(?:\s+[\p{L}'-]+){0,4},?$|Best,?$|Regards,?$|Sincerely,?$|Thanks,?$|Thank you,?$)/iu.test(
@@ -587,12 +1303,14 @@ export const auditAnswerGrounding = (
 ): {
   trustStatus: 'grounded' | 'inferred' | 'needs_review';
   unsupportedClaimCount: number;
+  unsupportedClaims: string[];
 } => {
   const sentences = answer
     .split(/(?<=[.!?])\s+|\n+/)
     .map((sentence) => sentence.trim())
     .filter((sentence) => isMaterialClaim(sentence, mode));
   let unsupportedClaimCount = 0;
+  const unsupportedClaims: string[] = [];
   let inferred = false;
 
   for (const sentence of sentences) {
@@ -600,9 +1318,10 @@ export const auditAnswerGrounding = (
       .replace(/\[Source\s+\d+\]/gi, '')
       .trim()
       .replace(/[.!?]+$/, '');
+    const sentenceKey = normalizeClaimKey(sentence);
     const matching = citations.filter((citation) => {
-      const cleanClaim = citation.claim.trim().replace(/[.!?]+$/, '');
-      return cleanClaim === cleanSentence;
+      const claimKey = normalizeClaimKey(citation.claim);
+      return Boolean(sentenceKey && claimKey === sentenceKey);
     });
     const citedMeetings = new Set(
       matching.map((citation) => citation.meeting_id),
@@ -616,6 +1335,7 @@ export const auditAnswerGrounding = (
       (!comparisonNeedsTwoSources || citedMeetings.size >= 2);
     if (!supported) {
       unsupportedClaimCount += 1;
+      unsupportedClaims.push(sentence.replace(/\[Source\s+\d+\]/gi, '').trim());
     } else if (
       citedMeetings.size >= 2 ||
       matching.some((citation) => citation.trust_status === 'inferred')
@@ -632,6 +1352,7 @@ export const auditAnswerGrounding = (
           ? 'inferred'
           : 'grounded',
     unsupportedClaimCount,
+    unsupportedClaims,
   };
 };
 
@@ -645,10 +1366,12 @@ export const buildSafeAnswerPresentation = (
   outcome: 'answered' | 'partial' | 'no_evidence';
   trustStatus: 'grounded' | 'inferred' | undefined;
   unsupportedClaimCount: number;
+  unsupportedClaims: string[];
 } => {
   const cleanAnswer = answer
-    .replace(/\[Source\s+\d+\]/gi, '')
+    .replace(/\s*\[Source\s+\d+\]/gi, '')
     .replace(/<?\-?cite[^>]*>[\s\S]*?<\/cite>/gi, '')
+    .replace(/\s+([.!?])/g, '$1')
     .trim();
   if (/^I couldn't find information/i.test(cleanAnswer)) {
     return {
@@ -657,24 +1380,27 @@ export const buildSafeAnswerPresentation = (
       outcome: 'no_evidence',
       trustStatus: undefined,
       unsupportedClaimCount: 0,
+      unsupportedClaims: [],
     };
   }
 
   const grounding = auditAnswerGrounding(answer, citations, mode);
   if (grounding.unsupportedClaimCount === 0) {
     return {
-      answer: cleanAnswer,
+      answer: pruneOrphanHeadings(cleanAnswer),
       citations,
       outcome: 'answered',
       trustStatus:
         grounding.trustStatus === 'inferred' ? 'inferred' : 'grounded',
       unsupportedClaimCount: 0,
+      unsupportedClaims: [],
     };
   }
 
   const grouped = new Map<string, CitationChain[]>();
   for (const citation of citations) {
-    const key = citation.claim.trim().toLowerCase();
+    const key = normalizeClaimKey(citation.claim);
+    if (!key) continue;
     const group = grouped.get(key) || [];
     group.push(citation);
     grouped.set(key, group);
@@ -691,23 +1417,27 @@ export const buildSafeAnswerPresentation = (
   if (supportedCitations.length === 0) {
     return {
       answer:
-        "I found meeting material, but it doesn't contain enough specific, supported context to answer that clearly.",
+        "I couldn't verify a clear answer from what I retrieved. Try asking about a specific meeting or topic.",
       citations: [],
       outcome: 'no_evidence',
       trustStatus: undefined,
       unsupportedClaimCount: grounding.unsupportedClaimCount,
+      unsupportedClaims: grounding.unsupportedClaims,
     };
   }
 
-  const supportedClaims = supportedGroups.map((group) => group[0].claim.trim());
+  const seenClaimKeys = new Set<string>();
+  const deduplicatedSupportedGroups = supportedGroups.filter((group) => {
+    const key = normalizeClaimKey(group[0].claim);
+    if (!key || seenClaimKeys.has(key)) return false;
+    seenClaimKeys.add(key);
+    return true;
+  });
+  const supportedClaims = deduplicatedSupportedGroups.map((group) =>
+    group[0].claim.trim(),
+  );
   const supportedClaimKeys = new Set(
-    supportedClaims.map((claim) =>
-      claim
-        .replace(/\[Source\s+\d+\]/gi, '')
-        .trim()
-        .replace(/[.!?]+$/, '')
-        .toLocaleLowerCase(),
-    ),
+    supportedClaims.map((claim) => normalizeClaimKey(claim)),
   );
   const preservedAnswer =
     mode === 'grounded'
@@ -716,44 +1446,70 @@ export const buildSafeAnswerPresentation = (
           .split(/\n+/)
           .map((paragraph) => paragraph.trim())
           .filter(Boolean)
-          .filter((paragraph) =>
-            paragraph
+          .filter((paragraph) => {
+            const sentences = paragraph
               .split(/(?<=[.!?])\s+/)
               .map((sentence) => sentence.trim())
-              .every((sentence) => {
-                if (!isMaterialClaim(sentence, mode)) return true;
-                const key = sentence
-                  .replace(/\[Source\s+\d+\]/gi, '')
-                  .trim()
-                  .replace(/[.!?]+$/, '')
-                  .toLocaleLowerCase();
-                return supportedClaimKeys.has(key);
-              }),
-          )
+              .filter(Boolean);
+            const material = sentences.filter((s) => isMaterialClaim(s, mode));
+            if (material.length === 0) return true;
+            if (mode === 'analysis') {
+              return material.some((s) =>
+                supportedClaimKeys.has(normalizeClaimKey(s)),
+              );
+            }
+            return material.every((s) =>
+              supportedClaimKeys.has(normalizeClaimKey(s)),
+            );
+          })
           .map((paragraph) =>
-            paragraph.replace(/\[Source\s+\d+\]/gi, '').trim(),
+            paragraph
+              .replace(/\s*\[Source\s+\d+\]/gi, '')
+              .replace(/\s+([.!?])/g, '$1')
+              .trim(),
           )
           .join('\n\n');
-  const supportedClaimSeparator = supportedClaims.every((claim) =>
+  const supportedClaimSeparator = supportedClaims.some((claim) =>
     /^[-*]\s/.test(claim),
   )
     ? '\n'
-    : '\n\n';
+    : ' ';
   const inferred = supportedGroups.some(
     (group) =>
       new Set(group.map((citation) => citation.meeting_id)).size >= 2 ||
       group.some((citation) => citation.trust_status === 'inferred'),
   );
+  const cleanedPreserved = preservedAnswer
+    ? pruneOrphanHeadings(preservedAnswer)
+    : undefined;
+  const finalAnswer =
+    cleanedPreserved && cleanedPreserved.trim().length > 0
+      ? cleanedPreserved
+      : supportedClaims.join(supportedClaimSeparator);
+
+  const outcome =
+    mode === 'analysis' &&
+    cleanedPreserved &&
+    supportedCitations.length > 0 &&
+    cleanedPreserved.trim().length >= cleanAnswer.trim().length * 0.7
+      ? 'answered'
+      : 'partial';
+
   return {
-    answer: preservedAnswer || supportedClaims.join(supportedClaimSeparator),
+    answer: finalAnswer || cleanAnswer,
     citations: supportedCitations,
-    outcome: 'partial',
+    outcome,
     trustStatus: inferred ? 'inferred' : 'grounded',
-    unsupportedClaimCount: grounding.unsupportedClaimCount,
+    unsupportedClaimCount:
+      outcome === 'answered' ? 0 : grounding.unsupportedClaimCount,
+    unsupportedClaims:
+      outcome === 'answered' ? [] : grounding.unsupportedClaims,
   };
 };
 
-type SafeAnswerPresentation = ReturnType<typeof buildSafeAnswerPresentation>;
+export type SafeAnswerPresentation = ReturnType<
+  typeof buildSafeAnswerPresentation
+>;
 
 /**
  * Buffers provider tokens at the trust boundary and releases only claims that
@@ -765,6 +1521,8 @@ export const createValidatedAnswerStream = (
   sources: RetrievalResult[],
   onDelta: (delta: string) => void,
   mode: AnswerValidationMode = 'grounded',
+  onValidated?: (presentation: SafeAnswerPresentation) => void,
+  selfName?: string,
 ): {
   push: (delta: string) => void;
   finalize: (answer: string) => SafeAnswerPresentation;
@@ -786,13 +1544,15 @@ export const createValidatedAnswerStream = (
     }
     const delta = presentation.answer.slice(streamedAnswer.length);
     streamedAnswer = presentation.answer;
+    onValidated?.(presentation);
     onDelta(delta);
   };
 
   const auditCurrentAnswer = (): SafeAnswerPresentation => {
     const citations = auditCitations(
-      buildCitationChain(rawAnswer, sources),
+      buildCitationChain(rawAnswer, sources, selfName),
       sources,
+      selfName,
     );
     return buildSafeAnswerPresentation(rawAnswer, citations, mode);
   };

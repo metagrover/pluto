@@ -94,4 +94,34 @@ describe('Sidebar navigation', () => {
     expect(container.textContent).toContain('Weekly review');
     expect(container.querySelector('[title="Delete Session"]')).toBeNull();
   });
+
+  it('cycles through theme options when the theme toggle button is clicked', () => {
+    const setTheme = vi.fn();
+    act(() =>
+      root.render(
+        <Sidebar
+          sidebarVisible
+          activeTab="hub"
+          setActiveTab={vi.fn()}
+          selectedMeetingId={null}
+          setSelectedMeetingId={vi.fn()}
+          safeMeetings={[]}
+          onStartRecording={vi.fn()}
+          onOpenSearch={vi.fn()}
+          onOpenPeopleHome={vi.fn()}
+          theme="claude"
+          setTheme={setTheme}
+        />,
+      ),
+    );
+
+    const themeToggle = container.querySelector<HTMLButtonElement>(
+      '[title="Theme: claude"]',
+    )!;
+    expect(themeToggle).not.toBeNull();
+    act(() => {
+      themeToggle.click();
+    });
+    expect(setTheme).toHaveBeenCalledWith('coral');
+  });
 });

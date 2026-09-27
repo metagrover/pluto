@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   composeCandidateAttributedTurns,
   parseBenchmarkCliArgs,
@@ -396,6 +396,10 @@ const makePrivateCorpus = () => {
   writeFileSync(path.join(root, 'references', 'case.json'), '{}');
   return { parent, root };
 };
+
+beforeAll(() => {
+  mkdirSync(path.resolve('tmp'), { recursive: true });
+});
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {

@@ -1,11 +1,15 @@
 import {
+  Check,
   CheckCircle2,
   Cloud,
   Cpu,
   FileWarning,
+  Hash,
+  Heart,
   Laptop,
   Moon,
   RefreshCw,
+  Sparkles,
   Sun,
   Trash2,
   Zap,
@@ -30,6 +34,7 @@ import {
   cloudConsentSettingKey,
 } from '../../../electron/llm/providerCatalog';
 import { useAppUpdate } from '../../api/updater';
+import type { AppTheme } from '../../types/theme';
 import {
   OLLAMA_GENERAL_MODEL,
   OLLAMA_QUICK_CHAT_MODEL,
@@ -48,8 +53,8 @@ interface SettingsTabProps {
   setAutoEndEnabled: (val: boolean) => void;
   fetchMeetings: () => void;
   setSelectedMeetingId: (id: string | number | null) => void;
-  theme: 'light' | 'dark' | 'system';
-  setTheme: (val: 'light' | 'dark' | 'system') => void;
+  theme: AppTheme;
+  setTheme: (val: AppTheme) => void;
   calendarSnapshot?: CalendarIntegrationSnapshot | null;
   onCalendarSnapshotChange?: (snapshot: CalendarIntegrationSnapshot) => void;
   initialTab?: SettingsTabId;
@@ -77,11 +82,103 @@ const providerOptions = [
   { id: 'claude', name: 'Claude', detail: 'Anthropic', icon: Cloud },
 ] as const;
 
-const themeOptions = [
-  { id: 'light', name: 'Light', icon: Sun },
-  { id: 'dark', name: 'Dark', icon: Moon },
-  { id: 'system', name: 'System', icon: Laptop },
-] as const;
+interface ThemeOptionPreview {
+  sidebarBg: string;
+  canvasBg: string;
+  accentColor: string;
+  textColor: string;
+  sidebarBorder?: string;
+}
+
+interface ThemeOption {
+  id: AppTheme;
+  name: string;
+  badge?: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  preview: ThemeOptionPreview;
+}
+
+const themeOptions: ThemeOption[] = [
+  {
+    id: 'light',
+    name: 'Light',
+    description: 'Crisp white & neutral gray',
+    icon: Sun,
+    preview: {
+      sidebarBg: '#F7F7F5',
+      canvasBg: '#FFFFFF',
+      accentColor: '#155DB1',
+      textColor: '#37352F',
+    },
+  },
+  {
+    id: 'dark',
+    name: 'Dark',
+    description: 'Deep charcoal & slate',
+    icon: Moon,
+    preview: {
+      sidebarBg: '#202020',
+      canvasBg: '#191919',
+      accentColor: '#60A5FA',
+      textColor: '#E5E5E5',
+    },
+  },
+  {
+    id: 'terracotta',
+    name: 'Terracotta',
+    badge: 'Claude',
+    description: 'Warm sand & earthy clay',
+    icon: Sparkles,
+    preview: {
+      sidebarBg: '#F3EFE6',
+      canvasBg: '#FBF9F5',
+      accentColor: '#D97757',
+      textColor: '#24211D',
+      sidebarBorder: '#DED8CE',
+    },
+  },
+  {
+    id: 'coral',
+    name: 'Coral',
+    badge: 'Airbnb',
+    description: 'Modern white & Rausch coral',
+    icon: Heart,
+    preview: {
+      sidebarBg: '#F8F8F8',
+      canvasBg: '#FFFFFF',
+      accentColor: '#FF385C',
+      textColor: '#222222',
+      sidebarBorder: '#E5E5E5',
+    },
+  },
+  {
+    id: 'aubergine',
+    name: 'Aubergine',
+    badge: 'Slack',
+    description: 'Slack purple & workspace',
+    icon: Hash,
+    preview: {
+      sidebarBg: '#3F0E40',
+      canvasBg: '#FFFFFF',
+      accentColor: '#007A5A',
+      textColor: '#1D1C1D',
+      sidebarBorder: '#522653',
+    },
+  },
+  {
+    id: 'system',
+    name: 'System',
+    description: 'Matches macOS appearance',
+    icon: Laptop,
+    preview: {
+      sidebarBg: '#F7F7F5',
+      canvasBg: '#FFFFFF',
+      accentColor: '#155DB1',
+      textColor: '#37352F',
+    },
+  },
+];
 
 const settingsTabs = [
   { id: 'personal', label: 'Personal' },
@@ -443,38 +540,189 @@ export const SettingsTab = ({
         >
           <IdentitySettings />
           <Section title="Appearance">
-            <SettingsRow
-              label="Theme"
-              helper="Choose how Pluto looks on this device."
-              actionControl={false}
-            >
-              <div className="grid grid-cols-3 gap-2">
+            <div className="p-5">
+              <div className="mb-4">
+                <h4 className="text-[14px] font-medium text-pro-text-main">
+                  Theme
+                </h4>
+                <p className="text-[13px] text-pro-text-muted mt-0.5">
+                  Choose how Pluto looks on this device.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
                 {themeOptions.map((option) => {
-                  const active = theme === option.id;
-                  const Icon = option.icon;
+                  const active =
+                    theme === option.id ||
+                    (option.id === 'terracotta' &&
+                      (theme === 'claude' ||
+                        theme === 'celestial' ||
+                        theme === 'botanical')) ||
+                    (option.id === 'coral' && theme === 'airbnb') ||
+                    (option.id === 'aubergine' && theme === 'slack');
                   return (
                     <button
                       key={option.id}
                       type="button"
                       onClick={() => setTheme(option.id)}
-                      className={`flex flex-col items-center justify-center gap-1.5 rounded-lg border py-3 transition-all ${
+                      className={`group relative flex flex-col rounded-xl border p-2.5 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent ${
                         active
-                          ? 'border-pro-accent bg-pro-accent/5 text-pro-text-main shadow-sm ring-1 ring-pro-accent/20'
-                          : 'border-pro-border/60 bg-pro-bg text-pro-text-muted hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main'
+                          ? 'border-pro-accent bg-pro-accent/[0.04] ring-1 ring-pro-accent shadow-xs'
+                          : 'border-pro-border/70 bg-pro-bg hover:border-pro-border hover:bg-pro-surface hover:shadow-xs'
                       }`}
                     >
-                      <Icon
-                        className={`w-5 h-5 ${active ? 'text-pro-accent' : 'opacity-70'}`}
-                        strokeWidth={active ? 2.5 : 2}
-                      />
-                      <span className="text-[12px] font-medium">
-                        {option.name}
+                      {/* Visual Mini-UI Preview Swatch */}
+                      <div
+                        className="relative h-20 w-full overflow-hidden rounded-lg border border-black/10 dark:border-white/10 shadow-xs flex mb-2.5 transition-transform duration-200 group-hover:scale-[1.01]"
+                        style={{ backgroundColor: option.preview.canvasBg }}
+                      >
+                        {option.id === 'system' ? (
+                          <div className="relative flex h-full w-full">
+                            {/* Left Half: Light */}
+                            <div className="flex h-full w-1/2 border-r border-black/10 bg-[#FFFFFF]">
+                              <div className="h-full w-[34%] bg-[#F7F7F5] border-r border-black/5 flex flex-col p-1.5 gap-1 shrink-0">
+                                <div className="h-1.5 w-1.5 rounded-full bg-[#155DB1]" />
+                                <div className="h-0.5 w-full rounded-full bg-black/15 mt-0.5" />
+                                <div className="h-0.5 w-3/4 rounded-full bg-black/10" />
+                              </div>
+                              <div className="flex-1 p-2 flex flex-col justify-between overflow-hidden">
+                                <div className="space-y-1">
+                                  <div className="h-1 w-1/2 rounded-full bg-black/40" />
+                                  <div className="h-0.5 w-full rounded-full bg-black/15" />
+                                </div>
+                                <div className="h-2 w-6 rounded-xs bg-[#155DB1]" />
+                              </div>
+                            </div>
+
+                            {/* Right Half: Dark */}
+                            <div className="flex h-full w-1/2 bg-[#191919]">
+                              <div className="h-full w-[34%] bg-[#202020] border-r border-white/5 flex flex-col p-1.5 gap-1 shrink-0">
+                                <div className="h-1.5 w-1.5 rounded-full bg-[#60A5FA]" />
+                                <div className="h-0.5 w-full rounded-full bg-white/20 mt-0.5" />
+                                <div className="h-0.5 w-3/4 rounded-full bg-white/15" />
+                              </div>
+                              <div className="flex-1 p-2 flex flex-col justify-between overflow-hidden">
+                                <div className="space-y-1">
+                                  <div className="h-1 w-1/2 rounded-full bg-white/50" />
+                                  <div className="h-0.5 w-full rounded-full bg-white/20" />
+                                </div>
+                                <div className="h-2 w-6 rounded-xs bg-[#60A5FA]" />
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {/* Mini Sidebar */}
+                            <div
+                              className="h-full w-[32%] border-r flex flex-col p-1.5 gap-1 shrink-0"
+                              style={{
+                                backgroundColor: option.preview.sidebarBg,
+                                borderColor:
+                                  option.preview.sidebarBorder ||
+                                  'rgba(0,0,0,0.08)',
+                              }}
+                            >
+                              <div
+                                className="h-1.5 w-1.5 rounded-full"
+                                style={{
+                                  backgroundColor: option.preview.accentColor,
+                                }}
+                              />
+                              <div
+                                className="h-0.5 w-full rounded-full opacity-40 mt-0.5"
+                                style={{
+                                  backgroundColor: option.preview.textColor,
+                                }}
+                              />
+                              <div
+                                className="h-0.5 w-3/4 rounded-full opacity-25"
+                                style={{
+                                  backgroundColor: option.preview.textColor,
+                                }}
+                              />
+                              <div
+                                className="h-0.5 w-1/2 rounded-full opacity-25"
+                                style={{
+                                  backgroundColor: option.preview.textColor,
+                                }}
+                              />
+                            </div>
+
+                            {/* Mini Main Canvas */}
+                            <div className="flex-1 p-2 flex flex-col justify-between overflow-hidden">
+                              <div className="space-y-1.5">
+                                <div
+                                  className="h-1 w-3/5 rounded-full opacity-70"
+                                  style={{
+                                    backgroundColor: option.preview.textColor,
+                                  }}
+                                />
+                                <div
+                                  className="h-0.5 w-full rounded-full opacity-25"
+                                  style={{
+                                    backgroundColor: option.preview.textColor,
+                                  }}
+                                />
+                                <div
+                                  className="h-0.5 w-4/5 rounded-full opacity-20"
+                                  style={{
+                                    backgroundColor: option.preview.textColor,
+                                  }}
+                                />
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <div
+                                  className="h-2 w-7 rounded-xs"
+                                  style={{
+                                    backgroundColor: option.preview.accentColor,
+                                  }}
+                                />
+                                <div
+                                  className="h-1.5 w-1.5 rounded-full opacity-40"
+                                  style={{
+                                    backgroundColor: option.preview.accentColor,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </>
+                        )}
+
+                        {/* Active Checkmark Badge */}
+                        {active && (
+                          <div className="absolute top-1.5 right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-pro-accent text-white shadow-xs">
+                            <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Theme Name, Accent Dot & Inspiration Tag */}
+                      <div className="flex items-baseline justify-between gap-1.5 w-full px-0.5">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className="h-2 w-2 rounded-full shrink-0"
+                            style={{
+                              backgroundColor: option.preview.accentColor,
+                            }}
+                          />
+                          <span className="text-[13px] font-semibold text-pro-text-main truncate">
+                            {option.name}
+                          </span>
+                        </div>
+                        {option.badge && (
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-pro-surface border border-pro-border/70 text-pro-text-muted shrink-0">
+                            {option.badge}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-pro-text-muted/80 leading-normal line-clamp-1 mt-0.5 px-0.5">
+                        {option.description}
                       </span>
                     </button>
                   );
                 })}
               </div>
-            </SettingsRow>
+            </div>
           </Section>
         </div>
       ) : null}

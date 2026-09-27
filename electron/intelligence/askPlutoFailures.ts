@@ -17,7 +17,7 @@ export const classifyAskPlutoFailure = (
     return {
       reason: 'timeout',
       answer:
-        'Local analysis took too long. Your question and meeting evidence are still here. Retry, or use Fast mode for a shorter answer.',
+        'Pluto stopped this answer because it took longer than expected. Retry to try again.',
     };
   }
 

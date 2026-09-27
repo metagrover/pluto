@@ -14,6 +14,10 @@ import type {
   RetrievalResult,
 } from './intelligenceTypes';
 
+import {
+  readProjectDisplayTitle,
+  readProjectThemeSynthesis,
+} from '../../src/utils/projectBriefing';
 import * as dbModule from '../db';
 // We import the llm provider factory
 import { getAllSettings, getProvider } from '../llm/factory';
@@ -143,6 +147,198 @@ const classifyQueryHeuristically = (
   return 'factual';
 };
 
+export interface MatchedProjectEntity {
+  id: string;
+  canonicalId: string;
+  name: string;
+  displayTitle: string;
+  keyTerms: string[];
+}
+
+const extractProjectKeyTerms = (
+  metadata: string | null | undefined,
+  theme: ReturnType<typeof readProjectThemeSynthesis>,
+): string[] => {
+  const terms: string[] = [
+    ...(theme?.currentFocus ? [theme.currentFocus] : []),
+    ...(theme?.outcome ? [theme.outcome] : []),
+  ];
+  if (!metadata) return terms;
+  try {
+    const parsed = JSON.parse(metadata) as Record<string, unknown>;
+    if (Array.isArray(parsed.labels)) {
+      for (const label of parsed.labels) {
+        if (typeof label === 'string' && label.trim().length >= 3) {
+          terms.push(label.trim());
+        }
+      }
+    }
+    if (Array.isArray(parsed.aliases)) {
+      for (const alias of parsed.aliases) {
+        if (typeof alias === 'string' && alias.trim().length >= 3) {
+          terms.push(alias.trim());
+        }
+      }
+    }
+    if (Array.isArray(parsed.projectMilestones)) {
+      for (const m of parsed.projectMilestones) {
+        if (
+          m &&
+          typeof m === 'object' &&
+          typeof (m as Record<string, unknown>).title === 'string'
+        ) {
+          const title = (m as Record<string, unknown>).title as string;
+          if (title.trim().length >= 4) terms.push(title.trim());
+        }
+      }
+    }
+  } catch {
+    // Ignore JSON parse errors
+  }
+  return [...new Set(terms)];
+};
+
+export const matchProjectEntity = (
+  query: string,
+  entityMentions: string[] = [],
+): MatchedProjectEntity | null => {
+  const normalizedQuery = query.toLocaleLowerCase();
+
+  // 1. Direct match from entity mentions
+  for (const entityId of entityMentions) {
+    const canonicalId =
+      typeof dbModule.resolveProjectIdentityId === 'function'
+        ? dbModule.resolveProjectIdentityId(entityId)
+        : entityId;
+    const entity =
+      typeof dbModule.getEntity === 'function'
+        ? dbModule.getEntity(canonicalId)
+        : undefined;
+    if (entity && entity.type === 'project') {
+      const displayTitle = readProjectDisplayTitle(
+        entity.metadata,
+        entity.name,
+      );
+      const theme = readProjectThemeSynthesis(entity.metadata);
+      const keyTerms = extractProjectKeyTerms(entity.metadata, theme);
+      return {
+        id: entity.id,
+        canonicalId,
+        name: entity.name,
+        displayTitle,
+        keyTerms,
+      };
+    }
+  }
+
+  // 2. Scan all project entities in db
+  const allProjects =
+    typeof dbModule.getEntitiesByType === 'function'
+      ? dbModule.getEntitiesByType('project')
+      : [];
+  if (!allProjects.length) return null;
+
+  for (const project of allProjects) {
+    const canonicalId =
+      typeof dbModule.resolveProjectIdentityId === 'function'
+        ? dbModule.resolveProjectIdentityId(project.id)
+        : project.id;
+    const displayTitle = readProjectDisplayTitle(
+      project.metadata,
+      project.name,
+    );
+    const theme = readProjectThemeSynthesis(project.metadata);
+    const keyTerms = extractProjectKeyTerms(project.metadata, theme);
+
+    const normalizedName = project.name.toLocaleLowerCase().trim();
+    const normalizedDisplay = displayTitle.toLocaleLowerCase().trim();
+
+    if (
+      (normalizedName.length >= 3 &&
+        normalizedQuery.includes(normalizedName)) ||
+      (normalizedDisplay.length >= 3 &&
+        normalizedQuery.includes(normalizedDisplay))
+    ) {
+      return {
+        id: project.id,
+        canonicalId,
+        name: project.name,
+        displayTitle,
+        keyTerms,
+      };
+    }
+
+    if (
+      /\b(?:project|initiative|workstream|stream|roadmap)\b/i.test(
+        normalizedQuery,
+      )
+    ) {
+      for (const term of keyTerms) {
+        const normalizedTerm = term.toLocaleLowerCase().trim();
+        if (
+          normalizedTerm.length >= 4 &&
+          normalizedQuery.includes(normalizedTerm)
+        ) {
+          return {
+            id: project.id,
+            canonicalId,
+            name: project.name,
+            displayTitle,
+            keyTerms,
+          };
+        }
+      }
+    } else {
+      const commonProjectIgnoredWords = new Set([
+        'project',
+        'active',
+        'stream',
+        'initiative',
+        'milestone',
+        'current',
+        'focus',
+        'task',
+        'tasks',
+        'done',
+        'open',
+        'status',
+        'review',
+        'update',
+        'this',
+        'that',
+        'with',
+        'from',
+      ]);
+      for (const term of keyTerms) {
+        const normalizedTerm = term.toLocaleLowerCase().trim();
+        if (
+          normalizedTerm.length >= 3 &&
+          !commonProjectIgnoredWords.has(normalizedTerm) &&
+          new RegExp(
+            `\\b${normalizedTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+            'i',
+          ).test(normalizedQuery)
+        ) {
+          return {
+            id: project.id,
+            canonicalId,
+            name: project.name,
+            displayTitle,
+            keyTerms,
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+};
+
+export const isPlanningOrPriorityQuery = (query: string): boolean =>
+  /\b(?:what\s+(?:should|do|can)\s+(?:i|we)\s+(?:need\s+to\s+)?(?:be\s+)?(?:focus|focusing|focused|working|work|do|prioritize|tackle)|what\s+(?:are|is)\s+(?:my|our|the\s+team(?:'s)?)\s+(?:top\s+)?(?:priorit(?:y|ies)|focus|deliverables?|next\s+steps?|action\s+items?|commitments?)|what(?:'s|\s+is)\s+(?:on\s+(?:my|our)\s+plate|(?:my|our)\s+(?:top\s+)?priorit(?:y|ies)|(?:my|our)\s+focus|top\s+of\s+mind|happening\s+with\s+(?:my|our)\s+work)|what\s+am\s+i\s+supposed\s+to\s+(?:be\s+)?(?:working|work|focus|do)|where\s+should\s+(?:i|we)\s+start|what\s+to\s+focus\s+on|next\s+steps?\s+for\s+(?:me|us)|current\s+priorities|active\s+streams|workspace\s+(?:overview|summary|update)|what(?:'s|\s+is)\s+going\s+on\s+across\s+(?:meetings|projects|my\s+work)|what\s+needs?\s+(?:my|our|immediate)?\s*attention|catch\s+me\s+up\s+on\s+(?:work|projects|priorities|everything)|how\s+should\s+i\s+prioritize|help\s+me\s+plan\s+(?:my|today|the\s+week)|what\s+did\s+i\s+commit\s+to)\b/i.test(
+    query,
+  );
+
 /**
  * Parses a query string to extract intent, entities and semantic bounds.
  */
@@ -152,6 +348,7 @@ export const parseQuery = async (
     signal?: AbortSignal;
     useModelClassification?: boolean;
     now?: Date;
+    disputedEntity?: string;
   } = {},
 ): Promise<ParsedQuery> => {
   options.signal?.throwIfAborted();
@@ -200,7 +397,19 @@ export const parseQuery = async (
     'calls',
     'recorded',
     'recording',
-    // Query-framing words that add FTS noise
+    // Modal verbs and query-framing words that add FTS noise
+    'should',
+    'would',
+    'could',
+    'shall',
+    'might',
+    'may',
+    'must',
+    'need',
+    'needs',
+    'ought',
+    'answer',
+    'answers',
     'summarize',
     'summary',
     'key',
@@ -237,6 +446,46 @@ export const parseQuery = async (
     'update',
     'updates',
   ]);
+  const isPlanning = isPlanningOrPriorityQuery(text);
+  if (isPlanning) {
+    const planningStopwords = [
+      'focus',
+      'focusing',
+      'focused',
+      'priority',
+      'priorities',
+      'prioritize',
+      'plate',
+      'start',
+      'working',
+      'work',
+      'steps',
+      'today',
+      'day',
+      'mind',
+      'attention',
+      'deliverables',
+      'tackle',
+      'plan',
+      'planning',
+      'catch',
+      'everything',
+      'state',
+      'status',
+      'update',
+      'going',
+      'need',
+      'supposed',
+      'responsible',
+      'loops',
+    ];
+    for (const word of planningStopwords) {
+      stopwords.add(word);
+    }
+  }
+  if (options.disputedEntity) {
+    stopwords.add(options.disputedEntity.toLowerCase());
+  }
   const keywords = tokens.filter((w) => !stopwords.has(w.toLowerCase()));
 
   // Sanitize text for SQLite FTS5 MATCH queries
@@ -255,22 +504,25 @@ export const parseQuery = async (
 
   // 1. Fast-path heuristic for conversational greetings
   const trimmed = lowerText.trim();
-  if (
-    /^hi|hello|hey|thanks|thank you|who are you|what can you do|what is this/i.test(
-      trimmed,
-    )
-  ) {
+  const isGreeting =
+    /^(?:hi|hello|hey)(?:[\s,!]*?(?:pluto|there))?[\s!?.]*$/i.test(trimmed);
+  const isCapabilityQuestion =
+    /^(?:who are you|what can you do|what is this)[\s!?.]*$/i.test(trimmed);
+  const isThanks = /^(?:thanks|thank you)(?:[\s,!]*pluto)?[\s!?.]*$/i.test(
+    trimmed,
+  );
+  if (isGreeting || isCapabilityQuestion || isThanks) {
     console.log('[QueryEngine] Greeting detected, providing canned response');
 
     let cannedResponse =
       "Hi! I'm Pluto, your AI meeting assistant. Ask me anything about your meeting history.";
-    if (/^who are you|what is this/i.test(trimmed)) {
+    if (/^(?:who are you|what is this)\b/i.test(trimmed)) {
       cannedResponse =
         "I'm Pluto, an AI meeting intelligence assistant. I can help you search through your meeting history, summarize discussions, and track action items.";
-    } else if (/^what can you do/i.test(trimmed)) {
+    } else if (/^what can you do\b/i.test(trimmed)) {
       cannedResponse =
         'I can extract entities, search through meeting transcripts using semantic retrieval, and answer factual questions using your recording history as context.';
-    } else if (/^thanks|thank you/i.test(trimmed)) {
+    } else if (isThanks) {
       cannedResponse = "You're welcome! Let me know if you need anything else.";
     }
 
@@ -288,7 +540,9 @@ export const parseQuery = async (
   let intent: ParsedQuery['intent'] = 'factual';
   let expanded_keywords: string[] = [];
 
-  if (options.useModelClassification === false) {
+  if (isPlanning) {
+    intent = 'factual';
+  } else if (options.useModelClassification === false) {
     intent = classifyQueryHeuristically(lowerText);
   } else {
     try {
@@ -340,6 +594,25 @@ export const parseQuery = async (
           .slice(0, 3) // top 3 entities
       : [];
 
+  const matchedProject = matchProjectEntity(text, entityMentions);
+  if (matchedProject) {
+    if (!entityMentions.includes(matchedProject.canonicalId)) {
+      entityMentions.unshift(matchedProject.canonicalId);
+    }
+    const projectTokens = [
+      matchedProject.displayTitle,
+      matchedProject.name,
+      ...matchedProject.keyTerms,
+    ]
+      .flatMap((term) => term.split(/[\s,.;:!?]+/))
+      .filter((w) => w.length > 2 && !stopwords.has(w.toLowerCase()));
+    for (const token of projectTokens) {
+      if (!expanded_keywords.includes(token)) {
+        expanded_keywords.push(token);
+      }
+    }
+  }
+
   return {
     keywords,
     expanded_keywords,
@@ -386,19 +659,44 @@ const CONTEXTLESS_SUMMARY_TEXT =
 const GENERIC_MEETING_TITLE =
   /^(?:meeting|untitled meeting|recovered recording)$/i;
 
+export const isSelfReferentialQuery = (query: string): boolean =>
+  /\b(?:my\s+(?:quarterly\s+|annual\s+|monthly\s+|weekly\s+|recent\s+)?(?:accomplishments?|achievements?|commitments?|action items?|tasks?|work|deliverables?|updates?|contributions?|projects?|priorities|focus|plate)|what\s+(?:did\s+i|have\s+i|was\s+my|were\s+my|do\s+i|should\s+i|am\s+i|do\s+i\s+need)|give\s+me\s+my|generate\s+my|summarize\s+my|did\s+i\s+(?:say|mention|commit|work|agree)|what\s+i\s+(?:did|said|worked|committed)|what(?:'s|\s+is)\s+(?:on\s+my\s+plate|my\s+(?:top\s+)?priorit(?:y|ies)|my\s+focus))\b/i.test(
+    query,
+  );
+
 const ASSIGNEE_ACTION_QUERY_PATTERNS = [
   /\b(?:what(?:'s| is)|what else is|show me (?:what(?:'s| is))?)\s+assigned to\s+(.+?)(?:\?|$)/i,
   /\bwhat\s+does\s+(.+?)\s+own(?:\?|$)/i,
-  /\bwhat\s+(?:are|were)\s+(.+?)(?:'s|’s)\s+action items?(?:\?|$)/i,
+  /\bwhat\s+(?:are|were)\s+(.+?)(?:'s|’s)\s+(?:action items?|commitments?|tasks?|accomplishments?|deliverables?)(?:\?|$)/i,
+  /\b(?:generate|list|show|give me)\s+(.+?)(?:'s|’s)\s+(?:quarterly\s+|annual\s+|monthly\s+|weekly\s+|recent\s+)?(?:accomplishments?|achievements?|deliverables?)(?:\?|$)/i,
+  /\bwhat\s+did\s+(.+?)\s+(?:accomplish|deliver|complete|finish)(?:\?|$)/i,
 ];
 
-const parseAssigneeActionQuery = (query: string): string | null => {
+export const parseAssigneeActionQuery = (query: string): string | null => {
   if (
     /\b(?:what (?:are|is)|show me|list)?\s*my\s+(?:(?:open|completed|done|closed)\s+)?(?:commitments?|action items?|tasks?)\b/i.test(
       query,
     ) ||
     /\bwhat\s+do\s+i\s+own\b/i.test(query) ||
-    /\b(?:commitments?|action items?|tasks?)\s+(?:are\s+)?mine\b/i.test(query)
+    /\bwhat\s+(?:should|do)\s+i\s+(?:need\s+to\s+)?(?:be\s+)?(?:focus|focusing|working|work|do|prioritize)(?:\s+on)?\b/i.test(
+      query,
+    ) ||
+    /\bwhat\s+(?:are|is)\s+my\s+(?:top\s+)?(?:priorit(?:y|ies)|focus|deliverables?|next steps?)\b/i.test(
+      query,
+    ) ||
+    /\bwhat(?:'s|\s+is)\s+(?:on\s+my\s+plate|my\s+(?:top\s+)?priorit(?:y|ies)|my\s+focus)\b/i.test(
+      query,
+    ) ||
+    /\bwhat\s+am\s+i\s+supposed\s+to\s+(?:be\s+)?(?:working|work|focus|do)\b/i.test(
+      query,
+    ) ||
+    /\b(?:commitments?|action items?|tasks?|priorities)\s+(?:are\s+)?mine\b/i.test(
+      query,
+    ) ||
+    /\b(?:generate|list|show|what (?:are|were)|give me)?\s*my\s+(?:(?:quarterly|annual|monthly|weekly|recent)\s+)?(?:accomplishments?|achievements?|deliverables?|completed (?:tasks?|commitments?|work))\b/i.test(
+      query,
+    ) ||
+    /\bwhat\s+did\s+i\s+(?:accomplish|deliver|complete|finish)\b/i.test(query)
   ) {
     return 'me';
   }
@@ -556,13 +854,33 @@ export const buildAssigneeActionRecall = (
     : undefined;
   if (person && canonicalCommitments) {
     const completedRequested =
-      /\b(?:completed|complete|done|closed|finished)\b/i.test(query);
+      /\b(?:completed|complete|done|closed|finished|accomplishments?|achievements?|deliverables?)\b/i.test(
+        query,
+      );
+    const isPriorityQuery =
+      !completedRequested &&
+      /\b(?:focus|focusing|priorit(?:y|ies|ize)|what should i|on my plate|next steps?|work on|supposed to)\b/i.test(
+        query,
+      );
     const confirmed = completedRequested
       ? canonicalCommitments.delivered
       : canonicalCommitments.open;
     const possible = completedRequested ? [] : canonicalCommitments.candidates;
+
+    const sortedConfirmed = [...confirmed];
+    if (isPriorityQuery) {
+      sortedConfirmed.sort((a, b) => {
+        if (a.dueDate && !b.dueDate) return -1;
+        if (!a.dueDate && b.dueDate) return 1;
+        if (a.dueDate && b.dueDate) {
+          return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+        }
+        return 0;
+      });
+    }
+
     const selected = [
-      ...confirmed.map((item) => ({ ...item, confirmed: true as const })),
+      ...sortedConfirmed.map((item) => ({ ...item, confirmed: true as const })),
       ...possible.map((item) => ({ ...item, confirmed: false as const })),
     ].slice(0, 12);
     const grouped = new Map<
@@ -584,7 +902,7 @@ export const buildAssigneeActionRecall = (
       const evidence = items
         .map(
           (item) =>
-            `${item.confirmed ? (completedRequested ? 'Completed commitment' : 'Confirmed assignment') : 'Possible follow-up'}: ${item.text}${item.dueDate ? ` Due ${formatActionDueDate(item.dueDate) || item.dueDate}.` : ''}${item.evidence ? ` Evidence: ${item.evidence}` : ''}`,
+            `${item.confirmed ? (completedRequested ? 'Completed deliverable' : 'Confirmed assignment') : 'Possible follow-up'}: ${item.text}${item.dueDate ? ` Due ${formatActionDueDate(item.dueDate) || item.dueDate}.` : ''}${item.evidence ? ` Evidence: ${item.evidence}` : ''}`,
         )
         .join('\n');
       return {
@@ -597,7 +915,12 @@ export const buildAssigneeActionRecall = (
       groups.map((group, index) => [String(group.meeting.id), index + 1]),
     );
     const lines = [
-      ...confirmed.map(
+      ...(isPriorityQuery && sortedConfirmed.length > 0
+        ? [
+            'Here is what is currently on your plate, based on your open commitments:',
+          ]
+        : []),
+      ...sortedConfirmed.map(
         (item) =>
           `- ${item.text}${item.dueDate ? ` Due ${formatActionDueDate(item.dueDate) || item.dueDate}.` : ''} [Source ${sourceIndex.get(item.sourceMeetingId) || 1}]`,
       ),
@@ -618,11 +941,13 @@ export const buildAssigneeActionRecall = (
       answer:
         lines.filter(Boolean).length > 0
           ? lines.join('\n')
-          : `I couldn't find any confirmed ${completedRequested ? 'completed' : 'open'} commitments assigned to ${subject}.`,
+          : isPriorityQuery
+            ? `I couldn't find any open commitments or action items assigned to ${subject} to prioritize.`
+            : `I couldn't find any confirmed ${completedRequested ? 'accomplishments or completed deliverables' : 'open commitments'} assigned to ${subject}.`,
       context,
       coverageLimited: false,
       mentionedMeetingCount: context.length,
-      commitmentCount: confirmed.length,
+      commitmentCount: sortedConfirmed.length,
     };
   }
 
@@ -708,20 +1033,166 @@ export const buildAssigneeActionRecall = (
   };
 };
 
+export const buildProjectRecall = (
+  query: string,
+  entityMentions: string[] = [],
+): {
+  project: MatchedProjectEntity;
+  displayTitle: string;
+  context: RetrievalResult[];
+} | null => {
+  const matched = matchProjectEntity(query, entityMentions);
+  if (!matched) return null;
+
+  const brief =
+    typeof dbModule.getProjectBrief === 'function'
+      ? dbModule.getProjectBrief(matched.canonicalId)
+      : null;
+  const snapshot =
+    typeof dbModule.getWorkingMemorySnapshot === 'function'
+      ? dbModule.getWorkingMemorySnapshot('project', matched.canonicalId)
+      : null;
+  const entity =
+    typeof dbModule.getEntity === 'function'
+      ? dbModule.getEntity(matched.canonicalId)
+      : null;
+  if (!brief && !snapshot && !entity) return null;
+
+  const displayTitle = brief?.project.displayTitle || matched.displayTitle;
+  const status = entity?.status || brief?.project.status || 'active';
+  const theme = brief?.theme;
+  const currentRead = snapshot?.payload?.current_read;
+
+  const sections: string[] = [
+    `[Project: ${displayTitle}]`,
+    `[Identified Name]: ${matched.name}`,
+    `[Status]: ${status}`,
+  ];
+
+  if (theme) {
+    if (theme.outcome) sections.push(`[Desired Outcome]: ${theme.outcome}`);
+    if (theme.currentFocus)
+      sections.push(`[Current Focus]: ${theme.currentFocus}`);
+    if (theme.recentChanges?.length) {
+      sections.push(
+        `[Recent Changes]:\n${theme.recentChanges
+          .slice(0, 4)
+          .map((c) => `- ${c.summary}`)
+          .join('\n')}`,
+      );
+    }
+    if (theme.openThreads?.length) {
+      sections.push(
+        `[Open Threads & Risks]:\n${theme.openThreads
+          .slice(0, 4)
+          .map((t) => `- [${t.kind}] ${t.text}`)
+          .join('\n')}`,
+      );
+    }
+  }
+
+  if (currentRead) {
+    sections.push(
+      `[Current Read]: ${currentRead.headline || ''}\n${(
+        currentRead.supporting_bullets || []
+      )
+        .map((b) => `- ${b}`)
+        .join('\n')}`,
+    );
+  }
+
+  if (brief?.milestones?.length) {
+    const milestonesText = brief.milestones
+      .slice(0, 6)
+      .map(
+        (m) =>
+          `- ${m.title} (${m.status}${m.targetDate ? `, target: ${m.targetDate}` : ''})`,
+      )
+      .join('\n');
+    sections.push(`[Milestones]:\n${milestonesText}`);
+  }
+
+  if (brief?.tasks?.length) {
+    const tasksText = brief.tasks
+      .slice(0, 8)
+      .map(
+        (t) =>
+          `- ${t.name}${t.assigned_to ? ` [Owner: ${t.assigned_to}]` : ''}${t.due_date ? ` (due: ${t.due_date})` : ''} [Status: ${t.status || 'open'}]`,
+      )
+      .join('\n');
+    sections.push(`[Tasks & Action Items]:\n${tasksText}`);
+  }
+
+  if (brief?.meetings?.length) {
+    const meetingsText = brief.meetings
+      .slice(0, 4)
+      .map(
+        (m) =>
+          `- Meeting: "${m.title}" (${m.started_at || m.created_at || 'date unknown'})${m.context ? ` — Context: ${m.context.slice(0, 160)}` : ''}`,
+      )
+      .join('\n');
+    sections.push(`[Recent Contributing Meetings]:\n${meetingsText}`);
+  }
+
+  const projectRetrievalResult: RetrievalResult = {
+    meeting_id: matched.canonicalId,
+    meeting_title: `Project: ${displayTitle}`,
+    source_type: 'artifact',
+    source_id: matched.canonicalId,
+    mid: null,
+    evidence_text: sections.join('\n'),
+    score: 1.0,
+    score_breakdown: {
+      fts_rank: 1,
+      graph_proximity: 1,
+      recency_decay: 1,
+      mention_weight: 1,
+    },
+    evidence_kind: 'overview',
+    trust_status: snapshot?.trust_status ?? 'grounded',
+  };
+
+  const meetingResults: RetrievalResult[] = [];
+  if (brief?.meetings?.length) {
+    for (const m of brief.meetings.slice(0, 3)) {
+      const persisted = dbModule.getMeeting(m.id) as
+        | dbModule.PersistedMeeting
+        | undefined;
+      if (persisted) {
+        meetingResults.push(
+          buildMeetingRetrievalResult(
+            persisted,
+            `Project meeting (${displayTitle})`,
+          ),
+        );
+      }
+    }
+  }
+
+  return {
+    project: matched,
+    displayTitle,
+    context: [projectRetrievalResult, ...meetingResults],
+  };
+};
+
 export const buildWorkingMemoryOverviewRecall = (
   query: string,
   entityMentions: string[],
 ): { context: RetrievalResult[]; scope: 'global' | 'project' } | null => {
   if (
-    !/\b(?:overview|brief(?:ing)?|what(?:'s| is) going on|current priorities|active streams|risks and unknowns|across meetings)\b/i.test(
+    !/\b(?:overview|brief(?:ing)?|what(?:'s| is) going on|current priorities|active streams|risks and unknowns|across meetings|what should i (?:be )?(?:focus|working|work) on|on my plate|priorit(?:y|ies))\b/i.test(
       query,
     )
   ) {
     return null;
   }
-  const project = entityMentions
-    .map((entityId) => dbModule.getEntity(entityId))
-    .find((entity) => entity?.type === 'project');
+  const matchedProject = matchProjectEntity(query, entityMentions);
+  const project = matchedProject
+    ? dbModule.getEntity(matchedProject.canonicalId)
+    : entityMentions
+        .map((entityId) => dbModule.getEntity(entityId))
+        .find((entity) => entity?.type === 'project');
   const snapshot = project
     ? dbModule.getWorkingMemorySnapshot('project', project.id)
     : dbModule.getWorkingMemorySnapshot('global', 'global');
@@ -769,9 +1240,344 @@ export const buildWorkingMemoryOverviewRecall = (
         },
       ];
     });
-  return context.length
-    ? { context, scope: project ? 'project' : 'global' }
-    : null;
+  if (context.length > 0) {
+    return { context, scope: project ? 'project' : 'global' };
+  }
+
+  // If no meeting quotes were indexed, form a primary overview artifact from the snapshot payload
+  const currentRead = snapshot.payload?.current_read;
+  const rawActiveStreams = Array.isArray(snapshot.payload?.active_streams)
+    ? snapshot.payload.active_streams
+    : [];
+  const activeStreams: Array<Record<string, unknown>> = rawActiveStreams.filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === 'object',
+  );
+  const rawOpenLoops = Array.isArray(snapshot.payload?.open_loops)
+    ? snapshot.payload.open_loops
+    : Array.isArray(
+          (snapshot.payload as unknown as Record<string, unknown>)
+            ?.needs_attention,
+        )
+      ? ((snapshot.payload as unknown as Record<string, unknown>)
+          ?.needs_attention as unknown[])
+      : [];
+  const openLoops: Array<Record<string, unknown>> = rawOpenLoops.filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === 'object',
+  );
+
+  const sections: string[] = [
+    `[Working Memory Overview: ${project ? 'Project' : 'Workspace'}]`,
+  ];
+  if (currentRead?.headline) {
+    sections.push(
+      `[Current Read]: ${currentRead.headline}\n${(currentRead.supporting_bullets || []).map((b) => `- ${b}`).join('\n')}`,
+    );
+  }
+  if (activeStreams.length > 0) {
+    sections.push(
+      `[Active Streams]:\n${activeStreams
+        .slice(0, 5)
+        .map(
+          (s) =>
+            `- ${typeof s.title === 'string' ? s.title : 'Stream'}: ${typeof s.current_read === 'string' ? s.current_read : typeof s.status === 'string' ? s.status : ''}`,
+        )
+        .join('\n')}`,
+    );
+  }
+  if (openLoops.length > 0) {
+    sections.push(
+      `[Open Loops & Blockers]:\n${openLoops
+        .slice(0, 5)
+        .map(
+          (l) =>
+            `- ${typeof l.title === 'string' ? l.title : 'Item'}: ${typeof l.summary === 'string' ? l.summary : ''}`,
+        )
+        .join('\n')}`,
+    );
+  }
+
+  if (sections.length <= 1) return null;
+
+  const artifactResult: RetrievalResult = {
+    meeting_id: snapshot.id || 'snapshot:working_memory',
+    meeting_title: `${project ? 'Project' : 'Workspace'} Working Memory: Current Read & Streams`,
+    source_type: 'artifact',
+    source_id: snapshot.id || 'snapshot:working_memory',
+    mid: null,
+    evidence_text: sections.join('\n\n'),
+    score: 1.0,
+    score_breakdown: {
+      fts_rank: 1,
+      graph_proximity: 1,
+      recency_decay: 1,
+      mention_weight: 1,
+    },
+    evidence_kind: 'overview',
+    trust_status: snapshot.trust_status,
+  };
+
+  return {
+    context: [artifactResult],
+    scope: project ? 'project' : 'global',
+  };
+};
+
+export interface WorkspaceIntelligenceRecall {
+  context: RetrievalResult[];
+  summary: {
+    hasWorkingMemory: boolean;
+    hasOpenCommitments: boolean;
+    hasActiveProjects: boolean;
+    recentMeetingCount: number;
+    openCommitmentCount: number;
+    activeStreamCount: number;
+  };
+}
+
+export const buildWorkspaceIntelligenceRecall = (input: {
+  query: string;
+  persistedMeetings: dbModule.PersistedMeeting[];
+  selfPersonId?: string | null;
+}): WorkspaceIntelligenceRecall => {
+  const selfPersonId =
+    input.selfPersonId ??
+    (typeof dbModule.identityStore?.getSelfPersonId === 'function'
+      ? dbModule.identityStore.getSelfPersonId()
+      : null);
+
+  const personBriefing =
+    selfPersonId && typeof dbModule.getPersonBriefing === 'function'
+      ? dbModule.getPersonBriefing(selfPersonId)
+      : null;
+
+  const openCommitments = personBriefing?.commitments?.open ?? [];
+  const candidateCommitments = personBriefing?.commitments?.candidates ?? [];
+
+  const globalSnapshot =
+    typeof dbModule.getWorkingMemorySnapshot === 'function'
+      ? dbModule.getWorkingMemorySnapshot('global', 'global')
+      : null;
+
+  const currentRead = globalSnapshot?.payload?.current_read;
+  const rawActiveStreams = Array.isArray(
+    globalSnapshot?.payload?.active_streams,
+  )
+    ? globalSnapshot.payload.active_streams
+    : [];
+  const activeStreams: Array<Record<string, unknown>> = rawActiveStreams.filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === 'object',
+  );
+
+  const rawGlobalOpenLoops = Array.isArray(globalSnapshot?.payload?.open_loops)
+    ? globalSnapshot.payload.open_loops
+    : Array.isArray(
+          (globalSnapshot?.payload as unknown as Record<string, unknown>)
+            ?.needs_attention,
+        )
+      ? ((globalSnapshot?.payload as unknown as Record<string, unknown>)
+          ?.needs_attention as unknown[])
+      : [];
+  const openLoops: Array<Record<string, unknown>> = rawGlobalOpenLoops.filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === 'object',
+  );
+
+  const rawRisks = Array.isArray(globalSnapshot?.payload?.risks_and_unknowns)
+    ? globalSnapshot.payload.risks_and_unknowns
+    : [];
+  const risksAndUnknowns: Array<Record<string, unknown>> = rawRisks.filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === 'object',
+  );
+
+  const portfolio =
+    typeof dbModule.getProjectPortfolio === 'function'
+      ? dbModule.getProjectPortfolio()
+      : [];
+
+  const activeProjects = portfolio
+    .filter((p) => p.status !== 'completed')
+    .slice(0, 4);
+
+  const recentMeetings = input.persistedMeetings.slice(0, 4);
+
+  const sections: string[] = ['[Workspace Intelligence & Executive Briefing]'];
+
+  if (currentRead?.headline) {
+    const bullets = (currentRead.supporting_bullets || [])
+      .map((b) => `- ${b}`)
+      .join('\n');
+    sections.push(
+      `[Workspace Current Read]: ${currentRead.headline}${bullets ? `\n${bullets}` : ''}`,
+    );
+  }
+
+  if (activeStreams.length > 0) {
+    const streamsText = activeStreams
+      .slice(0, 5)
+      .map((s) => {
+        const title = typeof s.title === 'string' ? s.title : 'Active stream';
+        const read =
+          typeof s.current_read === 'string' && s.current_read.trim()
+            ? `: ${s.current_read.trim()}`
+            : '';
+        const status =
+          typeof s.status === 'string' && s.status.trim()
+            ? ` [Status: ${s.status.trim()}]`
+            : '';
+        return `- Stream "${title}"${status}${read}`;
+      })
+      .join('\n');
+    sections.push(`[Active Work Streams]:\n${streamsText}`);
+  }
+
+  if (openLoops.length > 0) {
+    const loopsText = openLoops
+      .slice(0, 5)
+      .map((item) => {
+        const title = typeof item.title === 'string' ? item.title : 'Open loop';
+        const summary =
+          typeof item.summary === 'string' && item.summary.trim()
+            ? `: ${item.summary.trim()}`
+            : '';
+        const whyNow =
+          typeof item.why_now === 'string' && item.why_now.trim()
+            ? ` (Attention: ${item.why_now.trim()})`
+            : '';
+        return `- ${title}${summary}${whyNow}`;
+      })
+      .join('\n');
+    sections.push(`[Open Loops & Blockers]:\n${loopsText}`);
+  }
+
+  if (risksAndUnknowns.length > 0) {
+    const risksText = risksAndUnknowns
+      .slice(0, 3)
+      .map((r) => {
+        const title = typeof r.title === 'string' ? r.title : 'Risk';
+        const summary =
+          typeof r.summary === 'string' && r.summary.trim()
+            ? `: ${r.summary.trim()}`
+            : '';
+        return `- ${title}${summary}`;
+      })
+      .join('\n');
+    sections.push(`[Risks & Key Unknowns]:\n${risksText}`);
+  }
+
+  if (openCommitments.length > 0 || candidateCommitments.length > 0) {
+    const openLines = openCommitments.slice(0, 8).map((c) => {
+      const dueStr = c.dueDate ? ` (Due: ${c.dueDate})` : '';
+      const evidenceStr = c.evidence
+        ? ` [Context: ${c.evidence.replace(/\s+/g, ' ').trim().slice(0, 160)}]`
+        : '';
+      return `- ${c.text}${dueStr}${evidenceStr}`;
+    });
+    const candidateLines = candidateCommitments.slice(0, 3).map((c) => {
+      return `- [Unconfirmed candidate]: ${c.text}`;
+    });
+    sections.push(
+      `[Your Commitments & Action Items]:\n${[...openLines, ...candidateLines].join('\n')}`,
+    );
+  } else {
+    sections.push(
+      '[Your Commitments]: No verified open action items are assigned to you in recent meetings. Orient priorities around active project goals, open loops, and recent decisions.',
+    );
+  }
+
+  if (activeProjects.length > 0) {
+    const projectLines = activeProjects.map((p) => {
+      const title = p.display_title || p.name;
+      const parts: string[] = [
+        `- Project "${title}" [${p.status || 'active'}]`,
+      ];
+      if (p.current_focus) parts.push(`  * Current Focus: ${p.current_focus}`);
+      if (p.next_milestone)
+        parts.push(`  * Next Milestone: ${p.next_milestone}`);
+      if (p.health_headline)
+        parts.push(`  * Status Read: ${p.health_headline}`);
+      const terms = extractProjectKeyTerms(
+        p.metadata,
+        readProjectThemeSynthesis(p.metadata),
+      );
+      if (terms.length > 0) {
+        parts.push(`  * Labels & Key Terms: ${terms.slice(0, 5).join(', ')}`);
+      }
+      if (p.recent_change) {
+        parts.push(`  * Recent Change: ${p.recent_change}`);
+      }
+      return parts.join('\n');
+    });
+    sections.push(`[Active Projects & Focus]:\n${projectLines.join('\n')}`);
+  }
+
+  if (recentMeetings.length > 0) {
+    const meetingLines = recentMeetings.map((m) => {
+      const dateStr = m.started_at || m.created_at;
+      const formattedDate = dateStr
+        ? new Date(dateStr).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+          })
+        : 'recent';
+      const mid = parseMid(m.mid_json);
+      const decisions = mid?.decisions?.map((d) => d.description).slice(0, 2);
+      const decisionsStr = decisions?.length
+        ? ` | Decisions: ${decisions.join('; ')}`
+        : '';
+      const notes = m.enhanced_notes || m.user_notes || '';
+      const summaryMatch = notes.match(
+        /\[(?:Analysis|Overview|Summary)\]:\s*([^\n]+)/i,
+      );
+      const summaryText = summaryMatch?.[1]
+        ? ` — ${summaryMatch[1].trim().slice(0, 140)}`
+        : '';
+      return `- Meeting "${m.title || 'Untitled'}" (${formattedDate})${summaryText}${decisionsStr}`;
+    });
+    sections.push(
+      `[Recent Meetings & Key Decisions]:\n${meetingLines.join('\n')}`,
+    );
+  }
+
+  const primaryResult: RetrievalResult = {
+    meeting_id: 'workspace:intelligence',
+    meeting_title:
+      'Workspace Intelligence: Working Memory, Streams & Priorities',
+    source_type: 'artifact',
+    source_id: 'workspace:intelligence',
+    mid: null,
+    evidence_text: sections.join('\n\n'),
+    score: 1.0,
+    score_breakdown: {
+      fts_rank: 1,
+      graph_proximity: 1,
+      recency_decay: 1,
+      mention_weight: 1,
+    },
+    evidence_kind: 'overview',
+    trust_status: globalSnapshot?.trust_status ?? 'grounded',
+  };
+
+  const recentMeetingResults = recentMeetings
+    .slice(0, 3)
+    .map((meeting) =>
+      buildMeetingRetrievalResult(meeting, 'Recent meeting context'),
+    );
+
+  return {
+    context: [primaryResult, ...recentMeetingResults],
+    summary: {
+      hasWorkingMemory: Boolean(globalSnapshot),
+      hasOpenCommitments: openCommitments.length > 0,
+      hasActiveProjects: activeProjects.length > 0,
+      recentMeetingCount: recentMeetings.length,
+      openCommitmentCount: openCommitments.length,
+      activeStreamCount: activeStreams.length,
+    },
+  };
 };
 
 const normalizeScopeText = (value: string): string =>
@@ -935,6 +1741,7 @@ export const retrieveContext = async (
     pinnedResults?: RetrievalResult[];
     query?: string;
     meetingIds?: string[];
+    synthesizedOnly?: boolean;
   } = {},
 ): Promise<RetrievalResult[]> => {
   if (parsed.intent === 'conversational') {
@@ -1096,10 +1903,11 @@ export const retrieveContext = async (
     }
 
     // Transcript-only meetings are considered only after notes and headings
-    // fail, and only the matching meetings are eligible for deepening below.
+    // fail, and only when exact wording is explicitly requested and synthesizedOnly is not set.
     if (
+      !options.synthesizedOnly &&
       Object.keys(resultsMap).length === 0 &&
-      /\b(?:quote|verbatim|exact|transcript|said|go deeper|why|rationale)\b/i.test(
+      /\b(?:quote|verbatim|word for word|exact(?:ly)?(?: what| how)?|exact words?)\b/i.test(
         options.query || '',
       )
     ) {
@@ -1251,13 +2059,9 @@ export const retrieveContext = async (
         ),
       ].slice(0, 6);
   const transcriptRequested =
-    /\b(?:quote|verbatim|word for word|exact|transcript|what did .+ say|go deeper|why|rationale)\b/i.test(
+    !options.synthesizedOnly &&
+    /\b(?:quote|verbatim|word for word|exact(?:ly)?(?: what| how)?|exact words?)\b/i.test(
       options.query || '',
-    ) ||
-    selected.some(
-      (result) =>
-        !result.evidence_text.includes('[Analysis]') &&
-        !result.retrieved_sections?.length,
     );
   if (!transcriptRequested) return selected;
 

@@ -20,7 +20,6 @@ import {
   resolveSavedMeetingEvidencePolicy,
 } from './meetingNotesEvidence';
 
-
 export const MEETING_ASK_PLUTO_TURN_LIMIT = 6;
 export const MEETING_ASK_PLUTO_TURN_CHAR_LIMIT = 1200;
 const MEETING_ASK_PLUTO_EVIDENCE_LIMIT = 18;
@@ -79,13 +78,67 @@ interface TranscriptSegmentLike {
 }
 
 const COMMON_QUERY_STOP_WORDS = new Set([
-  'a', 'an', 'the', 'and', 'or', 'but', 'if', 'then', 'else', 'when',
-  'at', 'from', 'by', 'for', 'with', 'about', 'against', 'between',
-  'into', 'through', 'during', 'before', 'after', 'above', 'below',
-  'to', 'of', 'in', 'on', 'what', 'who', 'how', 'why', 'where', 'which',
-  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
-  'do', 'does', 'did', 'can', 'could', 'will', 'would', 'should',
-  'this', 'that', 'these', 'those', 'meeting', 'call', 'discussion', 'say',
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'but',
+  'if',
+  'then',
+  'else',
+  'when',
+  'at',
+  'from',
+  'by',
+  'for',
+  'with',
+  'about',
+  'against',
+  'between',
+  'into',
+  'through',
+  'during',
+  'before',
+  'after',
+  'above',
+  'below',
+  'to',
+  'of',
+  'in',
+  'on',
+  'what',
+  'who',
+  'how',
+  'why',
+  'where',
+  'which',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'have',
+  'has',
+  'had',
+  'do',
+  'does',
+  'did',
+  'can',
+  'could',
+  'will',
+  'would',
+  'should',
+  'this',
+  'that',
+  'these',
+  'those',
+  'meeting',
+  'call',
+  'discussion',
+  'say',
 ]);
 
 const selectRelevantTranscriptSegments = (
@@ -214,7 +267,6 @@ const transcriptSegmentsFromJson = (transcriptJson: unknown) => {
     );
 };
 
-
 const deriveContextTrustStatus = ({
   meeting,
   evidenceItems,
@@ -299,7 +351,6 @@ export const buildMeetingAskPlutoContext = ({
     text: segment.text,
     quote: segment.quote,
   }));
-
 
   if (notesDocument.notesText) {
     addEvidence(evidenceItems, {
@@ -405,13 +456,11 @@ export const buildMeetingAskPlutoContext = ({
       ? 'This answer may use bounded transcript evidence for an exact-wording request.'
       : evidencePolicy === 'transcript_fallback'
         ? 'Meeting notes are unavailable, so this answer may use transcript evidence directly from the transcript.'
-
         : isLiveOrProvisional(meeting)
           ? 'This answer uses live or provisional meeting notes.'
           : status === 'ready'
             ? 'This answer is scoped to saved meeting notes.'
             : 'No notes or structured meeting evidence is available yet.';
-
 
   return {
     status,
@@ -851,7 +900,6 @@ export const buildMeetingAskPlutoResponseFromAnswer = ({
       .trim(),
   ).trim();
   const responseTrustStatus = 'needs_review';
-
 
   return {
     status: 'answered',

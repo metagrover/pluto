@@ -139,6 +139,71 @@ describe('Ask Pluto conversation scope', () => {
     ).toBe("Summarize this week's meetings");
   });
 
+  it('keeps two consecutive tell-me-more turns on the same cited meeting', () => {
+    const question =
+      'What were the key takeaways from UI and Layout Refinements?';
+    const firstTurns: AskPlutoConversationTurn[] = [
+      { role: 'user', content: question },
+      {
+        role: 'assistant',
+        content: 'The team decided to hide the button or label.',
+        meetingIds: ['ui-layout-meeting'],
+        conversationAnchor: question,
+      },
+    ];
+    const first = resolveAskPlutoConversation('tell me more', firstTurns);
+    expect(first).toMatchObject({
+      relation: 'expansion',
+      task: 'analysis',
+      retrievalQuery: question,
+    });
+
+    const second = resolveAskPlutoConversation('tell me more', [
+      ...firstTurns,
+      { role: 'user', content: 'tell me more' },
+      {
+        role: 'assistant',
+        content: 'The capability to add multiple calendars has been added.',
+        meetingIds: ['ui-layout-meeting'],
+        conversationAnchor: first.retrievalQuery,
+      },
+    ]);
+    expect(second).toMatchObject({
+      relation: 'expansion',
+      task: 'analysis',
+      retrievalQuery: question,
+    });
+    expect(second.answerQuery).not.toContain('tell me more: tell me more');
+  });
+
+  it('revisits the original question for an omitted-detail follow-up', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      {
+        role: 'user',
+        content: 'Summarize Punit Grover’s recent contributions',
+      },
+      {
+        role: 'assistant',
+        content: 'Punit asked about the kitchen table.',
+        outcome: 'partial',
+        unsupportedClaimCount: 4,
+        omissionRef: 'opaque-ref',
+      },
+    ];
+
+    expect(
+      resolveAskPlutoConversation('Can you list the left out details?', turns),
+    ).toMatchObject({
+      relation: 'omission_follow_up',
+      task: 'analysis',
+      retrievalQuery: 'Summarize Punit Grover’s recent contributions',
+    });
+    expect(
+      resolveAskPlutoConversation('What did Punit decide next?', turns)
+        .relation,
+    ).toBe('follow_up');
+  });
+
   it('separates a referential drafting request from its retrieval query', () => {
     const turns: AskPlutoConversationTurn[] = [
       { role: 'user', content: 'What is Jordan working on?' },
@@ -280,5 +345,54 @@ describe('Ask Pluto conversation scope', () => {
       answerQuery: 'what is jordan most concerned about?',
       priorQuestion: "What's assigned to Jordan?",
     });
+  });
+
+  it('isolates the real user question when disputing an attributed entity', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      { role: 'user', content: 'Generate my quarterly accomplishments' },
+      {
+        role: 'assistant',
+        content: '• Ayush worked on a pipeline to generate client emails.',
+        outcome: 'answered',
+      },
+    ];
+
+    expect(
+      resolveAskPlutoConversation(
+        'why are you giving me answers for Ayush? give me my accomplishments',
+        turns,
+      ),
+    ).toMatchObject({
+      relation: 'follow_up',
+      retrievalQuery: 'give me my accomplishments',
+      answerQuery:
+        'why are you giving me answers for Ayush? give me my accomplishments',
+      priorQuestion: 'Generate my quarterly accomplishments',
+    });
+  });
+
+  it('resolves a topic-specific expansion referencing the prior assistant answer', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      { role: 'user', content: 'what should i focus on?' },
+      {
+        role: 'assistant',
+        content:
+          'Immediate Priorities:\n• Follow up with Rachel to confirm approach for service notification PR.\n• Meeting with Rachel scheduled for Monday regarding client data and database optimization.',
+        meetingIds: ['rachel-monday-meeting'],
+        outcome: 'answered',
+      },
+    ];
+
+    const resolved = resolveAskPlutoConversation(
+      'tell me more? monday meeting especially',
+      turns,
+    );
+
+    expect(resolved.relation).toBe('expansion');
+    expect(resolved.task).toBe('analysis');
+    expect(resolved.retrievalQuery).toContain('monday');
+    expect(resolved.retrievalQuery).toContain('Rachel');
+    expect(resolved.retrievalQuery).toContain('database optimization');
+    expect(resolved.retrievalQuery).not.toContain('what should i focus on');
   });
 });

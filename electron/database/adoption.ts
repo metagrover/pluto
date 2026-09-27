@@ -162,6 +162,30 @@ export const adoptLegacyDatabase = (input: {
       // Ignore if table doesn't exist yet
     }
 
+    // Ensure legacy meetings table has columns referenced by baseline triggers
+    try {
+      const meetingCols = sqlite.pragma('table_info(meetings)') as Array<{
+        name: string;
+      }>;
+      if (meetingCols.length > 0) {
+        const colNames = new Set(meetingCols.map((c) => c.name));
+        const requiredCols: Array<{ name: string; type: string }> = [
+          { name: 'transcript_json', type: 'TEXT' },
+          { name: 'analysis_json', type: 'TEXT' },
+          { name: 'started_at', type: 'DATETIME' },
+        ];
+        for (const col of requiredCols) {
+          if (!colNames.has(col.name)) {
+            sqlite.exec(
+              `ALTER TABLE meetings ADD COLUMN ${col.name} ${col.type}`,
+            );
+          }
+        }
+      }
+    } catch {
+      // Ignore if table doesn't exist yet
+    }
+
     // Ensure __drizzle_migrations exists and stamp baseline migration
     sqlite.exec(`
       CREATE TABLE IF NOT EXISTS __drizzle_migrations (

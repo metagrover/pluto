@@ -214,4 +214,3 @@ describe('meeting Ask Pluto conversational context', () => {
     expect(participantFollowUp.relation).toBe('follow_up');
   });
 });
-

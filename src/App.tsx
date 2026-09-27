@@ -100,6 +100,7 @@ import {
   loadSelectedMeetingDetail,
   mergeMeetingStatus,
 } from './services/selectedMeetingDetail';
+import type { AppTheme } from './types/theme';
 import { calendarAgendaWindow } from './utils/calendarAgenda';
 import {
   getCalendarRosterNames,
@@ -217,33 +218,33 @@ function App() {
             id: 'preview-chat-q1',
             role: 'user',
             content:
-              'What decisions were made about API Migration and SOC2 compliance across our recent syncs?',
+              'What did we agree on pricing and trial dates for Acme Corp?',
           },
           {
             id: 'preview-chat-a1',
             role: 'assistant',
-            content: `Across the **Architecture docs review** and **Q2 roadmap sync**:
+            content: `Across your meetings with **Acme Corp** and the **Q4 Launch Review**:
 
-1. **Docs-as-Code Workflow**: The team confirmed adopting a Markdown-based docs-as-code workflow versioned directly inside the repository, using CI for automated validation.
-2. **SOC2 Audit & Credential Rotation**: Token rotation is completed. Maya Chen confirmed database credential rotation will be finalized by **Thursday at 5:00 PM** before production cutover.
-3. **CoreML Engine Benchmark**: Local on-device transcription latency was validated at **3.2x faster than real-time** on M-series Apple Silicon chips with zero cloud audio leakage.`,
+1. **Pricing:** The team approved a **$45 per seat** team plan and kept the basic plan at **$20**.
+2. **Trial Date:** Acme Corp starts their 30-day trial on **October 3rd** with 120 team members.
+3. **Next Step:** Maya promised to share the new pricing sheet with sales by **Thursday at 5:00 PM**.`,
             citations: [
               {
-                claim: 'Docs-as-code workflow adoption',
-                meeting_id: 'preview-architecture-docs',
-                meeting_title: 'Architecture docs review',
+                claim: 'Team plan pricing agreement',
+                meeting_id: 'preview-pricing-review',
+                meeting_title: 'Q4 Launch & Customer Pricing',
                 evidence_span:
-                  "I'd like us to adopt a docs-as-code approach using Markdown in the repo so that documentation lives alongside the code and can be versioned and reviewed the same way.",
+                  "Based on customer feedback, let's set the team price at $45 per seat and keep the basic plan at $20 so new teams can try it easily.",
                 evidence_valid: true,
                 trust_status: 'grounded',
                 source_type: 'meeting',
               },
               {
-                claim: 'SOC2 credential rotation deadline',
-                meeting_id: 'preview-roadmap-sync',
-                meeting_title: 'Q2 roadmap sync',
+                claim: 'Acme Corp 30-day trial timeline',
+                meeting_id: 'preview-acme-sync',
+                meeting_title: 'Acme Corp Customer Sync',
                 evidence_span:
-                  'Token rotation is completed. We just need to verify the database credential rotation before production cutover.',
+                  'Acme Corp is ready to start their 30-day trial next week on October 3rd.',
                 evidence_valid: true,
                 trust_status: 'grounded',
                 source_type: 'meeting',
@@ -253,14 +254,14 @@ function App() {
             outcome: 'answered',
             resolvedScope: {
               kind: 'meeting_ids',
-              meetingIds: ['preview-architecture-docs', 'preview-roadmap-sync'],
+              meetingIds: ['preview-pricing-review', 'preview-acme-sync'],
               resolvedAt: new Date().toISOString(),
               source: 'explicit',
             },
             retrievalSummary: {
               matchedMeetingCount: 2,
               includedMeetingCount: 2,
-              preparedEvidenceCount: 6,
+              preparedEvidenceCount: 4,
               transcriptOnlyCount: 0,
               omittedMeetingCount: 0,
             },
@@ -281,7 +282,7 @@ function App() {
   const [zenVisible, setZenVisible] = useState(false);
   const [selectedMeetingId, setSelectedMeetingId] = useState<
     string | number | null
-  >(meetingPreviewEnabled ? 'preview-architecture-docs' : null);
+  >(meetingPreviewEnabled ? previewMeeting.id : null);
   const [askPlutoCitationTarget, setAskPlutoCitationTarget] = useState<{
     meetingId: string;
     sectionId?: string;
@@ -347,7 +348,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [llmProvider, setLlmProvider] = useState<ProviderId>('ollama');
   const [ollamaModel, setOllamaModel] = useState('');
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
+  const [theme, setTheme] = useState<AppTheme>('system');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState('');
   const [updatingDashboardTaskIds, setUpdatingDashboardTaskIds] = useState<
@@ -728,7 +729,22 @@ function App() {
 
   useEffect(() => {
     const root = window.document.documentElement;
-    root.classList.remove('light', 'dark');
+    root.classList.remove(
+      'light',
+      'dark',
+      'terracotta',
+      'coral',
+      'aubergine',
+      'claude',
+      'airbnb',
+      'slack',
+      'midnight',
+      'paper',
+      'electric',
+      'celestial',
+      'botanical',
+      'forest',
+    );
 
     if (theme === 'system') {
       const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
@@ -736,6 +752,17 @@ function App() {
         ? 'dark'
         : 'light';
       root.classList.add(systemTheme);
+    } else if (theme === 'aubergine' || theme === 'slack') {
+      root.classList.add('aubergine');
+    } else if (theme === 'coral' || theme === 'airbnb') {
+      root.classList.add('coral');
+    } else if (
+      theme === 'terracotta' ||
+      theme === 'claude' ||
+      theme === 'celestial' ||
+      theme === 'botanical'
+    ) {
+      root.classList.add('terracotta');
     } else {
       root.classList.add(theme);
     }
@@ -743,7 +770,22 @@ function App() {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (e: MediaQueryListEvent) => {
       if (theme === 'system') {
-        root.classList.remove('light', 'dark');
+        root.classList.remove(
+          'light',
+          'dark',
+          'terracotta',
+          'coral',
+          'aubergine',
+          'claude',
+          'airbnb',
+          'slack',
+          'midnight',
+          'paper',
+          'electric',
+          'celestial',
+          'botanical',
+          'forest',
+        );
         root.classList.add(e.matches ? 'dark' : 'light');
       }
     };
@@ -827,7 +869,21 @@ function App() {
         if (val !== null) setExportIncludeTranscript(val === 'true');
       });
     window.ipcRenderer.invoke('GET_SETTING', 'theme').then((val) => {
-      if (val) setTheme(val as 'light' | 'dark' | 'system');
+      if (
+        val === 'terracotta' ||
+        val === 'coral' ||
+        val === 'aubergine' ||
+        val === 'claude' ||
+        val === 'airbnb' ||
+        val === 'slack' ||
+        val === 'light' ||
+        val === 'dark' ||
+        val === 'system'
+      ) {
+        setTheme(val as AppTheme);
+      } else if (val === 'celestial' || val === 'botanical') {
+        setTheme('terracotta');
+      }
     });
     window.ipcRenderer
       .invoke('GET_SETTING', 'calendar_auto_name_enabled')

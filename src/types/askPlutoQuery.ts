@@ -120,6 +120,9 @@ export interface AskPlutoConversationTurn {
   resolvedScope?: ResolvedAskPlutoScope;
   retrievalSummary?: AskPlutoRetrievalSummary;
   retrievalTrace?: AskPlutoRetrievalTrace;
+  unsupportedClaimCount?: number;
+  omissionRef?: string;
+  conversationAnchor?: string;
 }
 
 export interface AskPlutoActiveMeetingSnapshot {
@@ -165,6 +168,8 @@ export interface AskPlutoQueryResponse<Citation = unknown> {
     | 'generation_failed';
   trustStatus?: 'grounded' | 'inferred' | 'needs_review';
   unsupportedClaimCount?: number;
+  omissionRef?: string;
+  conversationAnchor?: string;
   outcome?: AskPlutoOutcome;
   resolvedScope?: ResolvedAskPlutoScope;
   retrievalSummary?: AskPlutoRetrievalSummary;

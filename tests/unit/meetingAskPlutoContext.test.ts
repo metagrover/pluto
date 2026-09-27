@@ -847,7 +847,9 @@ describe('meeting-scoped Ask Pluto context', () => {
     });
 
     expect(prompt).toContain('Reference and pronoun resolution:');
-    expect(prompt).toContain('Interpreting inquiries (concerns, objections, risks, intent):');
+    expect(prompt).toContain(
+      'Interpreting inquiries (concerns, objections, risks, intent):',
+    );
     expect(prompt).toContain('Never narrate timestamps or elapsed seconds:');
     expect(prompt).toContain('do not write "at 110 seconds"');
   });
@@ -865,8 +867,9 @@ describe('meeting-scoped Ask Pluto context', () => {
 
     expect(response.answer).not.toContain('at 58 seconds');
     expect(response.answer).not.toContain('at 860 seconds');
-    expect(response.answer).toContain('A decision to continue writing despite issues.');
+    expect(response.answer).toContain(
+      'A decision to continue writing despite issues.',
+    );
     expect(response.answer).toContain('Also an IPO is planned.');
   });
 });
-

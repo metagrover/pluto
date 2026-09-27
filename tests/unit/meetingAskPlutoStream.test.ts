@@ -4,8 +4,6 @@ import {
   stripMeetingAskPlutoTimestampNarration,
 } from '../../electron/intelligence/meetingAskPlutoStream';
 
-
-
 const streamChunks = (chunks: string[], flush = true) => {
   const visible: string[] = [];
   const stream = createMeetingAskPlutoVisibleStream((delta) =>
@@ -75,13 +73,17 @@ describe('meeting Ask Pluto visible stream', () => {
       stripMeetingAskPlutoTimestampNarration(
         'The importance of a client that was highlighted in the last meeting, as indicated at 361 seconds.',
       ),
-    ).toBe('The importance of a client that was highlighted in the last meeting.');
+    ).toBe(
+      'The importance of a client that was highlighted in the last meeting.',
+    );
 
     expect(
       stripMeetingAskPlutoTimestampNarration(
         'A question about whether an IPO is one of the biggest things the team will do, asked at 860 seconds.',
       ),
-    ).toBe('A question about whether an IPO is one of the biggest things the team will do.');
+    ).toBe(
+      'A question about whether an IPO is one of the biggest things the team will do.',
+    );
 
     expect(
       stripMeetingAskPlutoTimestampNarration(
@@ -114,4 +116,3 @@ describe('meeting Ask Pluto visible stream', () => {
     ).toBe('Revenue grew by 25 percent this quarter.');
   });
 });
-

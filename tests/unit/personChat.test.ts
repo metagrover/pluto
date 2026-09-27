@@ -53,12 +53,13 @@ describe('person chat intelligence', () => {
     );
   });
 
-  it('only includes statements attributed to a bound speaker', () => {
+  it('only includes synthesized meeting notes, not raw transcript segments', () => {
+    // Person chat uses only enhanced_notes/user_notes — raw transcript_json is never read.
     const meetings: Record<string, PersistedMeeting> = {
       confirmed: {
         id: 'confirmed',
         title: 'Weekly sync',
-        enhanced_notes: 'The team reviewed the launch.',
+        enhanced_notes: 'The team reviewed the launch. Maya will send the draft tomorrow.',
         transcript_json: JSON.stringify({
           segments: [
             { speaker: 'Maya Voice', text: 'I will send the draft tomorrow.' },
@@ -74,11 +75,13 @@ describe('person chat intelligence', () => {
       detail,
       query: 'What did Maya say about the draft?',
       getMeeting: (id) => meetings[id],
-      getBoundSpeakers: () => ['Maya Voice'],
     });
 
-    expect(context.evidence).toContain('I will send the draft tomorrow.');
-    expect(context.evidence).not.toContain('definitely dislikes');
+    // Should surface synthesized notes, not raw transcript speaker lines
+    expect(context.evidence).toContain('Maya will send the draft tomorrow.');
+    // Should NOT surface raw transcript speaker quotes
+    expect(context.evidence).not.toContain('I will send the draft tomorrow.\nSomeone Else');
+    // Unconfirmed meeting entry should still say Mention only
     expect(context.evidence).toContain('Mention only');
   });
 
@@ -87,7 +90,6 @@ describe('person chat intelligence', () => {
       detail,
       query: 'Help me prepare',
       getMeeting: () => undefined,
-      getBoundSpeakers: () => [],
     });
     const prompt = buildPersonChatPrompt({
       query: 'Help me prepare',
@@ -105,7 +107,6 @@ describe('person chat intelligence', () => {
       detail,
       query: 'Draft a message to Maya',
       getMeeting: () => undefined,
-      getBoundSpeakers: () => [],
     });
     const prompt = buildPersonChatPrompt({
       query: 'Draft a message to Maya',

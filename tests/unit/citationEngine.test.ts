@@ -7,6 +7,8 @@ import {
   buildSafeAnswerPresentation,
   claimIsSupportedByEvidence,
   createValidatedAnswerStream,
+  isNonFactualResponseText,
+  pruneOrphanHeadings,
 } from '../../electron/intelligence/citationEngine';
 import type { RetrievalResult } from '../../electron/intelligence/intelligenceTypes';
 
@@ -184,6 +186,60 @@ describe('Citation Engine', () => {
       },
     ] as RetrievalResult[];
 
+    it('validates direct address only against a confirmed self name in the cited passage', () => {
+      const selfSource = [
+        {
+          meeting_id: 'self-meeting',
+          meeting_title: 'Workspace review',
+          evidence_text:
+            'Punit Grover asked whether the kitchen table could be used.',
+          mid: null,
+        },
+      ] as RetrievalResult[];
+      const answer =
+        'You asked whether the kitchen table could be used. [Source 1]';
+      const grounded = createValidatedAnswerStream(
+        selfSource,
+        () => undefined,
+        'grounded',
+        undefined,
+        'Punit Grover',
+      ).finalize(answer);
+      expect(grounded.outcome).toBe('answered');
+      expect(grounded.answer).toBe(
+        'You asked whether the kitchen table could be used.',
+      );
+      expect(grounded.citations[0].evidence_valid).toBe(true);
+
+      const unconfirmed = createValidatedAnswerStream(
+        selfSource,
+        () => undefined,
+      ).finalize(answer);
+      expect(unconfirmed.outcome).toBe('no_evidence');
+    });
+
+    it('does not attribute another person’s action to the confirmed self', () => {
+      const source = [
+        {
+          meeting_id: 'mixed-meeting',
+          meeting_title: 'Workspace review',
+          evidence_text:
+            'Punit Grover attended the review. Sam asked whether the kitchen table could be used.',
+          mid: null,
+        },
+      ] as RetrievalResult[];
+      const result = createValidatedAnswerStream(
+        source,
+        () => undefined,
+        'grounded',
+        undefined,
+        'Punit Grover',
+      ).finalize(
+        'You asked whether the kitchen table could be used. [Source 1]',
+      );
+      expect(result.outcome).toBe('no_evidence');
+    });
+
     it('never exposes unsupported provider prose before the no-evidence result', () => {
       const onDelta = vi.fn();
       const stream = createValidatedAnswerStream(sources, onDelta);
@@ -201,12 +257,17 @@ describe('Citation Engine', () => {
 
     it('streams a supported claim only after its citation passes validation', () => {
       const deltas: string[] = [];
-      const stream = createValidatedAnswerStream(sources, (delta) =>
-        deltas.push(delta),
+      const validated = vi.fn();
+      const stream = createValidatedAnswerStream(
+        sources,
+        (delta) => deltas.push(delta),
+        'grounded',
+        validated,
       );
 
       stream.push('Sam owns launch signoff. ');
       expect(deltas).toEqual([]);
+      expect(validated).not.toHaveBeenCalled();
       stream.push('[Source 1]');
 
       const presentation = stream.finalize(
@@ -215,6 +276,12 @@ describe('Citation Engine', () => {
       expect(deltas.join('')).toBe('Sam owns launch signoff.');
       expect(presentation.answer).toBe(deltas.join(''));
       expect(presentation.outcome).toBe('answered');
+      expect(validated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          answer: 'Sam owns launch signoff.',
+          citations: [expect.objectContaining({ meeting_id: 'm1' })],
+        }),
+      );
     });
 
     it('streams a supported cited bullet without requiring final punctuation', () => {
@@ -467,7 +534,11 @@ describe('Citation Engine', () => {
       });
       expect(
         auditAnswerGrounding('The launch is Friday. [Source 1]', audited),
-      ).toEqual({ trustStatus: 'inferred', unsupportedClaimCount: 0 });
+      ).toEqual({
+        trustStatus: 'inferred',
+        unsupportedClaimCount: 0,
+        unsupportedClaims: [],
+      });
     });
 
     it('selects the evidence span that best supports the cited claim', () => {
@@ -560,6 +631,21 @@ describe('Citation Engine', () => {
       ).toBe(true);
     });
 
+    it('does not treat common action verbs, days, or technical acronyms as unsupported named entities', () => {
+      expect(
+        claimIsSupportedByEvidence(
+          'Follow up with Rachel to confirm approach for service notification PR.',
+          'Follow up with Rachel on the approach for the service notification PR.',
+        ),
+      ).toBe(true);
+      expect(
+        claimIsSupportedByEvidence(
+          'Meeting with Rachel scheduled for Monday regarding client data and database optimization.',
+          'Sync with Rachel on client data pipeline and database optimization upcoming on Monday.',
+        ),
+      ).toBe(true);
+    });
+
     it('allows a supported positive claim when evidence has an unrelated negative detail', () => {
       expect(
         claimIsSupportedByEvidence(
@@ -567,6 +653,63 @@ describe('Citation Engine', () => {
           "The speaker expressed embarrassment about the application's origin, stated it was not their idea, and questioned who initiated it.",
         ),
       ).toBe(true);
+    });
+
+    it('treats model unavailability as a meeting fact when the passage says it was not available', () => {
+      expect(
+        claimIsSupportedByEvidence(
+          'Punit Grover was unsure why the Parakeet model was unavailable.',
+          "Punit Grover: I don't know why the Parakeet model is not available.",
+        ),
+      ).toBe(true);
+      expect(
+        claimIsSupportedByEvidence(
+          'The Parakeet model was available.',
+          'The Parakeet model was not available.',
+        ),
+      ).toBe(false);
+      expect(
+        claimIsSupportedByEvidence(
+          'The Parakeet model was not available.',
+          'There was no Parakeet model available.',
+        ),
+      ).toBe(true);
+      expect(
+        claimIsSupportedByEvidence(
+          'The Parakeet model was available.',
+          'There was no Parakeet model available.',
+        ),
+      ).toBe(false);
+      expect(
+        claimIsSupportedByEvidence(
+          'The Parakeet model was unavailable.',
+          'The Parakeet model was available.',
+        ),
+      ).toBe(false);
+      expect(
+        claimIsSupportedByEvidence(
+          'Punit Grover knew why the Parakeet model was unavailable.',
+          "Punit Grover didn't know why the Parakeet model was not available.",
+        ),
+      ).toBe(false);
+
+      const context = [
+        {
+          meeting_id: 'parakeet-meeting',
+          meeting_title: 'Parakeet Model Availability Issue',
+          evidence_text:
+            'Punit Grover said there was no Parakeet model available.',
+          mid: null,
+        },
+      ] as RetrievalResult[];
+      const citations = auditCitations(
+        buildCitationChain(
+          'Punit Grover said the Parakeet model was not available. [Source 1]',
+          context,
+        ),
+        context,
+      );
+      expect(citations[0].evidence_valid).toBe(true);
     });
 
     it('uses structured MID action items exposed to the answer prompt as evidence', () => {
@@ -699,6 +842,99 @@ describe('Citation Engine', () => {
       expect(audited).toHaveLength(2);
       expect(audited.every((citation) => citation.evidence_valid)).toBe(true);
     });
+
+    it('passes synthesized-source citations on structural validity alone, skipping token-overlap', () => {
+      // Synthesized notes are already grounded truth; paraphrases should NOT fail
+      // the citation audit just because the wording doesn't have verbatim token overlap.
+      const synthesizedNote =
+        'Standup: Rachel will finalize the data pipeline handoff by end of week. ' +
+        'Blocker on schema migration resolved. Next step: deploy to staging environment.';
+      const context = [
+        {
+          meeting_id: 'm-synth',
+          meeting_title: 'Workspace Intelligence: Working Memory',
+          evidence_text: synthesizedNote,
+          evidence_kind: 'note' as const,
+          mid: {
+            evidence_spans: [{ quote: synthesizedNote }],
+          },
+          score: 0.9,
+          score_breakdown: {
+            fts_rank: 0.9,
+            graph_proximity: 0,
+            recency_decay: 0,
+            mention_weight: 0,
+          },
+        },
+      ] as RetrievalResult[];
+
+      vi.mocked(dbModule.getMeetingMid).mockReturnValue(
+        context[0].mid as ReturnType<typeof dbModule.getMeetingMid>,
+      );
+
+      // Paraphrase — no verbatim overlap with the synthesized note text
+      const audited = auditCitations(
+        [
+          {
+            claim: 'Schema migration issues are resolved; staging deployment is the next priority.',
+            meeting_id: 'm-synth',
+            meeting_title: 'Workspace Intelligence: Working Memory',
+            evidence_span: synthesizedNote,
+            evidence_valid: false,
+            trust_status: 'needs_review',
+          },
+        ],
+        context,
+      );
+
+      // Should pass: synthesized source → structural validity sufficient
+      expect(audited[0].evidence_valid).toBe(true);
+    });
+
+    it('still applies token-overlap check for raw transcript sources', () => {
+      // Raw transcripts are NOT pre-grounded; the overlap check must still apply.
+      const transcriptPassage = 'Sam will prepare the launch checklist.';
+      const context = [
+        {
+          meeting_id: 'm-raw',
+          meeting_title: 'Launch review',
+          evidence_text: transcriptPassage,
+          evidence_kind: 'transcript' as const,
+          mid: {
+            evidence_spans: [{ quote: transcriptPassage }],
+          },
+          score: 0.8,
+          score_breakdown: {
+            fts_rank: 0.8,
+            graph_proximity: 0,
+            recency_decay: 0,
+            mention_weight: 0,
+          },
+        },
+      ] as RetrievalResult[];
+
+      vi.mocked(dbModule.getMeetingMid).mockReturnValue(
+        context[0].mid as ReturnType<typeof dbModule.getMeetingMid>,
+      );
+
+      // This claim has no token overlap with the transcript passage
+      const audited = auditCitations(
+        [
+          {
+            claim: 'Alex owns pricing approval.',
+            meeting_id: 'm-raw',
+            meeting_title: 'Launch review',
+            evidence_span: transcriptPassage,
+            evidence_valid: false,
+            trust_status: 'needs_review',
+          },
+        ],
+        context,
+      );
+
+      // Should fail: raw transcript → token-overlap still required
+      expect(audited[0].evidence_valid).toBe(false);
+    });
   });
 
   describe('auditAnswerGrounding', () => {
@@ -719,6 +955,7 @@ describe('Citation Engine', () => {
       expect(auditAnswerGrounding(answer, citations)).toEqual({
         trustStatus: 'needs_review',
         unsupportedClaimCount: 1,
+        unsupportedClaims: ['Alex owns pricing approval.'],
       });
     });
 
@@ -739,6 +976,9 @@ describe('Citation Engine', () => {
       expect(auditAnswerGrounding(answer, citations)).toEqual({
         trustStatus: 'needs_review',
         unsupportedClaimCount: 1,
+        unsupportedClaims: [
+          'The launch moved later compared with the prior plan.',
+        ],
       });
     });
 
@@ -758,6 +998,7 @@ describe('Citation Engine', () => {
       expect(auditAnswerGrounding(answer, citations)).toEqual({
         trustStatus: 'needs_review',
         unsupportedClaimCount: 1,
+        unsupportedClaims: ["Jordan's primary concern is lending accuracy."],
       });
     });
 
@@ -786,6 +1027,7 @@ describe('Citation Engine', () => {
       expect(auditAnswerGrounding(answer, citations)).toEqual({
         trustStatus: 'inferred',
         unsupportedClaimCount: 0,
+        unsupportedClaims: [],
       });
     });
   });
@@ -824,6 +1066,7 @@ describe('Citation Engine', () => {
         outcome: 'no_evidence',
         trustStatus: undefined,
         unsupportedClaimCount: 0,
+        unsupportedClaims: [],
       });
     });
 
@@ -858,6 +1101,39 @@ describe('Citation Engine', () => {
         outcome: 'partial',
         trustStatus: 'grounded',
         unsupportedClaimCount: 1,
+        unsupportedClaims: ['The launch moved to Friday.'],
+      });
+    });
+
+    it('keeps supported prose together when an unsupported detail is removed', () => {
+      const citations = [
+        {
+          claim: 'Sam owns pricing approval.',
+          meeting_id: 'm1',
+          meeting_title: 'Pricing review',
+          evidence_span: 'Sam owns pricing approval.',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+        {
+          claim: 'The review is due Friday.',
+          meeting_id: 'm1',
+          meeting_title: 'Pricing review',
+          evidence_span: 'The review is due Friday.',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+      ];
+
+      expect(
+        buildSafeAnswerPresentation(
+          'Sam owns pricing approval. [Source 1] The review is due Friday. [Source 1] The launch moved to Monday.',
+          citations,
+        ),
+      ).toMatchObject({
+        answer: 'Sam owns pricing approval. The review is due Friday.',
+        outcome: 'partial',
+        unsupportedClaimCount: 1,
       });
     });
 
@@ -889,7 +1165,7 @@ describe('Citation Engine', () => {
       ).toBe('- Sam owns pricing approval.\n- The launch is Friday.');
     });
 
-    it('separates supported prose claims into readable chat paragraphs', () => {
+    it('keeps supported prose claims in a connected response', () => {
       const citations = [
         {
           claim: 'Sam owns pricing approval.',
@@ -914,7 +1190,7 @@ describe('Citation Engine', () => {
           'Sam owns pricing approval. [Source 1] The launch is Friday. [Source 2] Unsupported filler.',
           citations,
         ).answer,
-      ).toBe('Sam owns pricing approval.\n\nThe launch is Friday.');
+      ).toBe('Sam owns pricing approval. The launch is Friday.');
     });
 
     it('returns no evidence when every generated claim is unsupported', () => {
@@ -936,6 +1212,215 @@ describe('Citation Engine', () => {
       expect(result.answer).not.toContain('Alex');
       expect(result.citations).toEqual([]);
       expect(result.trustStatus).toBeUndefined();
+    });
+
+    it('deduplicates nearly-identical supported claims with trailing punctuation differences', () => {
+      const citations = [
+        {
+          claim:
+            '• Ayush worked on a pipeline to generate and review client emails.',
+          meeting_id: 'm1',
+          meeting_title: 'Email review',
+          evidence_span:
+            'Ayush worked on a pipeline to generate and review client emails.',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+        {
+          claim:
+            '• Ayush worked on a pipeline to generate and review client emails .',
+          meeting_id: 'm1',
+          meeting_title: 'Email review',
+          evidence_span:
+            'Ayush worked on a pipeline to generate and review client emails.',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+      ];
+
+      const result = buildSafeAnswerPresentation(
+        '• Ayush worked on a pipeline to generate and review client emails. [Source 1]\n• Ayush worked on a pipeline to generate and review client emails . [Source 1]\nUnsupported claim.',
+        citations,
+      );
+
+      expect(result.outcome).toBe('partial');
+      expect(result.answer).toBe(
+        '• Ayush worked on a pipeline to generate and review client emails.',
+      );
+    });
+
+    it('prunes orphan headings when body sentences are missing or stripped', () => {
+      const inputWithOrphans = [
+        'Email and Pipeline Development',
+        '',
+        'Product Strategy and UI',
+        '',
+        'Suggestion: Prioritize the "hardened" pipeline and the cloud deployment for Mary as these involve direct dependencies on your output for others.',
+      ].join('\n');
+
+      const pruned = pruneOrphanHeadings(inputWithOrphans);
+      expect(pruned).toBe(
+        'Suggestion: Prioritize the "hardened" pipeline and the cloud deployment for Mary as these involve direct dependencies on your output for others.',
+      );
+    });
+
+    it('retains headings when followed by valid body content', () => {
+      const input = [
+        'Email and Pipeline Development',
+        '',
+        '- Built the SMTP gateway [Source 1]',
+        '',
+        'Product Strategy and UI',
+        '',
+        '- Redesigned the navigation bar [Source 2]',
+      ].join('\n');
+
+      const pruned = pruneOrphanHeadings(input);
+      expect(pruned).toContain('Email and Pipeline Development');
+      expect(pruned).toContain('Product Strategy and UI');
+      expect(pruned).toContain('Built the SMTP gateway');
+      expect(pruned).toContain('Redesigned the navigation bar');
+    });
+
+    it('treats analysis recommendations and connective rationale as non-factual response text', () => {
+      expect(
+        isNonFactualResponseText('Email and Pipeline Development', 'analysis'),
+      ).toBe(true);
+      expect(
+        isNonFactualResponseText(
+          'Suggestion: Prioritize the "hardened" pipeline and the cloud deployment for Mary as these involve direct dependencies on your output for others.',
+          'analysis',
+        ),
+      ).toBe(true);
+      expect(
+        isNonFactualResponseText(
+          'Recommendation: Focus on the immediate deliverables first.',
+          'analysis',
+        ),
+      ).toBe(true);
+      expect(
+        isNonFactualResponseText(
+          'You should prioritize these items as they represent blocking dependencies for the team.',
+          'analysis',
+        ),
+      ).toBe(true);
+      expect(
+        isNonFactualResponseText(
+          'Here is what is currently on your plate, based on your open commitments:',
+          'analysis',
+        ),
+      ).toBe(true);
+    });
+
+    it('prunes orphan headings in buildSafeAnswerPresentation for analysis mode', () => {
+      const citations = [
+        {
+          claim: 'Finish the hardened pipeline for Mary.',
+          meeting_id: 'm1',
+          meeting_title: 'Pipeline Sync',
+          evidence_span: 'Finish the hardened pipeline for Mary.',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+      ];
+
+      const rawAnswer = [
+        'Email and Pipeline Development',
+        '',
+        'Finish the hardened pipeline for Mary. [Source 1]',
+        '',
+        'Product Strategy and UI',
+        '',
+        'Some unverified claim about product redesign that was not discussed.',
+        '',
+        'Suggestion: Prioritize the "hardened" pipeline as it unblocks others.',
+      ].join('\n');
+
+      const presentation = buildSafeAnswerPresentation(
+        rawAnswer,
+        citations,
+        'analysis',
+      );
+
+      expect(presentation.outcome).toBe('partial');
+      expect(presentation.answer).toContain('Email and Pipeline Development');
+      expect(presentation.answer).toContain(
+        'Finish the hardened pipeline for Mary.',
+      );
+      // The second heading whose body was completely unsupported should be pruned!
+      expect(presentation.answer).not.toContain('Product Strategy and UI');
+      expect(presentation.answer).toContain(
+        'Suggestion: Prioritize the "hardened" pipeline as it unblocks others.',
+      );
+    });
+
+    it('preserves executive planning and priority synthesis without dropping paragraphs in analysis mode', () => {
+      const citations = [
+        {
+          claim: 'Finish the hardened pipeline deployment for Mary.',
+          meeting_id: 'workspace:intelligence',
+          meeting_title:
+            'Workspace Intelligence: Working Memory, Streams & Priorities',
+          evidence_span:
+            'Stream "pipeline": Finish the hardened pipeline deployment for Mary',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+        {
+          claim: 'Project "Pluto": Next milestone is v1.0 release.',
+          meeting_id: 'workspace:intelligence',
+          meeting_title:
+            'Workspace Intelligence: Working Memory, Streams & Priorities',
+          evidence_span:
+            'Project "Pluto" [active]\n  * Next Milestone: v1.0 release',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+        {
+          claim: 'Resolve email look and feel errors before client rollout.',
+          meeting_id: 'workspace:intelligence',
+          meeting_title:
+            'Workspace Intelligence: Working Memory, Streams & Priorities',
+          evidence_span:
+            'Open Loops & Blockers:\n- Resolve email look and feel errors before client rollout',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+      ];
+
+      const rawAnswer = [
+        '**Immediate Priorities & Commitments:**',
+        '',
+        '- Finish the hardened pipeline deployment for Mary. [Source 1]',
+        '',
+        '**Active Work Streams & Projects:**',
+        '',
+        '- Project "Pluto": Next milestone is v1.0 release. [Source 1]',
+        '',
+        '**Open Loops & Attention Items:**',
+        '',
+        '- Resolve email look and feel errors before client rollout. [Source 1]',
+        '',
+        'Suggestion: Prioritize unblocking Mary on the pipeline deployment as it represents the highest leverage immediate task.',
+      ].join('\n');
+
+      const presentation = buildSafeAnswerPresentation(
+        rawAnswer,
+        citations,
+        'analysis',
+      );
+
+      expect(presentation.answer).toContain(
+        '**Immediate Priorities & Commitments:**',
+      );
+      expect(presentation.answer).toContain(
+        'Finish the hardened pipeline deployment for Mary.',
+      );
+      expect(presentation.answer).toContain(
+        'Suggestion: Prioritize unblocking Mary',
+      );
+      expect(presentation.outcome).toBe('answered');
+      expect(presentation.unsupportedClaimCount).toBe(0);
     });
   });
 });

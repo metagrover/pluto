@@ -281,7 +281,7 @@ describe('settled decision with a rejected conditional offer', () => {
         { kind: 'action', owner: 'Milo' },
       ),
     ).toEqual({
-      text: 'Share the outline with reviewers.',
+      text: 'Share the outline with reviewers',
       owner: 'Milo',
       due: null,
     });
@@ -298,7 +298,7 @@ describe('settled decision with a rejected conditional offer', () => {
         { kind: 'action', owner: 'Marin' },
       ),
     ).toEqual({
-      text: 'Animate the introduction if useful.',
+      text: 'Animate the introduction if useful',
       owner: 'Marin',
       due: null,
     });
@@ -321,7 +321,7 @@ describe('settled decision with a rejected conditional offer', () => {
           { kind: 'action', owner: 'Marin' },
         ),
       ).toEqual({
-        text: 'Animate the introduction if useful.',
+        text: 'Animate the introduction if useful',
         owner: null,
         due: null,
       });
@@ -370,7 +370,7 @@ describe('settled decision with a rejected conditional offer', () => {
         { kind: 'action', owner: 'Marin' },
       ),
     ).toEqual({
-      text: 'Animate the introduction once legal approves.',
+      text: 'Animate the introduction once legal approves',
       owner: 'Marin',
       due: null,
     });
@@ -384,7 +384,7 @@ describe('settled decision with a rejected conditional offer', () => {
         { kind: 'action', owner: 'Cleo' },
       ),
     ).toEqual({
-      text: 'Send the report if useful.',
+      text: 'Send the report if useful',
       owner: 'Cleo',
       due: null,
     });
@@ -398,7 +398,7 @@ describe('settled decision with a rejected conditional offer', () => {
         { kind: 'action', owner: 'Cleo' },
       ),
     ).toEqual({
-      text: 'Share the report if useful.',
+      text: 'Share the report if useful',
       owner: 'Cleo',
       due: null,
     });

@@ -8,7 +8,7 @@ describe('classifyAskPlutoFailure', () => {
       classifyAskPlutoFailure(new DOMException('Timed out', 'TimeoutError')),
     ).toMatchObject({
       reason: 'timeout',
-      answer: expect.stringContaining('took too long'),
+      answer: expect.stringContaining('took longer than expected'),
     });
     expect(
       classifyAskPlutoFailure(new TypeError('fetch failed: ECONNREFUSED')),

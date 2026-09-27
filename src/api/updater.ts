@@ -64,7 +64,9 @@ export const useAppUpdate = () => {
 
     return () => {
       mounted = false;
-      unsubscribe();
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
     };
   }, []);
 

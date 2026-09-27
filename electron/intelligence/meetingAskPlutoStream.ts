@@ -78,7 +78,6 @@ export const stripMeetingAskPlutoTimestampNarration = (
   return cleaned.replace(/^\p{Ll}/u, (letter) => letter.toLocaleUpperCase());
 };
 
-
 const couldBecomeEvidenceReference = (value: string) => {
   const normalized = value.toLowerCase();
   if (EVIDENCE_PREFIX.startsWith(normalized)) return true;

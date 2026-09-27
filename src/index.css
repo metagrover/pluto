@@ -2314,6 +2314,341 @@
   /* Muted Gold for Dark */
 }
 
+/* ==========================================================================
+   Terracotta Theme (Claude Inspired)
+   Warm sand paper, deep charcoal ink, terracotta clay accents
+   ========================================================================== */
+.terracotta,
+.claude,
+.celestial,
+.botanical {
+  /* Main Canvas: Warm Sand Paper */
+  --pro-bg: 43 30% 97%; /* #FBF9F5 */
+  /* Sidebar & Surfaces: Gentle Warm Linen */
+  --pro-surface: 40 25% 94%; /* #F3EFE6 */
+  /* Typography: Deep Charcoal Ink (14:1 AAA contrast) */
+  --pro-text-main: 30 15% 15%; /* #24211D */
+  --pro-text-muted: 33 10% 45%; /* #7B766D */
+  /* Borders & Dividers: Soft Natural Paper Line */
+  --pro-border: 38 18% 85%; /* #DED8CE */
+  --pro-hover: 38 20% 90%; /* #ECE5DA */
+
+  /* Hero Accent: Anthropic Terracotta Clay */
+  --pro-accent: 15 65% 58%; /* #D97757 */
+  --pro-accent-alt: 25 80% 45%; /* #CC5A36 */
+
+  /* Semantic Status */
+  --pro-urgent: 0 72% 51%; /* #DC2626 */
+  --pro-warning: 38 90% 45%; /* #D97706 */
+  --pro-success: 152 45% 36%; /* #327A56 */
+
+  --pro-shadow-premium: 0 2px 8px rgba(36, 33, 29, 0.04), 0 12px 28px -6px rgba(36, 33, 29, 0.06);
+}
+
+.terracotta ::selection,
+.claude ::selection,
+.celestial ::selection,
+.botanical ::selection {
+  background-color: hsla(15, 65%, 58%, 0.22);
+  color: #24211D;
+}
+
+.terracotta input,
+.terracotta textarea,
+.claude input,
+.claude textarea,
+.celestial input,
+.celestial textarea {
+  caret-color: #D97757;
+}
+
+.terracotta *:focus-visible,
+.claude *:focus-visible,
+.celestial *:focus-visible {
+  outline-color: #D97757;
+}
+
+.terracotta ::-webkit-scrollbar-thumb,
+.claude ::-webkit-scrollbar-thumb,
+.celestial ::-webkit-scrollbar-thumb {
+  background-color: #DED8CE;
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+.terracotta ::-webkit-scrollbar-thumb:hover,
+.claude ::-webkit-scrollbar-thumb:hover,
+.celestial ::-webkit-scrollbar-thumb:hover {
+  background-color: #D97757;
+}
+
+/* Scoped Sidebar Styling for Terracotta */
+.terracotta .app-sidebar [data-active="true"],
+.claude .app-sidebar [data-active="true"] {
+  background-color: rgba(217, 119, 87, 0.12) !important;
+  color: #C05634 !important;
+  font-weight: 600 !important;
+}
+
+.terracotta .app-sidebar [data-active="true"] svg,
+.claude .app-sidebar [data-active="true"] svg {
+  color: #D97757 !important;
+}
+
+.terracotta .app-sidebar .sidebar-record-btn:hover,
+.claude .app-sidebar .sidebar-record-btn:hover {
+  border-color: rgba(217, 119, 87, 0.35) !important;
+  box-shadow: 0 0 12px rgba(217, 119, 87, 0.1) !important;
+}
+
+/* ==========================================================================
+   Coral Theme (Airbnb Inspired)
+   Warm minimalist white, deep black typography, hospitable Rausch Coral
+   ========================================================================== */
+.coral,
+.airbnb {
+  /* Main Canvas: Pure Modern White */
+  --pro-bg: 0 0% 100%; /* #FFFFFF */
+  /* Sidebar & Surfaces: Soft Pillowy Warm Tint */
+  --pro-surface: 0 0% 97.5%; /* #F8F8F8 */
+  /* Typography: High-Contrast Airbnb Charcoal (16:1 AAA contrast) */
+  --pro-text-main: 0 0% 13%; /* #222222 */
+  --pro-text-muted: 0 0% 44%; /* #717171 */
+  /* Borders & Dividers: Clean Hairline */
+  --pro-border: 0 0% 90%; /* #E5E5E5 */
+  --pro-hover: 0 0% 95%; /* #F2F2F2 */
+
+  /* Hero Accent: Airbnb Rausch Coral */
+  --pro-accent: 349 100% 60%; /* #FF385C */
+  --pro-accent-alt: 349 90% 48%; /* #E00B41 */
+
+  /* Semantic Status */
+  --pro-urgent: 349 100% 60%; /* #FF385C */
+  --pro-warning: 38 92% 50%; /* #F59E0B */
+  --pro-success: 160 84% 39%; /* #10B981 */
+
+  --pro-shadow-premium: 0 2px 8px rgba(0, 0, 0, 0.04), 0 14px 28px -4px rgba(255, 56, 92, 0.08);
+}
+
+.coral ::selection,
+.airbnb ::selection {
+  background-color: hsla(349, 100%, 60%, 0.18);
+  color: #222222;
+}
+
+.coral input,
+.coral textarea,
+.airbnb input,
+.airbnb textarea {
+  caret-color: #FF385C;
+}
+
+.coral *:focus-visible,
+.airbnb *:focus-visible {
+  outline-color: #FF385C;
+}
+
+.coral ::-webkit-scrollbar-thumb,
+.airbnb ::-webkit-scrollbar-thumb {
+  background-color: #DDDDDD;
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+.coral ::-webkit-scrollbar-thumb:hover,
+.airbnb ::-webkit-scrollbar-thumb:hover {
+  background-color: #FF385C;
+}
+
+/* Scoped Sidebar Styling for Coral */
+.coral .app-sidebar [data-active="true"],
+.airbnb .app-sidebar [data-active="true"] {
+  background-color: rgba(255, 56, 92, 0.08) !important;
+  color: #FF385C !important;
+  font-weight: 600 !important;
+}
+
+.coral .app-sidebar [data-active="true"] svg,
+.airbnb .app-sidebar [data-active="true"] svg {
+  color: #FF385C !important;
+}
+
+.coral .app-sidebar .sidebar-record-btn:hover,
+.airbnb .app-sidebar .sidebar-record-btn:hover {
+  border-color: rgba(255, 56, 92, 0.35) !important;
+  box-shadow: 0 0 12px rgba(255, 56, 92, 0.12) !important;
+}
+
+/* ==========================================================================
+   Aubergine Theme (Slack Inspired)
+   Legendary #3F0E40 Eggplant sidebar, clean white workspace, Slack active dots
+   ========================================================================== */
+.aubergine,
+.slack {
+  /* Main Canvas: Clean White Workspace */
+  --pro-bg: 0 0% 100%; /* #FFFFFF */
+  /* Surfaces: Soft Off-White Cards */
+  --pro-surface: 0 0% 98%; /* #F8F8F8 */
+  /* Typography: Slack Dark Slate */
+  --pro-text-main: 0 0% 12%; /* #1D1C1D */
+  --pro-text-muted: 0 0% 42%; /* #616061 */
+  /* Borders & Dividers */
+  --pro-border: 0 0% 89%; /* #E2E2E2 */
+  --pro-hover: 0 0% 94%; /* #F0F0F0 */
+
+  /* Hero Accent: Slack Green for primary buttons/actions (#007A5A) */
+  --pro-accent: 164 100% 24%; /* #007A5A */
+  /* Secondary Accent: Slack Aubergine */
+  --pro-accent-alt: 290 64% 15%; /* #3F0E40 */
+
+  /* Semantic Status */
+  --pro-urgent: 350 78% 54%; /* #E01E5A Slack Red */
+  --pro-warning: 41 94% 45%; /* #ECB22E Slack Yellow */
+  --pro-success: 156 59% 42%; /* #2BAC76 Slack Green */
+
+  --pro-shadow-premium: 0 1px 4px rgba(0, 0, 0, 0.05), 0 8px 24px -4px rgba(63, 14, 64, 0.08);
+}
+
+/* Scoped Sidebar Styling for Aubergine */
+.aubergine .app-sidebar,
+.slack .app-sidebar {
+  background-color: #3F0E40 !important;
+  border-right-color: #522653 !important;
+}
+
+.aubergine .app-sidebar *,
+.slack .app-sidebar * {
+  --pro-text-main: 0 0% 100%;
+  --pro-text-muted: 298 15% 75%; /* #C3B6C2 */
+  --pro-border: 298 37% 24%; /* #522653 */
+  --pro-hover: 298 37% 20%; /* #451846 */
+}
+
+/* Ensure Pluto logo and text in Aubergine sidebar are white & visible */
+.aubergine .app-sidebar img[src*="pluto_logo.svg"],
+.slack .app-sidebar img[src*="pluto_logo.svg"] {
+  display: none !important;
+}
+
+.aubergine .app-sidebar img[src*="pluto_logo_dark_mode.svg"],
+.slack .app-sidebar img[src*="pluto_logo_dark_mode.svg"] {
+  display: block !important;
+}
+
+.aubergine .app-sidebar .font-serif,
+.slack .app-sidebar .font-serif {
+  color: #FAFAFA !important;
+}
+
+/* Primary record button: Slack Green */
+.aubergine .app-sidebar .sidebar-record-btn,
+.slack .app-sidebar .sidebar-record-btn {
+  background-color: #007A5A !important;
+  color: #FFFFFF !important;
+  border-color: #007A5A !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25) !important;
+}
+
+.aubergine .app-sidebar .sidebar-record-btn:hover,
+.slack .app-sidebar .sidebar-record-btn:hover {
+  background-color: #148567 !important;
+  color: #FFFFFF !important;
+}
+
+.aubergine .app-sidebar .sidebar-record-btn svg,
+.slack .app-sidebar .sidebar-record-btn svg {
+  color: #FFFFFF !important;
+}
+
+/* Sidebar Search bar */
+.aubergine .app-sidebar .sidebar-search-btn,
+.slack .app-sidebar .sidebar-search-btn {
+  background-color: #522653 !important;
+  color: #D1C2D9 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.aubergine .app-sidebar .sidebar-search-btn:hover,
+.slack .app-sidebar .sidebar-search-btn:hover {
+  background-color: #5d2b5e !important;
+  color: #FFFFFF !important;
+}
+
+/* Inactive nav buttons */
+.aubergine .app-sidebar .sidebar-nav-btn,
+.aubergine .app-sidebar .sidebar-footer-btn,
+.slack .app-sidebar .sidebar-nav-btn,
+.slack .app-sidebar .sidebar-footer-btn {
+  color: #C3B6C2 !important;
+}
+
+.aubergine .app-sidebar .sidebar-nav-btn:hover,
+.aubergine .app-sidebar .sidebar-footer-btn:hover,
+.slack .app-sidebar .sidebar-nav-btn:hover,
+.slack .app-sidebar .sidebar-footer-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #FFFFFF !important;
+}
+
+.aubergine .app-sidebar .sidebar-nav-btn:hover svg,
+.aubergine .app-sidebar .sidebar-footer-btn:hover svg,
+.slack .app-sidebar .sidebar-nav-btn:hover svg,
+.slack .app-sidebar .sidebar-footer-btn:hover svg {
+  color: #FFFFFF !important;
+}
+
+/* Active channel pill: Lighter shade of Aubergine primary color (#5B245D vs #3F0E40) */
+.aubergine .app-sidebar [data-active="true"],
+.slack .app-sidebar [data-active="true"] {
+  background-color: #5B245D !important;
+  color: #FFFFFF !important;
+  font-weight: 600 !important;
+}
+
+.aubergine .app-sidebar [data-active="true"]:hover,
+.slack .app-sidebar [data-active="true"]:hover {
+  background-color: #672969 !important;
+  color: #FFFFFF !important;
+}
+
+.aubergine .app-sidebar [data-active="true"] svg,
+.slack .app-sidebar [data-active="true"] svg {
+  color: #FFFFFF !important;
+}
+
+.aubergine ::selection,
+.slack ::selection {
+  background-color: hsla(295, 55%, 35%, 0.2);
+  color: #1D1C1D;
+}
+
+.aubergine input,
+.aubergine textarea,
+.slack input,
+.slack textarea {
+  caret-color: #007A5A;
+}
+
+.aubergine *:focus-visible,
+.slack *:focus-visible {
+  outline-color: #007A5A;
+}
+
+.aubergine ::-webkit-scrollbar-thumb,
+.slack ::-webkit-scrollbar-thumb {
+  background-color: #D1D5DB;
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+.aubergine ::-webkit-scrollbar-thumb:hover,
+.slack ::-webkit-scrollbar-thumb:hover {
+  background-color: #3F0E40;
+}
+
 @layer base {
   body {
     @apply antialiased selection:bg-pro-accent/10 selection:text-pro-accent transition-colors duration-300;
@@ -2476,6 +2811,23 @@
 }
 
 /* Pluto Skeleton Line Shimmer */
+@keyframes pluto-progress-pulse {
+  0%,
+  40%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  20% {
+    opacity: 1;
+    transform: scale(1.25);
+  }
+}
+
+.pluto-progress-dot {
+  animation: pluto-progress-pulse 1.2s ease-in-out infinite;
+}
+
 @keyframes pluto-skeleton-sheen {
   0% {
     transform: translateX(-100%);
@@ -2506,6 +2858,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .pluto-progress-dot {
+    animation: none;
+    opacity: 0.7;
+    transform: none;
+  }
+
   .pluto-skeleton-line::after {
     animation: none;
   }

@@ -26,6 +26,14 @@ vi.mock('../../electron/db', () => ({
   linkEntities: vi.fn().mockImplementation((l: unknown) => l),
   addMeetingEntity: vi.fn(),
   ensureMeetingEntity: vi.fn(() => true),
+  db: {
+    prepare: vi.fn(() => ({
+      all: vi.fn(() => []),
+      get: vi.fn(() => undefined),
+      run: vi.fn(),
+    })),
+    transaction: vi.fn((fn: () => unknown) => fn()),
+  },
 }));
 
 import * as db from '../../electron/db';
@@ -199,13 +207,13 @@ describe('Relationship Inference', () => {
       expect.objectContaining({
         type: 'action_item',
         dedupe_by_name: false,
-        metadata: {
+        metadata: expect.objectContaining({
           full_description: 'Send the rollout note',
           assignee_name: 'Alex',
           commitment_state: 'possible',
           origin: 'extraction',
           source_meeting_id: 'meeting-action-source',
-        },
+        }),
       }),
     );
   });

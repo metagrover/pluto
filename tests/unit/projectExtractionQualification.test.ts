@@ -15,6 +15,14 @@ vi.mock('../../electron/db', () => ({
   addMeetingEntity: mock.addMeetingEntity,
   retireMeetingDerivedCommitments: mock.retireMeetingDerivedCommitments,
   withCommitmentTransaction: mock.withCommitmentTransaction,
+  db: {
+    prepare: vi.fn(() => ({
+      all: vi.fn(() => []),
+      get: vi.fn(() => undefined),
+      run: vi.fn(),
+    })),
+    transaction: vi.fn((fn: () => unknown) => fn()),
+  },
 }));
 import { processExtractedEntities } from '../../electron/entityPipeline';
 import { readProjectQualification } from '../../src/utils/projectQualification';

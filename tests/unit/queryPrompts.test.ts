@@ -3,6 +3,56 @@ import { describe, expect, it } from 'vitest';
 import { getAskPlutoPrompt } from '../../electron/intelligence/queryPrompts';
 
 describe('getAskPlutoPrompt', () => {
+  it('uses confirmed self identity for address without treating it as meeting evidence', () => {
+    const prompt = getAskPlutoPrompt(
+      'Summarize my recent contributions',
+      [],
+      'factual',
+      [],
+      'None',
+      'lookup',
+      undefined,
+      undefined,
+      'Punit Grover',
+    );
+    expect(prompt).toContain('name is Punit Grover');
+    expect(prompt).toContain('Address supported facts about this person as');
+    expect(prompt).toContain('does not prove who spoke');
+  });
+
+  it('asks a follow-up for additional supported context from the same meeting', () => {
+    const prompt = getAskPlutoPrompt(
+      'Add supported context for UI and Layout Refinements.',
+      [
+        {
+          meeting_id: 'ui-layout',
+          meeting_title: 'UI and Layout Refinements',
+          mid: null,
+          evidence_text:
+            'The capability to add multiple calendars has been added.',
+          score: 1,
+          score_breakdown: {
+            fts_rank: 1,
+            graph_proximity: 0,
+            recency_decay: 1,
+            mention_weight: 0,
+          },
+        },
+      ],
+      'factual',
+      [],
+      'None',
+      'analysis',
+      undefined,
+      { previousAnswer: 'The team decided to hide the button.' },
+    );
+
+    expect(prompt).toContain('same meeting scope');
+    expect(prompt).toContain('Do not restate the earlier answer');
+    expect(prompt).toContain('The team decided to hide the button.');
+    expect(prompt).toContain('multiple calendars');
+  });
+
   it('labels local artifacts and preserves source-wide absence wording', () => {
     const prompt = getAskPlutoPrompt(
       'What did the launch note say?',
@@ -28,7 +78,9 @@ describe('getAskPlutoPrompt', () => {
 
     expect(prompt).toContain('Local artifact: "Launch note" (ID: artifact-1)');
     expect(prompt).toContain('Source grounding is implicit');
-    expect(prompt).toContain("The available sources didn't establish that.");
+    expect(prompt).toContain(
+      'Do not conclude that the underlying source lacks the information',
+    );
   });
 
   it('includes bounded conversation and the resolved meeting title', () => {
@@ -129,11 +181,14 @@ describe('getAskPlutoPrompt', () => {
 
     expect(prompt).toContain('Prefer wording already present in the evidence');
     expect(prompt).toContain('Split compound facts into separate sentences');
-    expect(prompt).toContain('up to 4 supported points');
-    expect(prompt).toContain('stay under 160 words');
+    expect(prompt).toContain('natural, connected sentences');
     expect(prompt).toContain(
-      'Include the decision, owner, deadline, or next step when it directly helps answer the question',
+      'Cover the relevant decision, reason, owner, deadline, and next step',
     );
+    expect(prompt).toContain(
+      'a broad question should cover its material supported details',
+    );
+    expect(prompt).toContain('up to 260 words');
     expect(prompt).toContain('Make every point self-contained');
     expect(prompt).toContain('"an application"');
     expect(prompt).toContain('smallest set of directly supporting sources');
@@ -141,7 +196,9 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).toContain(
       'Never begin with “Based on the meeting evidence provided”',
     );
-    expect(prompt).toContain("“The meetings didn't establish that.”");
+    expect(prompt).toContain(
+      'If you cannot confirm the answer from what was retrieved',
+    );
     expect(prompt).toContain('“My interpretation is…”');
     expect(prompt).toContain("“This wasn't discussed, but generally…”");
   });
@@ -170,7 +227,7 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).toContain('Cover each meeting that has meaningful evidence');
     expect(prompt).toContain('up to 260 words');
     expect(prompt).toContain('do not spend output on an uncited overview');
-    expect(prompt).not.toContain('up to 4 supported points');
+    expect(prompt).not.toContain('natural, connected sentences');
   });
 
   it('includes user corrections as constraints rather than meeting evidence', () => {
@@ -243,6 +300,75 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).toContain('Use up to 300 words');
   });
 
+  it('treats omitted draft statements as leads rather than meeting facts', () => {
+    const prompt = getAskPlutoPrompt(
+      'Find additional supported contributions by Punit Grover.',
+      [],
+      'factual',
+      [],
+      'None',
+      'analysis',
+      {
+        claims: ['Punit requested a larger workspace.'],
+        previousAnswer: 'Punit asked about the kitchen table.',
+      },
+    );
+
+    expect(prompt).toContain('They are search leads, not established facts');
+    expect(prompt).toContain('Punit requested a larger workspace.');
+    expect(prompt).toContain('Do not repeat the previous answer');
+    expect(prompt).toContain(
+      'only additional details that this fresh context directly supports',
+    );
+    expect(prompt).toContain(
+      'A participant list or calendar invitation does not prove who spoke',
+    );
+    expect(prompt).not.toContain('Prefix each recommendation');
+    expect(prompt).toContain(
+      'Do not conclude that the underlying source lacks the information',
+    );
+  });
+
+  it('places fresh transcript passages inside the follow-up prompt budget', () => {
+    const prompt = getAskPlutoPrompt(
+      'Find another contribution.',
+      [
+        {
+          meeting_id: 'meeting-1',
+          meeting_title: 'Workspace review',
+          mid: null,
+          evidence_text: 'Old notes '.repeat(500),
+          transcript_passages: [
+            {
+              quote: 'Punit: We need a larger workspace.',
+              speaker: 'Punit',
+              start_segment_index: 1,
+              end_segment_index: 1,
+              source_revision: 'revision-1',
+              trust_status: 'grounded',
+            },
+          ],
+          score: 1,
+          score_breakdown: {
+            fts_rank: 1,
+            graph_proximity: 0,
+            recency_decay: 1,
+            mention_weight: 0,
+          },
+        },
+      ],
+      'factual',
+      [],
+      'None',
+      'analysis',
+      { claims: ['Punit requested a larger workspace.'], previousAnswer: '' },
+    );
+
+    expect(prompt).toContain(
+      '[Transcript passage]: Punit: We need a larger workspace.',
+    );
+  });
+
   it('keeps drafting conversational while grounding factual details', () => {
     const prompt = getAskPlutoPrompt(
       'Draft a follow-up email about that.',
@@ -290,5 +416,107 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).not.toContain('DECISION_END');
     expect(prompt).not.toContain('ACTION_END');
     expect(prompt.length).toBeLessThan(8_000);
+  });
+
+  it('includes executive chief of staff guidance for planning queries', () => {
+    const prompt = getAskPlutoPrompt(
+      'what should i focus on?',
+      [],
+      'analysis',
+      [],
+      'None',
+      'analysis',
+      { isPlanningQuery: true },
+    );
+
+    expect(prompt).toContain('Act as an executive Chief of Staff');
+    expect(prompt).toContain('Immediate Priorities & Commitments');
+    expect(prompt).toContain('Active Work Streams & Projects');
+    expect(prompt).toContain('Open Loops & Attention Items');
+    expect(prompt).toContain('Never quote conversational chit-chat');
+  });
+
+  it('includes attribution dispute instructions when user objects to attributed entity', () => {
+    const prompt = getAskPlutoPrompt(
+      'give me my accomplishments',
+      [],
+      'factual',
+      [],
+      'None',
+      'lookup',
+      { disputedEntity: 'Ayush' },
+    );
+
+    expect(prompt).toContain('ATTRIBUTION DISPUTE:');
+    expect(prompt).toContain('NOT Ayush');
+    expect(prompt).toContain('Do NOT attribute any claims to Ayush');
+  });
+
+  it('includes project context and grounding instructions when querying about a specific project', () => {
+    const prompt = getAskPlutoPrompt(
+      'what is the status of pluto?',
+      [],
+      'factual',
+      [],
+      'None',
+      'lookup',
+      { projectContext: { name: 'pluto', displayTitle: 'Pluto App' } },
+    );
+
+    expect(prompt).toContain('PROJECT CONTEXT & GROUNDING:');
+    expect(prompt).toContain('Pluto App');
+    expect(prompt).toContain('Clearly distinguish delivered milestones');
+  });
+
+  it('enforces synthesized-only guidance and omits transcript passages when synthesizedOnly is true', () => {
+    const prompt = getAskPlutoPrompt(
+      'Summarize our active priorities and roadmap',
+      [
+        {
+          meeting_id: 'meeting-1',
+          meeting_title: 'Roadmap review',
+          mid: null,
+          evidence_text: 'The team aligned on the mobile milestone.',
+          transcript_passages: [
+            {
+              quote: 'Raw conversational chat that should be omitted',
+              speaker: 'Sam',
+              start_segment_index: 0,
+              end_segment_index: 1,
+              source_revision: 'rev-1',
+              trust_status: 'grounded',
+            },
+          ],
+          score: 1,
+          score_breakdown: {
+            fts_rank: 1,
+            graph_proximity: 0,
+            recency_decay: 1,
+            mention_weight: 0,
+          },
+        },
+      ],
+      'factual',
+      [],
+      'None',
+      'analysis',
+      {
+        synthesizedOnly: true,
+        omissionReview: {
+          claims: ['Mobile milestone is prioritized'],
+          previousAnswer: 'Previous answer text',
+        },
+      },
+    );
+
+    expect(prompt).toContain(
+      'Base your answer strictly on the synthesized meeting notes, people profiles, and project profiles provided in Context.',
+    );
+    expect(prompt).toContain(
+      'Do not cite, expect, or rely on raw transcript dialogue.',
+    );
+    expect(prompt).not.toContain(
+      'Raw conversational chat that should be omitted',
+    );
   });
 });

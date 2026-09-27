@@ -2101,9 +2101,9 @@ export function calculateOllamaContextBudget(
         : task === 'askPlutoLive'
           ? 768
           : task === 'askPluto'
-            ? 192
+            ? 768
             : task === 'askPlutoDeep'
-              ? 512
+              ? 1024
               : task === 'analysisEditorial'
                 ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
                 : task === 'terminologyReconciliation'

@@ -1,6 +1,8 @@
 import {
   Files,
   FolderKanban,
+  Hash,
+  Heart,
   Home,
   Library,
   MessageSquare,
@@ -10,6 +12,7 @@ import {
   PlusCircle,
   Search,
   Settings,
+  Sparkles,
   Sun,
   Users,
 } from 'lucide-react';
@@ -18,6 +21,7 @@ import {
   resolveCaptureAction,
 } from '../../services/captureLifecycle';
 import type { Meeting } from '../../types';
+import type { AppTheme } from '../../types/theme';
 import { sortMeetingsByStartTime } from '../../utils/meetingOrdering';
 import { Logo } from '../Brand/Logo';
 import { SidebarUpdateBadge } from './SidebarUpdateBadge';
@@ -44,8 +48,8 @@ interface SidebarProps {
   onReturnToRecording?: () => void;
   onOpenSearch: () => void;
   onOpenPeopleHome: () => void;
-  theme: 'light' | 'dark' | 'system';
-  setTheme: (theme: 'light' | 'dark' | 'system') => void;
+  theme: AppTheme;
+  setTheme: (theme: AppTheme) => void;
 }
 
 export const Sidebar = ({
@@ -77,14 +81,22 @@ export const Sidebar = ({
             `}
     >
       <div className="pt-[60px] pb-6 px-6 flex items-center">
-        <Logo size={24} showText />
+        <Logo
+          size={24}
+          showText
+          variant={
+            theme === 'aubergine' || theme === 'slack' || theme === 'dark'
+              ? 'light'
+              : 'default'
+          }
+        />
       </div>
 
       <div className="px-3 pb-3 space-y-0.5">
         <button
           type="button"
           onClick={onOpenSearch}
-          className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-3 text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 transition-colors focus-visible:outline-none group"
+          className="sidebar-search-btn flex min-h-[30px] w-full items-center gap-2 rounded-md px-3 text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 transition-colors focus-visible:outline-none group"
         >
           <Search aria-hidden="true" size={16} className="shrink-0" />
           <span className="flex-1 text-left text-[14px] font-medium">
@@ -104,7 +116,7 @@ export const Sidebar = ({
                 : undefined
           }
           disabled={!captureAction.enabled}
-          className="flex min-h-[34px] w-full items-center gap-2 rounded-lg px-3 border border-black/5 dark:border-white/10 bg-white dark:bg-white/10 hover:border-black/15 dark:hover:border-white/20 hover:shadow-[0_0_12px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_0_12px_rgba(255,255,255,0.08)] text-pro-text-main transition-all duration-300 focus-visible:outline-none group shadow-[0_1px_2px_rgba(0,0,0,0.04)] mt-1"
+          className="sidebar-record-btn flex min-h-[34px] w-full items-center gap-2 rounded-lg px-3 border border-black/5 dark:border-white/10 bg-white dark:bg-white/10 hover:border-black/15 dark:hover:border-white/20 hover:shadow-[0_0_12px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_0_12px_rgba(255,255,255,0.08)] text-pro-text-main transition-all duration-300 focus-visible:outline-none group shadow-[0_1px_2px_rgba(0,0,0,0.04)] mt-1"
         >
           {recordingBusy ? (
             <span
@@ -140,11 +152,12 @@ export const Sidebar = ({
         <div className="space-y-0.5">
           <button
             type="button"
+            data-active={activeTab === 'hub' && !selectedMeetingId ? 'true' : undefined}
             onClick={() => {
               setActiveTab('hub');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'hub' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
+            className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'hub' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
             <Home
               size={16}
@@ -165,11 +178,12 @@ export const Sidebar = ({
           </h3>
           <button
             type="button"
+            data-active={activeTab === 'projects' && !selectedMeetingId ? 'true' : undefined}
             onClick={() => {
               setActiveTab('projects');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'projects' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
+            className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'projects' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
             <FolderKanban
               size={16}
@@ -190,11 +204,12 @@ export const Sidebar = ({
           </h3>
           <button
             type="button"
+            data-active={activeTab === 'chat' && !selectedMeetingId ? 'true' : undefined}
             onClick={() => {
               setActiveTab('chat');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'chat' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium group focus-visible:outline-none'}`}
+            className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'chat' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium group focus-visible:outline-none'}`}
           >
             <MessageSquare
               size={16}
@@ -213,8 +228,9 @@ export const Sidebar = ({
           </button>
           <button
             type="button"
+            data-active={activeTab === 'people' && !selectedMeetingId ? 'true' : undefined}
             onClick={onOpenPeopleHome}
-            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'people' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
+            className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'people' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
             <Users
               size={16}
@@ -228,11 +244,12 @@ export const Sidebar = ({
           </button>
           <button
             type="button"
+            data-active={activeTab === 'sources' && !selectedMeetingId ? 'true' : undefined}
             onClick={() => {
               setActiveTab('sources');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'sources' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
+            className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'sources' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
             <Files
               size={16}
@@ -253,11 +270,12 @@ export const Sidebar = ({
           </h3>
           <button
             type="button"
+            data-active={activeTab === 'meetings' && !selectedMeetingId ? 'true' : undefined}
             onClick={() => {
               setActiveTab('meetings');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'meetings' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
+            className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'meetings' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
             <Library
               size={16}
@@ -321,12 +339,13 @@ export const Sidebar = ({
                   <div key={m.id}>
                     <button
                       type="button"
+                      data-active={selectedMeetingId === m.id ? 'true' : undefined}
                       onClick={() => {
                         setSelectedMeetingId(m.id);
                         setActiveTab('hub');
                       }}
                       className={`
-                                          w-full flex flex-col items-start gap-0.5 text-left px-3 py-2 rounded-md transition-colors
+                                          sidebar-nav-btn w-full flex flex-col items-start gap-0.5 text-left px-3 py-2 rounded-md transition-colors
                                           ${
                                             selectedMeetingId === m.id
                                               ? 'bg-black/5 dark:bg-white/10'
@@ -357,11 +376,12 @@ export const Sidebar = ({
       <div className="px-3 py-3 border-t border-pro-border flex items-center justify-between gap-2">
         <button
           type="button"
+          data-active={activeTab === 'settings' && !selectedMeetingId ? 'true' : undefined}
           onClick={() => {
             setActiveTab('settings');
             setSelectedMeetingId(null);
           }}
-          className={`flex-1 flex items-center gap-2 group cursor-pointer px-2 py-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors focus-visible:outline-none ${activeTab === 'settings' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : ''}`}
+          className={`sidebar-footer-btn flex-1 flex items-center gap-2 group cursor-pointer px-2 py-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors focus-visible:outline-none ${activeTab === 'settings' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : ''}`}
         >
           <Settings
             size={15}
@@ -376,15 +396,30 @@ export const Sidebar = ({
 
         <button
           type="button"
-          onClick={() =>
-            setTheme(
-              theme === 'dark'
-                ? 'light'
-                : theme === 'light'
-                  ? 'system'
-                  : 'dark',
-            )
-          }
+          onClick={() => {
+            const themeCycle: AppTheme[] = [
+              'light',
+              'dark',
+              'terracotta',
+              'coral',
+              'aubergine',
+              'system',
+            ];
+            const canonicalTheme: AppTheme =
+              theme === 'claude' ||
+              theme === 'celestial' ||
+              theme === 'botanical'
+                ? 'terracotta'
+                : theme === 'airbnb'
+                  ? 'coral'
+                  : theme === 'slack'
+                    ? 'aubergine'
+                    : theme;
+            const currentIndex = themeCycle.indexOf(canonicalTheme);
+            const nextIndex =
+              currentIndex === -1 ? 0 : (currentIndex + 1) % themeCycle.length;
+            setTheme(themeCycle[nextIndex]);
+          }}
           className="w-6 h-6 rounded-md hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-pro-text-main/70 hover:text-pro-text-main transition-colors"
           title={`Theme: ${theme}`}
         >
@@ -392,6 +427,15 @@ export const Sidebar = ({
             <Moon size={14} />
           ) : theme === 'light' ? (
             <Sun size={14} />
+          ) : theme === 'terracotta' ||
+            theme === 'claude' ||
+            theme === 'celestial' ||
+            theme === 'botanical' ? (
+            <Sparkles size={14} className="text-[#D97757]" />
+          ) : theme === 'coral' || theme === 'airbnb' ? (
+            <Heart size={14} className="text-[#FF385C]" />
+          ) : theme === 'aubergine' || theme === 'slack' ? (
+            <Hash size={14} className="text-[#9E629F]" />
           ) : (
             <Monitor size={14} />
           )}
