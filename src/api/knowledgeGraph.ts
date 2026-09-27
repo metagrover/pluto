@@ -280,6 +280,7 @@ export const upsertEntity = async (entity: {
   name: string;
   status?: EntityStatus;
   due_date?: string | null;
+  clear_due_date?: boolean; // Explicitly remove a due date; null alone preserves existing dates.
   assigned_to?: string | null;
   metadata?: Record<string, unknown>;
   dedupe_by_name?: boolean;

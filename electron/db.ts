@@ -6349,6 +6349,7 @@ export const upsertEntity = (entity: {
   name: string;
   status?: EntityStatus;
   due_date?: string | null;
+  clear_due_date?: boolean; // Explicitly remove a due date; null alone preserves existing dates.
   assigned_to?: string | null;
   metadata?: Record<string, unknown>;
   dedupe_by_name?: boolean;
@@ -6478,7 +6479,7 @@ export const upsertEntity = (entity: {
       UPDATE entities SET
         name = COALESCE(?, name),
         status = COALESCE(?, status),
-        due_date = COALESCE(?, due_date),
+        due_date = CASE WHEN ? THEN NULL ELSE COALESCE(?, due_date) END,
         assigned_to = COALESCE(?, assigned_to),
         metadata = COALESCE(?, metadata),
         saliency_score = COALESCE(?, saliency_score),
@@ -6489,6 +6490,7 @@ export const upsertEntity = (entity: {
     stmt.run(
       matchedProjectAlias || matchedPersonAlias ? null : entity.name,
       entity.status,
+      entity.clear_due_date === true ? 1 : 0,
       entity.due_date,
       entity.assigned_to,
       entity.metadata ? JSON.stringify(entity.metadata) : null,

@@ -524,6 +524,56 @@ describe('Dashboard interactions', () => {
     act(() => root.unmount());
   });
 
+  it.each(['escape', 'cancel'] as const)(
+    'closes creation with %s, returns focus, and preserves an unsaved draft',
+    (method) => {
+      const handleCreateCommitment = vi.fn(async () => undefined);
+      const { container, root } = renderDashboard({ handleCreateCommitment });
+      const addButton = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Add a commitment"]',
+      )!;
+      act(() => addButton.click());
+      const input = container.querySelector<HTMLInputElement>(
+        'input[aria-label="Commitment"]',
+      )!;
+      expect(document.activeElement).toBe(input);
+      act(() => {
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value',
+        )!.set!.call(input, 'Unsaved draft');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      act(() => {
+        if (method === 'escape')
+          input.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key: 'Escape',
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        else
+          Array.from(input.closest('form')!.querySelectorAll('button'))
+            .find((button) => button.textContent === 'Cancel')!
+            .click();
+      });
+      expect(
+        container.querySelector('input[aria-label="Commitment"]'),
+      ).toBeNull();
+      expect(document.activeElement).toBe(addButton);
+      expect(handleCreateCommitment).not.toHaveBeenCalled();
+      act(() => addButton.click());
+      expect(
+        container.querySelector<HTMLInputElement>(
+          'input[aria-label="Commitment"]',
+        )?.value,
+      ).toBe('Unsaved draft');
+      act(() => root.unmount());
+    },
+  );
+
   it('anchors the briefing on the date and exposes an ordered daily three without Ask Pluto', async () => {
     const handleSetDailyCommitments = vi.fn(async () => {});
     const model = buildDashboardHomeModel({
@@ -587,6 +637,235 @@ describe('Dashboard interactions', () => {
       expect.stringContaining('First priority'),
     ]);
 
+    act(() => root.unmount());
+  });
+
+  it.each([false, true])(
+    'reorders by drag in both directions and restores failed saves (%s)',
+    async (fail) => {
+      const handleSetDailyCommitments = vi.fn(
+        async (_ids: string[], _previous: string[], _date: string) => {
+          if (fail) throw new Error('save failed');
+        },
+      );
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: ['first', 'second'].map((id) =>
+          makeAction({
+            id,
+            name: id,
+            metadata: JSON.stringify({ commitment_state: 'confirmed' }),
+          }),
+        ),
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+      });
+      const { container, root } = renderDashboard({
+        model,
+        handleSetDailyCommitments,
+      });
+      const drag = async (from: number, to: number) => {
+        const rows = container.querySelectorAll(
+          '[data-testid="dashboard-commitment-row"]',
+        );
+        const dataTransfer = {
+          effectAllowed: '',
+          dropEffect: '',
+          setData: vi.fn(),
+          getData: () => '',
+        };
+        const event = (type: string) =>
+          Object.assign(new Event(type, { bubbles: true, cancelable: true }), {
+            dataTransfer,
+          });
+        act(() => {
+          rows[from].dispatchEvent(event('dragstart'));
+        });
+        await act(async () => {
+          rows[to].dispatchEvent(event('drop'));
+        });
+      };
+      await drag(0, 1);
+      expect(handleSetDailyCommitments.mock.calls[0]?.[0]).toEqual([
+        'second',
+        'first',
+      ]);
+      expect(
+        container.querySelector('[data-testid="dashboard-commitment-row"]')
+          ?.textContent,
+      ).toContain(fail ? 'First' : 'Second');
+      if (!fail) {
+        await drag(1, 0);
+        expect(handleSetDailyCommitments.mock.calls[1]?.[0]).toEqual([
+          'first',
+          'second',
+        ]);
+      }
+      act(() => root.unmount());
+    },
+  );
+
+  it('edits commitment text, retains failed drafts, and cancels without saving', async () => {
+    const handleEditCommitment = vi.fn(async () => {
+      throw new Error('save failed');
+    });
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          metadata: JSON.stringify({ commitment_state: 'confirmed' }),
+        }),
+      ],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+    const { container, root } = renderDashboard({
+      model,
+      handleEditCommitment,
+    });
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Edit Send the launch recap"]',
+        )
+        ?.click(),
+    );
+    const editor = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Edit commitment"]',
+    )!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )!.set!;
+      setter.call(editor, 'Updated commitment');
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+      editor.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      editor
+        .closest('form')!
+        .dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+    });
+    expect(handleEditCommitment).toHaveBeenCalledWith(
+      'action-1',
+      'Updated commitment',
+      null,
+    );
+    expect(editor.value).toBe('Updated commitment');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not save',
+    );
+    handleEditCommitment.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      editor
+        .closest('form')!
+        .dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+    });
+    expect(container.querySelector('textarea')).toBeNull();
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Edit Send the launch recap"]',
+        )
+        ?.click(),
+    );
+    act(() =>
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent === 'Cancel')
+        ?.click(),
+    );
+    expect(handleEditCommitment).toHaveBeenCalledTimes(2);
+    act(() => root.unmount());
+  });
+
+  it('edits a prioritized unconfirmed commitment and changes or removes its date', async () => {
+    const handleEditCommitment = vi.fn(
+      async (_id: string, _text: string, _date: string | null) => {},
+    );
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      dateKey: '2026-09-27',
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          due_date: '2026-09-28',
+          metadata: JSON.stringify({
+            commitment_state: 'possible',
+            dashboard_daily_priority: { date: '2026-09-27', rank: 0 },
+          }),
+        }),
+      ],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+    const { container, root } = renderDashboard({
+      model,
+      handleEditCommitment,
+    });
+    const open = () =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Edit Send the launch recap"]',
+        )!
+        .click();
+    act(open);
+    const input = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Commitment due date"]',
+    )!;
+    expect(input.value).toBe('2026-09-28');
+    act(() => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )!.set!.call(input, '2026-10-01');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () =>
+      input
+        .closest('form')!
+        .dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        ),
+    );
+    expect(handleEditCommitment).toHaveBeenLastCalledWith(
+      'action-1',
+      'Send the launch recap',
+      '2026-10-01',
+    );
+    act(open);
+    act(() =>
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent === 'Remove date')!
+        .click(),
+    );
+    const form = container.querySelector('textarea')!.closest('form')!;
+    await act(async () =>
+      form.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      ),
+    );
+    expect(handleEditCommitment).toHaveBeenLastCalledWith(
+      'action-1',
+      'Send the launch recap',
+      null,
+    );
     act(() => root.unmount());
   });
 

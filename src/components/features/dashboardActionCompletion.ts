@@ -113,6 +113,7 @@ export const persistDashboardPriorityOrder = async (
       name: string;
       status: EntityStatus;
       due_date: string | null;
+      clear_due_date?: boolean;
       assigned_to: string | null;
       metadata: Record<string, unknown>;
       dedupe_by_name: false;
@@ -181,5 +182,46 @@ export const persistDashboardPriorityOrder = async (
     throw error;
   }
 
+  await deps.refreshDashboard();
+};
+
+export const persistDashboardCommitmentEdit = async (
+  input: { id: string; text: string; dueDate?: string | null },
+  deps: Parameters<typeof persistDashboardPriorityOrder>[1],
+): Promise<void> => {
+  const text = input.text.trim();
+  if (!text) throw new Error('Commitment text is required');
+  const entity = await deps.getEntity(input.id);
+  if (!entity || entity.type !== 'action_item')
+    throw new Error('Commitment not found');
+  const metadata = parseActionMetadata(entity.metadata);
+  const dueDate = input.dueDate === undefined ? entity.due_date : input.dueDate;
+  if (entity.name !== text || entity.due_date !== dueDate) {
+    await deps.upsertEntity({
+      id: entity.id,
+      type: 'action_item',
+      name: text,
+      status: entity.status,
+      due_date: dueDate,
+      clear_due_date: dueDate === null,
+      assigned_to: entity.assigned_to,
+      dedupe_by_name: false,
+      metadata: {
+        ...metadata,
+        user_text_edits: [
+          ...(Array.isArray(metadata.user_text_edits)
+            ? metadata.user_text_edits
+            : []),
+          {
+            previous_due_date: entity.due_date,
+            due_date: dueDate,
+            previous_text: entity.name,
+            text,
+            edited_at: new Date().toISOString(),
+          },
+        ],
+      },
+    });
+  }
   await deps.refreshDashboard();
 };
