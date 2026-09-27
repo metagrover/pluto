@@ -24,6 +24,41 @@ afterAll(() => {
 });
 
 describe('action commitment database persistence', () => {
+  it('changes and explicitly clears a due date without losing commitment metadata', () => {
+    const action = upsertEntity({
+      type: 'action_item',
+      name: 'Date editing test',
+      due_date: '2026-09-27',
+      metadata: {
+        source_meeting_id: 'meeting-1',
+        dashboard_daily_priority: { date: '2026-09-27', rank: 0 },
+      },
+    });
+    const changed = upsertEntity({
+      id: action.id,
+      type: 'action_item',
+      name: action.name,
+      due_date: '2026-10-01',
+    });
+    expect(changed.due_date).toBe('2026-10-01');
+    const preserved = upsertEntity({
+      id: action.id,
+      type: 'action_item',
+      name: action.name,
+      due_date: null,
+    });
+    expect(preserved.due_date).toBe('2026-10-01');
+    const cleared = upsertEntity({
+      id: action.id,
+      type: 'action_item',
+      name: action.name,
+      due_date: null,
+      clear_due_date: true,
+    });
+    expect(cleared.due_date).toBeNull();
+    expect(JSON.parse(cleared.metadata!)).toEqual(JSON.parse(action.metadata!));
+  });
+
   it.each([
     ['confirmed', 'rejected'],
     ['rejected', 'confirmed'],

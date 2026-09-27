@@ -55,6 +55,7 @@ import {
   persistDashboardActionCompletion,
   persistDashboardAttentionStatus,
   persistDashboardCommitmentCreation,
+  persistDashboardCommitmentEdit,
   persistDashboardCommitmentReview,
   persistDashboardPriorityOrder,
 } from './components/features/dashboardActionCompletion';
@@ -663,6 +664,27 @@ function App() {
     } catch (error) {
       console.error('Failed to add dashboard commitment', error);
       setDashboardActionError(DASHBOARD_COMMITMENT_CREATION_ERROR);
+      throw error;
+    }
+  };
+
+  const handleEditDashboardCommitment = async (
+    id: string,
+    text: string,
+    dueDate: string | null,
+  ) => {
+    setDashboardActionError(null);
+    try {
+      await persistDashboardCommitmentEdit(
+        { id, text, dueDate },
+        {
+          getEntity,
+          upsertEntity,
+          refreshDashboard: dashboardHome.refresh,
+        },
+      );
+    } catch (error) {
+      setDashboardActionError('Could not save commitment. Try again.');
       throw error;
     }
   };
@@ -2203,6 +2225,7 @@ function App() {
                   handleCompleteTask={handleCompleteTask}
                   handleReviewCommitment={handleReviewDashboardCommitment}
                   handleCreateCommitment={handleCreateDashboardCommitment}
+                  handleEditCommitment={handleEditDashboardCommitment}
                   handleSetDailyCommitments={handleSetDashboardDailyCommitments}
                   handleUpdateAttentionStatus={
                     handleUpdateDashboardAttentionStatus

@@ -5,6 +5,7 @@ import {
   persistDashboardActionCompletion,
   persistDashboardAttentionStatus,
   persistDashboardCommitmentCreation,
+  persistDashboardCommitmentEdit,
   persistDashboardCommitmentReview,
   persistDashboardPriorityOrder,
 } from '../../src/components/features/dashboardActionCompletion';
@@ -344,5 +345,111 @@ describe('persistDashboardAttentionStatus', () => {
     ).rejects.toThrow('write failed');
 
     expect(refreshDashboard).not.toHaveBeenCalled();
+  });
+});
+
+describe('persistDashboardCommitmentEdit', () => {
+  const entity = {
+    id: 'action-1',
+    type: 'action_item' as const,
+    name: 'Original wording',
+    normalized_name: 'original wording',
+    status: 'active' as const,
+    due_date: '2026-09-27',
+    assigned_to: 'person-1',
+    metadata: JSON.stringify({
+      commitment_state: 'confirmed',
+      source_meeting_id: 'meeting-1',
+      evidence_quote: 'Original evidence',
+    }),
+    saliency_score: 1,
+    domain_tag: 'work',
+    created_at: '',
+    updated_at: '',
+  };
+  it('preserves source evidence, identity, due date, and prior wording when editing', async () => {
+    const upsertEntity = vi.fn(async () => entity);
+    const refreshDashboard = vi.fn(async () => {});
+    await persistDashboardCommitmentEdit(
+      { id: entity.id, text: ' Updated wording ' },
+      { getEntity: async () => entity, upsertEntity, refreshDashboard },
+    );
+    expect(upsertEntity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: entity.id,
+        name: 'Updated wording',
+        due_date: entity.due_date,
+        assigned_to: entity.assigned_to,
+        metadata: expect.objectContaining({
+          source_meeting_id: 'meeting-1',
+          evidence_quote: 'Original evidence',
+          commitment_state: 'confirmed',
+          user_text_edits: [
+            expect.objectContaining({
+              previous_text: 'Original wording',
+              text: 'Updated wording',
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(refreshDashboard).toHaveBeenCalledOnce();
+  });
+  it.each(['2026-10-01', null])(
+    'persists a date-only edit (%s), preserving priority and evidence',
+    async (dueDate) => {
+      const prioritized = {
+        ...entity,
+        metadata: JSON.stringify({
+          source_meeting_id: 'meeting-1',
+          commitment_state: 'possible',
+          dashboard_daily_priority: { date: '2026-09-27', rank: 0 },
+        }),
+      };
+      const upsertEntity = vi.fn(async () => prioritized);
+      await persistDashboardCommitmentEdit(
+        { id: entity.id, text: entity.name, dueDate },
+        {
+          getEntity: async () => prioritized,
+          upsertEntity,
+          refreshDashboard: async () => {},
+        },
+      );
+      expect(upsertEntity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: entity.id,
+          name: entity.name,
+          due_date: dueDate,
+          clear_due_date: dueDate === null,
+          metadata: expect.objectContaining({
+            source_meeting_id: 'meeting-1',
+            commitment_state: 'possible',
+            dashboard_daily_priority: { date: '2026-09-27', rank: 0 },
+            user_text_edits: [
+              expect.objectContaining({
+                previous_due_date: entity.due_date,
+                due_date: dueDate,
+              }),
+            ],
+          }),
+        }),
+      );
+    },
+  );
+
+  it('rejects empty text and missing commitments without writing', async () => {
+    const upsertEntity = vi.fn(async () => entity);
+    const deps = {
+      getEntity: async () => undefined,
+      upsertEntity,
+      refreshDashboard: vi.fn(async () => {}),
+    };
+    await expect(
+      persistDashboardCommitmentEdit({ id: 'missing', text: ' ' }, deps),
+    ).rejects.toThrow('text is required');
+    await expect(
+      persistDashboardCommitmentEdit({ id: 'missing', text: 'New text' }, deps),
+    ).rejects.toThrow('not found');
+    expect(upsertEntity).not.toHaveBeenCalled();
   });
 });

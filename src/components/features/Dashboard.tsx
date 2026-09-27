@@ -20,6 +20,7 @@ import {
   useState,
 } from 'react';
 import type { CSSProperties, FormEvent, RefObject } from 'react';
+import TextareaAutosize from 'react-textarea-autosize';
 import type {
   CalendarDescriptor,
   CalendarEvent,
@@ -58,6 +59,11 @@ interface DashboardProps {
     text: string,
     dueDate: string | null,
   ) => Promise<undefined | { id: string }>;
+  handleEditCommitment?: (
+    id: string,
+    text: string,
+    dueDate: string | null,
+  ) => Promise<void>;
   handleSetDailyCommitments?: (
     orderedIds: string[],
     previousIds: string[],
@@ -482,6 +488,7 @@ export const Dashboard = ({
   handleCompleteTask,
   handleReviewCommitment = async () => {},
   handleCreateCommitment = async () => undefined,
+  handleEditCommitment,
   handleSetDailyCommitments = async () => {},
   handleUpdateAttentionStatus = async () => {},
   calendarSnapshot = null,
@@ -495,7 +502,29 @@ export const Dashboard = ({
   onPrepareMeeting = () => {},
   onPrepareAnother = () => {},
 }: DashboardProps) => {
+  const [editingCommitmentId, setEditingCommitmentId] = useState<string | null>(
+    null,
+  );
+  const [editedCommitmentText, setEditedCommitmentText] = useState('');
+  const [editedCommitmentDueDate, setEditedCommitmentDueDate] = useState('');
+  const [isSavingCommitment, setIsSavingCommitment] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const draggedCommitmentRef = useRef<string | null>(null);
+  const commitmentEditorRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (editingCommitmentId) commitmentEditorRef.current?.focus();
+  }, [editingCommitmentId]);
   const [addingCommitment, setAddingCommitment] = useState(false);
+  const addCommitmentButtonRef = useRef<HTMLButtonElement>(null);
+  const newCommitmentInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (addingCommitment) newCommitmentInputRef.current?.focus();
+  }, [addingCommitment]);
+  const cancelCommitmentCreation = () => {
+    if (isCreatingCommitment) return;
+    setAddingCommitment(false);
+    addCommitmentButtonRef.current?.focus();
+  };
   const [commitmentText, setCommitmentText] = useState('');
   const [commitmentDueDate, setCommitmentDueDate] = useState('');
   const [isCreatingCommitment, setIsCreatingCommitment] = useState(false);
@@ -695,15 +724,44 @@ export const Dashboard = ({
     void saveDailyOrder(nextIds);
   };
 
-  const dropCommitment = (targetId: string) => {
-    if (!draggedCommitmentId || draggedCommitmentId === targetId) return;
-    const nextIds = orderedCommitmentIds.filter(
-      (id) => id !== draggedCommitmentId,
-    );
-    const targetIndex = nextIds.indexOf(targetId);
-    nextIds.splice(targetIndex, 0, draggedCommitmentId);
+  const dropCommitment = (targetId: string, sourceId: string | null) => {
+    if (!sourceId || sourceId === targetId || isSavingDailyOrderRef.current)
+      return;
+    const targetIndex = orderedCommitmentIds.indexOf(targetId);
+    if (targetIndex < 0 || !orderedCommitmentIds.includes(sourceId)) return;
+    const nextIds = orderedCommitmentIds.filter((id) => id !== sourceId);
+    nextIds.splice(targetIndex, 0, sourceId);
+    draggedCommitmentRef.current = null;
     setDraggedCommitmentId(null);
     void saveDailyOrder(nextIds);
+  };
+
+  const saveCommitmentEdit = async (event: FormEvent) => {
+    event.preventDefault();
+    const text = editedCommitmentText.trim();
+    if (
+      !editingCommitmentId ||
+      !text ||
+      isSavingCommitment ||
+      !handleEditCommitment
+    )
+      return;
+    setIsSavingCommitment(true);
+    setEditError(null);
+    try {
+      await handleEditCommitment(
+        editingCommitmentId,
+        text,
+        editedCommitmentDueDate || null,
+      );
+      setEditingCommitmentId(null);
+    } catch {
+      setEditError(
+        'Could not save commitment. Your edit is still here; try again.',
+      );
+    } finally {
+      setIsSavingCommitment(false);
+    }
   };
 
   if (loading) {
@@ -811,7 +869,10 @@ export const Dashboard = ({
             </div>
             <button
               type="button"
+              ref={addCommitmentButtonRef}
               aria-label="Add a commitment"
+              aria-expanded={addingCommitment}
+              disabled={isCreatingCommitment}
               title="Add a commitment"
               onClick={() => setAddingCommitment((value) => !value)}
               className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-pro-border/70 text-pro-text-muted transition-colors hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
@@ -823,9 +884,18 @@ export const Dashboard = ({
           {addingCommitment ? (
             <form
               onSubmit={submitCommitment}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  cancelCommitmentCreation();
+                }
+              }}
               className="mt-4 flex flex-col gap-3 border-b border-pro-border/70 pb-4 sm:flex-row"
             >
               <input
+                ref={newCommitmentInputRef}
+                disabled={isCreatingCommitment}
                 value={commitmentText}
                 onChange={(event) => setCommitmentText(event.target.value)}
                 placeholder="Commitment"
@@ -837,6 +907,7 @@ export const Dashboard = ({
                 value={commitmentDueDate}
                 onChange={(event) => setCommitmentDueDate(event.target.value)}
                 aria-label="Optional due date"
+                disabled={isCreatingCommitment}
                 className="min-h-10 rounded-md border border-pro-border bg-pro-bg px-3 text-[13px] font-medium text-pro-text-main outline-none focus:border-pro-accent"
               />
               <button
@@ -849,6 +920,14 @@ export const Dashboard = ({
                 ) : (
                   'Add'
                 )}
+              </button>
+              <button
+                type="button"
+                disabled={isCreatingCommitment}
+                onClick={cancelCommitmentCreation}
+                className="inline-flex min-h-10 items-center justify-center rounded-md px-3 text-[12px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
+              >
+                Cancel
               </button>
             </form>
           ) : null}
@@ -913,16 +992,34 @@ export const Dashboard = ({
                     key={item.id}
                     data-testid="dashboard-commitment-row"
                     aria-busy={isUpdating}
-                    draggable={!isUpdating && !isSavingDailyOrder}
+                    draggable={
+                      !isUpdating &&
+                      !isSavingDailyOrder &&
+                      editingCommitmentId !== item.id
+                    }
                     onDragStart={(event) => {
+                      draggedCommitmentRef.current = item.id;
                       setDraggedCommitmentId(item.id);
                       event.dataTransfer.effectAllowed = 'move';
                       event.dataTransfer.setData('text/plain', item.id);
                     }}
-                    onDragEnd={() => setDraggedCommitmentId(null)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => dropCommitment(item.id)}
-                    className={`group py-4 transition-opacity ${draggedCommitmentId === item.id ? 'opacity-45' : ''}`}
+                    onDragEnd={() => {
+                      draggedCommitmentRef.current = null;
+                      setDraggedCommitmentId(null);
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'move';
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      dropCommitment(
+                        item.id,
+                        draggedCommitmentRef.current ??
+                          event.dataTransfer.getData('text/plain'),
+                      );
+                    }}
+                    className={`group no-drag py-4 transition-opacity ${draggedCommitmentId === item.id ? 'opacity-45' : ''}`}
                   >
                     <div className="flex items-start gap-3">
                       <span
@@ -938,7 +1035,7 @@ export const Dashboard = ({
                           aria-label={primaryAriaLabel}
                           disabled={isUpdating}
                           onClick={() => handleCompleteTask(item.id)}
-                          className="group/complete flex h-7 w-7 shrink-0 items-center justify-center self-center rounded-full border border-pro-border text-pro-text-muted/55 transition-colors hover:border-pro-accent hover:bg-pro-accent/5 hover:text-pro-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-60"
+                          className="group/complete mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-pro-border text-pro-text-muted/55 transition-colors hover:border-pro-accent hover:bg-pro-accent/5 hover:text-pro-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-60"
                         >
                           {isUpdating ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -948,7 +1045,7 @@ export const Dashboard = ({
                         </button>
                       ) : (
                         <div
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-dashed border-pro-border/80 text-pro-text-muted/40 transition-colors"
+                          className="flex h-6 w-6 shrink-0 items-center justify-center self-center rounded-full border border-dashed border-pro-border/80 text-pro-text-muted/40 transition-colors"
                           title="Suggested commitment from meeting"
                           aria-hidden="true"
                         >
@@ -957,10 +1054,126 @@ export const Dashboard = ({
                       )}
                       <div className="min-w-0 flex-1 pt-0.5">
                         <div className="flex items-start justify-between gap-3">
-                          <h3 className="text-[14px] font-normal leading-5 text-pro-text-main">
-                            {item.title}
-                          </h3>
-                          <div className="flex shrink-0 items-center gap-1.5">
+                          {editingCommitmentId === item.id ? (
+                            <form
+                              className="min-w-0 flex-1"
+                              onSubmit={saveCommitmentEdit}
+                            >
+                              <TextareaAutosize
+                                ref={commitmentEditorRef}
+                                aria-label="Edit commitment"
+                                minRows={1}
+                                maxRows={6}
+                                value={editedCommitmentText}
+                                disabled={isSavingCommitment}
+                                onChange={(event) =>
+                                  setEditedCommitmentText(event.target.value)
+                                }
+                                onKeyDown={(event) => {
+                                  if (
+                                    event.key === 'Enter' &&
+                                    !event.shiftKey &&
+                                    !event.nativeEvent.isComposing
+                                  ) {
+                                    event.preventDefault();
+                                    event.currentTarget.form?.requestSubmit();
+                                  }
+                                  if (
+                                    event.key === 'Escape' &&
+                                    !isSavingCommitment
+                                  )
+                                    setEditingCommitmentId(null);
+                                }}
+                                className="-mt-1 -ml-2 block w-[calc(100%+0.5rem)] resize-none rounded-md border border-pro-accent/30 bg-pro-surface/40 px-2 py-1 text-[14px] font-normal leading-5 text-pro-text-main outline-none focus:border-pro-accent/60"
+                              />
+                              <div className="mt-2 flex items-center gap-2 text-[11px] text-pro-text-muted">
+                                <label className="flex items-center gap-2">
+                                  Due
+                                  <input
+                                    type="date"
+                                    aria-label="Commitment due date"
+                                    value={editedCommitmentDueDate}
+                                    disabled={isSavingCommitment}
+                                    onChange={(event) =>
+                                      setEditedCommitmentDueDate(
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="rounded border border-pro-border/60 bg-transparent px-2 py-1 text-[11px] text-pro-text-main outline-none focus:border-pro-accent/60 [color-scheme:light] dark:[color-scheme:dark]"
+                                  />
+                                </label>
+                                {editedCommitmentDueDate ? (
+                                  <button
+                                    type="button"
+                                    disabled={isSavingCommitment}
+                                    onClick={() =>
+                                      setEditedCommitmentDueDate('')
+                                    }
+                                    className="rounded px-1 py-1 hover:text-pro-text-main focus-visible:outline focus-visible:outline-pro-accent"
+                                  >
+                                    Remove date
+                                  </button>
+                                ) : null}
+                              </div>
+                              <div className="mt-1.5 flex items-center gap-3">
+                                <span className="mr-auto text-[10px] text-pro-text-muted/50">
+                                  Enter to save · Esc to cancel
+                                </span>
+                                <button
+                                  type="submit"
+                                  disabled={
+                                    isSavingCommitment ||
+                                    !editedCommitmentText.trim()
+                                  }
+                                  className="rounded px-1 py-1 text-[11px] font-medium text-pro-accent transition-colors hover:bg-pro-accent/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
+                                >
+                                  {isSavingCommitment ? 'Saving…' : 'Save'}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isSavingCommitment}
+                                  onClick={() => setEditingCommitmentId(null)}
+                                  className="rounded px-1 py-1 text-[11px] text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                              {editError ? (
+                                <p
+                                  role="alert"
+                                  className="text-xs text-pro-urgent"
+                                >
+                                  {editError}
+                                </p>
+                              ) : null}
+                            </form>
+                          ) : (
+                            <h3 className="min-w-0 flex-1 text-[14px] font-normal leading-5 text-pro-text-main">
+                              {handleEditCommitment ? (
+                                <button
+                                  type="button"
+                                  aria-label={`Edit ${item.title}`}
+                                  disabled={isUpdating}
+                                  onClick={() => {
+                                    setEditingCommitmentId(item.id);
+                                    setEditedCommitmentText(item.title);
+                                    setEditedCommitmentDueDate(
+                                      item.dueDate?.slice(0, 10) ?? '',
+                                    );
+                                    setEditError(null);
+                                  }}
+                                  className="w-full rounded text-left hover:text-pro-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+                                >
+                                  {item.title}
+                                </button>
+                              ) : (
+                                item.title
+                              )}
+                            </h3>
+                          )}
+                          <div
+                            className={`shrink-0 items-center gap-1.5 ${editingCommitmentId === item.id ? 'hidden' : 'flex'}`}
+                          >
                             <div className="flex items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
                               <button
                                 type="button"

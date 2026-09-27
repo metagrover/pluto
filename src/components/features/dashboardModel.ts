@@ -76,6 +76,7 @@ export interface DashboardActionInsightItem {
   assigneeName?: string | null;
   assignedTo?: string | null;
   dueLabel: string;
+  dueDate?: string | null;
   status: 'overdue' | 'stale' | 'active';
   commitmentState: 'possible' | 'confirmed';
   reviewedAt: string | null;
@@ -824,6 +825,7 @@ const actionToInsightItem = (
     assigneeName,
     assignedTo: action.assigned_to ?? null,
     dueLabel,
+    dueDate: action.due_date ?? null,
     status,
     commitmentState,
     reviewedAt:
