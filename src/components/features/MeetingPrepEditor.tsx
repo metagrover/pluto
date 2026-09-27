@@ -1,8 +1,3 @@
-import {
-  formatPrepDate,
-  formatPrepParticipants,
-} from '../../utils/meetingPrepPresentation';
-import { MeetingPrepBrief } from './MeetingPrepBrief';
 import { ChevronDown, Plus, X } from 'lucide-react';
 import {
   forwardRef,
@@ -20,6 +15,11 @@ import {
   listPrepMeetings,
   saveMeetingPrep,
 } from '../../api/meetingPrep';
+import {
+  formatPrepDate,
+  formatPrepParticipants,
+} from '../../utils/meetingPrepPresentation';
+import { MeetingPrepBrief } from './MeetingPrepBrief';
 export interface MeetingPrepEditorHandle {
   flush: () => Promise<void>;
 }

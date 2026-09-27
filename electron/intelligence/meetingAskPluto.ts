@@ -1,4 +1,3 @@
-import type { MeetingPrep } from '../meetingPrep';
 import type {
   MeetingAskPlutoCitation,
   MeetingAskPlutoLiveContext,
@@ -9,6 +8,7 @@ import type {
 import { resolveMeetingSpeakerLabel } from '../../src/utils/meetingSpeakerProvenance';
 import type { TrustStatus } from '../../src/utils/trustStatus';
 import type { PersistedMeeting } from '../db';
+import type { MeetingPrep } from '../meetingPrep';
 import type { MidFrontmatter } from './intelligenceTypes';
 import type { MeetingAskPlutoAssistanceRoute } from './meetingAskPlutoAssistance';
 import type { MeetingAskPlutoConversationResolution } from './meetingAskPlutoConversation';
@@ -953,8 +953,25 @@ export function withMeetingPrepContext(
       ].join('\n'),
     });
   if (prep.briefing) {
-    const text = [...(prep.briefing.overview || []), ...(prep.briefing.talkingPoints || [])].map(item => `${item.text} [${item.sourceLabel}; ${item.sourceDate || 'date unknown'}]`).join('\n').slice(0, 4000);
-    if (text) items.push({id:'prep-briefing',kind:'prep',meetingId:context.scope.meetingId,title:'Generated preparation from past meetings — planned context, not current discussion',text});
+    const text = [
+      ...(prep.briefing.overview || []),
+      ...(prep.briefing.talkingPoints || []),
+    ]
+      .map(
+        (item) =>
+          `${item.text} [${item.sourceLabel}; ${item.sourceDate || 'date unknown'}]`,
+      )
+      .join('\n')
+      .slice(0, 4000);
+    if (text)
+      items.push({
+        id: 'prep-briefing',
+        kind: 'prep',
+        meetingId: context.scope.meetingId,
+        title:
+          'Generated preparation from past meetings — planned context, not current discussion',
+        text,
+      });
   }
   for (const meeting of (prep.meetings || []).slice(0, 8))
     items.push({

@@ -1,6 +1,3 @@
-import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
-import { createMeetingPrepStore, findCalendarInviteeName } from './meetingPrep';
-import { createPrepAttendeeStore } from './prepAttendees';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import {
@@ -136,6 +133,8 @@ import type {
   AttentionScoreBreakdown,
   MidFrontmatter,
 } from './intelligence/intelligenceTypes';
+import type { MeetingNotesEvidenceSource } from './intelligence/meetingNotesEvidence';
+import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
 import { analysisDocumentV3ToMarkdown } from './llm/analysisDocumentV3';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import {
@@ -152,7 +151,10 @@ import {
 import { createLogger } from './logger';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { buildMeetingNotesIdentityProjection } from './meetingParticipantIdentity';
+import type { PrepMeetingOption } from './meetingPrep';
+import { createMeetingPrepStore, findCalendarInviteeName } from './meetingPrep';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
+import { createPrepAttendeeStore } from './prepAttendees';
 import { createSecureSettingsManager } from './secureSettings';
 import { saveMeetingSpeakerCandidates } from './speakerVoiceStore';
 
@@ -10191,33 +10193,56 @@ export const updateEntityAliasSuggestionStatus = (
 };
 
 export const prepAttendeeStore = createPrepAttendeeStore(db, {
-  people: () => getEntitiesByType('person').filter(person => resolvePersonIdentityId(person.id) === person.id).map(person => ({
-    id: person.id, name: person.name, aliases: getPersonNameAliases(person.id),
-  })),
+  people: () =>
+    getEntitiesByType('person')
+      .filter((person) => resolvePersonIdentityId(person.id) === person.id)
+      .map((person) => ({
+        id: person.id,
+        name: person.name,
+        aliases: getPersonNameAliases(person.id),
+      })),
   canonical: resolvePersonIdentityId,
-  createPerson: name => upsertEntity({type: 'person', name, dedupe_by_name: false}).id,
+  createPerson: (name) =>
+    upsertEntity({ type: 'person', name, dedupe_by_name: false }).id,
   selfId: () => identityStore.getSelfPersonId(),
 });
 
 export const meetingPrepStore = createMeetingPrepStore(db, {
-  personName: email => {
-    const link = db.prepare('SELECT person_id FROM prep_attendee_links WHERE attendee_key = ?').get(`email:${email}`) as {person_id:string | null} | undefined;
+  personName: (email) => {
+    const link = db
+      .prepare(
+        'SELECT person_id FROM prep_attendee_links WHERE attendee_key = ?',
+      )
+      .get(`email:${email}`) as { person_id: string | null } | undefined;
     if (link) {
       if (!link.person_id) return null;
       const person = getEntity(resolvePersonIdentityId(link.person_id));
       return person?.type === 'person' ? person.name : null;
     }
-    const events = (db.prepare('SELECT event_json FROM calendar_events').all() as Array<{event_json:string}>).flatMap(row => {
-      try { return [JSON.parse(row.event_json) as import('./calendar/types').CalendarEvent]; }
-      catch { return []; }
+    const events = (
+      db.prepare('SELECT event_json FROM calendar_events').all() as Array<{
+        event_json: string;
+      }>
+    ).flatMap((row) => {
+      try {
+        return [JSON.parse(row.event_json) as CalendarEvent];
+      } catch {
+        return [];
+      }
     });
     return findCalendarInviteeName(email, events);
   },
-  event: key => {
-    const row = db.prepare('SELECT event_json FROM calendar_events WHERE occurrence_key = ?').get(key) as {event_json: string} | undefined;
+  event: (key) => {
+    const row = db
+      .prepare(
+        'SELECT event_json FROM calendar_events WHERE occurrence_key = ?',
+      )
+      .get(key) as { event_json: string } | undefined;
     return row ? JSON.parse(row.event_json) : null;
   },
-  meetings: query => db.prepare(`
+  meetings: (query) =>
+    db
+      .prepare(`
     SELECT m.id, m.title, COALESCE(m.started_at, m.created_at) AS date,
       COALESCE(f.participants_text, '') AS participants,
       substr(COALESCE(NULLIF(f.notes_text, ''), m.user_notes, m.enhanced_notes, ''), 1, 240) AS preview
@@ -10225,19 +10250,65 @@ export const meetingPrepStore = createMeetingPrepStore(db, {
     WHERE datetime(COALESCE(m.started_at, m.created_at)) <= datetime('now')
       AND (? = '' OR instr(lower(m.title || ' ' || COALESCE(f.notes_text, '') || ' ' || COALESCE(f.participants_text, '') || ' ' || COALESCE(m.user_notes, '')), lower(?)) > 0)
     GROUP BY m.id ORDER BY COALESCE(m.started_at, m.created_at) DESC LIMIT 100
-  `).all(query.trim(), query.trim()) as import('./meetingPrep').PrepMeetingOption[],
-  meeting: id => {
-    const row = db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as (import('./intelligence/meetingNotesEvidence').MeetingNotesEvidenceSource & {started_at: string | null; created_at: string | null}) | undefined;
+  `)
+      .all(query.trim(), query.trim()) as PrepMeetingOption[],
+  meeting: (id) => {
+    const row = db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as
+      | (MeetingNotesEvidenceSource & {
+          started_at: string | null;
+          created_at: string | null;
+        })
+      | undefined;
     if (!row) return null;
     const document = buildMeetingNotesEvidenceDocument(row);
-    const context = [document.notesText, document.decisionsText && `Decisions:\n${document.decisionsText}`, document.actionItemsText && `Action items:\n${document.actionItemsText}`].filter(Boolean).join('\n\n').slice(0, 12000);
-    return {id, title: row.title || 'Untitled meeting', date: row.started_at || row.created_at, participants: document.participantsText, preview: context.slice(0, 240), context, trustStatus: document.trustStatus, capturedAt: new Date().toISOString()};
+    const context = [
+      document.notesText,
+      document.decisionsText && `Decisions:\n${document.decisionsText}`,
+      document.actionItemsText && `Action items:\n${document.actionItemsText}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+      .slice(0, 12000);
+    return {
+      id,
+      title: row.title || 'Untitled meeting',
+      date: row.started_at || row.created_at,
+      participants: document.participantsText,
+      preview: context.slice(0, 240),
+      context,
+      trustStatus: document.trustStatus,
+      capturedAt: new Date().toISOString(),
+    };
   },
-  topics: () => getEntitiesByType('topic').map(({id, name}) => ({id, name})),
-  topic: id => {
+  topics: () =>
+    getEntitiesByType('topic').map(({ id, name }) => ({ id, name })),
+  topic: (id) => {
     const topic = getEntity(id);
     if (!topic || topic.type !== 'topic') return null;
-    const rows = db.prepare('SELECT m.id, m.title, m.started_at, me.context FROM meeting_entities me JOIN meetings m ON m.id = me.meeting_id WHERE me.entity_id = ? ORDER BY COALESCE(m.started_at, m.created_at) DESC LIMIT 8').all(id) as Array<{id: string; title: string; started_at: string | null; context: string | null}>;
-    return {id, name: topic.name, context: rows.map(row => row.context).filter(Boolean).join('\n\n').slice(0, 12000), sources: rows.map(row => ({meetingId: row.id, title: row.title, date: row.started_at})), capturedAt: new Date().toISOString()};
+    const rows = db
+      .prepare(
+        'SELECT m.id, m.title, m.started_at, me.context FROM meeting_entities me JOIN meetings m ON m.id = me.meeting_id WHERE me.entity_id = ? ORDER BY COALESCE(m.started_at, m.created_at) DESC LIMIT 8',
+      )
+      .all(id) as Array<{
+      id: string;
+      title: string;
+      started_at: string | null;
+      context: string | null;
+    }>;
+    return {
+      id,
+      name: topic.name,
+      context: rows
+        .map((row) => row.context)
+        .filter(Boolean)
+        .join('\n\n')
+        .slice(0, 12000),
+      sources: rows.map((row) => ({
+        meetingId: row.id,
+        title: row.title,
+        date: row.started_at,
+      })),
+      capturedAt: new Date().toISOString(),
+    };
   },
 });

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { synthesizePreMeetingBrief } from '../../electron/preMeetingBriefSynthesis';
 import type { PreMeetingBrief } from '../../electron/preMeetingBrief';
+import { synthesizePreMeetingBrief } from '../../electron/preMeetingBriefSynthesis';
 
 const brief: PreMeetingBrief = {
   title: 'Review',

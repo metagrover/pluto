@@ -1,6 +1,6 @@
+import type { BlockedActionItem, Entity } from './db';
 import type { MeetingPrep } from './meetingPrep';
 import type { PreMeetingBrief, PreMeetingBriefItem } from './preMeetingBrief';
-import type { Entity, BlockedActionItem } from './db';
 export function buildMeetingPrepBrief(
   prep: MeetingPrep,
   deps: {

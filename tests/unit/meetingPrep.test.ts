@@ -1,13 +1,13 @@
-import type { PreMeetingBrief } from '../../electron/preMeetingBrief';
-import Database from 'better-sqlite3';
 import fs from 'node:fs';
+import Database from 'better-sqlite3';
 import { afterEach, expect, it } from 'vitest';
+import type { CalendarEvent } from '../../electron/calendar/types';
 import {
+  type PrepTopic,
   createMeetingPrepStore,
   prepStartBlocker,
-  type PrepTopic,
 } from '../../electron/meetingPrep';
-import type { CalendarEvent } from '../../electron/calendar/types';
+import type { PreMeetingBrief } from '../../electron/preMeetingBrief';
 const event: CalendarEvent = {
   occurrenceKey: 'calendar|event|start',
   eventIdentifier: 'event',

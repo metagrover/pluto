@@ -1,9 +1,9 @@
 import { ChevronDown, RefreshCw, Sparkles } from 'lucide-react';
-import { formatPrepDate } from '../../utils/meetingPrepPresentation';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { MeetingPrep } from '../../../electron/meetingPrep';
 import type { PreMeetingBrief } from '../../../electron/preMeetingBrief';
 import { buildPrepBrief, synthesizePrepBrief } from '../../api/meetingPrep';
+import { formatPrepDate } from '../../utils/meetingPrepPresentation';
 export function MeetingPrepBriefSkeleton() {
   return (
     <div

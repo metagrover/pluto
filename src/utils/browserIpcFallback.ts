@@ -1,6 +1,3 @@
-import type { MeetingPrep } from '../../electron/meetingPrep';
-import { prepRoster } from '../../electron/prepAttendees';
-import type { PrepAttendee } from '../../electron/prepAttendees';
 import type {
   CalendarEvent,
   CalendarIntegrationSnapshot,
@@ -9,6 +6,9 @@ import {
   applyMeetingNotesTemplateSettingsUpdate,
   createMeetingNotesTemplateSettingsSnapshot,
 } from '../../electron/llm/meetingNotesTemplates';
+import type { MeetingPrep } from '../../electron/meetingPrep';
+import { prepRoster } from '../../electron/prepAttendees';
+import type { PrepAttendee } from '../../electron/prepAttendees';
 import type { KnowledgeDoc } from '../api/knowledgeDocs';
 import type {
   Entity,
@@ -1125,47 +1125,174 @@ const createInvokeFallback =
 
     switch (channel) {
       case 'MEETING_PREP_OPEN': {
-        const event = args[0] as import('../../electron/calendar/types').CalendarEvent;
-        const saved = localStorage.getItem(`preview.prep:${event.occurrenceKey}`);
-        const prep: MeetingPrep = saved ? {...JSON.parse(saved), event} : {occurrenceKey: event.occurrenceKey, event, notes: '', topics: [], meetingId: null, recordingStarted: false, revision: 0, updatedAt: new Date().toISOString()};
-        localStorage.setItem(`preview.prep:${event.occurrenceKey}`, JSON.stringify(prep)); result = prep; break;
+        const event = args[0] as CalendarEvent;
+        const saved = localStorage.getItem(
+          `preview.prep:${event.occurrenceKey}`,
+        );
+        const prep: MeetingPrep = saved
+          ? { ...JSON.parse(saved), event }
+          : {
+              occurrenceKey: event.occurrenceKey,
+              event,
+              notes: '',
+              topics: [],
+              meetingId: null,
+              recordingStarted: false,
+              revision: 0,
+              updatedAt: new Date().toISOString(),
+            };
+        localStorage.setItem(
+          `preview.prep:${event.occurrenceKey}`,
+          JSON.stringify(prep),
+        );
+        result = prep;
+        break;
       }
-      case 'MEETING_PREP_GET': result = JSON.parse(localStorage.getItem(`preview.prep:${args[0]}`) || 'null'); break;
-      case 'MEETING_PREP_FOR_MEETING': result = null; break;
+      case 'MEETING_PREP_GET':
+        result = JSON.parse(
+          localStorage.getItem(`preview.prep:${args[0]}`) || 'null',
+        );
+        break;
+      case 'MEETING_PREP_FOR_MEETING':
+        result = null;
+        break;
       case 'MEETING_PREP_BRIEF_BUILD':
       case 'MEETING_PREP_BRIEF_SYNTHESIZE': {
-        const prep = JSON.parse(localStorage.getItem(`preview.prep:${args[0]}`) || 'null') as MeetingPrep | null;
+        const prep = JSON.parse(
+          localStorage.getItem(`preview.prep:${args[0]}`) || 'null',
+        ) as MeetingPrep | null;
         if (!prep) throw new Error('Preparation unavailable');
-        const {buildMeetingPrepBrief} = await import('../../electron/meetingPrepBrief');
-        result = buildMeetingPrepBrief(prep, {entities:()=>[],blockers:()=>[]}); break;
+        const { buildMeetingPrepBrief } = await import(
+          '../../electron/meetingPrepBrief'
+        );
+        result = buildMeetingPrepBrief(prep, {
+          entities: () => [],
+          blockers: () => [],
+        });
+        break;
       }
       case 'MEETING_PREP_MEETINGS': {
-        const query = String((args[0] as {query?: string})?.query || '').toLowerCase();
-        result = [{id: 'preview-q4-launch', title: 'Q4 Launch & Customer Pricing', date: '2026-09-20T10:00:00Z', participants: 'Maya, David', preview: 'Confirm launch dates, checklist ownership, and customer trial pricing.'}, {id: 'preview-team-review', title: 'Team Setup Review', date: '2026-09-22T10:00:00Z', participants: 'Alex', preview: 'Review onboarding and invitation steps.'}].filter(m => `${m.title} ${m.preview} ${m.participants}`.toLowerCase().includes(query)); break;
+        const query = String(
+          (args[0] as { query?: string })?.query || '',
+        ).toLowerCase();
+        result = [
+          {
+            id: 'preview-q4-launch',
+            title: 'Q4 Launch & Customer Pricing',
+            date: '2026-09-20T10:00:00Z',
+            participants: 'Maya, David',
+            preview:
+              'Confirm launch dates, checklist ownership, and customer trial pricing.',
+          },
+          {
+            id: 'preview-team-review',
+            title: 'Team Setup Review',
+            date: '2026-09-22T10:00:00Z',
+            participants: 'Alex',
+            preview: 'Review onboarding and invitation steps.',
+          },
+        ].filter((m) =>
+          `${m.title} ${m.preview} ${m.participants}`
+            .toLowerCase()
+            .includes(query),
+        );
+        break;
       }
-      case 'MEETING_PREP_TOPICS': result = [{id: 'preview-launch', name: 'Q4 launch'}, {id: 'preview-pricing', name: 'Customer pricing'}]; break;
+      case 'MEETING_PREP_TOPICS':
+        result = [
+          { id: 'preview-launch', name: 'Q4 launch' },
+          { id: 'preview-pricing', name: 'Customer pricing' },
+        ];
+        break;
       case 'MEETING_PREP_SAVE': {
-        const request = args[0] as {occurrenceKey: string; revision: number; patch: Record<string, any>};
-        const prep = JSON.parse(localStorage.getItem(`preview.prep:${request.occurrenceKey}`) || 'null') as MeetingPrep | null;
-        if (!prep || prep.revision !== request.revision) throw new Error('Prep changed elsewhere. Reload before saving.');
+        const request = args[0] as {
+          occurrenceKey: string;
+          revision: number;
+          patch: Record<string, any>;
+        };
+        const prep = JSON.parse(
+          localStorage.getItem(`preview.prep:${request.occurrenceKey}`) ||
+            'null',
+        ) as MeetingPrep | null;
+        if (!prep || prep.revision !== request.revision)
+          throw new Error('Prep changed elsewhere. Reload before saving.');
         const patch = request.patch;
         if ('notes' in patch) prep.notes = patch.notes;
-        if (patch.removeTopicId) prep.topics = prep.topics.filter(t => t.id !== patch.removeTopicId);
+        if (patch.removeTopicId)
+          prep.topics = prep.topics.filter((t) => t.id !== patch.removeTopicId);
         const id = patch.addTopicId || patch.refreshTopicId;
         if (id) {
-          const topic = {id, name: id === 'preview-launch' ? 'Q4 launch' : 'Customer pricing', context: 'Confirm launch dates, checklist ownership, and customer trial pricing.', sources: [{meetingId: 'preview-q4-launch',title: 'Q4 Launch & Customer Pricing',date: new Date().toISOString()}], capturedAt: new Date().toISOString()};
-          prep.topics = patch.refreshTopicId ? prep.topics.map(t => t.id === id ? topic : t) : [...prep.topics, topic];
+          const topic = {
+            id,
+            name: id === 'preview-launch' ? 'Q4 launch' : 'Customer pricing',
+            context:
+              'Confirm launch dates, checklist ownership, and customer trial pricing.',
+            sources: [
+              {
+                meetingId: 'preview-q4-launch',
+                title: 'Q4 Launch & Customer Pricing',
+                date: new Date().toISOString(),
+              },
+            ],
+            capturedAt: new Date().toISOString(),
+          };
+          prep.topics = patch.refreshTopicId
+            ? prep.topics.map((t) => (t.id === id ? topic : t))
+            : [...prep.topics, topic];
         }
         if (Array.isArray(patch.meetingIds)) {
-          prep.meetings = patch.meetingIds.map((id: string) => (prep.meetings || []).find(m => m.id === id) || {id,title:id === 'preview-q4-launch' ? 'Q4 Launch & Customer Pricing' : 'Team Setup Review',date:'2026-09-20T10:00:00Z',participants:'Maya, David',preview:'Launch checklist and pricing',context:'Confirm launch dates, checklist ownership, and customer trial pricing.',trustStatus:'grounded',capturedAt:new Date().toISOString()});
+          prep.meetings = patch.meetingIds.map(
+            (id: string) =>
+              (prep.meetings || []).find((m) => m.id === id) || {
+                id,
+                title:
+                  id === 'preview-q4-launch'
+                    ? 'Q4 Launch & Customer Pricing'
+                    : 'Team Setup Review',
+                date: '2026-09-20T10:00:00Z',
+                participants: 'Maya, David',
+                preview: 'Launch checklist and pricing',
+                context:
+                  'Confirm launch dates, checklist ownership, and customer trial pricing.',
+                trustStatus: 'grounded',
+                capturedAt: new Date().toISOString(),
+              },
+          );
         }
-        if (patch.removeMeetingId) prep.meetings = (prep.meetings || []).filter(m => m.id !== patch.removeMeetingId);
+        if (patch.removeMeetingId)
+          prep.meetings = (prep.meetings || []).filter(
+            (m) => m.id !== patch.removeMeetingId,
+          );
         const meetingId = patch.addMeetingId || patch.refreshMeetingId;
         if (meetingId) {
-          const meeting = {id: meetingId, title: meetingId === 'preview-q4-launch' ? 'Q4 Launch & Customer Pricing' : 'Team Setup Review', date: '2026-09-20T10:00:00Z', participants: 'Maya, David', preview: 'Confirm launch dates and customer trial pricing.', context: 'Confirm launch dates, checklist ownership, and customer trial pricing.', trustStatus: 'grounded' as const, capturedAt: new Date().toISOString()};
-          prep.meetings = patch.refreshMeetingId ? (prep.meetings || []).map(m => m.id === meetingId ? meeting : m) : [...(prep.meetings || []), meeting];
+          const meeting = {
+            id: meetingId,
+            title:
+              meetingId === 'preview-q4-launch'
+                ? 'Q4 Launch & Customer Pricing'
+                : 'Team Setup Review',
+            date: '2026-09-20T10:00:00Z',
+            participants: 'Maya, David',
+            preview: 'Confirm launch dates and customer trial pricing.',
+            context:
+              'Confirm launch dates, checklist ownership, and customer trial pricing.',
+            trustStatus: 'grounded' as const,
+            capturedAt: new Date().toISOString(),
+          };
+          prep.meetings = patch.refreshMeetingId
+            ? (prep.meetings || []).map((m) =>
+                m.id === meetingId ? meeting : m,
+              )
+            : [...(prep.meetings || []), meeting];
         }
-        prep.revision++; prep.updatedAt = new Date().toISOString(); localStorage.setItem(`preview.prep:${prep.occurrenceKey}`, JSON.stringify(prep)); result = prep; break;
+        prep.revision++;
+        prep.updatedAt = new Date().toISOString();
+        localStorage.setItem(
+          `preview.prep:${prep.occurrenceKey}`,
+          JSON.stringify(prep),
+        );
+        result = prep;
+        break;
       }
       case 'AUDIO_CAPTURE_JOURNAL_START': {
         const request = args[0] as { meetingId?: unknown } | undefined;

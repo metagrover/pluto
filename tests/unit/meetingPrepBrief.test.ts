@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
-import { buildMeetingPrepBrief } from '../../electron/meetingPrepBrief';
-import type { MeetingPrep } from '../../electron/meetingPrep';
 import type { Entity } from '../../electron/db';
+import type { MeetingPrep } from '../../electron/meetingPrep';
+import { buildMeetingPrepBrief } from '../../electron/meetingPrepBrief';
 const prep = {
   event: { title: 'Launch', start: '2026-09-28', agenda: null },
   meetings: [

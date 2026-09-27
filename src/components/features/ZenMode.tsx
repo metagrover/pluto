@@ -72,7 +72,7 @@ export const ZenMode = ({
   liveTranscriptIntegrity,
   recordingStartedAtMs,
   calendarEvent = null,
-      onOpenMeeting,
+  onOpenMeeting,
   askPlutoConversation,
   setAskPlutoConversation,
   askPlutoMinimized,

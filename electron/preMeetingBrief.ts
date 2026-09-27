@@ -1,11 +1,9 @@
-import { normalizeEvent } from './calendar/protocol';
-import type { PrepAttendee } from './prepAttendees';
-import { prepRoster, normalizePrepEmail } from './prepAttendees';
 import { parseAnalysisDocumentV3Json } from '../src/utils/analysisDocument';
 import type {
   PersonBriefingCommitment,
   PersonBriefingSummary,
 } from '../src/utils/personBriefing';
+import { normalizeEvent } from './calendar/protocol';
 import type {
   CalendarEvent,
   PriorMeetingCalendarContext,
@@ -17,6 +15,8 @@ import type {
   WorkingMemorySnapshot,
 } from './db';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
+import type { PrepAttendee } from './prepAttendees';
+import { normalizePrepEmail, prepRoster } from './prepAttendees';
 
 export type PreMeetingBriefRequest =
   | { kind: 'calendar'; event: CalendarEvent }

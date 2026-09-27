@@ -1,5 +1,5 @@
-import { openMeetingPrep } from './api/meetingPrep';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { openMeetingPrep } from './api/meetingPrep';
 import './App.css';
 
 // Core
@@ -397,9 +397,9 @@ function App() {
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const stopSessionRef = useRef<((endReason?: string) => void) | null>(null);
-  const startSessionRef = useRef<((event?: CalendarEvent) => Promise<CaptureStartResult>) | null>(
-    null,
-  );
+  const startSessionRef = useRef<
+    ((event?: CalendarEvent) => Promise<CaptureStartResult>) | null
+  >(null);
   const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptSegment[]>(
     [],
   );
@@ -1175,13 +1175,19 @@ function App() {
       setMeetingTitle(event.title || 'Meeting');
       setMeetingParticipants([]);
       setParticipantInput('');
-      setCurrentNotes(localStorage.getItem(`pluto.meeting-notes:${event.occurrenceKey}`) || '');
-      if (!startSessionRef.current) throw new Error('Recording is not ready yet.');
+      setCurrentNotes(
+        localStorage.getItem(`pluto.meeting-notes:${event.occurrenceKey}`) ||
+          '',
+      );
+      if (!startSessionRef.current)
+        throw new Error('Recording is not ready yet.');
       const result = await startSessionRef.current(event);
       if (!result.admitted) {
         activeCalendarEventRef.current = null;
         setActiveCalendarEvent(null);
-        throw new Error('Recording could not start. Check recording permissions and the calendar time, then retry.');
+        throw new Error(
+          'Recording could not start. Check recording permissions and the calendar time, then retry.',
+        );
       }
     },
     [dismissPrompt],
@@ -2015,9 +2021,15 @@ function App() {
           <Sidebar
             sidebarVisible={sidebarVisible}
             activeTab={activeTab}
-            setActiveTab={(tab) => { setPreMeetingBriefVisible(false); setActiveTab(tab); }}
+            setActiveTab={(tab) => {
+              setPreMeetingBriefVisible(false);
+              setActiveTab(tab);
+            }}
             selectedMeetingId={selectedMeetingId}
-            setSelectedMeetingId={(id) => { setPreMeetingBriefVisible(false); setSelectedMeetingId(id); }}
+            setSelectedMeetingId={(id) => {
+              setPreMeetingBriefVisible(false);
+              setSelectedMeetingId(id);
+            }}
             safeMeetings={safeMeetings}
             onStartRecording={() => {
               if (startSessionRef.current) {
@@ -2084,7 +2096,10 @@ function App() {
           liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}
           calendarEvent={resolvedActiveCalendarEvent}
-          onOpenMeeting={(id) => { setZenVisible(false); handleOpenMeeting(id); }}
+          onOpenMeeting={(id) => {
+            setZenVisible(false);
+            handleOpenMeeting(id);
+          }}
           askPlutoConversation={meetingAskPlutoConversation}
           setAskPlutoConversation={setMeetingAskPlutoConversation}
           askPlutoMinimized={meetingAskPlutoMinimized}
@@ -2119,22 +2134,22 @@ function App() {
               preMeetingBriefVisible
                 ? 'px-4 py-6 md:px-8'
                 : selectedMeetingId
-                ? 'meeting-app-scroll'
-                : activeTab === 'chat'
-                  ? 'px-0 py-0'
-                  : activeTab === 'settings'
-                    ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                    : !selectedMeetingId && activeTab === 'hub'
-                      ? previewParam
-                        ? 'px-4 md:px-8 lg:px-10 py-5 space-y-5'
-                        : 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
-                      : !selectedMeetingId && activeTab === 'people'
-                        ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                        : !selectedMeetingId && activeTab === 'projects'
+                  ? 'meeting-app-scroll'
+                  : activeTab === 'chat'
+                    ? 'px-0 py-0'
+                    : activeTab === 'settings'
+                      ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
+                      : !selectedMeetingId && activeTab === 'hub'
+                        ? previewParam
+                          ? 'px-4 md:px-8 lg:px-10 py-5 space-y-5'
+                          : 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
+                        : !selectedMeetingId && activeTab === 'people'
                           ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                          : !selectedMeetingId && activeTab === 'meetings'
+                          : !selectedMeetingId && activeTab === 'projects'
                             ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                            : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
+                            : !selectedMeetingId && activeTab === 'meetings'
+                              ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
+                              : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
             }`}
           >
             <>
@@ -2452,8 +2467,6 @@ function App() {
           void window.ipcRenderer?.invoke?.('QUIT_APP');
         }}
       />
-
-
 
       {autoEndTriggered && (
         <AutoEndToast

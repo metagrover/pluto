@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
-import type { CalendarEvent } from './calendar/types';
 import { normalizeEvent } from './calendar/protocol';
+import type { CalendarEvent } from './calendar/types';
 
 export interface PrepTopic {
   id: string;

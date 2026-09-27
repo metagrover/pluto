@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import {
-  withMeetingPrepContext,
   type MeetingAskPlutoContext,
+  withMeetingPrepContext,
 } from '../../electron/intelligence/meetingAskPluto';
 import { buildNotesWriterPrompt } from '../../electron/llm/meetingNotesPrompts';
 import type { MeetingPrep } from '../../electron/meetingPrep';

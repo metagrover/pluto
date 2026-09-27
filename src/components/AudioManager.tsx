@@ -1,5 +1,5 @@
-import type { CalendarEvent } from '../../electron/calendar/types';
 import { useEffect, useRef, useState } from 'react';
+import type { CalendarEvent } from '../../electron/calendar/types';
 import {
   type SilenceWatchdog,
   createSilenceWatchdog,
@@ -589,7 +589,9 @@ export const AudioManager = ({
     }
   };
 
-  const startSession = async (calendarEvent?: CalendarEvent): Promise<CaptureStartResult> => {
+  const startSession = async (
+    calendarEvent?: CalendarEvent,
+  ): Promise<CaptureStartResult> => {
     if (captureLifecycleRef.current.state !== 'idle') {
       console.warn('[Pluto] Ignoring duplicate start request');
       return {
@@ -672,7 +674,9 @@ export const AudioManager = ({
           {
             meetingId,
             startedAtMs: startTimeRef.current,
-            ...(calendarEvent ? {calendarOccurrenceKey: calendarEvent.occurrenceKey} : {}),
+            ...(calendarEvent
+              ? { calendarOccurrenceKey: calendarEvent.occurrenceKey }
+              : {}),
             sourceAvailability: {
               system: isGrantedStatus(systemAudioStatus)
                 ? 'available'
@@ -1447,14 +1451,19 @@ export const AudioManager = ({
       // Only expose the recording state once live PCM and durable microphone
       // capture are active. Until this point the UI remains in its explicit
       // starting state, so speech is not invited before it can be recorded.
-      if (calendarEvent) await window.ipcRenderer.invoke('MEETING_PREP_RECORDING_STARTED', meetingId);
+      if (calendarEvent)
+        await window.ipcRenderer.invoke(
+          'MEETING_PREP_RECORDING_STARTED',
+          meetingId,
+        );
       onRecordingStarted?.(startTimeRef.current);
       isRecordingRef.current = true;
       setIsRecording(true);
       publishCaptureLifecycle({ state: 'recording', meetingId });
-      if (!calendarEvent) void window.ipcRenderer
-        ?.invoke('CALENDAR_ASSOCIATE_START', { meetingId })
-        .catch(() => {});
+      if (!calendarEvent)
+        void window.ipcRenderer
+          ?.invoke('CALENDAR_ASSOCIATE_START', { meetingId })
+          .catch(() => {});
 
       silenceWatchdogRef.current?.disarm();
       const watchdog = createSilenceWatchdog({

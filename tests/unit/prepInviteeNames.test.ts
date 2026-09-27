@@ -1,9 +1,9 @@
 import { expect, it } from 'vitest';
-import {
-  resolvePrepInviteeNames,
-  findCalendarInviteeName,
-} from '../../electron/meetingPrep';
 import type { CalendarEvent } from '../../electron/calendar/types';
+import {
+  findCalendarInviteeName,
+  resolvePrepInviteeNames,
+} from '../../electron/meetingPrep';
 const event = {
   attendees: [
     { name: 'sam@example.com', email: ' SAM@example.com ' },

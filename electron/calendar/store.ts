@@ -242,7 +242,7 @@ export const createCalendarStore = (sql: SqlDatabase) => {
   const listPriorMeetingContexts = (
     before: string,
     requestedLimit = 80,
-    matching?: {event: CalendarEvent; emails: string[]},
+    matching?: { event: CalendarEvent; emails: string[] },
   ): PriorMeetingCalendarContext[] => {
     const limit = Math.min(200, Math.max(1, Math.floor(requestedLimit)));
     const rows = sql
@@ -262,9 +262,15 @@ export const createCalendarStore = (sql: SqlDatabase) => {
         ORDER BY COALESCE(meeting.started_at, meeting.created_at) DESC
         LIMIT ?
       `)
-      .all(before, matching ? 1 : 0, matching?.event.seriesKey ?? null,
-        matching?.event.calendarIdentifier ?? null, JSON.stringify(matching?.emails ?? []),
-        JSON.stringify(matching?.emails ?? []), limit) as PriorContextRow[];
+      .all(
+        before,
+        matching ? 1 : 0,
+        matching?.event.seriesKey ?? null,
+        matching?.event.calendarIdentifier ?? null,
+        JSON.stringify(matching?.emails ?? []),
+        JSON.stringify(matching?.emails ?? []),
+        limit,
+      ) as PriorContextRow[];
     return rows.map((row) => ({
       sourceKind: 'macos_calendar',
       occurrenceKey: row.occurrence_key,
@@ -293,10 +299,13 @@ export const createCalendarStore = (sql: SqlDatabase) => {
       )
       .get(occurrenceKey) as EventRow | undefined;
     const state = getState();
-    const storedEvent = eventRow || (snapshot ? {event_json: JSON.stringify(snapshot)} : null);
+    const storedEvent =
+      eventRow || (snapshot ? { event_json: JSON.stringify(snapshot) } : null);
     if (
       !storedEvent ||
-      (!snapshot && !state.selectedCalendar && state.selectedCalendars.length === 0)
+      (!snapshot &&
+        !state.selectedCalendar &&
+        state.selectedCalendars.length === 0)
     ) {
       return null;
     }

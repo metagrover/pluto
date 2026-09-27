@@ -1,6 +1,4 @@
-import { MeetingPrepBriefSkeleton } from './MeetingPrepBrief';
-import { formatPrepDate } from '../../utils/meetingPrepPresentation';
-import { Loader2, ArrowLeft, Play, ChevronDown } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Loader2, Play } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -8,6 +6,8 @@ import type { CalendarEvent } from '../../../electron/calendar/types';
 import type { MeetingPrep } from '../../../electron/meetingPrep';
 import { prepStartBlocker } from '../../../electron/meetingPrep';
 import { openMeetingPrep } from '../../api/meetingPrep';
+import { formatPrepDate } from '../../utils/meetingPrepPresentation';
+import { MeetingPrepBriefSkeleton } from './MeetingPrepBrief';
 import {
   MeetingPrepEditor,
   type MeetingPrepEditorHandle,

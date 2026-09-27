@@ -1,12 +1,12 @@
-import Database from 'better-sqlite3';
 import fs from 'node:fs';
+import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { CalendarEvent } from '../../electron/calendar/types';
 import {
-  createPrepAttendeeStore,
   type PrepPerson,
+  createPrepAttendeeStore,
   prepRoster,
 } from '../../electron/prepAttendees';
-import type { CalendarEvent } from '../../electron/calendar/types';
 
 const event = (
   name: string | null = 'Sam',

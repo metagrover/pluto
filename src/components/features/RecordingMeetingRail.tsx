@@ -1,4 +1,3 @@
-import { SavedMeetingPrep } from './MeetingPrepEditor';
 import { CheckCircle2, UserRound, X } from 'lucide-react';
 import { forwardRef, useEffect, useMemo, useState } from 'react';
 import type { CalendarEvent } from '../../../electron/calendar/types';
@@ -10,6 +9,7 @@ import {
 import { getEntitiesByType, upsertEntity } from '../../api/knowledgeGraph';
 import { isGenericSpeakerLabel } from '../../utils/speakerReview';
 import { SearchSelect, type SearchSelectOption } from '../ui/SearchSelect';
+import { SavedMeetingPrep } from './MeetingPrepEditor';
 
 const MEETING_TITLE_MAX_LENGTH = 64;
 export const RECORDING_SCRATCHPAD_STORAGE_KEY = 'pluto.recording-scratchpad';
@@ -318,7 +318,10 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
                 aria-label="Meeting preparation"
                 className="min-h-0 overflow-y-auto"
               >
-                <SavedMeetingPrep event={calendarEvent} onOpenMeeting={onOpenMeeting} />
+                <SavedMeetingPrep
+                  event={calendarEvent}
+                  onOpenMeeting={onOpenMeeting}
+                />
               </div>
             )}
           </section>

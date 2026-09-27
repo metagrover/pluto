@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { type Root, createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { MeetingPrep } from '../../electron/meetingPrep';
 import type { CalendarEvent } from '../../electron/calendar/types';
+import type { MeetingPrep } from '../../electron/meetingPrep';
 const api = vi.hoisted(() => ({
   openMeetingPrep: vi.fn(),
   buildPrepBrief: vi.fn(),
