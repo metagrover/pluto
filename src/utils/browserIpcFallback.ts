@@ -1,3 +1,6 @@
+import type { MeetingPrep } from '../../electron/meetingPrep';
+import { prepRoster } from '../../electron/prepAttendees';
+import type { PrepAttendee } from '../../electron/prepAttendees';
 import type {
   CalendarEvent,
   CalendarIntegrationSnapshot,
@@ -433,6 +436,7 @@ const emptyGraphStats: KnowledgeGraphStats = {
   total_meeting_connections: 0,
 };
 
+const previewPrepLinks = new Map<string, string | null>();
 const previewPeople: Entity[] = [
   {
     id: 'preview-maya',
@@ -1120,6 +1124,49 @@ const createInvokeFallback =
     let result: unknown;
 
     switch (channel) {
+      case 'MEETING_PREP_OPEN': {
+        const event = args[0] as import('../../electron/calendar/types').CalendarEvent;
+        const saved = localStorage.getItem(`preview.prep:${event.occurrenceKey}`);
+        const prep: MeetingPrep = saved ? {...JSON.parse(saved), event} : {occurrenceKey: event.occurrenceKey, event, notes: '', topics: [], meetingId: null, recordingStarted: false, revision: 0, updatedAt: new Date().toISOString()};
+        localStorage.setItem(`preview.prep:${event.occurrenceKey}`, JSON.stringify(prep)); result = prep; break;
+      }
+      case 'MEETING_PREP_GET': result = JSON.parse(localStorage.getItem(`preview.prep:${args[0]}`) || 'null'); break;
+      case 'MEETING_PREP_FOR_MEETING': result = null; break;
+      case 'MEETING_PREP_BRIEF_BUILD':
+      case 'MEETING_PREP_BRIEF_SYNTHESIZE': {
+        const prep = JSON.parse(localStorage.getItem(`preview.prep:${args[0]}`) || 'null') as MeetingPrep | null;
+        if (!prep) throw new Error('Preparation unavailable');
+        const {buildMeetingPrepBrief} = await import('../../electron/meetingPrepBrief');
+        result = buildMeetingPrepBrief(prep, {entities:()=>[],blockers:()=>[]}); break;
+      }
+      case 'MEETING_PREP_MEETINGS': {
+        const query = String((args[0] as {query?: string})?.query || '').toLowerCase();
+        result = [{id: 'preview-q4-launch', title: 'Q4 Launch & Customer Pricing', date: '2026-09-20T10:00:00Z', participants: 'Maya, David', preview: 'Confirm launch dates, checklist ownership, and customer trial pricing.'}, {id: 'preview-team-review', title: 'Team Setup Review', date: '2026-09-22T10:00:00Z', participants: 'Alex', preview: 'Review onboarding and invitation steps.'}].filter(m => `${m.title} ${m.preview} ${m.participants}`.toLowerCase().includes(query)); break;
+      }
+      case 'MEETING_PREP_TOPICS': result = [{id: 'preview-launch', name: 'Q4 launch'}, {id: 'preview-pricing', name: 'Customer pricing'}]; break;
+      case 'MEETING_PREP_SAVE': {
+        const request = args[0] as {occurrenceKey: string; revision: number; patch: Record<string, any>};
+        const prep = JSON.parse(localStorage.getItem(`preview.prep:${request.occurrenceKey}`) || 'null') as MeetingPrep | null;
+        if (!prep || prep.revision !== request.revision) throw new Error('Prep changed elsewhere. Reload before saving.');
+        const patch = request.patch;
+        if ('notes' in patch) prep.notes = patch.notes;
+        if (patch.removeTopicId) prep.topics = prep.topics.filter(t => t.id !== patch.removeTopicId);
+        const id = patch.addTopicId || patch.refreshTopicId;
+        if (id) {
+          const topic = {id, name: id === 'preview-launch' ? 'Q4 launch' : 'Customer pricing', context: 'Confirm launch dates, checklist ownership, and customer trial pricing.', sources: [{meetingId: 'preview-q4-launch',title: 'Q4 Launch & Customer Pricing',date: new Date().toISOString()}], capturedAt: new Date().toISOString()};
+          prep.topics = patch.refreshTopicId ? prep.topics.map(t => t.id === id ? topic : t) : [...prep.topics, topic];
+        }
+        if (Array.isArray(patch.meetingIds)) {
+          prep.meetings = patch.meetingIds.map((id: string) => (prep.meetings || []).find(m => m.id === id) || {id,title:id === 'preview-q4-launch' ? 'Q4 Launch & Customer Pricing' : 'Team Setup Review',date:'2026-09-20T10:00:00Z',participants:'Maya, David',preview:'Launch checklist and pricing',context:'Confirm launch dates, checklist ownership, and customer trial pricing.',trustStatus:'grounded',capturedAt:new Date().toISOString()});
+        }
+        if (patch.removeMeetingId) prep.meetings = (prep.meetings || []).filter(m => m.id !== patch.removeMeetingId);
+        const meetingId = patch.addMeetingId || patch.refreshMeetingId;
+        if (meetingId) {
+          const meeting = {id: meetingId, title: meetingId === 'preview-q4-launch' ? 'Q4 Launch & Customer Pricing' : 'Team Setup Review', date: '2026-09-20T10:00:00Z', participants: 'Maya, David', preview: 'Confirm launch dates and customer trial pricing.', context: 'Confirm launch dates, checklist ownership, and customer trial pricing.', trustStatus: 'grounded' as const, capturedAt: new Date().toISOString()};
+          prep.meetings = patch.refreshMeetingId ? (prep.meetings || []).map(m => m.id === meetingId ? meeting : m) : [...(prep.meetings || []), meeting];
+        }
+        prep.revision++; prep.updatedAt = new Date().toISOString(); localStorage.setItem(`preview.prep:${prep.occurrenceKey}`, JSON.stringify(prep)); result = prep; break;
+      }
       case 'AUDIO_CAPTURE_JOURNAL_START': {
         const request = args[0] as { meetingId?: unknown } | undefined;
         if (typeof request?.meetingId === 'string') {
@@ -1320,10 +1367,65 @@ const createInvokeFallback =
       case 'CALENDAR_GET_MEETING_CONTEXT':
         result = null;
         break;
+      case 'PRE_MEETING_ATTENDEE_CHANGE':
+      case 'PRE_MEETING_BRIEF_SYNTHESIZE':
       case 'PRE_MEETING_BRIEF_BUILD': {
-        const request = args[0] as
+        const change =
+          channel === 'PRE_MEETING_ATTENDEE_CHANGE'
+            ? (args[0] as {
+                request: { kind: 'calendar'; event: CalendarEvent };
+                key: string;
+                selection: { personId?: string | null; newName?: string };
+              })
+            : null;
+        const request = (change?.request || args[0]) as
           | { kind: 'calendar'; event: CalendarEvent }
           | { kind: 'query'; query: string };
+        if (change) {
+          let id = change.selection.personId ?? null;
+          if (change.selection.newName) {
+            id = `preview-prep-${previewPeople.length}`;
+            previewPeople.push({
+              ...previewPeople[0],
+              id,
+              name: change.selection.newName,
+              normalized_name: change.selection.newName.toLowerCase(),
+            });
+          }
+          previewPrepLinks.set(change.key, id);
+        }
+        const attendees: PrepAttendee[] =
+          request.kind === 'calendar'
+            ? prepRoster(request.event)
+                .filter((person) => person.name !== 'You')
+                .map((person) => {
+                  const candidates = previewPeople.filter(
+                    (p) => p.name.toLowerCase() === person.name?.toLowerCase(),
+                  );
+                  const stored = previewPrepLinks.has(person.key);
+                  const id = stored
+                    ? previewPrepLinks.get(person.key)
+                    : candidates.length === 1
+                      ? candidates[0].id
+                      : null;
+                  const match = previewPeople.find((p) => p.id === id);
+                  return {
+                    ...person,
+                    personId: match?.id ?? null,
+                    personName: match?.name ?? null,
+                    status: match
+                      ? 'identified'
+                      : stored
+                        ? 'unlinked'
+                        : 'unresolved',
+                    basis: match ? (stored ? 'user' : 'name') : 'none',
+                    suggestions: candidates.map(({ id, name }) => ({
+                      id,
+                      name,
+                    })),
+                  };
+                })
+            : [];
         const title =
           request.kind === 'calendar' ? request.event.title : request.query;
         result = {
@@ -1358,6 +1460,37 @@ const createInvokeFallback =
             },
           ],
           relevantContext: [],
+          attendees,
+          personOptions: previewPeople.map(({ id, name }) => ({ id, name })),
+          overview: [
+            {
+              id: 'preview-overview',
+              text: 'Keep the beta focused on the smaller onboarding flow.',
+              trustStatus: 'grounded',
+              sourceMeetingId: String(previewMeeting.id),
+              sourceLabel: previewMeeting.title,
+              sourceDate: previewMeeting.started_at,
+            },
+          ],
+          talkingPoints: [
+            {
+              id: 'preview-talk',
+              text: 'What is the latest update on “Confirm the launch checklist owner”?',
+              trustStatus: 'inferred',
+              sourceMeetingId: String(previewMeeting.id),
+              sourceLabel: previewMeeting.title,
+              sourceDate: previewMeeting.started_at,
+            },
+          ],
+          sourceMeetings: [
+            {
+              id: String(previewMeeting.id),
+              title: previewMeeting.title,
+              startedAt: previewMeeting.started_at,
+              evidence: 'invited',
+            },
+          ],
+          synthesisStatus: 'fallback',
           emptyMessage: null,
         };
         break;

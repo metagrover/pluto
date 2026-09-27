@@ -1,5 +1,11 @@
+import { normalizeEvent } from './calendar/protocol';
+import type { PrepAttendee } from './prepAttendees';
+import { prepRoster, normalizePrepEmail } from './prepAttendees';
 import { parseAnalysisDocumentV3Json } from '../src/utils/analysisDocument';
-import type { PersonBriefingSummary } from '../src/utils/personBriefing';
+import type {
+  PersonBriefingCommitment,
+  PersonBriefingSummary,
+} from '../src/utils/personBriefing';
 import type {
   CalendarEvent,
   PriorMeetingCalendarContext,
@@ -45,9 +51,34 @@ export interface PreMeetingBrief {
   stillOpen: PreMeetingBriefItem[];
   relevantContext: PreMeetingBriefItem[];
   emptyMessage: string | null;
+  attendees?: PrepAttendee[];
+  personOptions?: Array<{ id: string; name: string }>;
+  sourceMeetings?: Array<{
+    id: string;
+    title: string;
+    startedAt: string;
+    evidence: 'confirmed' | 'invited' | 'related';
+  }>;
+  overview?: PreMeetingBriefItem[];
+  evidenceItems?: PreMeetingBriefItem[];
+  talkingPoints?: PreMeetingBriefItem[];
+  synthesisStatus?: 'ready' | 'fallback';
 }
 
-interface BriefDependencies {
+export interface BriefDependencies {
+  getPersonEmails?: (personId: string) => string[];
+  listRelatedMeetingContexts?: (
+    event: CalendarEvent,
+    emails: string[],
+  ) => PriorMeetingCalendarContext[];
+  listPeople?: () => Array<{ id: string; name: string }>;
+  resolveAttendees?: (event: CalendarEvent) => PrepAttendee[];
+  getPersonHistory?: (personId: string) =>
+    | {
+        meetings: Array<{ id: string; evidence: string }>;
+        commitments?: { open: PersonBriefingCommitment[] };
+      }
+    | undefined;
   listPriorMeetingContexts: (
     before: string,
     limit?: number,
@@ -137,7 +168,7 @@ const item = (
   trustStatus: BriefTrustStatus,
   suffix: string,
 ): PreMeetingBriefItem => ({
-  id: `${String(source.id)}:${suffix}:${text}`,
+  id: `${String(source.id)}:${suffix}`,
   text,
   trustStatus,
   sourceMeetingId: String(source.id),
@@ -242,6 +273,19 @@ const personDossierItems = (
     }));
 };
 
+const isRejectedAction = (metadata: string | null) => {
+  try {
+    const m = JSON.parse(metadata || '{}');
+    return (
+      m.commitment_state === 'rejected' ||
+      m.meeting_regeneration_retired_at ||
+      m.cancelled_at
+    );
+  } catch {
+    return false;
+  }
+};
+
 const buildFromMeeting = (
   title: string,
   startsAt: string | null,
@@ -282,6 +326,11 @@ const buildFromMeeting = (
     ...decisions.map((text, index) =>
       item(text, meeting, trust, `decision-${index}`),
     ),
+    ...(!decisions.length && !questions.length
+      ? cleanLines(evidence.notesText, 2).map((text, index) =>
+          item(text.slice(0, 700), meeting, trust, `notes-${index}`),
+        )
+      : []),
     ...questions.map((text, index) =>
       item(text, meeting, trust, `question-${index}`),
     ),
@@ -295,6 +344,7 @@ const buildFromMeeting = (
     .filter(
       (entity) =>
         entity.type === 'action_item' &&
+        !isRejectedAction(entity.metadata) &&
         (entity.status === 'active' ||
           entity.status === 'overdue' ||
           entity.status === 'stale'),
@@ -305,7 +355,12 @@ const buildFromMeeting = (
       const text = blocker
         ? `${entity.name} — blocked by ${blocker.blocker_name}`
         : entity.name;
-      return item(text, meeting, 'grounded', `open-${index}`);
+      return item(
+        `${text}${entity.due_date ? ` · Due ${entity.due_date}` : ''}`,
+        meeting,
+        trust,
+        `open-${index}`,
+      );
     });
   const emptyMessage =
     lastTime.length || stillOpen.length || relevantContext.length || agenda
@@ -348,17 +403,276 @@ export const buildPreMeetingBrief = (
   }
 
   const event = request.event;
-  const prior = resolvePriorMeeting(
-    event,
-    deps.listPriorMeetingContexts(event.start, 80),
+  const attendees = deps.resolveAttendees?.(event) ?? [];
+  const roster = prepRoster(event);
+  const emailGroups = new Map<string, Set<string>>();
+  for (const attendee of deps.resolveAttendees ? attendees : roster) {
+    const personId =
+      'personId' in attendee && typeof attendee.personId === 'string'
+        ? attendee.personId
+        : null;
+    const key = personId || attendee.key;
+    const group = emailGroups.get(key) || new Set<string>();
+    if (attendee.email) group.add(attendee.email);
+    for (const email of personId
+      ? (deps.getPersonEmails?.(personId) ?? [])
+      : [])
+      group.add(email);
+    emailGroups.set(key, group);
+  }
+  const lookupEmails = [
+    ...new Set([...emailGroups.values()].flatMap((group) => [...group])),
+  ];
+  const contexts = [
+    ...new Map(
+      [
+        ...(deps.listRelatedMeetingContexts?.(event, lookupEmails) ?? []),
+        ...deps.listPriorMeetingContexts(event.start, 200),
+      ].map((context) => [context.meetingId, context]),
+    ).values(),
+  ];
+  const legacyPrior = resolvePriorMeeting(event, contexts);
+  const ranked = new Map<
+    string,
+    { id: string; score: number; evidence: 'confirmed' | 'invited' | 'related' }
+  >();
+  const add = (
+    id: string,
+    score: number,
+    evidence: 'confirmed' | 'invited' | 'related',
+  ) => {
+    const meeting = deps.getMeeting(id);
+    if (
+      !meeting ||
+      Date.parse(meeting.started_at || meeting.created_at || '') >=
+        Date.parse(event.start)
+    )
+      return;
+    const words = meaningfulWords(`${event.title} ${event.agenda || ''}`);
+    const body =
+      `${meeting.title} ${meeting.enhanced_notes || meeting.user_notes || ''}`.toLowerCase();
+    const rankedScore =
+      score + [...words].filter((word) => body.includes(word)).length * 5;
+    const existing = ranked.get(id);
+    const evidenceClass =
+      existing?.evidence === 'confirmed' || evidence === 'confirmed'
+        ? 'confirmed'
+        : existing?.evidence === 'invited' || evidence === 'invited'
+          ? 'invited'
+          : 'related';
+    ranked.set(id, {
+      id,
+      score: Math.max(rankedScore, existing?.score ?? 0),
+      evidence: evidenceClass,
+    });
+  };
+  for (const context of contexts) {
+    if (context.event.isCancelled) continue;
+    const past = new Set(
+      prepRoster(context.event)
+        .map((p) => normalizePrepEmail(p.email))
+        .filter(Boolean),
+    );
+    const overlap = [...emailGroups.values()].filter((group) =>
+      [...group].some((email) => past.has(email)),
+    );
+    const sameSeries =
+      !!event.seriesKey &&
+      event.seriesKey === context.event.seriesKey &&
+      event.calendarIdentifier === context.event.calendarIdentifier;
+    const shared = emailGroups.size > 1 && overlap.length >= emailGroups.size;
+    if (sameSeries || overlap.length)
+      add(
+        context.meetingId,
+        sameSeries ? 1000 : shared ? 500 : 100 + overlap.length * 30,
+        'invited',
+      );
+  }
+  const visitedPeople = new Set<string>();
+  const personCommitments: Array<{
+    name: string;
+    commitment: PersonBriefingCommitment;
+  }> = [];
+  const confirmedCounts = new Map<string, number>();
+  for (const attendee of attendees) {
+    if (!attendee.personId || visitedPeople.has(attendee.personId)) continue;
+    visitedPeople.add(attendee.personId);
+    const history = deps.getPersonHistory?.(attendee.personId);
+    for (const commitment of history?.commitments?.open ?? []) {
+      personCommitments.push({
+        name: attendee.personName || attendee.name || 'Attendee',
+        commitment,
+      });
+      add(commitment.sourceMeetingId, 150, 'related');
+    }
+    for (const past of history?.meetings ?? []) {
+      if (past.evidence === 'confirmed')
+        confirmedCounts.set(past.id, (confirmedCounts.get(past.id) || 0) + 1);
+    }
+  }
+  for (const [id, count] of confirmedCounts)
+    add(
+      id,
+      count >= Math.max(2, emailGroups.size) ? 600 : 150 + count * 30,
+      'confirmed',
+    );
+  // Title fallback is retained only when no people/email history was found.
+  if (
+    !ranked.size &&
+    legacyPrior &&
+    !attendees.some((p) => p.basis === 'user' || p.status === 'unlinked')
+  )
+    add(legacyPrior.context.meetingId, 10, 'related');
+  const sources = [...ranked.values()]
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        Date.parse(
+          deps.getMeeting(b.id)!.started_at ||
+            deps.getMeeting(b.id)!.created_at ||
+            '',
+        ) -
+          Date.parse(
+            deps.getMeeting(a.id)!.started_at ||
+              deps.getMeeting(a.id)!.created_at ||
+              '',
+          ),
+    )
+    .slice(0, 8);
+  const primary = sources[0] ? deps.getMeeting(sources[0].id) : undefined;
+  const briefs = sources.map((source) =>
+    buildFromMeeting(
+      event.title,
+      event.start,
+      event.agenda ?? null,
+      'related',
+      deps.getMeeting(source.id),
+      [],
+      deps,
+    ),
   );
-  return buildFromMeeting(
+  const brief = buildFromMeeting(
     event.title || 'Upcoming meeting',
     event.start,
     event.agenda ?? null,
-    prior?.relationship ?? 'none',
-    prior ? deps.getMeeting(prior.context.meetingId) : undefined,
-    event.attendees.flatMap((attendee) => attendee.name || []),
+    primary
+      ? legacyPrior?.context.meetingId === String(primary.id)
+        ? legacyPrior.relationship
+        : 'related'
+      : 'none',
+    primary,
+    [],
     deps,
   );
+  const unique = (items: PreMeetingBriefItem[], limit: number) => {
+    const seen = new Set<string>();
+    return items
+      .filter((entry) => {
+        const key = entry.text.trim().toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, limit);
+  };
+  brief.lastTime = unique(
+    briefs.flatMap((b) => b.lastTime),
+    4,
+  );
+  const selectedIds = new Set(sources.map((source) => source.id));
+  const owned = personCommitments
+    .filter(
+      ({ commitment }) =>
+        selectedIds.has(commitment.sourceMeetingId) &&
+        (commitment.status === 'active' || commitment.status === 'overdue'),
+    )
+    .map(({ name, commitment }) => {
+      const source = deps.getMeeting(commitment.sourceMeetingId)!;
+      return item(
+        `${name}: ${commitment.text}${commitment.dueDate ? ` · Due ${commitment.dueDate}` : ''}`,
+        source,
+        'grounded',
+        `owner:${commitment.id}`,
+      );
+    });
+  const ownedTexts = new Set(
+    personCommitments.map(({ commitment }) => commitment.text),
+  );
+  brief.stillOpen = unique(
+    [
+      ...owned,
+      ...briefs
+        .flatMap((b) => b.stillOpen)
+        .filter(
+          (entry) =>
+            ![...ownedTexts].some(
+              (text) =>
+                entry.text === text ||
+                entry.text.startsWith(`${text} ·`) ||
+                entry.text.startsWith(`${text} —`),
+            ),
+        ),
+    ],
+    6,
+  );
+  brief.attendees = attendees;
+  brief.personOptions = deps.listPeople?.() ?? [];
+  brief.sourceMeetings = sources.map((source) => {
+    const meeting = deps.getMeeting(source.id)!;
+    return {
+      id: source.id,
+      title: meeting.title || 'Untitled meeting',
+      startedAt: meeting.started_at || meeting.created_at || '',
+      evidence: source.evidence,
+    };
+  });
+  brief.evidenceItems = unique(
+    [
+      ...briefs.flatMap((b) => b.lastTime.slice(0, 2)),
+      ...brief.stillOpen,
+      ...brief.relevantContext,
+    ],
+    24,
+  );
+  brief.overview = brief.lastTime.slice(0, 2);
+  brief.talkingPoints = brief.stillOpen.slice(0, 3).map((entry) => ({
+    ...entry,
+    id: `talk:${entry.id}`,
+    text: `What is the latest update on “${entry.text}”?`,
+    trustStatus: 'inferred',
+  }));
+  brief.synthesisStatus = 'fallback';
+  if (brief.lastTime.length || brief.stillOpen.length)
+    brief.emptyMessage = null;
+  return brief;
 };
+
+export function validatePreMeetingBriefRequest(
+  value: unknown,
+): PreMeetingBriefRequest {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    JSON.stringify(value).length > 64_000
+  )
+    throw new Error('Invalid prep request');
+  const request = value as Record<string, unknown>;
+  if (
+    request.kind === 'query' &&
+    typeof request.query === 'string' &&
+    request.query.trim() &&
+    request.query.length <= 200
+  )
+    return { kind: 'query', query: request.query };
+  if (request.kind === 'calendar') {
+    const event = normalizeEvent(request.event);
+    if (
+      event &&
+      event.attendees.length <= 100 &&
+      Number.isFinite(Date.parse(event.start)) &&
+      Number.isFinite(Date.parse(event.end))
+    )
+      return { kind: 'calendar', event };
+  }
+  throw new Error('Invalid prep request');
+}

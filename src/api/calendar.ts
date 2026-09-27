@@ -57,3 +57,16 @@ export const associateMeetingAtStart = (meetingId: string, atTime?: string) =>
 
 export const buildPreMeetingBrief = (request: PreMeetingBriefRequest) =>
   invoke<PreMeetingBrief>('PRE_MEETING_BRIEF_BUILD', request);
+
+export const synthesizePreMeetingBrief = (request: PreMeetingBriefRequest) =>
+  invoke<PreMeetingBrief>('PRE_MEETING_BRIEF_SYNTHESIZE', request);
+export const changePrepAttendee = (
+  request: PreMeetingBriefRequest,
+  key: string,
+  selection: { personId?: string | null; newName?: string },
+) =>
+  invoke<PreMeetingBrief>('PRE_MEETING_ATTENDEE_CHANGE', {
+    request,
+    key,
+    selection,
+  });

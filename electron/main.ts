@@ -1,3 +1,6 @@
+import { buildMeetingPrepBrief } from './meetingPrepBrief';
+import { synthesizePreMeetingBrief } from './preMeetingBriefSynthesis';
+import { validatePreMeetingBriefRequest } from './preMeetingBrief';
 import { type ChildProcess, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -108,7 +111,6 @@ import {
 import { resolveUnpackedExecutablePath } from './packagedExecutablePath';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import {
-  type PreMeetingBriefRequest,
   buildPreMeetingBrief,
 } from './preMeetingBrief';
 import {
@@ -547,6 +549,7 @@ import {
 } from './intelligence/currentMeetingResolver';
 import { createLiveMeetingContextCoordinator } from './intelligence/liveMeetingContextCoordinator';
 import {
+  withMeetingPrepContext,
   buildLiveMeetingAskPlutoContext,
   buildLiveMeetingFallbackResponse,
   buildMeetingAskPlutoContext,
@@ -1730,21 +1733,93 @@ app.whenReady().then(async () => {
   ipcMain.handle('CALENDAR_GET_MEETING_CONTEXT', (_event, meetingId) =>
     db.calendarStore.getMeetingContext(String(meetingId)),
   );
-  ipcMain.handle(
-    'PRE_MEETING_BRIEF_BUILD',
-    (_event, request: PreMeetingBriefRequest) =>
-      buildPreMeetingBrief(request, {
-        listPriorMeetingContexts: db.calendarStore.listPriorMeetingContexts,
-        getMeeting: (id) =>
-          db.getMeeting(id) as db.PersistedMeeting | undefined,
-        getMeetingEntities: db.getMeetingEntities,
-        getBlockedActionItems: db.getBlockedActionItems,
-        searchMeetingSummaries: db.searchMeetingSummaries,
-        getGlobalWorkingMemory: () =>
-          db.getWorkingMemorySnapshot('global', 'global'),
-        getPeopleBriefingSummaries: db.getPeopleBriefingSummaries,
-      }),
-  );
+  db.meetingPrepStore.recoverUnstarted(id => Boolean(db.getMeeting(id)) || fs.existsSync(path.join(getMeetingArtifactsRootDir(), id, 'capture-journal', 'manifest.json')));
+  ipcMain.handle('MEETING_PREP_OPEN', (_event, event) => db.meetingPrepStore.open(event));
+  ipcMain.handle('MEETING_PREP_GET', (_event, key) => db.meetingPrepStore.get(key));
+  ipcMain.handle('MEETING_PREP_FOR_MEETING', (_event, id) => {
+    if (typeof id !== 'string' || id.length > 128) throw new Error('Invalid meeting ID');
+    return db.meetingPrepStore.forMeeting(id);
+  });
+  const prepareLinkedMeetingBrief = (key: unknown) => {
+    const prep = db.meetingPrepStore.get(key);
+    if (!prep) throw new Error('Preparation is unavailable');
+    const brief = buildMeetingPrepBrief(prep, {entities: id => db.getMeetingEntities(id).flatMap(entity => {
+      if (entity.type !== 'action_item') return [];
+      const current = db.resolveCommitmentIdentity(entity.id);
+      return current && !db.isRetiredCommitment(entity.id) ? [current] : [];
+    }), blockers: db.getBlockedActionItems});
+    return prep.briefing ? {...prep.briefing, stillOpen:brief.stillOpen} : brief;
+  };
+  ipcMain.handle('MEETING_PREP_BRIEF_BUILD', (_event, key) => prepareLinkedMeetingBrief(key));
+  const prepSynthesisRequests = new Map<string, symbol>();
+  ipcMain.handle('MEETING_PREP_BRIEF_SYNTHESIZE', async (_event, key) => {
+    const prep = db.meetingPrepStore.get(key);
+    if (!prep) throw new Error('Preparation is unavailable');
+    const token = Symbol();
+    prepSynthesisRequests.set(prep.occurrenceKey, token);
+    const references = JSON.stringify(prep.meetings || []);
+    const brief = prepareLinkedMeetingBrief(key);
+    try {
+      const settings = await getAllSettings(db);
+      const provider = await getProvider(settings);
+      const generated = await synthesizePreMeetingBrief(brief, (prompt, signal) => provider.answerAskPluto(prompt, {signal, mode:'deep'}));
+      if (prepSynthesisRequests.get(prep.occurrenceKey) === token) db.meetingPrepStore.saveBrief(key, references, generated);
+      return generated;
+    } catch {return brief;}
+    finally {if (prepSynthesisRequests.get(prep.occurrenceKey) === token) prepSynthesisRequests.delete(prep.occurrenceKey);}
+  });
+  ipcMain.handle('MEETING_PREP_TOPICS', () => db.meetingPrepStore.listTopics());
+  ipcMain.handle('MEETING_PREP_MEETINGS', (_event, input) => db.meetingPrepStore.listMeetings(input?.query ?? '', input?.occurrenceKey));
+  ipcMain.handle('MEETING_PREP_SAVE', (_event, input) => {
+    const prep = db.meetingPrepStore.save(input?.occurrenceKey, input?.revision, input?.patch);
+    for (const window of BrowserWindow.getAllWindows()) window.webContents.send('meeting-prep:updated', prep);
+    return prep;
+  });
+  const prepareBrief = (value: unknown) => buildPreMeetingBrief(validatePreMeetingBriefRequest(value), {
+    listPriorMeetingContexts: db.calendarStore.listPriorMeetingContexts,
+    getMeeting: id => db.getMeeting(id) as db.PersistedMeeting | undefined,
+    getMeetingEntities: id => db.getMeetingEntities(id).flatMap(entity => {
+      if (entity.type !== 'action_item') return [entity];
+      const current = db.resolveCommitmentIdentity(entity.id);
+      return current ? [{...entity, status:current.status, due_date:current.due_date, metadata:current.metadata}] : [];
+    }),
+    getBlockedActionItems: db.getBlockedActionItems,
+    searchMeetingSummaries: db.searchMeetingSummaries,
+    getGlobalWorkingMemory: () => db.getWorkingMemorySnapshot('global', 'global'),
+    getPeopleBriefingSummaries: db.getPeopleBriefingSummaries,
+    resolveAttendees: db.prepAttendeeStore.resolve,
+    listPeople: db.prepAttendeeStore.people,
+    getPersonEmails: db.prepAttendeeStore.emails,
+    listRelatedMeetingContexts: (event, emails) => db.calendarStore.listPriorMeetingContexts(event.start, 200, {event, emails}),
+    getPersonHistory: personId => {
+      const detail = db.getPersonBriefing(personId);
+      if (!detail) return undefined;
+      return {...detail, commitments: {...detail.commitments, open: detail.commitments.open.filter(commitment => {
+        const current = db.resolveCommitmentIdentity(commitment.id);
+        return current && !db.isRetiredCommitment(commitment.id) && (current.status === 'active' || current.status === 'overdue');
+      })}};
+    },
+  });
+  ipcMain.handle('PRE_MEETING_BRIEF_BUILD', (_event, value: unknown) => prepareBrief(value));
+  ipcMain.handle('PRE_MEETING_BRIEF_SYNTHESIZE', async (_event, value: unknown) => {
+    const brief = prepareBrief(value);
+    const settings = await getAllSettings(db);
+    const provider = await getProvider(settings);
+    return synthesizePreMeetingBrief(brief, (prompt, signal) => provider.answerAskPluto(prompt, {signal, mode:'deep'}));
+  });
+  ipcMain.handle('PRE_MEETING_ATTENDEE_CHANGE', (_event, value: unknown) => {
+    if (!value || typeof value !== 'object') throw new Error('Invalid attendee change');
+    const payload = value as Record<string, unknown>;
+    const request = validatePreMeetingBriefRequest(payload.request);
+    if (request.kind !== 'calendar' || typeof payload.key !== 'string' || payload.key.length > 1500) throw new Error('Invalid attendee change');
+    if (!payload.selection || typeof payload.selection !== 'object') throw new Error('Invalid person selection');
+    const selection = payload.selection as Record<string, unknown>;
+    if (Object.keys(selection).some(key => key !== 'personId' && key !== 'newName') ||
+        (selection.personId !== undefined && selection.personId !== null && (typeof selection.personId !== 'string' || selection.personId.length > 256)) ||
+        (selection.newName !== undefined && typeof selection.newName !== 'string')) throw new Error('Invalid person selection');
+    db.prepAttendeeStore.change(request.event, payload.key, selection as {personId?: string | null; newName?: string});
+    return prepareBrief(request);
+  });
   ipcMain.handle(
     'CALENDAR_MATCH_ACTIVE',
     (_event, payload?: { atTime?: string }) =>
@@ -2342,9 +2417,12 @@ app.whenReady().then(async () => {
     'AUDIO_CAPTURE_JOURNAL_START',
     async (
       event,
-      { meetingId, startedAtMs, expectedSources, sourceAvailability } = {},
+      { meetingId, startedAtMs, expectedSources, sourceAvailability, calendarOccurrenceKey } = {},
     ) => {
-      return handleAudioCaptureJournalStart({
+      if (captureSessionLease.current() && captureSessionLease.current()?.meetingId !== meetingId) throw new Error('capture_session_already_active');
+      const prep = calendarOccurrenceKey !== undefined ? db.meetingPrepStore.claimStart(calendarOccurrenceKey, meetingId) : null;
+      try {
+      const manifest = await handleAudioCaptureJournalStart({
         meetingId,
         startedAtMs,
         expectedSources,
@@ -2369,8 +2447,20 @@ app.whenReady().then(async () => {
           : null,
         encryptedCaptureRequired: encryptionRollout.encryptedCaptureWrites,
       });
+      if (manifest.meetingId !== meetingId) throw new Error('capture_session_already_active');
+      return manifest;
+      } catch (error) {
+        if (prep) db.meetingPrepStore.abortStart(meetingId);
+        throw error;
+      }
     },
   );
+
+  ipcMain.handle('MEETING_PREP_RECORDING_STARTED', (event, meetingId) => {
+    captureSessionLease.requireRecordingOwner(String(meetingId), event.sender.id);
+    db.meetingPrepStore.markStarted(String(meetingId));
+    return true;
+  });
 
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_ABORT_START',
@@ -2389,6 +2479,7 @@ app.whenReady().then(async () => {
           normalizedMeetingId,
         );
       } finally {
+        db.meetingPrepStore.abortStart(normalizedMeetingId);
         liveMeetingContextIndex.clear(normalizedMeetingId);
         if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
           knowledgeSynthesisPause.release('capture');
@@ -3482,7 +3573,10 @@ app.whenReady().then(async () => {
             : Number.isFinite(durationSeconds) && durationSeconds > 0
               ? new Date(startedAt.getTime() + durationSeconds * 1000)
               : null;
-        if (!Number.isNaN(startedAt.getTime()) && endedAt) {
+        const prep = db.meetingPrepStore.forMeeting(String(meeting.id));
+        if (prep) {
+          db.calendarStore.setMeetingContext(String(meeting.id), prep.occurrenceKey, 'user', prep.event);
+        } else if (!Number.isNaN(startedAt.getTime()) && endedAt) {
           db.calendarStore.associateMeeting(
             String(meeting.id),
             startedAt.toISOString(),
@@ -3534,6 +3628,7 @@ app.whenReady().then(async () => {
     return claimed;
   });
   ipcMain.handle('UPDATE_MEETING_TITLE_IF_CURRENT', (_event, input) => {
+    if (input?.source === 'generated' && db.meetingPrepStore.forMeeting(String(input?.meetingId))?.event.title.trim()) return false;
     const result = db.updateMeetingTitleIfCurrent(input);
     if (result) invalidateDreamingCatalog();
     return result;
@@ -7003,7 +7098,7 @@ app.whenReady().then(async () => {
       });
 
       try {
-        const context =
+        const baseContext =
           request.scope.type === 'live_meeting'
             ? (() => {
                 const activeMeeting = captureSessionLease.activeForOwner(
@@ -7071,6 +7166,9 @@ app.whenReady().then(async () => {
                       .speakerDisplayNames,
                 });
               })();
+
+        const prepMeetingId = request.scope.type === 'live_meeting' ? captureSessionLease.activeForOwner(event.sender.id)?.meetingId : request.scope.meetingId;
+        const context = withMeetingPrepContext(baseContext, prepMeetingId ? db.meetingPrepStore.forMeeting(prepMeetingId) : null);
 
         console.info('[Pluto][Ask Pluto][main] context-ready', {
           requestId,
@@ -7413,7 +7511,12 @@ app.whenReady().then(async () => {
         getMeeting: (meetingId) =>
           (db.getMeeting(meetingId) as db.PersistedMeeting | null) ?? null,
         saveMeeting: (meeting) => {
-          const saved = db.saveMeeting(meeting);
+          const prep = db.meetingPrepStore.forMeeting(String(meeting.id));
+          const saved = db.saveMeeting(prep && (!meeting.title || /^(Meeting|New Meeting)$/i.test(meeting.title)) ? {...meeting, title: prep.event.title || meeting.title} : meeting);
+          if (prep) {
+            db.meetingPrepStore.markStarted(String(meeting.id));
+            db.calendarStore.setMeetingContext(String(meeting.id), prep.occurrenceKey, 'user', prep.event);
+          }
           if (win && !win.isDestroyed()) {
             win.webContents.send('MEETING_NOTES_UPDATED', meeting.id);
           }

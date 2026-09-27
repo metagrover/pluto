@@ -39,6 +39,7 @@ interface ZenModeProps {
   liveTranscriptIntegrity: LiveTranscriptIntegrity;
   recordingStartedAtMs: number | null;
   calendarEvent?: CalendarEvent | null;
+  onOpenMeeting?: (id: string) => void;
   askPlutoConversation?: MeetingAskPlutoConversationMessage[];
   setAskPlutoConversation?: React.Dispatch<
     React.SetStateAction<MeetingAskPlutoConversationMessage[]>
@@ -71,6 +72,7 @@ export const ZenMode = ({
   liveTranscriptIntegrity,
   recordingStartedAtMs,
   calendarEvent = null,
+      onOpenMeeting,
   askPlutoConversation,
   setAskPlutoConversation,
   askPlutoMinimized,
@@ -151,6 +153,7 @@ export const ZenMode = ({
           notes={currentNotes}
           onNotesChange={setCurrentNotes}
           calendarEvent={calendarEvent}
+          onOpenMeeting={onOpenMeeting}
         />
         <LiveTranscript
           segments={model.transcript}

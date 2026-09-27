@@ -352,4 +352,50 @@ describe('calendar store', () => {
     const retrieved = store.getMeetingContext('meeting-proactive-1');
     expect(retrieved?.occurrenceKey).toBe(calendarEvent.occurrenceKey);
   });
+  it('filters email history before applying the candidate limit', () => {
+    const store = createCalendarStore(sql);
+    const meetingInsert = sql.prepare(
+      'INSERT INTO meetings(id,title,started_at) VALUES (?,?,?)',
+    );
+    const contextInsert = sql.prepare(
+      "INSERT INTO meeting_calendar_context(meeting_id,occurrence_key,calendar_title,event_json,match_origin,match_evidence,cache_revision) VALUES (?,?,'Work',?,'automatic','time_overlap',1)",
+    );
+    for (let index = 0; index < 205; index++) {
+      const id = `candidate-${index}`;
+      const matching = index === 0;
+      meetingInsert.run(
+        id,
+        'Review',
+        matching ? '2026-08-01T10:00:00Z' : '2026-09-01T10:00:00Z',
+      );
+      contextInsert.run(
+        id,
+        id,
+        JSON.stringify({
+          ...calendarEvent,
+          occurrenceKey: id,
+          organizer: null,
+          attendees: [
+            {
+              name: 'Sam',
+              email: matching ? 'sam@example.com' : 'someone-else@example.com',
+            },
+          ],
+        }),
+      );
+    }
+    expect(
+      store
+        .listPriorMeetingContexts('2026-09-28T10:00:00Z', 200)
+        .map((c) => c.meetingId),
+    ).not.toContain('candidate-0');
+    expect(
+      store
+        .listPriorMeetingContexts('2026-09-28T10:00:00Z', 200, {
+          event: calendarEvent,
+          emails: ['sam@example.com'],
+        })
+        .map((c) => c.meetingId),
+    ).toEqual(['candidate-0']);
+  });
 });

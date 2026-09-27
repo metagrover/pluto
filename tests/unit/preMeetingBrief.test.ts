@@ -4,6 +4,7 @@ import type { Entity, PersistedMeeting } from '../../electron/db';
 import {
   buildPreMeetingBrief,
   resolvePriorMeeting,
+  validatePreMeetingBriefRequest,
 } from '../../electron/preMeetingBrief';
 
 const event = (overrides: Partial<CalendarEvent> = {}): CalendarEvent => ({
@@ -146,4 +147,214 @@ describe('pre-meeting briefs', () => {
     expect(brief.priorMeeting).toBeNull();
     expect(brief.emptyMessage).toMatch(/No trustworthy previous meeting/);
   });
+});
+
+it('finds email history under changed titles and excludes mention-only history', () => {
+  const brief = buildPreMeetingBrief(
+    {
+      kind: 'calendar',
+      event: event({ title: 'A completely different title', seriesKey: null }),
+    },
+    {
+      listPriorMeetingContexts: () => [priorContext()],
+      getMeeting: (id) =>
+        id === 'meeting-1' ? meeting : { ...meeting, id: 'mention' },
+      getMeetingEntities: () => [action('completed'), action('active')],
+      getBlockedActionItems: () => [],
+      searchMeetingSummaries: () => [],
+      getGlobalWorkingMemory: () => undefined,
+      getPeopleBriefingSummaries: () => [],
+      resolveAttendees: () => [
+        {
+          key: 'email:sam@example.com',
+          name: 'Sam',
+          email: 'sam@example.com',
+          personId: 'sam',
+          personName: 'Sam',
+          status: 'identified',
+          basis: 'email',
+          suggestions: [],
+        },
+      ],
+      getPersonHistory: () => ({
+        meetings: [{ id: 'mention', evidence: 'mentioned' }],
+      }),
+    },
+  );
+  expect(brief.priorMeeting?.id).toBe('meeting-1');
+  expect(brief.sourceMeetings?.map((source) => source.id)).toEqual([
+    'meeting-1',
+  ]);
+  expect(brief.sourceMeetings?.[0].evidence).toBe('invited');
+  expect(brief.stillOpen).toHaveLength(1);
+});
+it('rechecks the corrected person and drops the previously selected person history', () => {
+  let personId = 'first';
+  const deps = {
+    listPriorMeetingContexts: () => [],
+    getMeeting: (id: string) => ({ ...meeting, id, title: id }),
+    getMeetingEntities: () => [],
+    getBlockedActionItems: () => [],
+    searchMeetingSummaries: () => [],
+    getGlobalWorkingMemory: () => undefined,
+    getPeopleBriefingSummaries: () => [],
+    resolveAttendees: () => [
+      {
+        key: 'email:sam@example.com',
+        name: 'Sam',
+        email: 'sam@example.com',
+        personId,
+        personName: personId,
+        status: 'identified' as const,
+        basis: 'user' as const,
+        suggestions: [],
+      },
+    ],
+    getPersonHistory: (id: string) => ({
+      meetings: [{ id: `history-${id}`, evidence: 'confirmed' }],
+    }),
+  };
+  const request = { kind: 'calendar' as const, event: event() };
+  expect(buildPreMeetingBrief(request, deps).priorMeeting?.id).toBe(
+    'history-first',
+  );
+  personId = 'second';
+  expect(
+    buildPreMeetingBrief(request, deps).sourceMeetings?.map((m) => m.id),
+  ).toEqual(['history-second']);
+});
+it('prioritizes shared group history over individual history and orders equal relevance by date', () => {
+  const attendee = (id: string) => ({
+    key: `email:${id}@example.com`,
+    name: id,
+    email: `${id}@example.com`,
+    personId: id,
+    personName: id,
+    status: 'identified' as const,
+    basis: 'email' as const,
+    suggestions: [],
+  });
+  const brief = buildPreMeetingBrief(
+    {
+      kind: 'calendar',
+      event: event({
+        seriesKey: null,
+        title: 'Group',
+        attendees: [
+          { name: 'Sam', email: 'sam@example.com' },
+          { name: 'Alex', email: 'alex@example.com' },
+        ],
+      }),
+    },
+    {
+      listPriorMeetingContexts: () => [],
+      getMeeting: (id) => ({
+        ...meeting,
+        id,
+        title: id,
+        started_at:
+          id === 'shared-old' ? '2026-09-10T10:00:00Z' : '2026-09-14T10:00:00Z',
+      }),
+      getMeetingEntities: () => [],
+      getBlockedActionItems: () => [],
+      searchMeetingSummaries: () => [],
+      getGlobalWorkingMemory: () => undefined,
+      getPeopleBriefingSummaries: () => [],
+      resolveAttendees: () => [attendee('sam'), attendee('alex')],
+      getPersonHistory: (id) => ({
+        meetings: [
+          { id: 'shared-old', evidence: 'confirmed' },
+          { id: 'shared-new', evidence: 'confirmed' },
+          { id: `solo-${id}`, evidence: 'confirmed' },
+        ],
+      }),
+    },
+  );
+  expect(brief.sourceMeetings?.slice(0, 2).map((m) => m.id)).toEqual([
+    'shared-new',
+    'shared-old',
+  ]);
+});
+
+it('validates prep IPC requests and rejects malformed calendar payloads', () => {
+  expect(
+    validatePreMeetingBriefRequest({ kind: 'calendar', event: event() }).kind,
+  ).toBe('calendar');
+  for (const value of [
+    null,
+    { kind: 'query', query: '' },
+    { kind: 'query', query: 'x'.repeat(201) },
+    { kind: 'calendar', event: event({ start: 'invalid' }) },
+    {
+      kind: 'calendar',
+      event: { ...event(), attendees: [{ name: 42, email: null }] },
+    },
+  ]) {
+    expect(() => validatePreMeetingBriefRequest(value)).toThrow(
+      'Invalid prep request',
+    );
+  }
+});
+it('includes other confirmed email aliases in history retrieval', () => {
+  let emails: string[] = [];
+  const brief = buildPreMeetingBrief(
+    { kind: 'calendar', event: event({ seriesKey: null, title: 'New title' }) },
+    {
+      listPriorMeetingContexts: () => [],
+      listRelatedMeetingContexts: (_event, keys) => {
+        emails = keys;
+        return [
+          priorContext({
+            attendees: [{ name: 'Sam', email: 'old@example.com' }],
+          }),
+        ];
+      },
+      getMeeting: () => meeting,
+      getMeetingEntities: () => [],
+      getBlockedActionItems: () => [],
+      searchMeetingSummaries: () => [],
+      getGlobalWorkingMemory: () => undefined,
+      getPeopleBriefingSummaries: () => [],
+      resolveAttendees: () => [
+        {
+          key: 'email:sam@example.com',
+          name: 'Sam',
+          email: 'sam@example.com',
+          personId: 'sam',
+          personName: 'Sam',
+          status: 'identified',
+          basis: 'user',
+          suggestions: [],
+        },
+      ],
+      getPersonEmails: () => ['old@example.com'],
+    },
+  );
+  expect(emails).toContain('old@example.com');
+  expect(brief.priorMeeting?.id).toBe('meeting-1');
+});
+it('excludes rejected and cancelled follow-ups from the briefing', () => {
+  const brief = buildPreMeetingBrief(
+    { kind: 'calendar', event: event() },
+    {
+      listPriorMeetingContexts: () => [priorContext()],
+      getMeeting: () => meeting,
+      getMeetingEntities: () => [
+        {
+          ...action('active'),
+          metadata: JSON.stringify({ commitment_state: 'rejected' }),
+        },
+        {
+          ...action('active'),
+          id: 'cancelled',
+          metadata: JSON.stringify({ cancelled_at: '2026-09-15' }),
+        },
+      ],
+      getBlockedActionItems: () => [],
+      searchMeetingSummaries: () => [],
+      getGlobalWorkingMemory: () => undefined,
+      getPeopleBriefingSummaries: () => [],
+    },
+  );
+  expect(brief.stillOpen).toEqual([]);
 });

@@ -1338,3 +1338,28 @@ export const speakerVoiceRejections = sqliteTable(
     index('idx_speaker_voice_rejections_meeting').on(table.meetingId),
   ],
 );
+
+export const prepAttendeeLinks = sqliteTable('prep_attendee_links', {
+  attendeeKey: text('attendee_key').primaryKey(),
+  personId: text('person_id').references(() => entities.id, { onDelete: 'set null' }),
+  source: text('source').notNull(),
+  updatedAt: text('updated_at').notNull().default(now),
+}, table => [index('idx_prep_attendee_person').on(table.personId), check('prep_attendee_source_check', sql`${table.source} IN ('automatic','user')`)]);
+export const prepAttendeeRejections = sqliteTable('prep_attendee_rejections', {
+  attendeeKey: text('attendee_key').notNull(),
+  personId: text('person_id').notNull().references(() => entities.id, { onDelete: 'cascade' }),
+}, table => [primaryKey({columns: [table.attendeeKey, table.personId]})]);
+
+export const meetingPrep = sqliteTable('meeting_prep', {
+  occurrenceKey: text('occurrence_key').primaryKey().notNull(),
+  eventJson: text('event_json').notNull(),
+  notes: text('notes').notNull().default(''),
+  topicsJson: text('topics_json').notNull().default('[]'),
+  meetingsJson: text('meetings_json').notNull().default('[]'),
+  briefingJson: text('briefing_json'),
+  meetingId: text('meeting_id').unique(),
+  recordingStarted: integer('recording_started').notNull().default(0),
+  revision: integer('revision').notNull().default(0),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});

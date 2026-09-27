@@ -3758,3 +3758,9 @@
     resize: vertical;
   }
 }
+
+/* Keep keyboard focus aligned with the active theme rather than the native browser accent. */
+.app-sidebar button:focus-visible {
+  outline: 2px solid hsl(var(--pro-accent));
+  outline-offset: 2px;
+}

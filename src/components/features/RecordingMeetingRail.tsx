@@ -1,3 +1,4 @@
+import { SavedMeetingPrep } from './MeetingPrepEditor';
 import { CheckCircle2, UserRound, X } from 'lucide-react';
 import { forwardRef, useEffect, useMemo, useState } from 'react';
 import type { CalendarEvent } from '../../../electron/calendar/types';
@@ -24,6 +25,7 @@ type Props = {
   notes: string;
   onNotesChange: (value: string) => void;
   calendarEvent?: CalendarEvent | null;
+  onOpenMeeting?: (id: string) => void;
   people?: IdentityPerson[];
   disabled?: boolean;
 };
@@ -41,11 +43,13 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
       notes,
       onNotesChange,
       calendarEvent = null,
+      onOpenMeeting,
       people: propPeople,
       disabled = false,
     },
     ref,
   ) => {
+    const [notesTab, setNotesTab] = useState<'meeting' | 'prep'>('meeting');
     const [saveState, setSaveState] = useState<'saved' | 'dirty'>('saved');
     const [localQuery, setLocalQuery] = useState('');
     const [loadedPeople, setLoadedPeople] = useState<IdentityPerson[]>([]);
@@ -92,14 +96,23 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
       setSaveState('dirty');
       const timer = window.setTimeout(() => {
         if (notes) {
-          window.localStorage.setItem(RECORDING_SCRATCHPAD_STORAGE_KEY, notes);
+          window.localStorage.setItem(
+            calendarEvent
+              ? `pluto.meeting-notes:${calendarEvent.occurrenceKey}`
+              : RECORDING_SCRATCHPAD_STORAGE_KEY,
+            notes,
+          );
         } else {
-          window.localStorage.removeItem(RECORDING_SCRATCHPAD_STORAGE_KEY);
+          window.localStorage.removeItem(
+            calendarEvent
+              ? `pluto.meeting-notes:${calendarEvent.occurrenceKey}`
+              : RECORDING_SCRATCHPAD_STORAGE_KEY,
+          );
         }
         setSaveState('saved');
       }, 400);
       return () => window.clearTimeout(timer);
-    }, [notes]);
+    }, [notes, calendarEvent?.occurrenceKey]);
 
     const eligiblePeople = useMemo(() => {
       return loadedPeople.filter((p) => {
@@ -191,7 +204,7 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
         <div className="recording-rail-content">
           <header className="rail-heading">
             <div className="rail-heading__status">
-              <p className="workspace-eyebrow">Live note</p>
+              <p className="workspace-eyebrow">Notes</p>
               <span aria-live="polite">
                 {saveState === 'saved' ? (
                   <>
@@ -258,12 +271,56 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
             <label className="sr-only" htmlFor="recording-notes">
               Meeting notes
             </label>
-            <textarea
-              id="recording-notes"
-              value={notes}
-              onChange={(event) => onNotesChange(event.target.value)}
-              placeholder="Start typing. Pluto will preserve your words and enrich them after the meeting."
-            />
+            <div
+              role="tablist"
+              aria-label="Notes sections"
+              className="mb-3 flex gap-2"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={notesTab === 'meeting'}
+                onClick={() => setNotesTab('meeting')}
+                className="rounded px-3 py-1.5 text-xs text-pro-text-main hover:bg-pro-surface"
+              >
+                Meeting
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={notesTab === 'prep'}
+                onClick={() => setNotesTab('prep')}
+                className="rounded px-3 py-1.5 text-xs text-pro-text-main hover:bg-pro-surface"
+              >
+                Prep
+              </button>
+            </div>
+            <div
+              role="tabpanel"
+              aria-label="Meeting notes"
+              className={
+                notesTab === 'meeting'
+                  ? 'flex min-h-0 flex-1 flex-col'
+                  : 'hidden'
+              }
+              hidden={notesTab !== 'meeting'}
+            >
+              <textarea
+                id="recording-notes"
+                value={notes}
+                onChange={(event) => onNotesChange(event.target.value)}
+                placeholder="Start typing. Pluto will preserve your words and enrich them after the meeting."
+              />
+            </div>
+            {notesTab === 'prep' && (
+              <div
+                role="tabpanel"
+                aria-label="Meeting preparation"
+                className="min-h-0 overflow-y-auto"
+              >
+                <SavedMeetingPrep event={calendarEvent} onOpenMeeting={onOpenMeeting} />
+              </div>
+            )}
           </section>
           <section
             className="rail-participants"

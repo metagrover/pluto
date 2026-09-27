@@ -1,3 +1,4 @@
+import type { MeetingPrep } from '../meetingPrep';
 import type {
   MeetingAskPlutoCitation,
   MeetingAskPlutoLiveContext,
@@ -36,7 +37,8 @@ export interface MeetingAskPlutoEvidenceItem {
     | 'decision'
     | 'action_item'
     | 'entity'
-    | 'attention';
+    | 'attention'
+    | 'prep';
   meetingId: string;
   title: string;
   text: string;
@@ -919,3 +921,56 @@ export const buildMeetingAskPlutoResponseFromAnswer = ({
     rationale: context.statusNote,
   };
 };
+
+/** Preparation is user intent and historical reference, never evidence of this meeting's discussion. */
+export function withMeetingPrepContext(
+  context: MeetingAskPlutoContext,
+  prep: MeetingPrep | null,
+): MeetingAskPlutoContext {
+  if (!prep) return context;
+  const items: MeetingAskPlutoEvidenceItem[] = [];
+  if (prep.notes.trim())
+    items.push({
+      id: 'prep-notes',
+      kind: 'prep',
+      meetingId: context.scope.meetingId,
+      title:
+        'User preparation — planned questions and agenda; not confirmed discussion',
+      text: prep.notes.slice(0, 6000),
+    });
+  for (const topic of prep.topics.slice(0, 8))
+    items.push({
+      id: `prep-topic-${topic.id}`,
+      kind: 'prep',
+      meetingId: context.scope.meetingId,
+      title: `Included historical topic: ${topic.name} — not evidence it was discussed today`,
+      text: [
+        topic.context.slice(0, 3000),
+        ...topic.sources.map(
+          (source) =>
+            `${source.title} (${source.date || 'date unknown'}; source meeting ${source.meetingId})`,
+        ),
+      ].join('\n'),
+    });
+  if (prep.briefing) {
+    const text = [...(prep.briefing.overview || []), ...(prep.briefing.talkingPoints || [])].map(item => `${item.text} [${item.sourceLabel}; ${item.sourceDate || 'date unknown'}]`).join('\n').slice(0, 4000);
+    if (text) items.push({id:'prep-briefing',kind:'prep',meetingId:context.scope.meetingId,title:'Generated preparation from past meetings — planned context, not current discussion',text});
+  }
+  for (const meeting of (prep.meetings || []).slice(0, 8))
+    items.push({
+      id: `prep-meeting-${meeting.id}`,
+      kind: 'prep',
+      meetingId: context.scope.meetingId,
+      title: `Included past meeting: ${meeting.title} (${meeting.date || 'date unknown'}; source meeting ${meeting.id}) — not evidence it was discussed today`,
+      text: meeting.context.slice(0, 6000),
+    });
+  if (!items.length) return context;
+  return {
+    ...context,
+    status: 'ready',
+    trustStatus:
+      context.status === 'unavailable' ? 'inferred' : context.trustStatus,
+    boundary: `${context.boundary} The user explicitly included the following preparation and historical meeting references. These describe planned discussion or past context, not what was said in the current meeting. Label preparation and historical references separately; never claim a planned question was asked or an outcome agreed without current-meeting evidence.`,
+    evidenceItems: [...context.evidenceItems, ...items],
+  };
+}

@@ -1,3 +1,4 @@
+import { openMeetingPrep } from './api/meetingPrep';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 
@@ -396,7 +397,7 @@ function App() {
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const stopSessionRef = useRef<((endReason?: string) => void) | null>(null);
-  const startSessionRef = useRef<(() => Promise<CaptureStartResult>) | null>(
+  const startSessionRef = useRef<((event?: CalendarEvent) => Promise<CaptureStartResult>) | null>(
     null,
   );
   const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptSegment[]>(
@@ -1167,14 +1168,20 @@ function App() {
 
   const handleStartFromPrompt = useCallback(
     async (event: CalendarEvent) => {
+      await openMeetingPrep(event);
       dismissPrompt(event.occurrenceKey);
       activeCalendarEventRef.current = event;
       setActiveCalendarEvent(event);
       setMeetingTitle(event.title || 'Meeting');
       setMeetingParticipants([]);
       setParticipantInput('');
-      if (startSessionRef.current) {
-        await startSessionRef.current();
+      setCurrentNotes(localStorage.getItem(`pluto.meeting-notes:${event.occurrenceKey}`) || '');
+      if (!startSessionRef.current) throw new Error('Recording is not ready yet.');
+      const result = await startSessionRef.current(event);
+      if (!result.admitted) {
+        activeCalendarEventRef.current = null;
+        setActiveCalendarEvent(null);
+        throw new Error('Recording could not start. Check recording permissions and the calendar time, then retry.');
       }
     },
     [dismissPrompt],
@@ -1627,6 +1634,7 @@ function App() {
           meetingId,
           expectedTitle: detail.title,
           title: generatedTitle.trim(),
+          source: 'generated',
         });
       } catch (error) {
         console.error(
@@ -2007,9 +2015,9 @@ function App() {
           <Sidebar
             sidebarVisible={sidebarVisible}
             activeTab={activeTab}
-            setActiveTab={setActiveTab}
+            setActiveTab={(tab) => { setPreMeetingBriefVisible(false); setActiveTab(tab); }}
             selectedMeetingId={selectedMeetingId}
-            setSelectedMeetingId={setSelectedMeetingId}
+            setSelectedMeetingId={(id) => { setPreMeetingBriefVisible(false); setSelectedMeetingId(id); }}
             safeMeetings={safeMeetings}
             onStartRecording={() => {
               if (startSessionRef.current) {
@@ -2076,6 +2084,7 @@ function App() {
           liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}
           calendarEvent={resolvedActiveCalendarEvent}
+          onOpenMeeting={(id) => { setZenVisible(false); handleOpenMeeting(id); }}
           askPlutoConversation={meetingAskPlutoConversation}
           setAskPlutoConversation={setMeetingAskPlutoConversation}
           askPlutoMinimized={meetingAskPlutoMinimized}
@@ -2107,7 +2116,9 @@ function App() {
           <div
             ref={contentScrollRef}
             className={`flex-1 flex flex-col scroll-smooth relative overflow-y-scroll ${
-              selectedMeetingId
+              preMeetingBriefVisible
+                ? 'px-4 py-6 md:px-8'
+                : selectedMeetingId
                 ? 'meeting-app-scroll'
                 : activeTab === 'chat'
                   ? 'px-0 py-0'
@@ -2132,7 +2143,19 @@ function App() {
               <div className="app-background-glow fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full blur-[150px] pointer-events-none z-0 opacity-40" />
             </>
 
-            {finalizingMeeting ? (
+            {preMeetingBriefVisible ? (
+              <PreMeetingBriefSheet
+                visible={preMeetingBriefVisible}
+                event={preMeetingBriefEvent}
+                onStartMeeting={handleStartFromPrompt}
+                recordingBusy={activeRecording}
+                onClose={() => setPreMeetingBriefVisible(false)}
+                onOpenMeeting={(meetingId) => {
+                  setPreMeetingBriefVisible(false);
+                  handleOpenMeeting(meetingId, { label: 'Back to Dashboard' });
+                }}
+              />
+            ) : finalizingMeeting ? (
               <RecordingFinalizingView meeting={finalizingMeeting} />
             ) : selectedMeetingId ? (
               <MeetingView
@@ -2430,15 +2453,7 @@ function App() {
         }}
       />
 
-      <PreMeetingBriefSheet
-        visible={preMeetingBriefVisible}
-        event={preMeetingBriefEvent}
-        onClose={() => setPreMeetingBriefVisible(false)}
-        onOpenMeeting={(meetingId) => {
-          setPreMeetingBriefVisible(false);
-          handleOpenMeeting(meetingId, { label: 'Back to Dashboard' });
-        }}
-      />
+
 
       {autoEndTriggered && (
         <AutoEndToast

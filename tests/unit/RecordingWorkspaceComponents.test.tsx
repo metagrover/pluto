@@ -231,7 +231,10 @@ describe('recording workspace components', () => {
       />,
     );
     expect(html).toContain('aria-label="Meeting notes"');
-    expect(html).toContain('Live note');
+    expect(html).toContain('Notes');
+    expect(html).toContain('Notes sections');
+    expect(html).toContain('>Meeting</button>');
+    expect(html).toContain('>Prep</button>');
     expect(html).toContain('Saved locally');
     expect(html).toContain('Meeting title');
     expect(html).toContain('value="Launch review"');

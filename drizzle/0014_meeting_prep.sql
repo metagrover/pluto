@@ -1,0 +1,11 @@
+CREATE TABLE meeting_prep (
+  occurrence_key TEXT PRIMARY KEY NOT NULL,
+  event_json TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  topics_json TEXT NOT NULL DEFAULT '[]',
+  meeting_id TEXT UNIQUE,
+  recording_started INTEGER NOT NULL DEFAULT 0,
+  revision INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
