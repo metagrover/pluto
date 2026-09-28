@@ -11,8 +11,6 @@ export const getMeetingPrep = (key: string) =>
   invoke<MeetingPrep | null>('MEETING_PREP_GET', key);
 export const getPrepForMeeting = (id: string) =>
   invoke<MeetingPrep | null>('MEETING_PREP_FOR_MEETING', id);
-export const listPrepTopics = () =>
-  invoke<Array<{ id: string; name: string }>>('MEETING_PREP_TOPICS');
 export const listPrepMeetings = (query = '', occurrenceKey?: string) =>
   invoke<PrepMeetingOption[]>('MEETING_PREP_MEETINGS', {
     query,
@@ -22,9 +20,6 @@ export const saveMeetingPrep = (
   prep: MeetingPrep,
   patch:
     | { notes: string }
-    | { addTopicId: string }
-    | { removeTopicId: string }
-    | { refreshTopicId: string }
     | { meetingIds: string[] }
     | { addMeetingId: string }
     | { removeMeetingId: string }

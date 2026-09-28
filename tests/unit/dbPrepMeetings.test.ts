@@ -72,3 +72,23 @@ it('searches actual saved meeting titles and notes and snapshots refreshed notes
   });
   expect(prep.meetings).toEqual([]);
 });
+
+it('keeps prep but clears the recording link when its meeting is deleted', () => {
+  const occurrenceKey = 'prep-deleted-recording';
+  db.meetingPrepStore.open({ ...event, occurrenceKey });
+  db.saveMeeting({
+    id: 'deleted-prep-recording',
+    title: 'Review',
+    started_at: '2026-09-28T10:00:00Z',
+  });
+  db.db
+    .prepare(
+      'UPDATE meeting_prep SET meeting_id = ?, recording_started = 1 WHERE occurrence_key = ?',
+    )
+    .run('deleted-prep-recording', occurrenceKey);
+  db.deleteMeeting('deleted-prep-recording');
+  expect(db.meetingPrepStore.get(occurrenceKey)).toMatchObject({
+    meetingId: null,
+    recordingStarted: false,
+  });
+});

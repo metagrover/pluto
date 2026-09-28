@@ -93,8 +93,6 @@ export function createMeetingPrepStore(
   deps: {
     event: (key: string) => CalendarEvent | null;
     personName?: (email: string) => string | null;
-    topic: (id: string) => PrepTopic | null;
-    topics: () => Array<{ id: string; name: string }>;
     meeting?: (id: string) => PrepMeetingReference | null;
     meetings?: (query: string) => PrepMeetingOption[];
   },
@@ -154,9 +152,6 @@ export function createMeetingPrepStore(
           (k) =>
             ![
               'notes',
-              'addTopicId',
-              'removeTopicId',
-              'refreshTopicId',
               'addMeetingId',
               'removeMeetingId',
               'refreshMeetingId',
@@ -167,7 +162,6 @@ export function createMeetingPrepStore(
       )
         throw new Error('Invalid prep update');
       let notes = current.notes;
-      let topics = current.topics;
       let meetings = current.meetings || [];
       if ('notes' in input) {
         if (typeof input.notes !== 'string' || input.notes.length > 100_000)
@@ -220,26 +214,6 @@ export function createMeetingPrepStore(
               ? meetings.map((m) => (m.id === id ? meeting : m))
               : [...meetings, meeting];
         }
-      } else {
-        const id = key(
-          input.addTopicId ?? input.removeTopicId ?? input.refreshTopicId,
-        );
-        if ('removeTopicId' in input)
-          topics = topics.filter((t) => t.id !== id);
-        else {
-          if ('refreshTopicId' in input && !topics.some((t) => t.id === id))
-            throw new Error('Topic is not linked');
-          if ('addTopicId' in input && topics.some((t) => t.id === id))
-            return current;
-          if ('addTopicId' in input && topics.length >= 20)
-            throw new Error('Include up to 20 topics');
-          const topic = deps.topic(id);
-          if (!topic) throw new Error('This topic is no longer available');
-          topics =
-            'refreshTopicId' in input
-              ? topics.map((t) => (t.id === id ? topic : t))
-              : [...topics, topic];
-        }
       }
       sql
         .prepare(
@@ -247,7 +221,7 @@ export function createMeetingPrepStore(
         )
         .run(
           notes,
-          JSON.stringify(topics),
+          JSON.stringify(current.topics),
           JSON.stringify(meetings),
           JSON.stringify(meetings) === JSON.stringify(current.meetings || [])
             ? current.briefing
@@ -334,7 +308,6 @@ export function createMeetingPrepStore(
         .run(JSON.stringify(brief), current.occurrenceKey);
       return true;
     },
-    listTopics: deps.topics,
     listMeetings: (query: unknown = '', occurrenceKey?: unknown) => {
       if (typeof query !== 'string' || query.length > 200)
         throw new Error('Invalid meeting search');

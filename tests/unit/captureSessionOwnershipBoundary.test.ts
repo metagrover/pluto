@@ -121,7 +121,7 @@ describe('capture session production ownership boundary', () => {
   it('hard-rejects lease conflicts before microphone acquisition', () => {
     const startSession = sliceBetween(
       audioManager,
-      'const startSession = async ()',
+      'const startSession = async (',
       'const stopSession = async (',
     );
     const conflictIndex = startSession.indexOf(

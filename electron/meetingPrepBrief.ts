@@ -100,3 +100,40 @@ export function buildMeetingPrepBrief(
       : 'Add a past meeting to build preparation context.',
   };
 }
+
+/** Keep generated historical prose, but never show a retired follow-up as open. */
+export function refreshMeetingPrepBrief(
+  saved: PreMeetingBrief,
+  current: PreMeetingBrief,
+): PreMeetingBrief {
+  const open = new Map(current.stillOpen.map((item) => [item.id, item]));
+  const refreshItems = (items: PreMeetingBriefItem[] | undefined) =>
+    items?.flatMap((item) => {
+      const actionId = item.id.startsWith('suggested:')
+        ? item.id.slice('suggested:'.length)
+        : item.id;
+      if (!actionId.startsWith('follow-up:')) return [item];
+      const active = open.get(actionId);
+      if (!active) return [];
+      return [
+        item.id.startsWith('suggested:')
+          ? {
+              ...active,
+              id: item.id,
+              text: `What is the latest update on “${active.text}”?`,
+              trustStatus: 'inferred' as const,
+            }
+          : active,
+      ];
+    });
+  return {
+    ...saved,
+    title: current.title,
+    startsAt: current.startsAt,
+    agenda: current.agenda,
+    stillOpen: current.stillOpen,
+    overview: refreshItems(saved.overview),
+    evidenceItems: refreshItems(saved.evidenceItems),
+    talkingPoints: refreshItems(saved.talkingPoints),
+  };
+}

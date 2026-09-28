@@ -1198,12 +1198,6 @@ const createInvokeFallback =
         );
         break;
       }
-      case 'MEETING_PREP_TOPICS':
-        result = [
-          { id: 'preview-launch', name: 'Q4 launch' },
-          { id: 'preview-pricing', name: 'Customer pricing' },
-        ];
-        break;
       case 'MEETING_PREP_SAVE': {
         const request = args[0] as {
           occurrenceKey: string;
@@ -1218,28 +1212,6 @@ const createInvokeFallback =
           throw new Error('Prep changed elsewhere. Reload before saving.');
         const patch = request.patch;
         if ('notes' in patch) prep.notes = patch.notes;
-        if (patch.removeTopicId)
-          prep.topics = prep.topics.filter((t) => t.id !== patch.removeTopicId);
-        const id = patch.addTopicId || patch.refreshTopicId;
-        if (id) {
-          const topic = {
-            id,
-            name: id === 'preview-launch' ? 'Q4 launch' : 'Customer pricing',
-            context:
-              'Confirm launch dates, checklist ownership, and customer trial pricing.',
-            sources: [
-              {
-                meetingId: 'preview-q4-launch',
-                title: 'Q4 Launch & Customer Pricing',
-                date: new Date().toISOString(),
-              },
-            ],
-            capturedAt: new Date().toISOString(),
-          };
-          prep.topics = patch.refreshTopicId
-            ? prep.topics.map((t) => (t.id === id ? topic : t))
-            : [...prep.topics, topic];
-        }
         if (Array.isArray(patch.meetingIds)) {
           prep.meetings = patch.meetingIds.map(
             (id: string) =>

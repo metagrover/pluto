@@ -1,7 +1,10 @@
 import { expect, it } from 'vitest';
 import type { Entity } from '../../electron/db';
 import type { MeetingPrep } from '../../electron/meetingPrep';
-import { buildMeetingPrepBrief } from '../../electron/meetingPrepBrief';
+import {
+  buildMeetingPrepBrief,
+  refreshMeetingPrepBrief,
+} from '../../electron/meetingPrepBrief';
 const prep = {
   event: { title: 'Launch', start: '2026-09-28', agenda: null },
   meetings: [
@@ -84,4 +87,46 @@ it('balances overview and synthesis context across selected meetings instead of 
   expect(
     result.evidenceItems?.slice(0, 4).map((item) => item.sourceMeetingId),
   ).toEqual(['old', 'second', 'old', 'second']);
+});
+
+it('removes completed action items from a saved generated briefing', () => {
+  const action = {
+    id: 'follow-up:done',
+    text: 'Send the launch checklist',
+    trustStatus: 'grounded' as const,
+    sourceMeetingId: 'old',
+    sourceLabel: 'Launch review',
+    sourceDate: '2026-09-20',
+  };
+  const historical = {
+    ...action,
+    id: 'history:old:0',
+    text: 'The team reviewed launch timing.',
+  };
+  const baseline = buildMeetingPrepBrief(prep, {
+    entities: () => [],
+    blockers: () => [],
+  });
+  const refreshed = refreshMeetingPrepBrief(
+    {
+      ...baseline,
+      synthesisStatus: 'ready',
+      overview: [action, historical],
+      evidenceItems: [action, historical],
+      stillOpen: [action],
+      talkingPoints: [
+        {
+          ...action,
+          id: 'suggested:follow-up:done',
+          text: 'What is the update?',
+        },
+      ],
+    },
+    baseline,
+  );
+  expect(refreshed.synthesisStatus).toBe('ready');
+  expect(refreshed.stillOpen).toEqual([]);
+  expect(refreshed.overview).toEqual([historical]);
+  expect(refreshed.evidenceItems).toEqual([historical]);
+  expect(refreshed.talkingPoints).toEqual([]);
 });

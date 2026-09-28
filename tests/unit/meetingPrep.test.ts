@@ -3,7 +3,6 @@ import Database from 'better-sqlite3';
 import { afterEach, expect, it } from 'vitest';
 import type { CalendarEvent } from '../../electron/calendar/types';
 import {
-  type PrepTopic,
   createMeetingPrepStore,
   prepStartBlocker,
 } from '../../electron/meetingPrep';
@@ -31,15 +30,6 @@ function setup() {
   sql.exec(fs.readFileSync('drizzle/0015_prep_past_meetings.sql', 'utf8'));
   sql.exec(fs.readFileSync('drizzle/0016_prep_briefing.sql', 'utf8'));
   let cached: CalendarEvent | null = event;
-  let topic: PrepTopic | null = {
-    id: 'topic',
-    name: 'Launch',
-    context: 'Old context',
-    sources: [
-      { meetingId: 'old', title: 'Previous review', date: '2026-09-20' },
-    ],
-    capturedAt: '2026-09-27',
-  };
   let meeting:
     | import('../../electron/meetingPrep').PrepMeetingReference
     | null = {
@@ -53,8 +43,6 @@ function setup() {
   };
   const deps = {
     event: () => cached,
-    topic: () => topic,
-    topics: () => [{ id: 'topic', name: 'Launch' }],
     meeting: () => meeting,
     meetings: () => (meeting ? [meeting] : []),
   };
@@ -67,9 +55,6 @@ function setup() {
     },
     changeMeeting: (value: typeof meeting) => {
       meeting = value;
-    },
-    changeTopic: (value: PrepTopic | null) => {
-      topic = value;
     },
   };
 }
@@ -84,35 +69,26 @@ it('preserves drafts on reopening and isolates calendar occurrences', () => {
   expect(store.open({ ...event, occurrenceKey: 'other' }).notes).toBe('');
   expect(store.get(event.occurrenceKey)?.notes).toBe(prep.notes);
 });
-it('snapshots topics, refreshes explicitly, deduplicates, and unlinks without deleting sources', () => {
-  const { store, changeTopic } = setup();
+it('preserves legacy topic snapshots when saving current prep notes', () => {
+  const { sql, store } = setup();
   let prep = store.open(event);
-  prep = store.save(prep.occurrenceKey, prep.revision, { addTopicId: 'topic' });
-  changeTopic({ ...prep.topics[0], context: 'New context' });
-  expect(store.open(event).topics[0].context).toBe('Old context');
-  expect(
-    store.save(prep.occurrenceKey, prep.revision, { addTopicId: 'topic' })
-      .topics,
-  ).toHaveLength(1);
-  prep = store.save(prep.occurrenceKey, prep.revision, {
-    refreshTopicId: 'topic',
-  });
-  expect(prep.topics[0].context).toBe('New context');
-  prep = store.save(prep.occurrenceKey, prep.revision, {
-    removeTopicId: 'topic',
-  });
-  expect(prep.topics).toEqual([]);
-  expect(store.listTopics()).toHaveLength(1);
-});
-it('preserves deleted-topic snapshots while preventing refresh of a deleted source', () => {
-  const { store, changeTopic } = setup();
-  let prep = store.open(event);
-  prep = store.save(prep.occurrenceKey, prep.revision, { addTopicId: 'topic' });
-  changeTopic(null);
-  expect(store.get(prep.occurrenceKey)?.topics).toHaveLength(1);
+  const topic = {
+    id: 'topic',
+    name: 'Launch',
+    context: 'Old context',
+    sources: [
+      { meetingId: 'old', title: 'Previous review', date: '2026-09-20' },
+    ],
+    capturedAt: '2026-09-27',
+  };
+  sql
+    .prepare('UPDATE meeting_prep SET topics_json = ? WHERE occurrence_key = ?')
+    .run(JSON.stringify([topic]), prep.occurrenceKey);
+  prep = store.save(prep.occurrenceKey, prep.revision, { notes: 'New notes' });
+  expect(prep.topics).toEqual([topic]);
   expect(() =>
-    store.save(prep.occurrenceKey, prep.revision, { refreshTopicId: 'topic' }),
-  ).toThrow('no longer available');
+    store.save(prep.occurrenceKey, prep.revision, { addTopicId: 'topic' }),
+  ).toThrow('Invalid prep update');
 });
 it('rejects stale revisions and malformed updates without losing notes', () => {
   const { store } = setup();
@@ -122,7 +98,7 @@ it('rejects stale revisions and malformed updates without losing notes', () => {
     store.save(prep.occurrenceKey, 0, { notes: 'Overwrite' }),
   ).toThrow('changed elsewhere');
   expect(() =>
-    store.save(prep.occurrenceKey, 1, { notes: 'x', addTopicId: 'topic' }),
+    store.save(prep.occurrenceKey, 1, { notes: 'x', addMeetingId: 'past' }),
   ).toThrow('Invalid');
   expect(store.get(prep.occurrenceKey)?.notes).toBe('Keep me');
 });

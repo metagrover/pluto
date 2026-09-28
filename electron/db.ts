@@ -3911,6 +3911,11 @@ export const deleteMeeting = (id: string | number) => {
   const result = db.prepare('DELETE FROM meetings WHERE id = ?').run(safeId);
 
   if (result.changes === 1) {
+    // Keep the occurrence's preparation, but do not leave its Start/Open
+    // action pointing at a recording that no longer exists.
+    db.prepare(
+      'UPDATE meeting_prep SET meeting_id = NULL, recording_started = 0, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE meeting_id = ?',
+    ).run(safeId);
     db.prepare('DELETE FROM meeting_analysis_runs WHERE meeting_id = ?').run(
       safeId,
     );
@@ -10277,37 +10282,6 @@ export const meetingPrepStore = createMeetingPrepStore(db, {
       preview: context.slice(0, 240),
       context,
       trustStatus: document.trustStatus,
-      capturedAt: new Date().toISOString(),
-    };
-  },
-  topics: () =>
-    getEntitiesByType('topic').map(({ id, name }) => ({ id, name })),
-  topic: (id) => {
-    const topic = getEntity(id);
-    if (!topic || topic.type !== 'topic') return null;
-    const rows = db
-      .prepare(
-        'SELECT m.id, m.title, m.started_at, me.context FROM meeting_entities me JOIN meetings m ON m.id = me.meeting_id WHERE me.entity_id = ? ORDER BY COALESCE(m.started_at, m.created_at) DESC LIMIT 8',
-      )
-      .all(id) as Array<{
-      id: string;
-      title: string;
-      started_at: string | null;
-      context: string | null;
-    }>;
-    return {
-      id,
-      name: topic.name,
-      context: rows
-        .map((row) => row.context)
-        .filter(Boolean)
-        .join('\n\n')
-        .slice(0, 12000),
-      sources: rows.map((row) => ({
-        meetingId: row.id,
-        title: row.title,
-        date: row.started_at,
-      })),
       capturedAt: new Date().toISOString(),
     };
   },

@@ -1170,7 +1170,13 @@ function App() {
   const handleStartFromPrompt = useCallback(
     async (event: CalendarEvent) => {
       const prep = await openMeetingPrep(event);
-      dismissPrompt(event.occurrenceKey);
+      const previous = {
+        event: activeCalendarEventRef.current,
+        title: meetingTitle,
+        participants: meetingParticipants,
+        participantInput,
+        notes: currentNotes,
+      };
       activeCalendarEventRef.current = event;
       // The recorder is invoked through an effect-updated ref. Commit the
       // calendar title first so its start/stop callbacks capture this event.
@@ -1185,18 +1191,34 @@ function App() {
             '',
         );
       });
-      if (!startSessionRef.current)
-        throw new Error('Recording is not ready yet.');
-      const result = await startSessionRef.current(event);
-      if (!result.admitted) {
-        activeCalendarEventRef.current = null;
-        setActiveCalendarEvent(null);
-        throw new Error(
-          'Recording could not start. Check recording permissions and the calendar time, then retry.',
-        );
+      try {
+        if (!startSessionRef.current)
+          throw new Error('Recording is not ready yet.');
+        const result = await startSessionRef.current(event);
+        if (!result.admitted)
+          throw new Error(
+            'Recording could not start. Check recording permissions and the calendar time, then retry.',
+          );
+        dismissPrompt(event.occurrenceKey);
+      } catch (error) {
+        activeCalendarEventRef.current = previous.event;
+        flushSync(() => {
+          setActiveCalendarEvent(previous.event);
+          setMeetingTitle(previous.title);
+          setMeetingParticipants(previous.participants);
+          setParticipantInput(previous.participantInput);
+          setCurrentNotes(previous.notes);
+        });
+        throw error;
       }
     },
-    [dismissPrompt],
+    [
+      currentNotes,
+      dismissPrompt,
+      meetingParticipants,
+      meetingTitle,
+      participantInput,
+    ],
   );
 
   const handlePrepareMeeting = useCallback((event: CalendarEvent) => {

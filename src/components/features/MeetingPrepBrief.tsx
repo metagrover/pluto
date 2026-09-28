@@ -59,7 +59,20 @@ export function MeetingPrepBrief({
         prep.briefing?.synthesisStatus === 'ready' ? prep.briefing : null,
       );
       setGenerating(false);
-      return;
+      // The saved synthesis stays fixed, while current commitment status is
+      // reconciled without running another model request.
+      try {
+        void buildPrepBrief(prep.occurrenceKey)
+          .then((value) => {
+            if (current && value.synthesisStatus === 'ready') setBrief(value);
+          })
+          .catch(() => {});
+      } catch {
+        // Retain the saved briefing if the IPC bridge is unavailable.
+      }
+      return () => {
+        current = false;
+      };
     }
     if (!(prep.meetings || []).length) {
       setGenerating(false);

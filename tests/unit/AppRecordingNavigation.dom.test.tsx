@@ -14,8 +14,10 @@ let holdRecordingStart = false;
 let completePendingStart: (() => void) | null = null;
 let completePendingStop: (() => void) | null = null;
 let startAdmissionCount = 0;
+let rejectCalendarStart = false;
 let titleAtCalendarStart: string | null = null;
 let notesAtCalendarStart: string | null = null;
+let notesAtManualStart: string | null = null;
 let calendarForTest: CalendarEvent | null = null;
 const calendarListeners = new Map<string, (...args: unknown[]) => void>();
 
@@ -68,8 +70,10 @@ vi.mock('../../src/components/AudioManager', () => ({
           if (event) {
             titleAtCalendarStart = userTitle || null;
             notesAtCalendarStart = userNotes || null;
-          }
+          } else notesAtManualStart = userNotes || null;
           startAdmissionCount += 1;
+          if (event && rejectCalendarStart)
+            return { admitted: false, state: 'idle' };
           onCaptureLifecycleChange?.({ state: 'starting' });
           onStartingChange?.(true);
           const complete = () => {
@@ -164,8 +168,10 @@ describe('App recording navigation', () => {
     completePendingStart = null;
     completePendingStop = null;
     startAdmissionCount = 0;
+    rejectCalendarStart = false;
     titleAtCalendarStart = null;
     notesAtCalendarStart = null;
+    notesAtManualStart = null;
     window.localStorage.clear();
     calendarForTest = null;
     calendarListeners.clear();
@@ -298,6 +304,43 @@ describe('App recording navigation', () => {
     expect(
       container.querySelector<HTMLTextAreaElement>('#recording-notes')?.value,
     ).toBe('Ask about the launch checklist');
+    await act(async () => root.unmount());
+  });
+
+  it('restores the previous scratchpad after a calendar recording is rejected', async () => {
+    calendarForTest = makeCalendarEvent();
+    rejectCalendarStart = true;
+    window.localStorage.setItem(
+      'pluto.recording-scratchpad',
+      'Unrelated draft',
+    );
+    const { default: App } = await import('../../src/App');
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<App />);
+      await flushPromises();
+    });
+    let startError: unknown;
+    await act(async () => {
+      try {
+        await calendarListeners.get('CALENDAR_PROMPT_START_RECORDING')?.(null, {
+          occurrenceKey: calendarForTest!.occurrenceKey,
+        });
+      } catch (error) {
+        startError = error;
+      }
+      await flushPromises();
+    });
+    expect(startError).toBeInstanceOf(Error);
+    expect(notesAtCalendarStart).toBe('Ask about the launch checklist');
+    rejectCalendarStart = false;
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'n', metaKey: true }),
+      );
+      await flushPromises();
+    });
+    expect(notesAtManualStart).toBe('Unrelated draft');
     await act(async () => root.unmount());
   });
 

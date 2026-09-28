@@ -101,7 +101,10 @@ import {
   extractArtifactContent,
 } from './localArtifacts';
 import { createLogger } from './logger';
-import { buildMeetingPrepBrief } from './meetingPrepBrief';
+import {
+  buildMeetingPrepBrief,
+  refreshMeetingPrepBrief,
+} from './meetingPrepBrief';
 import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioPcm,
@@ -1754,10 +1757,10 @@ app.whenReady().then(async () => {
       throw new Error('Invalid meeting ID');
     return db.meetingPrepStore.forMeeting(id);
   });
-  const prepareLinkedMeetingBrief = (key: unknown) => {
-    const prep = db.meetingPrepStore.get(key);
-    if (!prep) throw new Error('Preparation is unavailable');
-    const brief = buildMeetingPrepBrief(prep, {
+  const buildCurrentLinkedMeetingBrief = (
+    prep: import('./meetingPrep').MeetingPrep,
+  ) =>
+    buildMeetingPrepBrief(prep, {
       entities: (id) =>
         db.getMeetingEntities(id).flatMap((entity) => {
           if (entity.type !== 'action_item') return [];
@@ -1766,8 +1769,12 @@ app.whenReady().then(async () => {
         }),
       blockers: db.getBlockedActionItems,
     });
+  const prepareLinkedMeetingBrief = (key: unknown) => {
+    const prep = db.meetingPrepStore.get(key);
+    if (!prep) throw new Error('Preparation is unavailable');
+    const brief = buildCurrentLinkedMeetingBrief(prep);
     return prep.briefing
-      ? { ...prep.briefing, stillOpen: brief.stillOpen }
+      ? refreshMeetingPrepBrief(prep.briefing, brief)
       : brief;
   };
   ipcMain.handle('MEETING_PREP_BRIEF_BUILD', (_event, key) =>
@@ -1780,7 +1787,7 @@ app.whenReady().then(async () => {
     const token = Symbol();
     prepSynthesisRequests.set(prep.occurrenceKey, token);
     const references = JSON.stringify(prep.meetings || []);
-    const brief = prepareLinkedMeetingBrief(key);
+    const brief = buildCurrentLinkedMeetingBrief(prep);
     try {
       const settings = await getAllSettings(db);
       const provider = await getProvider(settings);
@@ -1799,7 +1806,6 @@ app.whenReady().then(async () => {
         prepSynthesisRequests.delete(prep.occurrenceKey);
     }
   });
-  ipcMain.handle('MEETING_PREP_TOPICS', () => db.meetingPrepStore.listTopics());
   ipcMain.handle('MEETING_PREP_MEETINGS', (_event, input) =>
     db.meetingPrepStore.listMeetings(input?.query ?? '', input?.occurrenceKey),
   );
