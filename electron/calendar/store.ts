@@ -242,6 +242,7 @@ export const createCalendarStore = (sql: SqlDatabase) => {
   const listPriorMeetingContexts = (
     before: string,
     requestedLimit = 80,
+    matching?: { event: CalendarEvent; emails: string[] },
   ): PriorMeetingCalendarContext[] => {
     const limit = Math.min(200, Math.max(1, Math.floor(requestedLimit)));
     const rows = sql
@@ -251,10 +252,25 @@ export const createCalendarStore = (sql: SqlDatabase) => {
         FROM meeting_calendar_context AS context
         JOIN meetings AS meeting ON meeting.id = context.meeting_id
         WHERE COALESCE(meeting.started_at, meeting.created_at, '') < ?
+          AND (? = 0 OR (
+            json_extract(context.event_json, '$.seriesKey') = ? AND
+            json_extract(context.event_json, '$.calendarIdentifier') = ?
+          ) OR EXISTS (
+            SELECT 1 FROM json_each(context.event_json, '$.attendees') attendee
+            WHERE LOWER(TRIM(json_extract(attendee.value, '$.email'))) IN (SELECT value FROM json_each(?))
+          ) OR LOWER(TRIM(json_extract(context.event_json, '$.organizer.email'))) IN (SELECT value FROM json_each(?)))
         ORDER BY COALESCE(meeting.started_at, meeting.created_at) DESC
         LIMIT ?
       `)
-      .all(before, limit) as PriorContextRow[];
+      .all(
+        before,
+        matching ? 1 : 0,
+        matching?.event.seriesKey ?? null,
+        matching?.event.calendarIdentifier ?? null,
+        JSON.stringify(matching?.emails ?? []),
+        JSON.stringify(matching?.emails ?? []),
+        limit,
+      ) as PriorContextRow[];
     return rows.map((row) => ({
       sourceKind: 'macos_calendar',
       occurrenceKey: row.occurrence_key,
@@ -272,6 +288,7 @@ export const createCalendarStore = (sql: SqlDatabase) => {
     meetingId: string,
     occurrenceKey: string,
     origin: 'automatic' | 'user',
+    snapshot?: CalendarEvent,
   ): MeetingCalendarContext | null => {
     const existing = getMeetingContext(meetingId);
     if (existing?.matchOrigin === 'user' && origin === 'automatic')
@@ -282,13 +299,17 @@ export const createCalendarStore = (sql: SqlDatabase) => {
       )
       .get(occurrenceKey) as EventRow | undefined;
     const state = getState();
+    const storedEvent =
+      eventRow || (snapshot ? { event_json: JSON.stringify(snapshot) } : null);
     if (
-      !eventRow ||
-      (!state.selectedCalendar && state.selectedCalendars.length === 0)
+      !storedEvent ||
+      (!snapshot &&
+        !state.selectedCalendar &&
+        state.selectedCalendars.length === 0)
     ) {
       return null;
     }
-    const event = JSON.parse(eventRow.event_json) as CalendarEvent;
+    const event = JSON.parse(storedEvent.event_json) as CalendarEvent;
     const matchedCalendar = state.selectedCalendars.find(
       (c) => c.identifier === event.calendarIdentifier,
     );
@@ -314,7 +335,7 @@ export const createCalendarStore = (sql: SqlDatabase) => {
         meetingId,
         occurrenceKey,
         calendarTitle,
-        eventRow.event_json,
+        storedEvent.event_json,
         origin,
         origin === 'user' ? 'user_selected' : 'time_overlap',
         state.cacheRevision,

@@ -18,6 +18,7 @@ export const createCaptureSessionLeaseRegistry = () => {
   };
 
   return {
+    current: () => (active ? { ...active } : null),
     acquire(meetingId: string, ownerId: number) {
       if (!active) {
         active = { meetingId, ownerId, phase: 'recording' };

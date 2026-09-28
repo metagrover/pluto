@@ -1,323 +1,283 @@
-import { ArrowUpRight, Loader2, Search, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Loader2, Play } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { CalendarEvent } from '../../../electron/calendar/types';
-import type {
-  PreMeetingBrief,
-  PreMeetingBriefItem,
-} from '../../../electron/preMeetingBrief';
-import { buildPreMeetingBrief } from '../../api/calendar';
-
-interface PreMeetingBriefSheetProps {
+import type { MeetingPrep } from '../../../electron/meetingPrep';
+import { prepStartBlocker } from '../../../electron/meetingPrep';
+import { openMeetingPrep } from '../../api/meetingPrep';
+import { formatPrepDate } from '../../utils/meetingPrepPresentation';
+import { MeetingPrepBriefSkeleton } from './MeetingPrepBrief';
+import {
+  MeetingPrepEditor,
+  type MeetingPrepEditorHandle,
+} from './MeetingPrepEditor';
+function agendaMarkdown(text: string): string {
+  if (!/<[a-z][\s\S]*>/i.test(text)) return text;
+  const document = new DOMParser().parseFromString(text, 'text/html');
+  document.querySelectorAll('script, style').forEach((node) => node.remove());
+  document.querySelectorAll('a').forEach((anchor) => {
+    const href = anchor.getAttribute('href') || '';
+    const label = anchor.textContent || href;
+    anchor.replaceWith(
+      /^https?:\/\//i.test(href) ? `${label} (${href})` : label,
+    );
+  });
+  document.querySelectorAll('br').forEach((node) => node.replaceWith('\n'));
+  document.querySelectorAll('p, div, li').forEach((node) => node.append('\n'));
+  return document.body.textContent || '';
+}
+interface Props {
   visible: boolean;
   event: CalendarEvent | null;
   onClose: () => void;
-  onOpenMeeting: (meetingId: string) => void;
+  onOpenMeeting: (id: string) => void;
+  onStartMeeting?: (event: CalendarEvent) => Promise<void>;
+  recordingBusy?: boolean;
 }
-
-const formatDate = (value: string | null) =>
-  value
-    ? new Date(value).toLocaleDateString([], {
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-      })
-    : null;
-
-const trustLabel = (status: PreMeetingBriefItem['trustStatus']) => {
-  if (status === 'needs_review') return 'Review';
-  if (status === 'inferred') return 'Related';
-  if (status === 'stale') return 'Older context';
-  return 'Source-backed';
-};
-
-const BriefSection = ({
-  title,
-  items,
-  onOpenMeeting,
-}: {
-  title: string;
-  items: PreMeetingBriefItem[];
-  onOpenMeeting: (meetingId: string) => void;
-}) => {
-  if (items.length === 0) return null;
-  return (
-    <section>
-      <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-pro-text-muted/70">
-        {title}
-      </h3>
-      <div className="mt-3 space-y-3">
-        {items.map((entry) => (
-          <article key={entry.id} className="border-l border-pro-border pl-3">
-            <p className="text-[13px] leading-5 text-pro-text-main">
-              {entry.text}
-            </p>
-            <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[9px] font-medium text-pro-text-muted/65">
-              <span>{trustLabel(entry.trustStatus)}</span>
-              <span aria-hidden="true">·</span>
-              {entry.sourceMeetingId ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenMeeting(entry.sourceMeetingId!)}
-                  className="inline-flex min-w-0 items-center gap-1 truncate hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
-                >
-                  <span className="truncate">{entry.sourceLabel}</span>
-                  <ArrowUpRight className="h-3 w-3 shrink-0" />
-                </button>
-              ) : (
-                <span className="truncate">{entry.sourceLabel}</span>
-              )}
-              {entry.sourceDate ? (
-                <span className="shrink-0">{formatDate(entry.sourceDate)}</span>
-              ) : null}
-            </div>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-};
-
-const BriefBody = ({
-  brief,
-  onOpenMeeting,
-  onPrepareAnother,
-}: {
-  brief: PreMeetingBrief;
-  onOpenMeeting: (meetingId: string) => void;
-  onPrepareAnother: () => void;
-}) => {
-  const relationshipLabel =
-    brief.relationship === 'same_series'
-      ? 'Same recurring series'
-      : brief.relationship === 'related'
-        ? 'Related previous meeting'
-        : brief.relationship === 'manual'
-          ? 'Closest matching meeting'
-          : null;
-  return (
-    <div className="space-y-7">
-      {relationshipLabel ? (
-        <div className="flex items-center justify-between gap-3 rounded-md bg-pro-surface/60 px-3 py-2 text-[10px] font-medium text-pro-text-muted">
-          <span>{relationshipLabel}</span>
-          {brief.priorMeeting ? (
-            <span className="shrink-0">
-              {formatDate(brief.priorMeeting.startedAt)}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      {brief.agenda ? (
-        <section>
-          <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-pro-text-muted/70">
-            Agenda
-          </h3>
-          <p className="mt-3 whitespace-pre-line text-[13px] leading-5 text-pro-text-main">
-            {brief.agenda}
-          </p>
-        </section>
-      ) : null}
-      <BriefSection
-        title="Last time"
-        items={brief.lastTime}
-        onOpenMeeting={onOpenMeeting}
-      />
-      <BriefSection
-        title="Still open"
-        items={brief.stillOpen}
-        onOpenMeeting={onOpenMeeting}
-      />
-      <BriefSection
-        title="Relevant context"
-        items={brief.relevantContext}
-        onOpenMeeting={onOpenMeeting}
-      />
-      {brief.emptyMessage ? (
-        <p className="rounded-lg border border-pro-border/70 bg-pro-surface/35 p-4 text-[12px] leading-5 text-pro-text-muted">
-          {brief.emptyMessage}
-        </p>
-      ) : null}
-      <button
-        type="button"
-        onClick={onPrepareAnother}
-        className="text-[10px] font-semibold text-pro-text-muted hover:text-pro-text-main"
-      >
-        Prepare another conversation
-      </button>
-    </div>
-  );
-};
-
 export const PreMeetingBriefSheet = ({
   visible,
   event,
   onClose,
   onOpenMeeting,
-}: PreMeetingBriefSheetProps) => {
-  const [brief, setBrief] = useState<PreMeetingBrief | null>(null);
-  const [loading, setLoading] = useState(false);
+  onStartMeeting,
+  recordingBusy = false,
+}: Props) => {
+  const [prep, setPrep] = useState<MeetingPrep | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const [manualMode, setManualMode] = useState(false);
-  const requestIdRef = useRef(0);
-
-  const load = async (
-    next:
-      | { kind: 'calendar'; event: CalendarEvent }
-      | { kind: 'query'; query: string },
-  ) => {
-    const requestId = ++requestIdRef.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await buildPreMeetingBrief(next);
-      if (requestId === requestIdRef.current) setBrief(result);
-    } catch {
-      if (requestId === requestIdRef.current) {
-        setError(
-          'This brief couldn’t be prepared. Recording is still available.',
-        );
-      }
-    } finally {
-      if (requestId === requestIdRef.current) setLoading(false);
-    }
-  };
-
+  const [loading, setLoading] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const editor = useRef<MeetingPrepEditorHandle>(null);
+  const generation = useRef(0);
   useEffect(() => {
-    if (!visible) {
-      requestIdRef.current += 1;
-      return;
-    }
-    setBrief(null);
+    const current = ++generation.current;
+    setPrep(null);
     setError(null);
-    setManualMode(false);
-    if (event) void load({ kind: 'calendar', event });
-  }, [event, visible]);
-
+    setStarting(false);
+    if (!visible || !event) return;
+    setLoading(true);
+    void openMeetingPrep(event)
+      .then((value) => {
+        if (current === generation.current) setPrep(value);
+      })
+      .catch(() => {
+        if (current === generation.current)
+          setError(
+            'Preparation could not be opened. Try reopening this meeting.',
+          );
+      })
+      .finally(() => {
+        if (current === generation.current) setLoading(false);
+      });
+    return () => {
+      generation.current++;
+    };
+  }, [visible, event]);
   useEffect(() => {
     if (!visible) return;
-    const handleKeyDown = (keyboardEvent: KeyboardEvent) => {
-      if (keyboardEvent.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, visible]);
-
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [visible]);
+  const close = async () => {
+    try {
+      await editor.current?.flush();
+      onClose();
+      return true;
+    } catch {
+      setError(
+        'Your preparation could not be saved. Retry save before closing.',
+      );
+      return false;
+    }
+  };
   if (!visible) return null;
-
+  const calendar = prep?.event || event;
+  const blocker = calendar ? prepStartBlocker(calendar, now) : null;
+  const roster = calendar
+    ? [
+        ...calendar.attendees,
+        ...(calendar.organizer ? [calendar.organizer] : []),
+      ].filter(
+        (person, index, list) =>
+          list.findIndex(
+            (p) => (p.email || p.name) === (person.email || person.name),
+          ) === index,
+      )
+    : [];
   return (
-    <div
-      className="fixed inset-0 z-[80] flex justify-end bg-black/20 backdrop-blur-[1px]"
-      role="presentation"
-      onMouseDown={(mouseEvent) => {
-        if (mouseEvent.target === mouseEvent.currentTarget) onClose();
-      }}
+    <section
+      aria-labelledby="pre-meeting-brief-title"
+      className="no-drag relative mx-auto flex w-full max-w-3xl flex-col"
     >
-      <aside
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="pre-meeting-brief-title"
-        className="flex h-full w-full max-w-[520px] flex-col border-l border-pro-border bg-pro-bg shadow-2xl"
-      >
-        <header className="flex items-start justify-between gap-6 border-b border-pro-border/70 px-7 py-6">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-pro-accent">
-              30-second prep
-            </p>
-            <h2
-              id="pre-meeting-brief-title"
-              className="mt-2 truncate font-serif text-[24px] font-medium text-pro-text-main"
-            >
-              {brief?.title ||
-                (!manualMode ? event?.title : null) ||
-                'Prepare a conversation'}
-            </h2>
-            {brief?.startsAt ? (
-              <p className="mt-1 text-[11px] font-medium text-pro-text-muted">
-                {new Date(brief.startsAt).toLocaleString([], {
-                  weekday: 'short',
-                  hour: 'numeric',
-                  minute: '2-digit',
-                })}
-              </p>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            aria-label="Close brief"
-            onClick={onClose}
-            className="rounded-md p-2 text-pro-text-muted hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+      <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-3">
+        <button
+          type="button"
+          aria-label="Back from meeting prep"
+          onClick={() => void close()}
+          className="no-drag inline-flex min-h-10 items-center gap-2 rounded-md px-2 text-sm text-pro-text-muted hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          Back
+        </button>
+        <button
+          type="button"
+          title={
+            !prep?.meetingId
+              ? recordingBusy
+                ? 'Finish the active recording before starting another.'
+                : blocker || undefined
+              : undefined
+          }
+          disabled={
+            !prep ||
+            starting ||
+            (!prep.meetingId && (!!blocker || recordingBusy || !onStartMeeting))
+          }
+          className="inline-flex shrink-0 items-center gap-2 rounded-md bg-pro-accent px-4 py-2 text-sm font-medium text-white hover:bg-pro-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-40"
+          onClick={async () => {
+            if (!prep || !calendar) return;
+            setStarting(true);
+            setError(null);
+            try {
+              await editor.current?.flush();
+              if (prep.meetingId) {
+                onClose();
+                onOpenMeeting(prep.meetingId);
+              } else {
+                await onStartMeeting?.(calendar);
+                onClose();
+              }
+            } catch (cause) {
+              setError(
+                cause instanceof Error
+                  ? cause.message
+                  : 'Meeting could not start. Your preparation is retained.',
+              );
+            } finally {
+              setStarting(false);
+            }
+          }}
+        >
+          {starting ? (
+            <Loader2 size={16} className="animate-spin" />
+          ) : (
+            <Play size={16} />
+          )}{' '}
+          {prep?.meetingId ? 'Open meeting' : 'Start meeting'}
+        </button>
+      </div>
+      <header className="border-b border-pro-border px-6 pb-4 pt-3">
+        <div className="min-w-0">
+          <h2
+            id="pre-meeting-brief-title"
+            title={calendar?.title}
+            className="break-words font-serif text-2xl text-pro-text-main"
           >
-            <X className="h-4 w-4" />
-          </button>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
-          {error ? (
-            <p
-              role="alert"
-              className="rounded-lg border border-pro-urgent/25 bg-pro-urgent/5 p-4 text-[12px] leading-5 text-pro-text-main"
-            >
-              {error}
+            {calendar?.title || 'Prepare a meeting'}
+          </h2>
+          {calendar && (
+            <p className="mt-1 text-xs text-pro-text-muted">
+              {formatPrepDate(calendar.start)} ·{' '}
+              {new Date(calendar.start).toLocaleTimeString([], {
+                hour: 'numeric',
+                minute: '2-digit',
+              })}{' '}
+              –{' '}
+              {new Date(calendar.end).toLocaleTimeString([], {
+                hour: 'numeric',
+                minute: '2-digit',
+              })}
             </p>
-          ) : brief ? (
-            <BriefBody
-              brief={brief}
-              onOpenMeeting={onOpenMeeting}
-              onPrepareAnother={() => {
-                setBrief(null);
-                setQuery('');
-                setManualMode(true);
-              }}
-            />
-          ) : manualMode || !event ? (
-            <form
-              onSubmit={(formEvent) => {
-                formEvent.preventDefault();
-                if (query.trim()) void load({ kind: 'query', query });
-              }}
-              className="rounded-lg border border-pro-border/70 bg-pro-surface/45 p-4"
-            >
-              <label
-                htmlFor="brief-query"
-                className="text-[12px] font-medium text-pro-text-main"
-              >
-                Who or what are you meeting about?
-              </label>
-              <p className="mt-1 text-[10px] leading-4 text-pro-text-muted">
-                Enter a person, project, stream, or conversation topic.
-              </p>
-              <div className="mt-3 flex gap-2">
-                <input
-                  id="brief-query"
-                  value={query}
-                  onChange={(inputEvent) => setQuery(inputEvent.target.value)}
-                  placeholder="e.g. Launch planning"
-                  className="min-w-0 flex-1 rounded-md border border-pro-border bg-pro-bg px-3 py-2 text-[12px] text-pro-text-main placeholder:text-pro-text-muted/55 focus:outline-none focus:ring-2 focus:ring-pro-accent"
-                />
-                <button
-                  type="submit"
-                  disabled={!query.trim() || loading}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-pro-accent px-3 text-[11px] font-semibold text-white transition-opacity disabled:opacity-45"
-                >
-                  {loading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Search className="h-3.5 w-3.5" />
-                  )}
-                  Prepare
-                </button>
-              </div>
-            </form>
-          ) : loading ? (
-            <div
-              className="flex min-h-52 items-center justify-center text-pro-text-muted"
-              aria-label="Preparing brief"
-            >
-              <Loader2 className="h-5 w-5 animate-spin" />
-            </div>
-          ) : null}
+          )}
         </div>
-      </aside>
-    </div>
+      </header>
+      <div className="min-h-0 p-6">
+        {error && (
+          <p role="alert" className="mb-4 text-sm text-pro-text-muted">
+            {error}
+          </p>
+        )}
+        {loading && (
+          <div className="mb-5 rounded-2xl border border-pro-border p-6">
+            <MeetingPrepBriefSkeleton />
+          </div>
+        )}
+        {!event && (
+          <p className="text-sm text-pro-text-muted">
+            Choose a calendar meeting to prepare its notes and references.
+          </p>
+        )}
+        {!!roster.length && (
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <h3 className="text-[10px] uppercase tracking-wider text-pro-text-muted">
+              Invited people
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {roster.map((person, index) => (
+                <span
+                  key={person.email || `${person.name}-${index}`}
+                  title={[person.name, person.email]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  className="max-w-full truncate rounded-full border border-pro-border px-3 py-1.5 text-xs text-pro-text-main"
+                >
+                  {person.isCurrentUser
+                    ? 'You'
+                    : person.name || person.email || 'Unknown attendee'}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {(calendar?.notes || calendar?.agenda) && (
+          <details
+            aria-label="Calendar agenda"
+            className="group/agenda mb-5 rounded-xl border border-pro-border bg-pro-surface/15 p-4"
+          >
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 min-h-6 rounded-sm text-sm font-medium text-pro-text-muted hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
+              Calendar agenda
+              <ChevronDown
+                size={16}
+                aria-hidden="true"
+                className="shrink-0 transition-transform group-open/agenda:rotate-180"
+              />
+            </summary>
+            <div className="mt-2 whitespace-pre-wrap break-words text-sm text-pro-text-main">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  a: ({ href, children }) => (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-pro-accent underline underline-offset-2"
+                    >
+                      {children}
+                    </a>
+                  ),
+                }}
+              >
+                {agendaMarkdown(calendar?.notes || calendar?.agenda || '')}
+              </ReactMarkdown>
+            </div>
+          </details>
+        )}
+        {prep && (
+          <MeetingPrepEditor
+            key={prep.occurrenceKey}
+            ref={editor}
+            prep={prep}
+            onChange={setPrep}
+            onOpenMeeting={(id) => {
+              void close().then((saved) => {
+                if (saved) onOpenMeeting(id);
+              });
+            }}
+          />
+        )}
+      </div>
+    </section>
   );
 };

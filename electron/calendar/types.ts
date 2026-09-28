@@ -17,6 +17,7 @@ export type CalendarCapabilityState =
   | 'ready';
 
 export interface CalendarPerson {
+  isCurrentUser?: boolean;
   name: string | null;
   email: string | null;
 }

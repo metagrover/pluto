@@ -41,13 +41,18 @@ const normalizePerson = (value: unknown): CalendarPerson | null => {
   if (!isRecord(value)) return null;
   if (
     (value.name !== undefined && !isStringOrNull(value.name)) ||
-    (value.email !== undefined && !isStringOrNull(value.email))
+    (value.email !== undefined && !isStringOrNull(value.email)) ||
+    (value.isCurrentUser !== undefined &&
+      typeof value.isCurrentUser !== 'boolean')
   ) {
     return null;
   }
   return {
     name: value.name ?? null,
     email: value.email ?? null,
+    ...(value.isCurrentUser !== undefined
+      ? { isCurrentUser: value.isCurrentUser }
+      : {}),
   };
 };
 
@@ -59,7 +64,7 @@ const isCalendar = (value: unknown): value is CalendarDescriptor =>
   typeof value.sourceType === 'string' &&
   isStringOrNull(value.colorHex);
 
-const normalizeEvent = (value: unknown): CalendarEvent | null => {
+export const normalizeEvent = (value: unknown): CalendarEvent | null => {
   if (
     !isRecord(value) ||
     typeof value.occurrenceKey !== 'string' ||

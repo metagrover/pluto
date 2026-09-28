@@ -133,6 +133,8 @@ import type {
   AttentionScoreBreakdown,
   MidFrontmatter,
 } from './intelligence/intelligenceTypes';
+import type { MeetingNotesEvidenceSource } from './intelligence/meetingNotesEvidence';
+import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
 import { analysisDocumentV3ToMarkdown } from './llm/analysisDocumentV3';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import {
@@ -149,7 +151,10 @@ import {
 import { createLogger } from './logger';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { buildMeetingNotesIdentityProjection } from './meetingParticipantIdentity';
+import type { PrepMeetingOption } from './meetingPrep';
+import { createMeetingPrepStore, findCalendarInviteeName } from './meetingPrep';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
+import { createPrepAttendeeStore } from './prepAttendees';
 import { createSecureSettingsManager } from './secureSettings';
 import { saveMeetingSpeakerCandidates } from './speakerVoiceStore';
 
@@ -3906,6 +3911,11 @@ export const deleteMeeting = (id: string | number) => {
   const result = db.prepare('DELETE FROM meetings WHERE id = ?').run(safeId);
 
   if (result.changes === 1) {
+    // Keep the occurrence's preparation, but do not leave its Start/Open
+    // action pointing at a recording that no longer exists.
+    db.prepare(
+      'UPDATE meeting_prep SET meeting_id = NULL, recording_started = 0, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE meeting_id = ?',
+    ).run(safeId);
     db.prepare('DELETE FROM meeting_analysis_runs WHERE meeting_id = ?').run(
       safeId,
     );
@@ -9733,6 +9743,9 @@ export const resetKnowledge = () => {
     'entity_corrections',
     'person_chat_messages',
     'person_chat_threads',
+    'meeting_prep',
+    'prep_attendee_rejections',
+    'prep_attendee_links',
     'person_name_aliases',
     'person_aliases',
     'project_aliases',
@@ -10185,3 +10198,93 @@ export const updateEntityAliasSuggestionStatus = (
     WHERE id = ?
   `).run(status, id);
 };
+
+export const prepAttendeeStore = createPrepAttendeeStore(db, {
+  people: () =>
+    getEntitiesByType('person')
+      .filter((person) => resolvePersonIdentityId(person.id) === person.id)
+      .map((person) => ({
+        id: person.id,
+        name: person.name,
+        aliases: getPersonNameAliases(person.id),
+      })),
+  canonical: resolvePersonIdentityId,
+  createPerson: (name) =>
+    upsertEntity({ type: 'person', name, dedupe_by_name: false }).id,
+  selfId: () => identityStore.getSelfPersonId(),
+});
+
+export const meetingPrepStore = createMeetingPrepStore(db, {
+  personName: (email) => {
+    const link = db
+      .prepare(
+        'SELECT person_id FROM prep_attendee_links WHERE attendee_key = ?',
+      )
+      .get(`email:${email}`) as { person_id: string | null } | undefined;
+    if (link) {
+      if (!link.person_id) return null;
+      const person = getEntity(resolvePersonIdentityId(link.person_id));
+      return person?.type === 'person' ? person.name : null;
+    }
+    const events = (
+      db.prepare('SELECT event_json FROM calendar_events').all() as Array<{
+        event_json: string;
+      }>
+    ).flatMap((row) => {
+      try {
+        return [JSON.parse(row.event_json) as CalendarEvent];
+      } catch {
+        return [];
+      }
+    });
+    return findCalendarInviteeName(email, events);
+  },
+  event: (key) => {
+    const row = db
+      .prepare(
+        'SELECT event_json FROM calendar_events WHERE occurrence_key = ?',
+      )
+      .get(key) as { event_json: string } | undefined;
+    return row ? JSON.parse(row.event_json) : null;
+  },
+  meetings: (query) =>
+    db
+      .prepare(`
+    SELECT m.id, m.title, COALESCE(m.started_at, m.created_at) AS date,
+      COALESCE(f.participants_text, '') AS participants,
+      substr(COALESCE(NULLIF(f.notes_text, ''), m.user_notes, m.enhanced_notes, ''), 1, 240) AS preview
+    FROM meetings m LEFT JOIN meeting_notes_fts f ON f.meeting_id = m.id
+    WHERE datetime(COALESCE(m.started_at, m.created_at)) <= datetime('now')
+      AND (? = '' OR instr(lower(m.title || ' ' || COALESCE(f.notes_text, '') || ' ' || COALESCE(f.participants_text, '') || ' ' || COALESCE(m.user_notes, '')), lower(?)) > 0)
+    GROUP BY m.id ORDER BY COALESCE(m.started_at, m.created_at) DESC LIMIT 100
+  `)
+      .all(query.trim(), query.trim()) as PrepMeetingOption[],
+  meeting: (id) => {
+    const row = db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as
+      | (MeetingNotesEvidenceSource & {
+          started_at: string | null;
+          created_at: string | null;
+        })
+      | undefined;
+    if (!row) return null;
+    const document = buildMeetingNotesEvidenceDocument(row);
+    const context = [
+      document.notesText,
+      document.decisionsText && `Decisions:\n${document.decisionsText}`,
+      document.actionItemsText && `Action items:\n${document.actionItemsText}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+      .slice(0, 12000);
+    return {
+      id,
+      title: row.title || 'Untitled meeting',
+      date: row.started_at || row.created_at,
+      participants: document.participantsText,
+      preview: context.slice(0, 240),
+      context,
+      trustStatus: document.trustStatus,
+      capturedAt: new Date().toISOString(),
+    };
+  },
+});

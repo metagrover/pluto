@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
+import { openMeetingPrep } from './api/meetingPrep';
 import './App.css';
 
 // Core
@@ -397,9 +399,9 @@ function App() {
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const stopSessionRef = useRef<((endReason?: string) => void) | null>(null);
-  const startSessionRef = useRef<(() => Promise<CaptureStartResult>) | null>(
-    null,
-  );
+  const startSessionRef = useRef<
+    ((event?: CalendarEvent) => Promise<CaptureStartResult>) | null
+  >(null);
   const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptSegment[]>(
     [],
   );
@@ -1189,17 +1191,56 @@ function App() {
 
   const handleStartFromPrompt = useCallback(
     async (event: CalendarEvent) => {
-      dismissPrompt(event.occurrenceKey);
+      const prep = await openMeetingPrep(event);
+      const previous = {
+        event: activeCalendarEventRef.current,
+        title: meetingTitle,
+        participants: meetingParticipants,
+        participantInput,
+        notes: currentNotes,
+      };
       activeCalendarEventRef.current = event;
-      setActiveCalendarEvent(event);
-      setMeetingTitle(event.title || 'Meeting');
-      setMeetingParticipants([]);
-      setParticipantInput('');
-      if (startSessionRef.current) {
-        await startSessionRef.current();
+      // The recorder is invoked through an effect-updated ref. Commit the
+      // calendar title first so its start/stop callbacks capture this event.
+      flushSync(() => {
+        setActiveCalendarEvent(event);
+        setMeetingTitle(event.title?.trim() || 'Meeting');
+        setMeetingParticipants([]);
+        setParticipantInput('');
+        setCurrentNotes(
+          localStorage.getItem(`pluto.meeting-notes:${event.occurrenceKey}`) ??
+            prep?.notes ??
+            '',
+        );
+      });
+      try {
+        if (!startSessionRef.current)
+          throw new Error('Recording is not ready yet.');
+        const result = await startSessionRef.current(event);
+        if (!result.admitted)
+          throw new Error(
+            'Recording could not start. Check recording permissions and the calendar time, then retry.',
+          );
+        dismissPrompt(event.occurrenceKey);
+      } catch (error) {
+        activeCalendarEventRef.current = previous.event;
+        flushSync(() => {
+          setActiveCalendarEvent(previous.event);
+          setMeetingTitle(previous.title);
+          setMeetingParticipants(previous.participants);
+          setParticipantInput(previous.participantInput);
+          setCurrentNotes(previous.notes);
+        });
+        throw error;
       }
     },
-    [dismissPrompt],
+    [
+      currentNotes,
+      dismissPrompt,
+      meetingParticipants,
+      meetingTitle,
+      participantInput,
+    ],
   );
 
   const handlePrepareMeeting = useCallback((event: CalendarEvent) => {
@@ -1649,6 +1690,7 @@ function App() {
           meetingId,
           expectedTitle: detail.title,
           title: generatedTitle.trim(),
+          source: 'generated',
         });
       } catch (error) {
         console.error(
@@ -2029,9 +2071,15 @@ function App() {
           <Sidebar
             sidebarVisible={sidebarVisible}
             activeTab={activeTab}
-            setActiveTab={setActiveTab}
+            setActiveTab={(tab) => {
+              setPreMeetingBriefVisible(false);
+              setActiveTab(tab);
+            }}
             selectedMeetingId={selectedMeetingId}
-            setSelectedMeetingId={setSelectedMeetingId}
+            setSelectedMeetingId={(id) => {
+              setPreMeetingBriefVisible(false);
+              setSelectedMeetingId(id);
+            }}
             safeMeetings={safeMeetings}
             onStartRecording={() => {
               if (startSessionRef.current) {
@@ -2098,6 +2146,10 @@ function App() {
           liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}
           calendarEvent={resolvedActiveCalendarEvent}
+          onOpenMeeting={(id) => {
+            setZenVisible(false);
+            handleOpenMeeting(id);
+          }}
           askPlutoConversation={meetingAskPlutoConversation}
           setAskPlutoConversation={setMeetingAskPlutoConversation}
           askPlutoMinimized={meetingAskPlutoMinimized}
@@ -2129,23 +2181,25 @@ function App() {
           <div
             ref={contentScrollRef}
             className={`flex-1 flex flex-col scroll-smooth relative overflow-y-scroll ${
-              selectedMeetingId
-                ? 'meeting-app-scroll'
-                : activeTab === 'chat'
-                  ? 'px-0 py-0'
-                  : activeTab === 'settings'
-                    ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                    : !selectedMeetingId && activeTab === 'hub'
-                      ? previewParam
-                        ? 'px-4 md:px-8 lg:px-10 py-5 space-y-5'
-                        : 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
-                      : !selectedMeetingId && activeTab === 'people'
-                        ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                        : !selectedMeetingId && activeTab === 'projects'
+              preMeetingBriefVisible
+                ? 'px-4 py-6 md:px-8'
+                : selectedMeetingId
+                  ? 'meeting-app-scroll'
+                  : activeTab === 'chat'
+                    ? 'px-0 py-0'
+                    : activeTab === 'settings'
+                      ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
+                      : !selectedMeetingId && activeTab === 'hub'
+                        ? previewParam
+                          ? 'px-4 md:px-8 lg:px-10 py-5 space-y-5'
+                          : 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
+                        : !selectedMeetingId && activeTab === 'people'
                           ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                          : !selectedMeetingId && activeTab === 'meetings'
+                          : !selectedMeetingId && activeTab === 'projects'
                             ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                            : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
+                            : !selectedMeetingId && activeTab === 'meetings'
+                              ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
+                              : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
             }`}
           >
             <>
@@ -2154,7 +2208,19 @@ function App() {
               <div className="app-background-glow fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full blur-[150px] pointer-events-none z-0 opacity-40" />
             </>
 
-            {finalizingMeeting ? (
+            {preMeetingBriefVisible ? (
+              <PreMeetingBriefSheet
+                visible={preMeetingBriefVisible}
+                event={preMeetingBriefEvent}
+                onStartMeeting={handleStartFromPrompt}
+                recordingBusy={activeRecording}
+                onClose={() => setPreMeetingBriefVisible(false)}
+                onOpenMeeting={(meetingId) => {
+                  setPreMeetingBriefVisible(false);
+                  handleOpenMeeting(meetingId, { label: 'Back to Dashboard' });
+                }}
+              />
+            ) : finalizingMeeting ? (
               <RecordingFinalizingView meeting={finalizingMeeting} />
             ) : selectedMeetingId ? (
               <MeetingView
@@ -2450,16 +2516,6 @@ function App() {
         }}
         onQuit={() => {
           void window.ipcRenderer?.invoke?.('QUIT_APP');
-        }}
-      />
-
-      <PreMeetingBriefSheet
-        visible={preMeetingBriefVisible}
-        event={preMeetingBriefEvent}
-        onClose={() => setPreMeetingBriefVisible(false)}
-        onOpenMeeting={(meetingId) => {
-          setPreMeetingBriefVisible(false);
-          handleOpenMeeting(meetingId, { label: 'Back to Dashboard' });
         }}
       />
 

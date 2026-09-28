@@ -53,7 +53,7 @@ describe('calendar helper protocol', () => {
               end: '2026-08-31T19:00:00Z',
               isAllDay: false,
               isCancelled: false,
-              attendees: [{ name: 'Ada' }],
+              attendees: [{ name: 'Ada', isCurrentUser: true }],
             },
           ],
         },
@@ -68,7 +68,7 @@ describe('calendar helper protocol', () => {
           expect.objectContaining({
             availability: null,
             organizer: null,
-            attendees: [{ name: 'Ada', email: null }],
+            attendees: [{ name: 'Ada', email: null, isCurrentUser: true }],
             lastModified: null,
           }),
         ],
@@ -130,6 +130,10 @@ describe('calendar helper protocol', () => {
     ['a missing required event field', { title: undefined }],
     ['a non-array attendee list', { attendees: null }],
     ['a malformed attendee', { attendees: [{ name: 42 }] }],
+    [
+      'an invalid current-user flag',
+      { attendees: [{ isCurrentUser: 'true' }] },
+    ],
     ['a malformed organizer', { organizer: { email: 42 } }],
     ['a malformed availability', { availability: 42 }],
     ['a malformed last-modified value', { lastModified: 42 }],

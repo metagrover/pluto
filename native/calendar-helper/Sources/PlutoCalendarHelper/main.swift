@@ -138,7 +138,7 @@ private func person(_ participant: EKParticipant?) -> CalendarPerson? {
     let email = participant.url.scheme == "mailto"
         ? String(participant.url.absoluteString.dropFirst("mailto:".count))
         : nil
-    return CalendarPerson(name: participant.name, email: email)
+    return CalendarPerson(name: participant.name, email: email, isCurrentUser: participant.isCurrentUser)
 }
 
 private func recurrenceFrequency(_ value: EKRecurrenceFrequency) -> String {

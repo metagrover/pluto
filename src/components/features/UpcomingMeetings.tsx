@@ -419,8 +419,17 @@ export const UpcomingMeetings = ({
                     </div>
                     <div className="flex min-w-0 items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <h3 className="truncate text-[13px] font-medium leading-5 text-pro-text-main">
-                          {event.title || 'Untitled event'}
+                        <h3
+                          title={event.title || 'Untitled event'}
+                          className="truncate text-[13px] font-medium leading-5 text-pro-text-main"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => onPrepare(event)}
+                            className="block w-full truncate text-left hover:text-pro-accent"
+                          >
+                            {event.title || 'Untitled event'}
+                          </button>
                         </h3>
                         <p className="text-[10px] font-medium leading-4 text-pro-text-muted/70">
                           {formatDuration(event)}

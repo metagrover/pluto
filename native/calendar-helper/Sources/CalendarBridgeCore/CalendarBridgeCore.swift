@@ -38,10 +38,12 @@ public struct ListEventsParams: Equatable, Sendable {
 public struct CalendarPerson: Codable, Equatable, Sendable {
     public let name: String?
     public let email: String?
+    public let isCurrentUser: Bool?
 
-    public init(name: String?, email: String?) {
+    public init(name: String?, email: String?, isCurrentUser: Bool? = nil) {
         self.name = name
         self.email = email
+        self.isCurrentUser = isCurrentUser
     }
 }
 

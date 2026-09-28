@@ -1320,3 +1320,51 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **OpenRouter policy:** Requests require zero-data-retention routing, deny data collection, require requested structured-output parameters, and disable response storage. OpenAI requests are stateless and disable response storage. Raw prompts and responses are not added to ordinary logs or benchmark reports.
 - **Evaluation:** Opt-in provider benchmarks run the same anonymized fixtures and production prompts through Ollama, OpenAI, and OpenRouter, recording content-free context hashes, prompt/source revision, provider/model, grounding outcomes, failures, and latency. Product labels such as Fast or Best require repeated runs and blinded human review.
 - **Local-only boundary:** Pluto remains usable without a network or cloud credential. Idle dreaming, autonomous maintenance, backfills, and other silent historical work remain local-only until a later explicit decision changes that boundary.
+
+## 2026-09-27 - Resolve calendar attendees for meeting prep
+
+- **Decision:** Prep stores editable email-to-person associations against stable person IDs. Known email links take priority; unique exact names or aliases can match automatically only without a conflicting email association. User corrections take priority and persist rejected matches. Email-less choices remain scoped to a calendar occurrence.
+- **History:** Prep ranks recurring-series, shared calendar-email, and confirmed person history independently of meeting titles. Calendar matches establish invitation context, not attendance or speaker identity. Mention-only evidence cannot establish participation. Corrections clear and rebuild dependent context.
+- **Grounding:** Overview facts are selected source excerpts. The configured analysis model selects supporting evidence and talking-point categories; rendered questions use validated exact excerpts rather than unchecked generated factual prose. Deterministic evidence remains available when generation fails.
+- **Compatibility:** Associations retain original person IDs so canonical resolution follows reversible merges without moving email ownership. Person deletion clears links; user unlinking persists a tombstone. No People/Domain UI expansion, speaker attribution, or automatic scheduled delivery is introduced.
+
+
+## 2026-09-27 - Keep calendar preparation separate from meeting evidence
+
+- **Supersedes:** The attendee-first prep presentation and automatic briefing generation in “2026-09-27 - Resolve calendar attendees for meeting prep.” Its identity and invitation-evidence boundaries remain valid.
+- **Decision:** Calendar prep opens as a page inside the existing application layout. Each occurrence owns an autosaved preparation document and manually linked topic snapshots. Opening prep starts neither recording nor AI generation. Invited people remain visible as calendar context.
+- **Recording:** Start is admitted from five minutes before the scheduled start through the scheduled end, with cancellation and recording concurrency checks in the main process. Recording is explicitly bound to the selected occurrence and retains its calendar title unless the user renames it.
+- **Evidence:** Meeting and Prep are separate editable documents. In-meeting Ask Pluto receives preparation as labelled background context. Post-meeting gist generation receives actual meeting evidence and existing Meeting notes, never preparation documents or topic snapshots.
+- **Presentation:** Times omit seconds. Start availability is explained on the disabled button rather than through a permanent disclaimer. Calendar agenda links open externally; raw invite HTML is never rendered.
+
+
+## 2026-09-27 - Select past meetings for calendar preparation
+
+- **Supersedes:** Manual topic selection in “2026-09-27 - Keep calendar preparation separate from meeting evidence.” The occurrence linkage, separate documents, recording rules, and gist evidence boundary remain unchanged.
+- **Decision:** Prep displays manually included past meetings, searchable by title and notes, with dates, saved participant labels, expandable note snapshots, explicit refresh, removal, and navigation to the original meeting. Existing topic snapshots remain preserved in storage but are not displayed in this picker.
+- **Evidence:** Past-meeting references are labelled historical background for Ask Pluto and never become evidence of discussion in the new meeting or inputs to its gist. Removing a reference does not delete its source recording; source deletion does not erase the saved prep snapshot.
+
+
+## 2026-09-27 - Regenerate sourced prep explicitly after saving meeting selection
+
+- **Supersedes:** The no-AI prep scope in “2026-09-27 - Keep calendar preparation separate from meeting evidence.” Its separate preparation/gist evidence boundary remains unchanged.
+- **Decision:** The past-meeting picker stages multiple selections and saves them atomically. Saved meeting cards offer an explicit Regenerate prep action. The configured analysis provider selects cited excerpts and supported talking points; deterministic saved evidence remains when synthesis fails. Generated briefing is persisted separately, invalidated when meeting references change, and guarded against stale generation writes.
+- **Presentation:** Personal notes appear in an expandable Add your notes section at the end, retain autosave, and are never replaced by regeneration. Escape does not navigate away from this page.
+
+
+## 2026-09-27 - Show one consolidated post-meeting notes document
+
+- **Supersedes:** The post-meeting Prep tab/access clause in “2026-09-27 - Keep calendar preparation separate from meeting evidence.” Prep remains accessible before and during recording, and persisted preparation remains intact.
+- **Decision:** The completed meeting displays one AI-generated notes document, with no separate Meeting/Prep tab strip. Preparation topics actually discussed are represented through the meeting's transcript and Meeting-note evidence in that document. Unasked preparation questions are not promoted to meeting outcomes, and raw historical snapshots are not concatenated into meeting evidence.
+
+## 2026-09-28 - Show preparation as read-only context during recording
+
+- **Supersedes:** The in-meeting editable Prep document clause in “2026-09-27 - Keep calendar preparation separate from meeting evidence.”
+- **Decision:** The standalone calendar prep workspace remains the editor. During an active recording, the Notes rail presents Meeting and Prep as distinct segmented tabs. Meeting notes remain editable; Prep displays the saved executive briefing and personal preparation notes as read-only context without regeneration or reference management controls.
+- **Evidence boundary:** Preparation remains background context for in-meeting Ask Pluto and is excluded from post-meeting gist evidence. Switching tabs does not promote preparation into meeting notes.
+
+## 2026-09-28 - Seed meeting notes from personal preparation
+
+- **Supersedes:** The active Prep tab's personal-notes presentation and no-promotion clause in “2026-09-28 - Show preparation as read-only context during recording.”
+- **Decision:** When a calendar occurrence starts recording, its saved personal prep notes prefill the editable Meeting notes if that occurrence has no existing Meeting-note document. Existing Meeting notes, including a deliberately cleared document, take precedence. The active Prep tab displays only the saved AI-generated executive briefing from linked past meetings and offers no editing or regeneration controls. The standalone prep workspace remains where personal preparation and source selection are edited.
+- **Evidence boundary:** Copied personal notes are user-written Meeting notes, not proof of what was said. The post-meeting notes pipeline retains its existing treatment of user notes as emphasis rather than factual transcript evidence. Historical meeting snapshots and the prep briefing remain excluded from post-meeting gist inputs.

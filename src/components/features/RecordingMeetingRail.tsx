@@ -1,5 +1,5 @@
 import { CheckCircle2, UserRound, X } from 'lucide-react';
-import { forwardRef, useEffect, useMemo, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import type { CalendarEvent } from '../../../electron/calendar/types';
 import {
   type IdentityPerson,
@@ -9,6 +9,7 @@ import {
 import { getEntitiesByType, upsertEntity } from '../../api/knowledgeGraph';
 import { isGenericSpeakerLabel } from '../../utils/speakerReview';
 import { SearchSelect, type SearchSelectOption } from '../ui/SearchSelect';
+import { SavedMeetingPrep } from './MeetingPrepEditor';
 
 const MEETING_TITLE_MAX_LENGTH = 64;
 export const RECORDING_SCRATCHPAD_STORAGE_KEY = 'pluto.recording-scratchpad';
@@ -24,6 +25,7 @@ type Props = {
   notes: string;
   onNotesChange: (value: string) => void;
   calendarEvent?: CalendarEvent | null;
+  onOpenMeeting?: (id: string) => void;
   people?: IdentityPerson[];
   disabled?: boolean;
 };
@@ -41,11 +43,17 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
       notes,
       onNotesChange,
       calendarEvent = null,
+      onOpenMeeting,
       people: propPeople,
       disabled = false,
     },
     ref,
   ) => {
+    const [notesTab, setNotesTab] = useState<'meeting' | 'prep'>('meeting');
+    const [editingTitle, setEditingTitle] = useState(false);
+    const [titleDraft, setTitleDraft] = useState(title);
+    const titleInputRef = useRef<HTMLInputElement>(null);
+    const titleEditCancelledRef = useRef(false);
     const [saveState, setSaveState] = useState<'saved' | 'dirty'>('saved');
     const [localQuery, setLocalQuery] = useState('');
     const [loadedPeople, setLoadedPeople] = useState<IdentityPerson[]>([]);
@@ -55,6 +63,18 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
     const setSearchQuery = (val: string) => {
       setLocalQuery(val);
       onParticipantInputChange?.(val);
+    };
+
+    useEffect(() => {
+      if (editingTitle) {
+        titleInputRef.current?.focus();
+        titleInputRef.current?.select();
+      }
+    }, [editingTitle]);
+
+    const commitTitle = () => {
+      onTitleChange(titleDraft.trim() || 'Meeting');
+      setEditingTitle(false);
     };
 
     useEffect(() => {
@@ -91,7 +111,14 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
     useEffect(() => {
       setSaveState('dirty');
       const timer = window.setTimeout(() => {
-        if (notes) {
+        if (calendarEvent) {
+          // An empty value records that the user deliberately cleared the
+          // prefilled notes; reopening this occurrence must not seed them again.
+          window.localStorage.setItem(
+            `pluto.meeting-notes:${calendarEvent.occurrenceKey}`,
+            notes,
+          );
+        } else if (notes) {
           window.localStorage.setItem(RECORDING_SCRATCHPAD_STORAGE_KEY, notes);
         } else {
           window.localStorage.removeItem(RECORDING_SCRATCHPAD_STORAGE_KEY);
@@ -99,7 +126,7 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
         setSaveState('saved');
       }, 400);
       return () => window.clearTimeout(timer);
-    }, [notes]);
+    }, [notes, calendarEvent?.occurrenceKey]);
 
     const eligiblePeople = useMemo(() => {
       return loadedPeople.filter((p) => {
@@ -191,7 +218,60 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
         <div className="recording-rail-content">
           <header className="rail-heading">
             <div className="rail-heading__status">
-              <p className="workspace-eyebrow">Live note</p>
+              <h2
+                id="notes-heading"
+                aria-label={title.trim() || 'Meeting'}
+                className="min-w-0 flex-1"
+              >
+                {editingTitle ? (
+                  <input
+                    ref={titleInputRef}
+                    id="recording-title"
+                    aria-label="Meeting title"
+                    className="rail-meeting-title"
+                    value={titleDraft}
+                    maxLength={MEETING_TITLE_MAX_LENGTH}
+                    onChange={(event) =>
+                      setTitleDraft(
+                        event.target.value.slice(0, MEETING_TITLE_MAX_LENGTH),
+                      )
+                    }
+                    onBlur={() => {
+                      if (titleEditCancelledRef.current) {
+                        titleEditCancelledRef.current = false;
+                        return;
+                      }
+                      commitTitle();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                      }
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        titleEditCancelledRef.current = true;
+                        setEditingTitle(false);
+                      }
+                    }}
+                    placeholder="Meeting"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="rail-meeting-title rail-meeting-title--display"
+                    aria-label={`Edit meeting title: ${title.trim() || 'Meeting'}`}
+                    onClick={() => {
+                      titleEditCancelledRef.current = false;
+                      setTitleDraft(title.trim() || 'Meeting');
+                      setEditingTitle(true);
+                    }}
+                  >
+                    {title.trim() || 'Meeting'}
+                  </button>
+                )}
+              </h2>
               <span aria-live="polite">
                 {saveState === 'saved' ? (
                   <>
@@ -202,68 +282,64 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
                 )}
               </span>
             </div>
-            <label className="sr-only" htmlFor="recording-title">
-              Meeting title
-            </label>
-            <input
-              id="recording-title"
-              className="rail-title-input"
-              value={title}
-              maxLength={MEETING_TITLE_MAX_LENGTH}
-              onChange={(event) =>
-                onTitleChange(
-                  event.target.value.slice(0, MEETING_TITLE_MAX_LENGTH),
-                )
-              }
-              placeholder="Meeting"
-            />
-            {calendarEvent ? (
-              <div className="mt-3 border-t border-pro-border/50 pt-3">
-                <p className="text-[10px] font-semibold text-pro-text-muted/65">
-                  From Calendar
-                </p>
-                <div className="mt-1 flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-[12px] font-medium text-pro-text-main">
-                      {calendarEvent.title}
-                    </p>
-                    <p className="mt-0.5 truncate text-[10px] font-medium text-pro-text-muted">
-                      {[calendarEvent.organizer, ...calendarEvent.attendees]
-                        .map((person) => person?.name || person?.email)
-                        .filter(
-                          (person, index, values): person is string =>
-                            Boolean(person) && values.indexOf(person) === index,
-                        )
-                        .join(' · ')}
-                    </p>
-                  </div>
-                  {!title.trim() ? (
-                    <button
-                      type="button"
-                      aria-label={`Use ${calendarEvent.title} as meeting title`}
-                      onClick={() => onTitleChange(calendarEvent.title)}
-                      className="shrink-0 text-[10px] font-semibold text-pro-accent transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-                    >
-                      Use title
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
           </header>
-          <section className="rail-notes" aria-labelledby="notes-heading">
-            <h2 id="notes-heading" className="sr-only">
-              Notes
-            </h2>
+          <section className="rail-notes" aria-label="Meeting notes and prep">
             <label className="sr-only" htmlFor="recording-notes">
               Meeting notes
             </label>
-            <textarea
-              id="recording-notes"
-              value={notes}
-              onChange={(event) => onNotesChange(event.target.value)}
-              placeholder="Start typing. Pluto will preserve your words and enrich them after the meeting."
-            />
+            <div
+              role="tablist"
+              aria-label="Notes sections"
+              className="mb-5 inline-flex max-w-full gap-2"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={notesTab === 'meeting'}
+                onClick={() => setNotesTab('meeting')}
+                className={`min-h-9 rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent ${notesTab === 'meeting' ? 'bg-pro-hover text-pro-text-main' : 'text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main'}`}
+              >
+                Meeting
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={notesTab === 'prep'}
+                onClick={() => setNotesTab('prep')}
+                className={`min-h-9 rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent ${notesTab === 'prep' ? 'bg-pro-hover text-pro-text-main' : 'text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main'}`}
+              >
+                Prep
+              </button>
+            </div>
+            <div
+              role="tabpanel"
+              aria-label="Meeting notes"
+              className={
+                notesTab === 'meeting'
+                  ? 'flex min-h-0 flex-1 flex-col'
+                  : 'hidden'
+              }
+              hidden={notesTab !== 'meeting'}
+            >
+              <textarea
+                id="recording-notes"
+                value={notes}
+                onChange={(event) => onNotesChange(event.target.value)}
+                placeholder="Start typing. Pluto will preserve your words and enrich them after the meeting."
+              />
+            </div>
+            {notesTab === 'prep' && (
+              <div
+                role="tabpanel"
+                aria-label="Meeting preparation"
+                className="min-h-0 overflow-y-auto"
+              >
+                <SavedMeetingPrep
+                  event={calendarEvent}
+                  onOpenMeeting={onOpenMeeting}
+                />
+              </div>
+            )}
           </section>
           <section
             className="rail-participants"

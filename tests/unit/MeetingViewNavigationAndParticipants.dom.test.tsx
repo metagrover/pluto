@@ -172,6 +172,11 @@ describe('MeetingView Navigation and Participants', () => {
     });
 
     expect(container.querySelector('.meeting-document-back')).toBeNull();
+    expect(container.querySelector('[aria-label="Notes sections"]')).toBeNull();
+    expect(
+      container.querySelector('[aria-label="Meeting preparation"]'),
+    ).toBeNull();
+    expect(container.querySelector('[data-meeting-prep-document]')).toBeNull();
   });
 
   it('renders participant count trigger and opens popover on click', async () => {
