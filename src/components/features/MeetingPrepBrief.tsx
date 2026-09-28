@@ -34,12 +34,14 @@ export function MeetingPrepBrief({
   regeneration,
   onRegenerate,
   disabled = false,
+  readOnly = false,
 }: {
   prep: MeetingPrep;
   onOpenMeeting?: (id: string) => void;
   regeneration: number;
   onRegenerate: () => void;
   disabled?: boolean;
+  readOnly?: boolean;
 }) {
   const [brief, setBrief] = useState<PreMeetingBrief | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -52,6 +54,13 @@ export function MeetingPrepBrief({
     lastRegeneration.current = regeneration;
     setBrief(null);
     setError(false);
+    if (readOnly) {
+      setBrief(
+        prep.briefing?.synthesisStatus === 'ready' ? prep.briefing : null,
+      );
+      setGenerating(false);
+      return;
+    }
     if (!(prep.meetings || []).length) {
       setGenerating(false);
       return;
@@ -75,7 +84,7 @@ export function MeetingPrepBrief({
     return () => {
       current = false;
     };
-  }, [prep.occurrenceKey, contextKey, regeneration]);
+  }, [prep.occurrenceKey, prep.briefing, contextKey, regeneration, readOnly]);
   if (!(prep.meetings || []).length) return null;
   const overview = brief?.overview?.length
     ? brief.overview
@@ -131,19 +140,21 @@ export function MeetingPrepBrief({
           <Sparkles size={14} aria-hidden="true" className="shrink-0" />
           Executive briefing
         </h3>
-        <button
-          type="button"
-          disabled={disabled || generating}
-          onClick={onRegenerate}
-          className="inline-flex min-h-8 items-center gap-2 rounded-md px-2 text-xs text-pro-text-muted hover:bg-pro-surface hover:text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-50"
-        >
-          <RefreshCw
-            size={13}
-            className={generating ? 'motion-safe:animate-spin' : undefined}
-            aria-hidden="true"
-          />
-          Regenerate
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            disabled={disabled || generating}
+            onClick={onRegenerate}
+            className="inline-flex min-h-8 items-center gap-2 rounded-md px-2 text-xs text-pro-text-muted hover:bg-pro-surface hover:text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-50"
+          >
+            <RefreshCw
+              size={13}
+              className={generating ? 'motion-safe:animate-spin' : undefined}
+              aria-hidden="true"
+            />
+            Regenerate
+          </button>
+        )}
       </div>
       {error && (
         <p role="alert" className="mb-3 text-xs text-pro-text-muted">

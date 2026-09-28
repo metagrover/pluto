@@ -1356,3 +1356,15 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 
 - **Supersedes:** The post-meeting Prep tab/access clause in “2026-09-27 - Keep calendar preparation separate from meeting evidence.” Prep remains accessible before and during recording, and persisted preparation remains intact.
 - **Decision:** The completed meeting displays one AI-generated notes document, with no separate Meeting/Prep tab strip. Preparation topics actually discussed are represented through the meeting's transcript and Meeting-note evidence in that document. Unasked preparation questions are not promoted to meeting outcomes, and raw historical snapshots are not concatenated into meeting evidence.
+
+## 2026-09-28 - Show preparation as read-only context during recording
+
+- **Supersedes:** The in-meeting editable Prep document clause in “2026-09-27 - Keep calendar preparation separate from meeting evidence.”
+- **Decision:** The standalone calendar prep workspace remains the editor. During an active recording, the Notes rail presents Meeting and Prep as distinct segmented tabs. Meeting notes remain editable; Prep displays the saved executive briefing and personal preparation notes as read-only context without regeneration or reference management controls.
+- **Evidence boundary:** Preparation remains background context for in-meeting Ask Pluto and is excluded from post-meeting gist evidence. Switching tabs does not promote preparation into meeting notes.
+
+## 2026-09-28 - Seed meeting notes from personal preparation
+
+- **Supersedes:** The active Prep tab's personal-notes presentation and no-promotion clause in “2026-09-28 - Show preparation as read-only context during recording.”
+- **Decision:** When a calendar occurrence starts recording, its saved personal prep notes prefill the editable Meeting notes if that occurrence has no existing Meeting-note document. Existing Meeting notes, including a deliberately cleared document, take precedence. The active Prep tab displays only the saved AI-generated executive briefing from linked past meetings and offers no editing or regeneration controls. The standalone prep workspace remains where personal preparation and source selection are edited.
+- **Evidence boundary:** Copied personal notes are user-written Meeting notes, not proof of what was said. The post-meeting notes pipeline retains its existing treatment of user notes as emphasis rather than factual transcript evidence. Historical meeting snapshots and the prep briefing remain excluded from post-meeting gist inputs.

@@ -2120,13 +2120,16 @@
     @apply mb-4 flex items-center justify-between gap-4;
   }
   .rail-heading__status > span {
-    @apply inline-flex items-center gap-1.5 text-xs font-medium text-pro-text-muted;
+    @apply inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-pro-text-muted;
   }
   .rail-participants h3 {
     @apply mb-2 flex items-center gap-2 text-xs font-medium text-pro-text-muted;
   }
-  .rail-title-input {
-    @apply w-full min-w-0 border-0 bg-transparent p-0 text-[1.65rem] font-semibold tracking-tight outline-none placeholder:text-pro-text-muted focus-visible:ring-0;
+  .rail-meeting-title {
+    @apply w-full min-w-0 border-0 border-b border-transparent bg-transparent px-0 py-1 text-2xl font-bold tracking-tight text-pro-text-main outline-none placeholder:text-pro-text-muted/65 transition-colors hover:border-pro-border focus:border-pro-accent focus-visible:ring-0;
+  }
+  .rail-meeting-title--display {
+    @apply block truncate text-left cursor-text focus-visible:border-pro-accent;
   }
   .rail-participants {
     @apply mt-6 pb-2 pt-1;
@@ -2150,7 +2153,7 @@
     @apply flex h-8 w-8 items-center justify-center text-pro-text-muted;
   }
   .rail-notes {
-    @apply mt-5 flex min-h-0 flex-1 flex-col border-y border-pro-border/70 py-5;
+    @apply mt-2 flex min-h-0 flex-1 flex-col border-b border-pro-border/70 pb-5;
   }
   .rail-notes textarea {
     @apply min-h-60 flex-1 resize-none border-0 bg-transparent p-0 text-[15px] leading-7 outline-none placeholder:text-pro-text-muted/65 focus-visible:ring-0;
@@ -2342,7 +2345,8 @@
   --pro-warning: 38 90% 45%; /* #D97706 */
   --pro-success: 152 45% 36%; /* #327A56 */
 
-  --pro-shadow-premium: 0 2px 8px rgba(36, 33, 29, 0.04), 0 12px 28px -6px rgba(36, 33, 29, 0.06);
+  --pro-shadow-premium: 0 2px 8px rgba(36, 33, 29, 0.04), 0 12px 28px -6px
+    rgba(36, 33, 29, 0.06);
 }
 
 .terracotta ::selection,
@@ -2350,7 +2354,7 @@
 .celestial ::selection,
 .botanical ::selection {
   background-color: hsla(15, 65%, 58%, 0.22);
-  color: #24211D;
+  color: #24211d;
 }
 
 .terracotta input,
@@ -2359,19 +2363,19 @@
 .claude textarea,
 .celestial input,
 .celestial textarea {
-  caret-color: #D97757;
+  caret-color: #d97757;
 }
 
 .terracotta *:focus-visible,
 .claude *:focus-visible,
 .celestial *:focus-visible {
-  outline-color: #D97757;
+  outline-color: #d97757;
 }
 
 .terracotta ::-webkit-scrollbar-thumb,
 .claude ::-webkit-scrollbar-thumb,
 .celestial ::-webkit-scrollbar-thumb {
-  background-color: #DED8CE;
+  background-color: #ded8ce;
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: padding-box;
@@ -2380,20 +2384,20 @@
 .terracotta ::-webkit-scrollbar-thumb:hover,
 .claude ::-webkit-scrollbar-thumb:hover,
 .celestial ::-webkit-scrollbar-thumb:hover {
-  background-color: #D97757;
+  background-color: #d97757;
 }
 
 /* Scoped Sidebar Styling for Terracotta */
 .terracotta .app-sidebar [data-active="true"],
 .claude .app-sidebar [data-active="true"] {
   background-color: rgba(217, 119, 87, 0.12) !important;
-  color: #C05634 !important;
+  color: #c05634 !important;
   font-weight: 600 !important;
 }
 
 .terracotta .app-sidebar [data-active="true"] svg,
 .claude .app-sidebar [data-active="true"] svg {
-  color: #D97757 !important;
+  color: #d97757 !important;
 }
 
 .terracotta .app-sidebar .sidebar-record-btn:hover,
@@ -2428,7 +2432,8 @@
   --pro-warning: 38 92% 50%; /* #F59E0B */
   --pro-success: 160 84% 39%; /* #10B981 */
 
-  --pro-shadow-premium: 0 2px 8px rgba(0, 0, 0, 0.04), 0 14px 28px -4px rgba(255, 56, 92, 0.08);
+  --pro-shadow-premium: 0 2px 8px rgba(0, 0, 0, 0.04), 0 14px 28px -4px
+    rgba(255, 56, 92, 0.08);
 }
 
 .coral ::selection,
@@ -2441,17 +2446,17 @@
 .coral textarea,
 .airbnb input,
 .airbnb textarea {
-  caret-color: #FF385C;
+  caret-color: #ff385c;
 }
 
 .coral *:focus-visible,
 .airbnb *:focus-visible {
-  outline-color: #FF385C;
+  outline-color: #ff385c;
 }
 
 .coral ::-webkit-scrollbar-thumb,
 .airbnb ::-webkit-scrollbar-thumb {
-  background-color: #DDDDDD;
+  background-color: #dddddd;
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: padding-box;
@@ -2459,20 +2464,20 @@
 
 .coral ::-webkit-scrollbar-thumb:hover,
 .airbnb ::-webkit-scrollbar-thumb:hover {
-  background-color: #FF385C;
+  background-color: #ff385c;
 }
 
 /* Scoped Sidebar Styling for Coral */
 .coral .app-sidebar [data-active="true"],
 .airbnb .app-sidebar [data-active="true"] {
   background-color: rgba(255, 56, 92, 0.08) !important;
-  color: #FF385C !important;
+  color: #ff385c !important;
   font-weight: 600 !important;
 }
 
 .coral .app-sidebar [data-active="true"] svg,
 .airbnb .app-sidebar [data-active="true"] svg {
-  color: #FF385C !important;
+  color: #ff385c !important;
 }
 
 .coral .app-sidebar .sidebar-record-btn:hover,
@@ -2508,13 +2513,14 @@
   --pro-warning: 41 94% 45%; /* #ECB22E Slack Yellow */
   --pro-success: 156 59% 42%; /* #2BAC76 Slack Green */
 
-  --pro-shadow-premium: 0 1px 4px rgba(0, 0, 0, 0.05), 0 8px 24px -4px rgba(63, 14, 64, 0.08);
+  --pro-shadow-premium: 0 1px 4px rgba(0, 0, 0, 0.05), 0 8px 24px -4px
+    rgba(63, 14, 64, 0.08);
 }
 
 /* Scoped Sidebar Styling for Aubergine */
 .aubergine .app-sidebar,
 .slack .app-sidebar {
-  background-color: #3F0E40 !important;
+  background-color: #3f0e40 !important;
   border-right-color: #522653 !important;
 }
 
@@ -2539,41 +2545,41 @@
 
 .aubergine .app-sidebar .font-serif,
 .slack .app-sidebar .font-serif {
-  color: #FAFAFA !important;
+  color: #fafafa !important;
 }
 
 /* Primary record button: Slack Green */
 .aubergine .app-sidebar .sidebar-record-btn,
 .slack .app-sidebar .sidebar-record-btn {
-  background-color: #007A5A !important;
-  color: #FFFFFF !important;
-  border-color: #007A5A !important;
+  background-color: #007a5a !important;
+  color: #ffffff !important;
+  border-color: #007a5a !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25) !important;
 }
 
 .aubergine .app-sidebar .sidebar-record-btn:hover,
 .slack .app-sidebar .sidebar-record-btn:hover {
   background-color: #148567 !important;
-  color: #FFFFFF !important;
+  color: #ffffff !important;
 }
 
 .aubergine .app-sidebar .sidebar-record-btn svg,
 .slack .app-sidebar .sidebar-record-btn svg {
-  color: #FFFFFF !important;
+  color: #ffffff !important;
 }
 
 /* Sidebar Search bar */
 .aubergine .app-sidebar .sidebar-search-btn,
 .slack .app-sidebar .sidebar-search-btn {
   background-color: #522653 !important;
-  color: #D1C2D9 !important;
+  color: #d1c2d9 !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
 .aubergine .app-sidebar .sidebar-search-btn:hover,
 .slack .app-sidebar .sidebar-search-btn:hover {
   background-color: #5d2b5e !important;
-  color: #FFFFFF !important;
+  color: #ffffff !important;
 }
 
 /* Inactive nav buttons */
@@ -2581,7 +2587,7 @@
 .aubergine .app-sidebar .sidebar-footer-btn,
 .slack .app-sidebar .sidebar-nav-btn,
 .slack .app-sidebar .sidebar-footer-btn {
-  color: #C3B6C2 !important;
+  color: #c3b6c2 !important;
 }
 
 .aubergine .app-sidebar .sidebar-nav-btn:hover,
@@ -2589,56 +2595,56 @@
 .slack .app-sidebar .sidebar-nav-btn:hover,
 .slack .app-sidebar .sidebar-footer-btn:hover {
   background-color: rgba(255, 255, 255, 0.08) !important;
-  color: #FFFFFF !important;
+  color: #ffffff !important;
 }
 
 .aubergine .app-sidebar .sidebar-nav-btn:hover svg,
 .aubergine .app-sidebar .sidebar-footer-btn:hover svg,
 .slack .app-sidebar .sidebar-nav-btn:hover svg,
 .slack .app-sidebar .sidebar-footer-btn:hover svg {
-  color: #FFFFFF !important;
+  color: #ffffff !important;
 }
 
 /* Active channel pill: Lighter shade of Aubergine primary color (#5B245D vs #3F0E40) */
 .aubergine .app-sidebar [data-active="true"],
 .slack .app-sidebar [data-active="true"] {
-  background-color: #5B245D !important;
-  color: #FFFFFF !important;
+  background-color: #5b245d !important;
+  color: #ffffff !important;
   font-weight: 600 !important;
 }
 
 .aubergine .app-sidebar [data-active="true"]:hover,
 .slack .app-sidebar [data-active="true"]:hover {
   background-color: #672969 !important;
-  color: #FFFFFF !important;
+  color: #ffffff !important;
 }
 
 .aubergine .app-sidebar [data-active="true"] svg,
 .slack .app-sidebar [data-active="true"] svg {
-  color: #FFFFFF !important;
+  color: #ffffff !important;
 }
 
 .aubergine ::selection,
 .slack ::selection {
   background-color: hsla(295, 55%, 35%, 0.2);
-  color: #1D1C1D;
+  color: #1d1c1d;
 }
 
 .aubergine input,
 .aubergine textarea,
 .slack input,
 .slack textarea {
-  caret-color: #007A5A;
+  caret-color: #007a5a;
 }
 
 .aubergine *:focus-visible,
 .slack *:focus-visible {
-  outline-color: #007A5A;
+  outline-color: #007a5a;
 }
 
 .aubergine ::-webkit-scrollbar-thumb,
 .slack ::-webkit-scrollbar-thumb {
-  background-color: #D1D5DB;
+  background-color: #d1d5db;
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: padding-box;
@@ -2646,7 +2652,7 @@
 
 .aubergine ::-webkit-scrollbar-thumb:hover,
 .slack ::-webkit-scrollbar-thumb:hover {
-  background-color: #3F0E40;
+  background-color: #3f0e40;
 }
 
 @layer base {
@@ -3077,8 +3083,8 @@
 
 .dashboard-confetti-piece--shower {
   top: -16px;
-  animation: dashboard-confetti-fall var(--duration)
-    ease-out var(--delay) forwards;
+  animation: dashboard-confetti-fall var(--duration) ease-out var(--delay)
+    forwards;
 }
 
 .dashboard-confetti-piece--corner {
@@ -3555,10 +3561,18 @@
   line-height: 1.35;
   color: hsl(var(--pro-text-main));
 }
-.person-chat__message--assistant h1 { font-size: 16px; }
-.person-chat__message--assistant h2 { font-size: 15px; }
-.person-chat__message--assistant h3 { font-size: 14px; }
-.person-chat__message--assistant h4 { font-size: 13.5px; }
+.person-chat__message--assistant h1 {
+  font-size: 16px;
+}
+.person-chat__message--assistant h2 {
+  font-size: 15px;
+}
+.person-chat__message--assistant h3 {
+  font-size: 14px;
+}
+.person-chat__message--assistant h4 {
+  font-size: 13.5px;
+}
 .person-chat__message--assistant h1:first-child,
 .person-chat__message--assistant h2:first-child,
 .person-chat__message--assistant h3:first-child {
@@ -3714,8 +3728,8 @@
   font-size: 13px;
   line-height: 1.5;
   outline: none;
-  transition: border-color 150ms ease, box-shadow 150ms ease,
-    background-color 150ms ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color
+    150ms ease;
 }
 .person-chat__composer textarea:focus {
   border-color: hsl(var(--pro-accent));

@@ -4,7 +4,9 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act } from 'react-dom/test-utils';
 import { describe, expect, it, vi } from 'vitest';
+import type { MeetingPrep } from '../../electron/meetingPrep';
 import { LiveTranscript } from '../../src/components/features/LiveTranscript';
+import { MeetingPrepReadOnly } from '../../src/components/features/MeetingPrepEditor';
 import { RecordingCaptureBar } from '../../src/components/features/RecordingCaptureBar';
 import { RecordingMeetingRail } from '../../src/components/features/RecordingMeetingRail';
 import { ZenMode } from '../../src/components/features/ZenMode';
@@ -38,6 +40,60 @@ describe('recording workspace components', () => {
     expect(html).toContain('03:12');
     expect(html).not.toContain('Meeting title');
     expect(html).not.toContain('Weekly review');
+  });
+
+  it('renders only the saved generated briefing in active Prep', async () => {
+    const prep = {
+      occurrenceKey: 'event',
+      event: { title: 'Launch review' },
+      notes: 'Ask about the trial dates.\nReview the launch checklist.',
+      briefing: {
+        synthesisStatus: 'ready',
+        overview: [
+          {
+            id: 'gist',
+            text: 'Trial dates remain open.',
+            sourceMeetingId: 'past',
+            sourceLabel: 'Previous launch',
+            sourceDate: '2026-09-20',
+          },
+        ],
+        stillOpen: [],
+        talkingPoints: [],
+      },
+      meetings: [
+        {
+          id: 'past',
+          title: 'Previous launch',
+          date: '2026-09-20',
+          context: 'We agreed to review pricing.',
+        },
+      ],
+    } as MeetingPrep;
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    await act(async () => root.render(<MeetingPrepReadOnly prep={prep} />));
+    const html = container.innerHTML;
+    expect(html).toContain('Executive briefing');
+    expect(html).toContain('Trial dates remain open.');
+    expect(html).not.toContain('Your preparation notes');
+    expect(html).not.toContain('Ask about the trial dates.');
+    expect(html).not.toContain('<textarea');
+    expect(html).not.toContain('Regenerate');
+    expect(html).not.toContain('Add past meetings');
+    await act(async () => root.unmount());
+  });
+
+  it('shows an empty state rather than historical excerpts before prep synthesis', () => {
+    const prep = {
+      occurrenceKey: 'event',
+      notes: 'Ask about pricing',
+      meetings: [{ id: 'past' }],
+    } as MeetingPrep;
+    const html = renderToStaticMarkup(<MeetingPrepReadOnly prep={prep} />);
+    expect(html).toContain('No briefing was generated');
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('Ask about pricing');
   });
 
   it('announces live transcript lag without reporting capture failure', () => {
@@ -231,13 +287,22 @@ describe('recording workspace components', () => {
       />,
     );
     expect(html).toContain('aria-label="Meeting notes"');
-    expect(html).toContain('Notes');
+    expect(html).toContain('Edit meeting title: Launch review');
     expect(html).toContain('Notes sections');
+    expect(html).toContain('aria-selected="true"');
+    expect(html).toContain('bg-pro-hover text-pro-text-main');
+    expect(html.indexOf('id="notes-heading"')).toBeLessThan(
+      html.indexOf('role="tablist"'),
+    );
+    expect(html.indexOf('rail-meeting-title--display')).toBeLessThan(
+      html.indexOf('role="tablist"'),
+    );
     expect(html).toContain('>Meeting</button>');
     expect(html).toContain('>Prep</button>');
     expect(html).toContain('Saved locally');
-    expect(html).toContain('Meeting title');
-    expect(html).toContain('value="Launch review"');
+    expect(html).toContain('Launch review</button>');
+    expect(html).toContain('Edit meeting title: Launch review');
+    expect(html).not.toContain('id="recording-title"');
     expect(html).toContain('Remove Avery');
     expect(html).toContain('Participants');
     expect(html).toContain('Add a person');
@@ -246,7 +311,7 @@ describe('recording workspace components', () => {
     expect(html).not.toContain('<details');
   });
 
-  it('offers matched Calendar context without replacing a typed title', async () => {
+  it('shows the calendar meeting title once in the editable heading', async () => {
     const calendarEvent = {
       occurrenceKey: 'event-a',
       eventIdentifier: 'event-a',
@@ -263,12 +328,11 @@ describe('recording workspace components', () => {
     };
     const container = document.createElement('div');
     const root = createRoot(container);
-    const onTitleChange = vi.fn();
     await act(async () =>
       root.render(
         <RecordingMeetingRail
-          title=""
-          onTitleChange={onTitleChange}
+          title="Product review"
+          onTitleChange={() => {}}
           calendarEvent={calendarEvent}
           participants={[]}
           participantInput=""
@@ -280,32 +344,14 @@ describe('recording workspace components', () => {
         />,
       ),
     );
-    expect(container.textContent).toContain('From Calendar');
-    expect(container.textContent).toContain('Product review');
-    expect(container.textContent).toContain('Alex · Sam');
-    container
-      .querySelector<HTMLButtonElement>(
-        'button[aria-label="Use Product review as meeting title"]',
-      )
-      ?.click();
-    expect(onTitleChange).toHaveBeenCalledWith('Product review');
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Edit meeting title: Product review"]',
+      )?.textContent,
+    ).toBe('Product review');
+    expect(container.textContent).not.toContain('From Calendar');
+    expect(container.textContent).not.toContain('Use title');
     act(() => root.unmount());
-
-    const titled = renderToStaticMarkup(
-      <RecordingMeetingRail
-        title="Customer escalation"
-        onTitleChange={() => {}}
-        calendarEvent={calendarEvent}
-        participants={[]}
-        participantInput=""
-        onParticipantInputChange={() => {}}
-        onAddParticipant={() => {}}
-        onRemoveParticipant={() => {}}
-        notes=""
-        onNotesChange={() => {}}
-      />,
-    );
-    expect(titled).not.toContain('Use Product review as meeting title');
   });
 
   it('saves live scratchpad text locally after typing pauses', async () => {
@@ -374,7 +420,7 @@ describe('recording workspace components', () => {
     );
   });
 
-  it('updates the recording meeting title from the details rail', () => {
+  it('updates the recording meeting title from the heading', () => {
     const container = document.createElement('div');
     const root = createRoot(container);
     const onTitleChange = vi.fn();
@@ -395,8 +441,15 @@ describe('recording workspace components', () => {
       );
     });
 
+    const display = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Edit meeting title: Meeting"]',
+    );
+    expect(display?.textContent).toBe('Meeting');
+    expect(display?.className).toContain('rail-meeting-title--display');
+    act(() => display?.click());
     const title = container.querySelector<HTMLInputElement>('#recording-title');
     expect(title).not.toBeNull();
+    expect(title?.value).toBe('Meeting');
     expect(title?.placeholder).toBe('Meeting');
     expect(title?.maxLength).toBe(64);
     const valueSetter = Object.getOwnPropertyDescriptor(
@@ -408,8 +461,52 @@ describe('recording workspace components', () => {
       valueSetter.call(title, 'Roadmap sync');
       title.dispatchEvent(new Event('input', { bubbles: true }));
     });
-
+    act(() =>
+      title?.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
     expect(onTitleChange).toHaveBeenCalledWith('Roadmap sync');
+    act(() => root.unmount());
+  });
+
+  it('keeps the displayed title when editing is cancelled', () => {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const onTitleChange = vi.fn();
+    act(() => {
+      root.render(
+        <RecordingMeetingRail
+          title="Launch review"
+          onTitleChange={onTitleChange}
+          participants={[]}
+          onAddParticipant={() => {}}
+          onRemoveParticipant={() => {}}
+          notes=""
+          onNotesChange={() => {}}
+        />,
+      );
+    });
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Edit meeting title: Launch review"]',
+        )
+        ?.click(),
+    );
+    const title = container.querySelector<HTMLInputElement>('#recording-title');
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    act(() => {
+      if (!title || !valueSetter) return;
+      valueSetter.call(title, 'Uncommitted edit');
+      title.dispatchEvent(new Event('input', { bubbles: true }));
+      title.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+    expect(onTitleChange).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Launch review');
     act(() => root.unmount());
   });
 
@@ -434,6 +531,13 @@ describe('recording workspace components', () => {
       );
     });
 
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Edit meeting title: Meeting"]',
+        )
+        ?.click(),
+    );
     const title = container.querySelector<HTMLInputElement>('#recording-title');
     const valueSetter = Object.getOwnPropertyDescriptor(
       window.HTMLInputElement.prototype,
@@ -446,7 +550,9 @@ describe('recording workspace components', () => {
       valueSetter.call(title, longTitle);
       title.dispatchEvent(new Event('input', { bubbles: true }));
     });
-
+    act(() =>
+      title?.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
     expect(onTitleChange).toHaveBeenCalledWith('A'.repeat(64));
     act(() => root.unmount());
   });

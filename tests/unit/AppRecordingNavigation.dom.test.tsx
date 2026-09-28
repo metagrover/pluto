@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CalendarEvent } from '../../electron/calendar/types';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -13,11 +14,17 @@ let holdRecordingStart = false;
 let completePendingStart: (() => void) | null = null;
 let completePendingStop: (() => void) | null = null;
 let startAdmissionCount = 0;
+let titleAtCalendarStart: string | null = null;
+let notesAtCalendarStart: string | null = null;
+let calendarForTest: CalendarEvent | null = null;
+const calendarListeners = new Map<string, (...args: unknown[]) => void>();
 
 vi.mock('../../src/components/AudioManager', () => ({
   AudioManager: ({
     onStartSessionRef,
     onStopSessionRef,
+    userTitle,
+    userNotes,
     onRecordingStarted,
     onStartingChange,
     onRecordingChange,
@@ -29,6 +36,8 @@ vi.mock('../../src/components/AudioManager', () => ({
     onCaptureLifecycleChange,
   }: {
     onStartSessionRef?: React.MutableRefObject<(() => void) | null>;
+    userTitle?: string;
+    userNotes?: string;
     onStopSessionRef?: React.MutableRefObject<(() => void) | null>;
     onRecordingStarted?: (startedAtMs: number) => void;
     onStartingChange?: (starting: boolean) => void;
@@ -55,7 +64,11 @@ vi.mock('../../src/components/AudioManager', () => ({
   }) => {
     useEffect(() => {
       if (onStartSessionRef) {
-        onStartSessionRef.current = () => {
+        onStartSessionRef.current = (event?: CalendarEvent) => {
+          if (event) {
+            titleAtCalendarStart = userTitle || null;
+            notesAtCalendarStart = userNotes || null;
+          }
           startAdmissionCount += 1;
           onCaptureLifecycleChange?.({ state: 'starting' });
           onStartingChange?.(true);
@@ -74,6 +87,7 @@ vi.mock('../../src/components/AudioManager', () => ({
           };
           if (holdRecordingStart) completePendingStart = complete;
           else complete();
+          return { admitted: true, state: 'recording' };
         };
       }
       if (onStopSessionRef) {
@@ -103,6 +117,8 @@ vi.mock('../../src/components/AudioManager', () => ({
     }, [
       onStartSessionRef,
       onStopSessionRef,
+      userTitle,
+      userNotes,
       onRecordingStarted,
       onStartingChange,
       onRecordingChange,
@@ -123,6 +139,22 @@ const flushPromises = async () => {
   await Promise.resolve();
 };
 
+const makeCalendarEvent = (): CalendarEvent =>
+  ({
+    occurrenceKey: 'calendar-launch',
+    eventIdentifier: 'calendar-launch',
+    calendarIdentifier: 'work',
+    title: 'Customer launch review',
+    start: new Date(Date.now() - 60_000).toISOString(),
+    end: new Date(Date.now() + 30 * 60_000).toISOString(),
+    isAllDay: false,
+    isCancelled: false,
+    availability: 'busy',
+    organizer: { name: 'Alex', email: 'alex@example.com' },
+    attendees: [],
+    lastModified: null,
+  }) as CalendarEvent;
+
 describe('App recording navigation', () => {
   let container: HTMLDivElement;
 
@@ -132,6 +164,11 @@ describe('App recording navigation', () => {
     completePendingStart = null;
     completePendingStop = null;
     startAdmissionCount = 0;
+    titleAtCalendarStart = null;
+    notesAtCalendarStart = null;
+    window.localStorage.clear();
+    calendarForTest = null;
+    calendarListeners.clear();
     container = document.createElement('div');
     document.body.append(container);
     window.__PLUTO_BROWSER_PREVIEW__ = false;
@@ -139,6 +176,17 @@ describe('App recording navigation', () => {
       configurable: true,
       value: {
         invoke: vi.fn(async (channel: string, key?: string) => {
+          if (
+            channel === 'CALENDAR_GET_STATE' ||
+            channel === 'CALENDAR_REFRESH'
+          )
+            return calendarForTest
+              ? { enabled: true, state: 'ready' }
+              : { enabled: false };
+          if (channel === 'CALENDAR_LIST_DAY')
+            return calendarForTest ? [calendarForTest] : [];
+          if (channel === 'MEETING_PREP_OPEN')
+            return { notes: 'Ask about the launch checklist' };
           if (channel === 'GET_SETTING') {
             if (key === 'setup_complete') return 'true';
             if (key === 'theme') return 'system';
@@ -207,7 +255,10 @@ describe('App recording navigation', () => {
           return null;
         }),
         send: vi.fn(),
-        on: vi.fn(),
+        on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => {
+          calendarListeners.set(channel, listener);
+          return () => calendarListeners.delete(channel);
+        }),
         off: vi.fn(),
       },
     });
@@ -218,6 +269,65 @@ describe('App recording navigation', () => {
     vi.restoreAllMocks();
     window.__PLUTO_BROWSER_PREVIEW__ = undefined;
   });
+
+  it('commits the calendar heading and prep notes before starting the selected occurrence', async () => {
+    calendarForTest = makeCalendarEvent();
+    const { default: App } = await import('../../src/App');
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<App />);
+      await flushPromises();
+    });
+    const startFromCalendar = calendarListeners.get(
+      'CALENDAR_PROMPT_START_RECORDING',
+    );
+    expect(startFromCalendar).toBeDefined();
+    await act(async () => {
+      await startFromCalendar?.(null, {
+        occurrenceKey: calendarForTest!.occurrenceKey,
+      });
+      await flushPromises();
+    });
+    expect(titleAtCalendarStart).toBe('Customer launch review');
+    expect(notesAtCalendarStart).toBe('Ask about the launch checklist');
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Edit meeting title: Customer launch review"]',
+      )?.textContent,
+    ).toBe('Customer launch review');
+    expect(
+      container.querySelector<HTMLTextAreaElement>('#recording-notes')?.value,
+    ).toBe('Ask about the launch checklist');
+    await act(async () => root.unmount());
+  });
+
+  it.each(['Existing meeting note', ''])(
+    'preserves existing meeting notes with value %j',
+    async (existingNotes) => {
+      calendarForTest = makeCalendarEvent();
+      window.localStorage.setItem(
+        'pluto.meeting-notes:calendar-launch',
+        existingNotes,
+      );
+      const { default: App } = await import('../../src/App');
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(<App />);
+        await flushPromises();
+      });
+      await act(async () => {
+        await calendarListeners.get('CALENDAR_PROMPT_START_RECORDING')?.(null, {
+          occurrenceKey: calendarForTest!.occurrenceKey,
+        });
+        await flushPromises();
+      });
+      expect(notesAtCalendarStart).toBe(existingNotes || null);
+      expect(
+        container.querySelector<HTMLTextAreaElement>('#recording-notes')?.value,
+      ).toBe(existingNotes);
+      await act(async () => root.unmount());
+    },
+  );
 
   it('returns to the active Zen meeting from the sidebar after going home', async () => {
     const { default: App } = await import('../../src/App');

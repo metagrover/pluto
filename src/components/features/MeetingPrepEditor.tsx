@@ -1,4 +1,4 @@
-import { ChevronDown, Plus, X } from 'lucide-react';
+import { BookOpen, ChevronDown, Plus, X } from 'lucide-react';
 import {
   forwardRef,
   useEffect,
@@ -435,6 +435,45 @@ export const MeetingPrepEditor = forwardRef<
   );
 });
 
+export function MeetingPrepReadOnly({
+  prep,
+  onOpenMeeting,
+}: { prep: MeetingPrep; onOpenMeeting?: (id: string) => void }) {
+  return (
+    <div className="space-y-5" aria-label="Preparation summary">
+      {prep.briefing?.synthesisStatus === 'ready' && (
+        <MeetingPrepBrief
+          prep={prep}
+          onOpenMeeting={onOpenMeeting}
+          regeneration={0}
+          onRegenerate={() => {}}
+          readOnly
+        />
+      )}
+      {prep.briefing?.synthesisStatus !== 'ready' && <PrepBriefEmptyState />}
+    </div>
+  );
+}
+
+function PrepBriefEmptyState() {
+  return (
+    <div
+      role="status"
+      className="flex min-h-60 flex-col items-center justify-center px-6 py-10 text-center"
+    >
+      <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-pro-border bg-pro-hover/40 text-pro-text-muted">
+        <BookOpen size={26} strokeWidth={1.5} aria-hidden="true" />
+      </span>
+      <p className="text-sm font-semibold text-pro-text-main">
+        No briefing was generated
+      </p>
+      <p className="mt-1 max-w-60 text-xs leading-5 text-pro-text-muted">
+        Briefings created during meeting prep appear here.
+      </p>
+    </div>
+  );
+}
+
 export function SavedMeetingPrep({
   meetingId,
   event,
@@ -444,11 +483,11 @@ export function SavedMeetingPrep({
   event?: import('../../../electron/calendar/types').CalendarEvent | null;
   onOpenMeeting?: (id: string) => void;
 }) {
-  const [prep, setPrep] = useState<MeetingPrep | null>(null);
+  const [prep, setPrep] = useState<MeetingPrep | null | undefined>(undefined);
   const [error, setError] = useState(false);
   useEffect(() => {
     let current = true;
-    setPrep(null);
+    setPrep(undefined);
     setError(false);
     const request = meetingId
       ? import('../../api/meetingPrep').then((api) =>
@@ -471,16 +510,16 @@ export function SavedMeetingPrep({
     };
   }, [meetingId, event?.occurrenceKey]);
   return prep ? (
-    <MeetingPrepEditor
-      key={prep.occurrenceKey}
-      prep={prep}
-      onOpenMeeting={onOpenMeeting}
-    />
-  ) : (
-    <p className="p-4 text-xs text-pro-text-muted">
-      {error
-        ? 'Preparation could not be loaded. Reopen this tab to retry.'
-        : 'No saved preparation for this meeting.'}
+    <MeetingPrepReadOnly prep={prep} onOpenMeeting={onOpenMeeting} />
+  ) : prep === undefined && !error ? (
+    <p role="status" className="p-4 text-xs text-pro-text-muted">
+      Loading preparation…
     </p>
+  ) : error ? (
+    <p role="alert" className="p-4 text-xs text-pro-text-muted">
+      Preparation could not be loaded. Reopen this tab to retry.
+    </p>
+  ) : (
+    <PrepBriefEmptyState />
   );
 }

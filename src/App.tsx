@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { openMeetingPrep } from './api/meetingPrep';
 import './App.css';
 
@@ -1168,17 +1169,22 @@ function App() {
 
   const handleStartFromPrompt = useCallback(
     async (event: CalendarEvent) => {
-      await openMeetingPrep(event);
+      const prep = await openMeetingPrep(event);
       dismissPrompt(event.occurrenceKey);
       activeCalendarEventRef.current = event;
-      setActiveCalendarEvent(event);
-      setMeetingTitle(event.title || 'Meeting');
-      setMeetingParticipants([]);
-      setParticipantInput('');
-      setCurrentNotes(
-        localStorage.getItem(`pluto.meeting-notes:${event.occurrenceKey}`) ||
-          '',
-      );
+      // The recorder is invoked through an effect-updated ref. Commit the
+      // calendar title first so its start/stop callbacks capture this event.
+      flushSync(() => {
+        setActiveCalendarEvent(event);
+        setMeetingTitle(event.title?.trim() || 'Meeting');
+        setMeetingParticipants([]);
+        setParticipantInput('');
+        setCurrentNotes(
+          localStorage.getItem(`pluto.meeting-notes:${event.occurrenceKey}`) ??
+            prep?.notes ??
+            '',
+        );
+      });
       if (!startSessionRef.current)
         throw new Error('Recording is not ready yet.');
       const result = await startSessionRef.current(event);
