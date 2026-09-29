@@ -4,6 +4,16 @@ interface PersonReadStream {
   current_read: string;
 }
 
+export const PERSON_CONTEXT_SYNTHESIS_VERSION = 8;
+
+export const isCurrentPersonDossier = (
+  status: string | null | undefined,
+  version: number | null | undefined,
+): boolean =>
+  status === 'up_to_date' &&
+  typeof version === 'number' &&
+  version >= PERSON_CONTEXT_SYNTHESIS_VERSION;
+
 interface PersonReadEvidence {
   meeting_id: string;
   meeting_title: string;

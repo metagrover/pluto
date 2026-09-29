@@ -56,7 +56,10 @@ import {
   parsePersonRole,
   scorePersonActivity,
 } from '../../utils/personBriefing';
-import { buildPersonDossierRead } from '../../utils/personDossierRead';
+import {
+  buildPersonDossierRead,
+  isCurrentPersonDossier,
+} from '../../utils/personDossierRead';
 import { PersonChatDock } from '../features/PersonChatDock';
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
@@ -1201,9 +1204,10 @@ export const PersonDossier = ({
     if (
       !currentDetail.knowledgeDoc ||
       meetingCount === 0 ||
-      (currentDetail.knowledgeDoc.status === 'up_to_date' &&
-        typeof summaryVersion === 'number' &&
-        summaryVersion >= 7) ||
+      isCurrentPersonDossier(
+        currentDetail.knowledgeDoc.status,
+        summaryVersion,
+      ) ||
       autoRefreshedPersonId.current === currentDetail.person.id
     ) {
       return;
@@ -1220,8 +1224,7 @@ export const PersonDossier = ({
   useEffect(() => {
     if (
       !currentDetail.knowledgeDoc ||
-      (currentDetail.knowledgeDoc.status === 'up_to_date' &&
-        summaryVersion >= 6)
+      isCurrentPersonDossier(currentDetail.knowledgeDoc.status, summaryVersion)
     ) {
       return;
     }
