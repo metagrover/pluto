@@ -720,6 +720,7 @@ export const PersonDossier = ({
   const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
   const [isDeleting, setIsDeleting] = useState(false);
   const prepareGeneration = useRef(0);
+  const autoRefreshedPersonId = useRef<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   const [voiceProfile, setVoiceProfile] = useState<ClientVoiceProfile | null>(
@@ -1203,6 +1204,26 @@ export const PersonDossier = ({
       console.error('Failed to synthesize fresh read:', err);
     }
   };
+
+  useEffect(() => {
+    if (
+      !currentDetail.knowledgeDoc ||
+      meetingCount === 0 ||
+      hasPersonSummary ||
+      (typeof summaryVersion === 'number' && summaryVersion >= 5) ||
+      autoRefreshedPersonId.current === currentDetail.person.id
+    ) {
+      return;
+    }
+    autoRefreshedPersonId.current = currentDetail.person.id;
+    void handleSynthesizeFreshRead();
+  }, [
+    currentDetail.person.id,
+    currentDetail.knowledgeDoc,
+    meetingCount,
+    hasPersonSummary,
+    summaryVersion,
+  ]);
 
   const handleDeletePerson = async () => {
     if (currentDetail.isSelf || isDeleting) return;
@@ -1749,11 +1770,27 @@ export const PersonDossier = ({
             )}
           </>
         ) : (
-          <p className="person-dossier__about-empty">
-            {meetingCount > 0
-              ? 'A source-backed summary of this person’s role and contributions is being prepared. Recent developments are below.'
-              : 'No conversations are linked to this person yet.'}
-          </p>
+          <div>
+            <p className="person-dossier__about-empty">
+              {dreamingState === 'error'
+                ? 'The person summary could not be updated. Recent developments remain available below.'
+                : summaryVersion >= 5 &&
+                    currentDetail.knowledgeDoc?.status === 'up_to_date'
+                  ? 'The linked conversations do not yet establish a reliable summary of this person’s role and contributions.'
+                  : meetingCount > 0
+                    ? 'A source-backed summary of this person’s role and contributions is being prepared. Recent developments are below.'
+                    : 'No conversations are linked to this person yet.'}
+            </p>
+            {dreamingState === 'error' && currentDetail.knowledgeDoc && (
+              <button
+                type="button"
+                className="mt-2 text-sm text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
+                onClick={() => void handleSynthesizeFreshRead()}
+              >
+                Retry summary
+              </button>
+            )}
+          </div>
         )}
       </section>
 
