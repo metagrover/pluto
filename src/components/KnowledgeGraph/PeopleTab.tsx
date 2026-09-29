@@ -878,20 +878,22 @@ export const PersonDossier = ({
     (candidate) => candidate.id === mergeSourceId,
   );
 
-  // Temporal provenance for working context
-  const rawDate = brief.freshnessAt;
-  const parsedDate = rawDate ? Date.parse(rawDate) : Number.NaN;
-  const isValidDate = !Number.isNaN(parsedDate);
-
-  const formattedDate = isValidDate
-    ? new Date(parsedDate).toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        ...(new Date(parsedDate).getFullYear() !== new Date().getFullYear()
-          ? { year: 'numeric' }
-          : {}),
-      })
-    : null;
+  const citedDates = personRead.workstreams
+    .flatMap((stream) => stream.sources)
+    .map((source) => Date.parse(source.captured_at ?? ''))
+    .filter(Number.isFinite);
+  const latestCitedDate = citedDates.length ? Math.max(...citedDates) : null;
+  const formattedDate =
+    latestCitedDate !== null
+      ? new Date(latestCitedDate).toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          ...(new Date(latestCitedDate).getFullYear() !==
+          new Date().getFullYear()
+            ? { year: 'numeric' }
+            : {}),
+        })
+      : null;
 
   const saveName = async () => {
     const name = nameDraft.trim();
@@ -1750,7 +1752,7 @@ export const PersonDossier = ({
               {personRead.headline}
             </p>
             <p className="mt-2 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-main/80">
-              {`Based on ${personReadSourceCount} cited conversations through ${formattedDate ?? 'the latest linked source'}.`}
+              {`Based on ${personReadSourceCount} cited conversations${formattedDate ? ` through ${formattedDate}` : ''}.`}
               {!roleSourceMeetingId || role === 'Known from conversations'
                 ? ' A formal job title has not been established.'
                 : ''}

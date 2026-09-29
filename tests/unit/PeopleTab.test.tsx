@@ -379,9 +379,9 @@ const briefingDetail: PersonBriefingDetail = {
     rendered_content: null,
     config: null,
     status: 'up_to_date',
-    last_synthesized_at: '2026-07-12T13:00:00.000Z',
+    last_synthesized_at: '2026-07-18T13:00:00.000Z',
     last_source_cursor: null,
-    updated_at: '2026-07-12T13:00:00.000Z',
+    updated_at: '2026-07-18T13:00:00.000Z',
     structured_json: JSON.stringify({
       schema_version: 2,
       scope: { type: 'person_context', title: 'Avery Chen' },
@@ -522,6 +522,8 @@ describe('PersonDossier', () => {
       'Avery Chen has worked on launch handoffs across multiple conversations.',
     );
     expect(markup).toContain('Based on 2 cited conversations');
+    expect(markup).toContain('through Jul 12');
+    expect(markup).not.toContain('through Jul 18');
     expect(markup).toContain('Product review · Jul 12');
     expect(markup).not.toContain('Recurring work');
     expect(markup).not.toContain('208a5a10');
