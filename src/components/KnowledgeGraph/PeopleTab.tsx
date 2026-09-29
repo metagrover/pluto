@@ -1285,6 +1285,11 @@ export const PersonDossier = ({
   const { workstreams, plainBullets } = useMemo(() => {
     return extractWorkstreams(brief.activeStreams, brief.supportingBullets);
   }, [brief.activeStreams, brief.supportingBullets]);
+  const summaryWorkstreams = workstreams.filter(
+    (stream) =>
+      stream.detail.trim().toLocaleLowerCase() !==
+      brief.headline.trim().toLocaleLowerCase(),
+  );
 
   return (
     <article className="person-dossier">
@@ -1761,25 +1766,24 @@ export const PersonDossier = ({
           <h2 id="person-summary">Who they are in this work</h2>
         </div>
         {hasPersonSummary ? (
-          <>
+          <div>
             <p className="max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main">
               {brief.headline}
             </p>
-            <p className="mt-2 text-xs text-pro-text-muted">
+            <p className="mt-2 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-muted">
               {isDraftSummary
-                ? 'Draft from recent conversations; Pluto is still compiling the full history through '
-                : 'Based on conversations through '}
-              {formattedDate ?? 'the latest linked source'}.
+                ? `Draft from recent conversations; Pluto is still compiling the full history through ${formattedDate ?? 'the latest linked source'}.`
+                : `Based on conversations through ${formattedDate ?? 'the latest linked source'}.`}
               {!roleSourceMeetingId || role === 'Known from conversations'
                 ? ' A formal job title has not been established.'
                 : ''}
             </p>
-            {workstreams.length > 0 && (
+            {summaryWorkstreams.length > 0 && (
               <div className="mt-6 space-y-3">
                 <h3 className="text-sm font-semibold text-pro-text-main">
                   Responsibilities and contributions
                 </h3>
-                {workstreams.slice(0, 4).map((stream) => (
+                {summaryWorkstreams.slice(0, 4).map((stream) => (
                   <div
                     key={stream.id}
                     className="border-b border-pro-border/50 pb-3 last:border-0"
@@ -1809,10 +1813,10 @@ export const PersonDossier = ({
                 ))}
               </div>
             )}
-          </>
+          </div>
         ) : (
           <div>
-            <p className="person-dossier__about-empty">
+            <p className="max-w-[68ch] font-sans text-sm leading-6 text-pro-text-muted">
               {dreamingState === 'error'
                 ? 'The person summary could not be updated. Recent developments remain available below.'
                 : summaryVersion >= 5 &&
