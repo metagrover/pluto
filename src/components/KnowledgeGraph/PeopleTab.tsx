@@ -52,7 +52,10 @@ import type {
   PersonBriefingSummary,
   PersonMeetingEvidence,
 } from '../../utils/personBriefing';
-import { parsePersonRole } from '../../utils/personBriefing';
+import {
+  parsePersonRole,
+  scorePersonActivity,
+} from '../../utils/personBriefing';
 import { buildPersonDossierRead } from '../../utils/personDossierRead';
 import { PersonChatDock } from '../features/PersonChatDock';
 import { PageHeader } from '../ui/PageHeader';
@@ -826,23 +829,18 @@ export const PersonDossier = ({
   const personActivity = (currentDetail.recentActivity ?? []).filter(
     (item) => !/\bwill (?:notify|ping|inform)\b/i.test(item.text),
   );
-  const directWorkScore = (text: string) => {
-    const name = currentDetail.person.name.toLocaleLowerCase();
-    const normalized = text.toLocaleLowerCase();
-    const prefix = [name, name.split(' ')[0]].find((candidate) =>
-      normalized.startsWith(`${candidate} `),
-    );
-    const remainder = prefix ? normalized.slice(prefix.length + 1) : '';
-    return /^(?:will (?:coordinate|build|implement|deliver|lead|develop|optimize|revise)|is (?:working|coordinating|building|reviewing|leading|optimizing|developing|implementing)|has (?:worked|built|reviewed|delivered|implemented)|worked|coordinated|built|reviewed|updated|revised|designed|implemented|delivered|optimized|developed|owns|manages|leads)\b/.test(
-      remainder,
-    )
-      ? 1
-      : 0;
-  };
+  const activityNames = [
+    currentDetail.person.name,
+    currentDetail.person.name.split(' ')[0],
+  ];
   const sourceNoteOverview = hasPersonSummary
     ? []
     : [...personActivity]
-        .sort((a, b) => directWorkScore(b.text) - directWorkScore(a.text))
+        .sort(
+          (a, b) =>
+            scorePersonActivity(b.text, activityNames) -
+            scorePersonActivity(a.text, activityNames),
+        )
         .slice(0, 2);
   const recurringQuotes = new Set(
     personRead.workstreams.flatMap((stream) =>
@@ -857,7 +855,9 @@ export const PersonDossier = ({
             !/\bwill (?:notify|ping|inform)\b/i.test(item.text),
         )
         .slice(0, 3)
-    : personActivity.filter((item) => !sourceNoteOverview.includes(item));
+    : personActivity
+        .filter((item) => !sourceNoteOverview.includes(item))
+        .slice(0, 3);
   const meetingCount = currentDetail.meetings.length;
   const confirmedMeetings = currentDetail.meetings.filter(
     (meeting) => meeting.evidence === 'confirmed',

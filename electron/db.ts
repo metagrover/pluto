@@ -9512,9 +9512,10 @@ export const getPersonBriefing = (
       meetings.filter((item) => item.evidence !== 'scheduled'),
       personNames.map((row) => row.name),
       analyses,
-      5,
+      12,
       acceptedClaims.filter((claim) => claim.kind === 'person_focus'),
       confirmedFirstName,
+      4,
     ),
     commitments: selectPersonCommitments({
       personId: canonicalId,

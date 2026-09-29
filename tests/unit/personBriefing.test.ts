@@ -95,6 +95,42 @@ it('shows recent named work without treating nearby people or generic discussion
   ]);
 });
 
+it('selects substantive named work even when routine notes appear first', () => {
+  const meetings = mergePersonMeetingEvidence({
+    confirmed: [meeting('review', '2026-09-20T10:00:00.000Z')],
+    scheduled: [],
+    mentioned: [],
+  });
+  const activity = selectPersonActivity(
+    meetings,
+    ['Avery Chen'],
+    new Map([
+      [
+        'review',
+        {
+          topics: [
+            {
+              key_points: [
+                { text: 'Avery Chen noted the review is scheduled tomorrow.' },
+                { text: 'Avery Chen will notify the team after the review.' },
+                { text: 'Avery Chen designed the release handoff.' },
+              ],
+            },
+          ],
+        },
+      ],
+    ]),
+    1,
+    [],
+    null,
+    1,
+  );
+
+  expect(activity.map((item) => item.text)).toEqual([
+    'Avery Chen designed the release handoff.',
+  ]);
+});
+
 it('includes accepted focus updates with a linked source among recent activity', () => {
   const meetings = mergePersonMeetingEvidence({
     confirmed: [meeting('recent', '2026-09-20T10:00:00.000Z')],

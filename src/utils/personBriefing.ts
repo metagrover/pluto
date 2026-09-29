@@ -114,6 +114,28 @@ export interface PersonActivityItem {
   source?: 'accepted_focus';
 }
 
+/** Rank attributable work above routine observations within a meeting. */
+export const scorePersonActivity = (text: string, names: string[]): number => {
+  const normalized = text.trim().toLocaleLowerCase();
+  const prefix = names
+    .map((name) => name.trim().toLocaleLowerCase())
+    .sort((a, b) => b.length - a.length)
+    .find(
+      (name) =>
+        normalized.startsWith(`${name} `) ||
+        normalized.startsWith(`${name}'s `),
+    );
+  if (!prefix) return 0;
+  const predicate = normalized.slice(prefix.length).trimStart();
+  if (
+    /^(?:is (?:working|testing|building|developing|implementing|reviewing|leading|optimizing|investigating|addressing|preparing)|has (?:worked|built|reviewed|delivered|implemented)|worked|tested|coordinated|built|reviewed|updated|revised|designed|implemented|delivered|optimized|developed|suggested|proposed|recommended|identified|emphasized|owns|manages|leads)\b/.test(
+      predicate,
+    )
+  )
+    return 2;
+  return /^will\b/.test(predicate) ? 1 : 0;
+};
+
 /** Meeting notes can describe activity, but do not establish a person's role or ownership. */
 export const selectPersonActivity = (
   meetings: PersonBriefingMeeting[],
@@ -148,7 +170,8 @@ export const selectPersonActivity = (
         ? record.all_action_items
         : []),
     ];
-    for (const point of points) {
+    const candidates: Array<{ value: string; key: string; index: number }> = [];
+    for (const [index, point] of points.entries()) {
       if (typeof point.text !== 'string') continue;
       const value = point.text.trim();
       const key = value.toLocaleLowerCase();
@@ -167,6 +190,16 @@ export const selectPersonActivity = (
           ))
       )
         continue;
+      candidates.push({ value, key, index });
+    }
+    candidates.sort(
+      (a, b) =>
+        scorePersonActivity(b.value, [...names, confirmedFirstName ?? '']) -
+          scorePersonActivity(a.value, [...names, confirmedFirstName ?? '']) ||
+        a.index - b.index,
+    );
+    for (const { value, key } of candidates) {
+      if (seen.has(key)) continue;
       seen.add(key);
       result.push({
         text: value,
