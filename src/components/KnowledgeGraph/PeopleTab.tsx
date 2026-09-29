@@ -836,13 +836,19 @@ export const PersonDossier = ({
     currentDetail.person.name,
     currentDetail.person.name.split(' ')[0],
   ];
+  const rankedActivity = [...personActivity].sort(
+    (a, b) =>
+      scorePersonActivity(b.text, activityNames) -
+      scorePersonActivity(a.text, activityNames),
+  );
   const sourceNoteOverview = hasPersonSummary
     ? []
-    : [...personActivity]
-        .sort(
-          (a, b) =>
-            scorePersonActivity(b.text, activityNames) -
-            scorePersonActivity(a.text, activityNames),
+    : rankedActivity
+        .filter(
+          (item, index) =>
+            rankedActivity.findIndex(
+              (candidate) => candidate.meetingId === item.meetingId,
+            ) === index,
         )
         .slice(0, 2);
   const recurringQuotes = new Set(
@@ -859,7 +865,12 @@ export const PersonDossier = ({
         )
         .slice(0, 3)
     : personActivity
-        .filter((item) => !sourceNoteOverview.includes(item))
+        .filter(
+          (item) =>
+            !sourceNoteOverview.some(
+              (selected) => selected.meetingId === item.meetingId,
+            ),
+        )
         .slice(0, 3);
   const meetingCount = currentDetail.meetings.length;
   const confirmedMeetings = currentDetail.meetings.filter(
@@ -1802,32 +1813,27 @@ export const PersonDossier = ({
           </div>
         ) : sourceNoteOverview.length > 0 ? (
           <div>
-            <div className="max-w-[68ch] space-y-3 font-serif text-lg leading-7 text-pro-text-main">
+            <div className="max-w-[68ch] space-y-5">
               {sourceNoteOverview.map((item) => (
-                <p key={`${item.meetingId}-${item.text}`}>{item.text}</p>
+                <article key={`${item.meetingId}-${item.text}`}>
+                  <p className="font-serif text-lg leading-7 text-pro-text-main">
+                    {item.text}
+                  </p>
+                  <button
+                    type="button"
+                    className="mt-1 text-left text-xs leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                    onClick={() => onOpenMeeting(item.meetingId)}
+                  >
+                    {item.meetingTitle}
+                    {item.occurredAt ? ` · ${formatDate(item.occurredAt)}` : ''}
+                  </button>
+                </article>
               ))}
             </div>
             <p className="mt-3 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-main/80">
               From person-specific meeting notes. A broader account of their
               role and contributions is being prepared.
             </p>
-            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              {Array.from(
-                new Map(
-                  sourceNoteOverview.map((item) => [item.meetingId, item]),
-                ).values(),
-              ).map((item) => (
-                <button
-                  key={`${item.meetingId}-${item.text}`}
-                  type="button"
-                  className="text-left leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                  onClick={() => onOpenMeeting(item.meetingId)}
-                >
-                  {item.meetingTitle}
-                  {item.occurredAt ? ` · ${formatDate(item.occurredAt)}` : ''}
-                </button>
-              ))}
-            </div>
           </div>
         ) : (
           <div>
