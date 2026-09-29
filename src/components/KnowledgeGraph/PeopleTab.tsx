@@ -1733,7 +1733,7 @@ export const PersonDossier = ({
         )}
         {hasPersonSummary ? (
           <div>
-            <p className="max-w-[64ch] font-serif text-xl leading-8 text-pro-text-main">
+            <p className="max-w-[64ch] font-serif text-lg leading-7 text-pro-text-main">
               {personRead.headline}
             </p>
             <p className="mt-2 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-muted">
@@ -1743,19 +1743,22 @@ export const PersonDossier = ({
                 : ''}
             </p>
             {personRead.workstreams.length > 0 && (
-              <div className="mt-7 space-y-5">
+              <div className="mt-6 space-y-4">
                 <h3 className="text-sm font-semibold text-pro-text-main">
                   Recurring work
                 </h3>
                 {personRead.workstreams.map((stream) => (
                   <div
                     key={stream.id}
-                    className="max-w-[68ch] border-b border-pro-border/50 pb-5 last:border-0 last:pb-0"
+                    className="max-w-[68ch] border-b border-pro-border/50 pb-4 last:border-0 last:pb-0"
                   >
                     <h4 className="text-sm font-semibold text-pro-text-main">
                       {stream.title}
                     </h4>
                     <p className="mt-1 max-w-[68ch] text-sm leading-6 text-pro-text-muted">
+                      <span className="font-medium text-pro-text-main">
+                        One example:{' '}
+                      </span>
                       {stream.detail}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
