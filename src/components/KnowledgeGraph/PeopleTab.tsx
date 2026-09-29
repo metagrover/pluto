@@ -870,7 +870,7 @@ export const PersonDossier = ({
       normalized.startsWith(`${candidate} `),
     );
     const remainder = prefix ? normalized.slice(prefix.length + 1) : '';
-    return /^(?:will|is (?:working|coordinating|building|reviewing|leading)|has (?:worked|built|reviewed|delivered)|worked|coordinated|built|reviewed|updated|revised|designed|implemented|delivered|owns|manages|leads)\b/.test(
+    return /^(?:will (?:coordinate|build|implement|deliver|lead|develop|optimize|revise)|is (?:working|coordinating|building|reviewing|leading|optimizing|developing|implementing)|has (?:worked|built|reviewed|delivered|implemented)|worked|coordinated|built|reviewed|updated|revised|designed|implemented|delivered|optimized|developed|owns|manages|leads)\b/.test(
       remainder,
     )
       ? 1

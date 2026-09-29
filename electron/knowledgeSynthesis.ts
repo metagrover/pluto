@@ -41,7 +41,10 @@ import {
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
 } from './llm/prompts';
-import { focusPersonSynthesisSources } from './personSynthesisSources';
+import {
+  collectPersonSynthesisActivity,
+  focusPersonSynthesisSources,
+} from './personSynthesisSources';
 import {
   createSerializedTaskGate,
   isSerializedTaskPreemption,
@@ -1596,6 +1599,17 @@ const buildSourceMeetings = (doc: db.KnowledgeDoc): SynthSourceMeeting[] => {
 
   if (doc.scope_type === 'person_context') {
     const person = db.getPersonBriefing(doc.scope_key);
+    const activity = person
+      ? collectPersonSynthesisActivity(
+          person.meetings,
+          sourceMeetings.map((meeting) => ({
+            id: String(meeting.id),
+            analysis_json: meeting.analysis_json,
+          })),
+          person.person.name,
+          person.recentActivity ?? [],
+        )
+      : [];
     return focusPersonSynthesisSources(
       sourceMeetings.map((meeting) => ({
         id: String(meeting.id),
@@ -1604,7 +1618,7 @@ const buildSourceMeetings = (doc: db.KnowledgeDoc): SynthSourceMeeting[] => {
         evidence: '',
         duration_seconds: meeting.duration_seconds,
       })),
-      person?.recentActivity ?? [],
+      activity,
       person?.person.name ?? doc.title,
     );
   }
