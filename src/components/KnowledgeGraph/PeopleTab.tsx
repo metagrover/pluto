@@ -805,6 +805,11 @@ export const PersonDossier = ({
     brief.activeStreams,
     brief.evidenceIndex,
   );
+  const personReadSourceCount = new Set(
+    personRead.workstreams.flatMap((stream) =>
+      stream.sources.map((source) => source.meeting_id),
+    ),
+  ).size;
   const summaryVersion = (() => {
     try {
       return JSON.parse(currentDetail.knowledgeDoc?.config || '{}')
@@ -1717,7 +1722,11 @@ export const PersonDossier = ({
         aria-labelledby="person-summary"
       >
         <div className="person-dossier__major-heading mb-3">
-          <h2 id="person-summary">What they work on</h2>
+          <h2 id="person-summary">
+            {hasPersonSummary
+              ? 'What they work on'
+              : 'Recent work we can verify'}
+          </h2>
         </div>
         {isContextOutdated && (
           <p className="mb-4 max-w-[68ch] text-sm text-pro-text-muted">
@@ -1738,25 +1747,29 @@ export const PersonDossier = ({
               {personRead.headline}
             </p>
             <p className="mt-2 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-muted">
-              {`Based on cited conversations through ${formattedDate ?? 'the latest linked source'}.`}
+              {`Based on ${personReadSourceCount} cited conversations through ${formattedDate ?? 'the latest linked source'}.`}
               {!roleSourceMeetingId || role === 'Known from conversations'
                 ? ' A formal job title has not been established.'
                 : ''}
             </p>
             {personRead.workstreams.length > 0 && (
               <div className="mt-6 space-y-4">
-                <h3 className="text-sm font-semibold text-pro-text-main">
-                  Recurring work
-                </h3>
+                {personRead.workstreams.length > 1 && (
+                  <h3 className="text-sm font-semibold text-pro-text-main">
+                    Recurring work
+                  </h3>
+                )}
                 {personRead.workstreams.map((stream) => (
                   <div
                     key={stream.id}
                     className="max-w-[68ch] border-b border-pro-border/50 pb-4 last:border-0 last:pb-0"
                   >
-                    <h4 className="text-sm font-semibold text-pro-text-main">
-                      {stream.title}
-                    </h4>
-                    <p className="mt-1 max-w-[68ch] text-sm leading-6 text-pro-text-muted">
+                    {personRead.workstreams.length > 1 && (
+                      <h4 className="text-sm font-semibold text-pro-text-main">
+                        {stream.title}
+                      </h4>
+                    )}
+                    <p className="mt-1 max-w-[68ch] text-sm leading-6 text-pro-text-main/80">
                       <span className="font-medium text-pro-text-main">
                         One example:{' '}
                       </span>
@@ -1771,6 +1784,9 @@ export const PersonDossier = ({
                           onClick={() => onOpenMeeting(source.meeting_id)}
                         >
                           {source.meeting_title || 'Open source meeting'}
+                          {source.captured_at
+                            ? ` · ${formatDate(source.captured_at)}`
+                            : ''}
                         </button>
                       ))}
                     </div>
