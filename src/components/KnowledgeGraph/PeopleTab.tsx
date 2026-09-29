@@ -10,7 +10,6 @@ import {
   Pencil,
   Play,
   Search,
-  Sparkles,
   Trash2,
   Undo2,
   UserRound,
@@ -54,56 +53,13 @@ import type {
   PersonMeetingEvidence,
 } from '../../utils/personBriefing';
 import { parsePersonRole } from '../../utils/personBriefing';
+import { buildPersonDossierRead } from '../../utils/personDossierRead';
 import { PersonChatDock } from '../features/PersonChatDock';
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
-import {
-  type KnowledgeV2Stream,
-  compileKnowledgeBrief,
-} from './knowledgeDocument';
+import { compileKnowledgeBrief } from './knowledgeDocument';
 
 export type PersonBriefingRow = PersonBriefingSummary;
-
-export interface ParsedWorkstream {
-  id: string;
-  title: string;
-  detail: string;
-}
-
-const extractWorkstreams = (
-  activeStreams: KnowledgeV2Stream[] = [],
-  supportingBullets: string[] = [],
-): { workstreams: ParsedWorkstream[]; plainBullets: string[] } => {
-  if (activeStreams.length > 0) {
-    return {
-      workstreams: activeStreams.map((s, idx) => ({
-        id: s.id || `stream-${idx}`,
-        title: s.title,
-        detail: s.current_read,
-      })),
-      plainBullets: [],
-    };
-  }
-
-  const workstreams: ParsedWorkstream[] = [];
-  const plainBullets: string[] = [];
-
-  for (let idx = 0; idx < supportingBullets.length; idx++) {
-    const bullet = supportingBullets[idx];
-    const match = bullet.match(/^([^:]{3,40}):\s+(.+)$/);
-    if (match) {
-      workstreams.push({
-        id: `bullet-stream-${idx}`,
-        title: match[1].trim(),
-        detail: match[2].trim(),
-      });
-    } else {
-      plainBullets.push(bullet);
-    }
-  }
-
-  return { workstreams, plainBullets };
-};
 
 export const buildPersonBriefingRow = (
   person: Entity,
@@ -846,6 +802,11 @@ export const PersonDossier = ({
       'No reliable compiled brief yet.',
       'Indexed knowledge needs a stronger synthesis.',
     ].includes(brief.headline);
+  const personRead = buildPersonDossierRead(
+    currentDetail.person.name,
+    brief.activeStreams,
+    brief.evidenceIndex,
+  );
   const summaryVersion = (() => {
     try {
       return JSON.parse(currentDetail.knowledgeDoc?.config || '{}')
@@ -856,13 +817,11 @@ export const PersonDossier = ({
   })();
   const hasPersonSummary =
     summaryVersion >= 6 &&
-    (currentDetail.knowledgeDoc?.status === 'up_to_date' ||
-      currentDetail.knowledgeDoc?.status === 'synthesizing') &&
-    hasReliableRead &&
-    brief.evidenceIndex.length > 0;
-  const isDraftSummary =
-    hasPersonSummary && currentDetail.knowledgeDoc?.status === 'synthesizing';
-  const personActivity = currentDetail.recentActivity ?? [];
+    currentDetail.knowledgeDoc?.status === 'up_to_date' &&
+    Boolean(personRead.headline);
+  const personActivity = (currentDetail.recentActivity ?? []).filter(
+    (item) => !/\bwill (?:notify|ping|inform)\b/i.test(item.text),
+  );
   const directWorkScore = (text: string) => {
     const name = currentDetail.person.name.toLocaleLowerCase();
     const normalized = text.toLocaleLowerCase();
@@ -881,14 +840,20 @@ export const PersonDossier = ({
     : [...personActivity]
         .sort((a, b) => directWorkScore(b.text) - directWorkScore(a.text))
         .slice(0, 2);
+  const recurringQuotes = new Set(
+    personRead.workstreams.flatMap((stream) =>
+      stream.sources.map((source) => source.quote.toLocaleLowerCase()),
+    ),
+  );
   const remainingActivity = hasPersonSummary
     ? personActivity
+        .filter(
+          (item) =>
+            !recurringQuotes.has(item.text.toLocaleLowerCase()) &&
+            !/\bwill (?:notify|ping|inform)\b/i.test(item.text),
+        )
+        .slice(0, 3)
     : personActivity.filter((item) => !sourceNoteOverview.includes(item));
-  const summarySources = Array.from(
-    new Map(
-      brief.evidenceIndex.map((source) => [source.meeting_id, source]),
-    ).values(),
-  ).slice(0, 3);
   const meetingCount = currentDetail.meetings.length;
   const confirmedMeetings = currentDetail.meetings.filter(
     (meeting) => meeting.evidence === 'confirmed',
@@ -910,10 +875,6 @@ export const PersonDossier = ({
   const rawDate = brief.freshnessAt;
   const parsedDate = rawDate ? Date.parse(rawDate) : Number.NaN;
   const isValidDate = !Number.isNaN(parsedDate);
-
-  const daysSince = isValidDate
-    ? Math.floor((Date.now() - parsedDate) / (1000 * 60 * 60 * 24))
-    : null;
 
   const formattedDate = isValidDate
     ? new Date(parsedDate).toLocaleDateString(undefined, {
@@ -1236,8 +1197,7 @@ export const PersonDossier = ({
     if (
       !currentDetail.knowledgeDoc ||
       meetingCount === 0 ||
-      hasPersonSummary ||
-      (typeof summaryVersion === 'number' && summaryVersion >= 6) ||
+      (typeof summaryVersion === 'number' && summaryVersion >= 7) ||
       autoRefreshedPersonId.current === currentDetail.person.id
     ) {
       return;
@@ -1248,7 +1208,6 @@ export const PersonDossier = ({
     currentDetail.person.id,
     currentDetail.knowledgeDoc,
     meetingCount,
-    hasPersonSummary,
     summaryVersion,
   ]);
 
@@ -1303,15 +1262,6 @@ export const PersonDossier = ({
       setIsDeleting(false);
     }
   };
-
-  const { workstreams, plainBullets } = useMemo(() => {
-    return extractWorkstreams(brief.activeStreams, brief.supportingBullets);
-  }, [brief.activeStreams, brief.supportingBullets]);
-  const summaryWorkstreams = workstreams.filter(
-    (stream) =>
-      stream.detail.trim().toLocaleLowerCase() !==
-      brief.headline.trim().toLocaleLowerCase(),
-  );
 
   return (
     <article className="person-dossier">
@@ -1495,7 +1445,7 @@ export const PersonDossier = ({
             <p>
               {roleSourceMeetingId && role !== 'Known from conversations'
                 ? `Recorded title: ${role}`
-                : 'Formal role not established'}
+                : `${currentDetail.meetings.filter((meeting) => meeting.evidence === 'confirmed').length} confirmed conversations`}
             </p>
             {role !== 'Known from conversations' && roleSourceMeetingId && (
               <button
@@ -1612,25 +1562,6 @@ export const PersonDossier = ({
             Undo merge
           </button>
         </output>
-      ) : null}
-
-      {(currentDetail.mergedPeople ?? []).length > 0 ? (
-        <details className="person-dossier__merged">
-          <summary>Manage merged names</summary>
-          <ul>
-            {(currentDetail.mergedPeople ?? []).map((person) => (
-              <li key={person.id}>
-                <span>{person.name}</span>
-                <button
-                  type="button"
-                  onClick={() => void restoreMerge(person.id)}
-                >
-                  Restore {person.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
       ) : null}
 
       {profileSettingsOpen ? (
@@ -1785,34 +1716,41 @@ export const PersonDossier = ({
         aria-labelledby="person-summary"
       >
         <div className="person-dossier__major-heading mb-3">
-          <h2 id="person-summary">
-            {hasPersonSummary
-              ? 'Who they are in this work'
-              : 'What they work on'}
-          </h2>
+          <h2 id="person-summary">What they work on</h2>
         </div>
+        {isContextOutdated && (
+          <p className="mb-4 max-w-[68ch] text-sm text-pro-text-muted">
+            Context marked outdated.{' '}
+            <button
+              type="button"
+              disabled={dreamingState === 'running'}
+              className="font-semibold text-pro-accent hover:underline disabled:opacity-50"
+              onClick={() => void handleSynthesizeFreshRead()}
+            >
+              {dreamingState === 'running' ? 'Refreshing…' : 'Refresh summary'}
+            </button>
+          </p>
+        )}
         {hasPersonSummary ? (
           <div>
-            <p className="max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main">
-              {brief.headline}
+            <p className="max-w-[64ch] font-serif text-xl leading-8 text-pro-text-main">
+              {personRead.headline}
             </p>
             <p className="mt-2 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-muted">
-              {isDraftSummary
-                ? `Draft from recent conversations; Pluto is still compiling the full history through ${formattedDate ?? 'the latest linked source'}.`
-                : `Based on conversations through ${formattedDate ?? 'the latest linked source'}.`}
+              {`Based on cited conversations through ${formattedDate ?? 'the latest linked source'}.`}
               {!roleSourceMeetingId || role === 'Known from conversations'
                 ? ' A formal job title has not been established.'
                 : ''}
             </p>
-            {summaryWorkstreams.length > 0 && (
-              <div className="mt-6 space-y-3">
+            {personRead.workstreams.length > 0 && (
+              <div className="mt-7 space-y-5">
                 <h3 className="text-sm font-semibold text-pro-text-main">
-                  Responsibilities and contributions
+                  Recurring work
                 </h3>
-                {summaryWorkstreams.slice(0, 4).map((stream) => (
+                {personRead.workstreams.map((stream) => (
                   <div
                     key={stream.id}
-                    className="border-b border-pro-border/50 pb-3 last:border-0"
+                    className="max-w-[68ch] border-b border-pro-border/50 pb-5 last:border-0 last:pb-0"
                   >
                     <h4 className="text-sm font-semibold text-pro-text-main">
                       {stream.title}
@@ -1820,22 +1758,19 @@ export const PersonDossier = ({
                     <p className="mt-1 max-w-[68ch] text-sm leading-6 text-pro-text-muted">
                       {stream.detail}
                     </p>
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                      {stream.sources.slice(0, 2).map((source) => (
+                        <button
+                          key={source.meeting_id}
+                          type="button"
+                          className="text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
+                          onClick={() => onOpenMeeting(source.meeting_id)}
+                        >
+                          {source.meeting_title || 'Open source meeting'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                ))}
-              </div>
-            )}
-            {summarySources.length > 0 && (
-              <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                <span className="text-pro-text-muted">Sources used</span>
-                {summarySources.map((source) => (
-                  <button
-                    key={source.meeting_id}
-                    type="button"
-                    className="text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
-                    onClick={() => onOpenMeeting(source.meeting_id)}
-                  >
-                    {source.meeting_title}
-                  </button>
                 ))}
               </div>
             )}
@@ -1948,106 +1883,24 @@ export const PersonDossier = ({
         </section>
       )}
 
-      {summaryVersion >= 6 &&
-        ((!hasPersonSummary && hasReliableRead) ||
-          (currentDetail.recentActivity ?? []).length === 0) && (
-          <section
-            className="person-dossier__about"
-            aria-label="Earlier context"
-          >
-            {hasReliableRead ? (
-              <details open={(currentDetail.recentActivity ?? []).length === 0}>
-                <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 rounded-md text-sm font-semibold text-pro-text-main hover:text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
-                  <span>Earlier context</span>
-                  <span className="flex items-center gap-2 text-xs font-normal text-pro-text-muted">
-                    {formattedDate
-                      ? `Brief evidence · ${formattedDate}`
-                      : 'Older brief'}
-                    <ChevronDown aria-hidden="true" size={15} />
-                  </span>
-                </summary>
-                <div className="mt-5">
-                  {isContextOutdated && (
-                    <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-800 dark:text-amber-300 space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-semibold">
-                          Context marked as outdated
-                        </p>
-                        <button
-                          type="button"
-                          disabled={dreamingState === 'running'}
-                          onClick={() => void handleSynthesizeFreshRead()}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/30 bg-amber-500/20 px-2.5 py-1 text-xs font-medium text-amber-900 dark:text-amber-200 hover:bg-amber-500/30 transition-colors disabled:opacity-50"
-                        >
-                          <Sparkles className="h-3 w-3" />
-                          <span>
-                            {dreamingState === 'running'
-                              ? 'Synthesizing…'
-                              : 'Refresh brief'}
-                          </span>
-                        </button>
-                      </div>
-                      <p className="text-pro-text-muted">
-                        This context is marked as outdated. Refresh the brief
-                        from available conversations.
-                      </p>
-                    </div>
-                  )}
-
-                  {daysSince !== null && daysSince > 30 ? (
-                    <p className="mb-4 max-w-[68ch] text-xs leading-5 text-pro-text-muted">
-                      This synthesis predates the recent notes above. Focus and
-                      responsibilities may have changed.
-                    </p>
-                  ) : null}
-
-                  <p className="max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main">
-                    {brief.headline}
-                  </p>
-                  {workstreams.length > 0 ? (
-                    <div className="mt-5 space-y-3">
-                      <h3 className="text-sm font-semibold text-pro-text-main">
-                        Previously discussed workstreams
-                      </h3>
-                      <div className="space-y-0">
-                        {workstreams.map((stream) => (
-                          <div
-                            key={stream.id}
-                            className="border-b border-pro-border/50 py-3 last:border-0"
-                          >
-                            <h4 className="text-sm font-semibold text-pro-text-main">
-                              {stream.title}
-                            </h4>
-                            <p className="mt-1 max-w-[68ch] text-sm leading-6 text-pro-text-muted">
-                              {stream.detail}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : plainBullets.length > 0 ? (
-                    <div className="mt-3 space-y-1.5">
-                      {plainBullets.map((bullet, idx) => (
-                        <p
-                          key={idx}
-                          className="text-sm text-pro-text-muted leading-relaxed"
-                        >
-                          {bullet}
-                        </p>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </details>
-            ) : (
-              <p className="person-dossier__about-empty">
-                {meetingCount > 0
-                  ? 'There is not enough verified context to describe this person yet.'
-                  : 'No confirmed conversations are linked to this person yet.'}
-              </p>
-            )}
-          </section>
-        )}
+      {(currentDetail.mergedPeople ?? []).length > 0 ? (
+        <details className="person-dossier__merged">
+          <summary>Manage merged names</summary>
+          <ul>
+            {(currentDetail.mergedPeople ?? []).map((person) => (
+              <li key={person.id}>
+                <span>{person.name}</span>
+                <button
+                  type="button"
+                  onClick={() => void restoreMerge(person.id)}
+                >
+                  Restore {person.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
 
       <section className="person-dossier__open-loops">
         <div className="person-dossier__major-heading">

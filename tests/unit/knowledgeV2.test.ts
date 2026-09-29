@@ -95,16 +95,9 @@ describe('knowledge V2 utilities', () => {
       new Map([['m1', 'avery reviewed the launch.']]),
     );
     expect(grounded.evidence_index.map((entry) => entry.id)).toEqual(['valid']);
-    expect(grounded.active_streams.map((stream) => stream.id)).toEqual([
-      'launch',
-    ]);
-    expect(grounded.current_read.cited_meeting_count).toBe(1);
-    expect(grounded.current_read.headline).toBe(
-      'Avery has worked on launch reviews.',
-    );
-    expect(grounded.active_streams[0].current_read).toBe(
-      'Avery works on launch reviews.',
-    );
+    expect(grounded.active_streams).toEqual([]);
+    expect(grounded.current_read.cited_meeting_count).toBe(0);
+    expect(grounded.current_read.headline).toBe('');
     const explicitOwnership = groundPersonKnowledgeV2Document(
       {
         ...doc,
@@ -117,9 +110,7 @@ describe('knowledge V2 utilities', () => {
       },
       new Map([['m1', 'avery manages launch reviews.']]),
     );
-    expect(explicitOwnership.active_streams[0].current_read).toBe(
-      'Avery manages launch reviews.',
-    );
+    expect(explicitOwnership.active_streams).toEqual([]);
     const anotherPersonOwnsIt = groundPersonKnowledgeV2Document(
       {
         ...doc,
@@ -136,9 +127,7 @@ describe('knowledge V2 utilities', () => {
       },
       new Map([['m1', 'morgan manages launch reviews.']]),
     );
-    expect(anotherPersonOwnsIt.current_read.headline).toBe(
-      'Avery works on launch reviews.',
-    );
+    expect(anotherPersonOwnsIt.current_read.headline).toBe('');
     const wrongSubject = groundPersonKnowledgeV2Document(
       {
         ...doc,
@@ -151,6 +140,37 @@ describe('knowledge V2 utilities', () => {
       'Avery Chen',
     );
     expect(wrongSubject.current_read.headline).toBe('');
+
+    const recurring = groundPersonKnowledgeV2Document(
+      {
+        ...doc,
+        active_streams: [
+          {
+            ...doc.active_streams[0],
+            current_read:
+              'Avery reviewed launch work (208a5a10-c557-4624-bfcb-4480e22cb882).',
+          },
+        ],
+        evidence_index: [
+          doc.evidence_index[0],
+          {
+            ...doc.evidence_index[0],
+            id: 'second',
+            meeting_id: 'm2',
+            quote: 'Avery worked on the handoff.',
+          },
+        ],
+      },
+      new Map([
+        ['m1', 'avery reviewed the launch.'],
+        ['m2', 'avery worked on the handoff.'],
+      ]),
+    );
+    expect(recurring.current_read.headline).toBe(
+      'Avery Chen has worked on launch reviews across multiple conversations.',
+    );
+    expect(recurring.current_read.source_count).toBe(2);
+    expect(recurring.active_streams[0].current_read).not.toContain('208a5a10');
   });
 
   it('filters true throwaway recordings without blocking testing strategy meetings', () => {

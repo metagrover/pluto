@@ -122,6 +122,7 @@ export const selectPersonActivity = (
   limit = 5,
   acceptedFocus: Array<{ value: string; sourceMeetingIds: string[] }> = [],
   confirmedFirstName: string | null = null,
+  perMeetingLimit = 2,
 ): PersonActivityItem[] => {
   const namePrefixes = names
     .map((name) => name.trim().toLocaleLowerCase())
@@ -175,7 +176,7 @@ export const selectPersonActivity = (
         evidence: meeting.evidence,
       });
       itemsFromMeeting++;
-      if (itemsFromMeeting >= 2) break;
+      if (itemsFromMeeting >= perMeetingLimit) break;
     }
   }
   for (const claim of acceptedFocus) {

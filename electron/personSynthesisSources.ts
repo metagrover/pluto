@@ -36,9 +36,12 @@ export const collectPersonSynthesisActivity = (
       [personName],
       analyses,
       40,
+      [],
+      null,
+      4,
     ),
     ...recentActivity,
-  ];
+  ].filter((item) => !/\bwill (?:notify|ping|inform)\b/i.test(item.text));
 };
 
 /** A linked meeting is only a source for a person read when its notes describe that person. */
@@ -50,7 +53,7 @@ export const focusPersonSynthesisSources = <T extends PersonSynthesisSource>(
   const byMeeting = new Map<string, string[]>();
   for (const item of activity) {
     const notes = byMeeting.get(item.meetingId) ?? [];
-    notes.push(item.text);
+    if (!notes.includes(item.text)) notes.push(item.text);
     byMeeting.set(item.meetingId, notes);
   }
   return meetings.flatMap((meeting) => {

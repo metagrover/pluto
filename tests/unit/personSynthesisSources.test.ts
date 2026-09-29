@@ -45,6 +45,46 @@ describe('person synthesis sources', () => {
     expect(activity.every((item) => item.text.startsWith('Avery '))).toBe(true);
   });
 
+  it('keeps later substantive work from a meeting ahead of routine notification notes', () => {
+    const activity = collectPersonSynthesisActivity(
+      [
+        {
+          id: 'm1',
+          title: 'Review',
+          started_at: '2026-09-20',
+          created_at: null,
+          duration_seconds: null,
+          context: null,
+          evidence: 'confirmed',
+        },
+      ],
+      [
+        {
+          id: 'm1',
+          analysis_json: JSON.stringify({
+            analysis_schema_version: 3,
+            overview: 'Review',
+            topics: [
+              {
+                key_points: [
+                  { text: 'Avery will notify Morgan about any changes.' },
+                  { text: 'Avery reviewed the data pipeline changes.' },
+                  { text: 'Avery developed the release plan.' },
+                ],
+              },
+            ],
+          }),
+        },
+      ],
+      'Avery',
+      [],
+    );
+    expect(activity.map((item) => item.text)).toEqual([
+      'Avery reviewed the data pipeline changes.',
+      'Avery developed the release plan.',
+    ]);
+  });
+
   it('excludes broad meeting topics and keeps only attributable notes', () => {
     const sources = focusPersonSynthesisSources(
       [

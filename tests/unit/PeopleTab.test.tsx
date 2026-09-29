@@ -402,7 +402,30 @@ const briefingDetail: PersonBriefingDetail = {
           freshness: 'fresh',
         },
       },
-      active_streams: [],
+      active_streams: [
+        {
+          id: 'launch-work',
+          title: 'Launch handoffs',
+          domain: 'work',
+          status: 'active',
+          current_read:
+            'Avery reviewed the written handoff with the team (208a5a10-c557-4624-bfcb-4480e22cb882).',
+          last_touched_at: '2026-07-12T12:00:00.000Z',
+          source_count: 2,
+          open_follow_up_count: 0,
+          decision_count: 0,
+          unresolved_question_count: 0,
+          pinned: false,
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.9,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-07-12T12:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+      ],
       needs_attention: [],
       patterns: [
         {
@@ -440,8 +463,8 @@ const briefingDetail: PersonBriefingDetail = {
           meeting_id: 'meeting-1',
           meeting_title: 'Product review',
           captured_at: '2026-07-12T12:00:00.000Z',
-          quote: 'Send the review first.',
-          stream_ids: [],
+          quote: 'Avery reviewed the launch handoff.',
+          stream_ids: ['launch-work'],
           item_ids: ['pattern-1'],
           mode: 'direct',
           confidence: 0.9,
@@ -451,8 +474,8 @@ const briefingDetail: PersonBriefingDetail = {
           meeting_id: 'meeting-4',
           meeting_title: 'Design handoff',
           captured_at: '2026-07-10T12:00:00.000Z',
-          quote: 'The written review keeps the handoff clear.',
-          stream_ids: [],
+          quote: 'Avery worked on the written handoff.',
+          stream_ids: ['launch-work'],
           item_ids: ['pattern-1'],
           mode: 'direct',
           confidence: 0.9,
@@ -492,15 +515,18 @@ describe('PersonDossier', () => {
       />,
     );
 
-    expect(markup.indexOf('Who they are in this work')).toBeLessThan(
+    expect(markup.indexOf('What they work on')).toBeLessThan(
       markup.indexOf('Recent developments'),
     );
-    expect(markup).toContain('Avery is coordinating the launch handoff.');
-    expect(markup).toContain('Sources used');
+    expect(markup).toContain(
+      'Avery Chen has worked on launch handoffs across multiple conversations.',
+    );
+    expect(markup).toContain('Recurring work');
+    expect(markup).not.toContain('208a5a10');
     expect(markup).not.toContain('Earlier context');
   });
 
-  it('shows a grounded draft while the person history is still compiling', () => {
+  it('keeps a partial draft out of the identity summary while history is compiling', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
         detail={{
@@ -515,8 +541,9 @@ describe('PersonDossier', () => {
         onOpenMeeting={() => {}}
       />,
     );
-    expect(markup).toContain('Draft from recent conversations');
-    expect(markup).toContain('Avery is coordinating the launch handoff.');
+    expect(markup).not.toContain('Recurring work');
+    expect(markup).not.toContain('Avery is coordinating the launch handoff.');
+    expect(markup).toContain('From person-specific meeting notes.');
   });
 
   it('suppresses the earlier broad-meeting summary until person-specific synthesis replaces it', () => {
