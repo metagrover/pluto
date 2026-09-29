@@ -16,6 +16,7 @@ import {
   splitKnowledgeSourceChunk,
 } from './knowledgeChunking';
 import {
+  PERSON_CONTEXT_SYNTHESIS_VERSION,
   getKnowledgeSynthesisInputConfig,
   knowledgeDocNeedsSynthesis,
   knowledgeDocSatisfiesMeetingRefresh,
@@ -1324,7 +1325,12 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
         label: chunk.label,
         structuredJson: JSON.stringify(chunk.structured),
       })),
-      previousStructuredJson: params.doc.structured_json,
+      previousStructuredJson:
+        params.doc.scope_type === 'person_context' &&
+        (parseKnowledgeDocConfig(params.doc.config).synthesis_version ?? 0) <
+          PERSON_CONTEXT_SYNTHESIS_VERSION
+          ? null
+          : params.doc.structured_json,
       claimCorrections: params.claimCorrections,
     });
     const merged = await synthesizeStructuredFromPrompt({
