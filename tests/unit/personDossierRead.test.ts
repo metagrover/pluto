@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { buildPersonDossierRead } from '../../src/utils/personDossierRead';
+import {
+  buildPersonDossierRead,
+  isCurrentPersonDossier,
+} from '../../src/utils/personDossierRead';
 
 describe('person dossier read', () => {
+  it('refreshes older completed reads and waits for the current one', () => {
+    expect(isCurrentPersonDossier('up_to_date', 7)).toBe(false);
+    expect(isCurrentPersonDossier('synthesizing', 8)).toBe(false);
+    expect(isCurrentPersonDossier('up_to_date', 8)).toBe(true);
+  });
+
   it('leads with recurring work and shows an attributable example', () => {
     const result = buildPersonDossierRead(
       'Avery',
