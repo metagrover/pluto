@@ -322,6 +322,15 @@ const briefingDetail: PersonBriefingDetail = {
       evidence: 'mentioned',
     },
   ],
+  recentActivity: [
+    {
+      text: 'Avery Chen revised the launch handoff after the product review.',
+      meetingId: 'meeting-1',
+      meetingTitle: 'Product review',
+      occurredAt: '2026-07-12T12:00:00.000Z',
+      evidence: 'confirmed',
+    },
+  ],
   commitments: {
     open: [
       {
@@ -505,6 +514,7 @@ describe('PersonDossier', () => {
           ),
           commitments: { open: [], delivered: [], candidates: [] },
           knowledgeDoc: null,
+          recentActivity: [],
         }}
         onBack={() => {}}
         onOpenMeeting={() => {}}
@@ -522,7 +532,7 @@ describe('PersonDossier', () => {
     expect(markup).not.toContain('No mention-only conversations');
   });
 
-  it('renders temporal provenance and meeting link for working context', () => {
+  it('dates the older brief independently from recent work', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
         detail={briefingDetail}
@@ -532,8 +542,9 @@ describe('PersonDossier', () => {
     );
 
     expect(markup).toContain('Product review');
-    expect(markup).toContain('From');
-    expect(markup).toContain('Captured during past conversations');
+    expect(markup).toContain('Brief evidence · Jul 12');
+    expect(markup).toContain('This synthesis predates the recent notes above.');
+    expect(markup).toContain('Earlier context');
   });
 
   it('renders custom back label when returning from meeting context', () => {
@@ -559,12 +570,13 @@ describe('PersonDossier', () => {
     );
 
     // Shows temporal heading
-    expect(markup).toMatch(/(?:Recent Focus|Historical Context|Active Focus)/);
+    expect(markup).toContain('What they&#x27;ve been working on');
+    expect(markup).toContain('Earlier context');
     // Shows Mark context as outdated button in More dropdown
     expect(markup).toContain('Mark context as outdated');
   });
 
-  it('renders "What this person has been up to" activity insight and touchpoints', () => {
+  it('leads with sourced work and keeps history and commitments available', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
         detail={briefingDetail}
@@ -573,8 +585,9 @@ describe('PersonDossier', () => {
       />,
     );
 
-    expect(markup).toContain('What Avery has been up to');
-    expect(markup).toContain('recent touchpoint');
+    expect(markup).toContain(
+      'Avery Chen revised the launch handoff after the product review.',
+    );
     expect(markup).toContain('Avery is coordinating the launch handoff.');
     expect(markup).toContain('Product review');
     expect(markup).toContain('Design handoff');
@@ -717,17 +730,13 @@ describe('PersonDossier', () => {
     );
 
     // Verifies workstream cards
-    expect(markup).toContain('Active Workstreams &amp; Initiatives');
+    expect(markup).toContain('Previously discussed workstreams');
     expect(markup).toContain('API Performance &amp; Infrastructure');
     expect(markup).toContain('Infrastructure &amp; Monitoring');
 
     // Verifies comprehensive insight prose
-    expect(markup).toContain('What Ayush has been up to');
-    expect(markup).toContain(
-      'Ayush is currently focused on performance optimization.',
-    );
-    expect(markup).toContain(
-      'Key initiatives include API Performance &amp; Infrastructure and Infrastructure &amp; Monitoring.',
+    expect(markup).not.toContain(
+      'is currently focused on performance optimization',
     );
     expect(markup).toContain('Clean up and push the backend configuration PR');
 

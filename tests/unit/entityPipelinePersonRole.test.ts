@@ -54,6 +54,9 @@ describe('person role evidence boundary', () => {
     const person = db.findEntity('person', 'Avery Lane');
     expect(JSON.parse(person?.metadata || '{}')).toMatchObject({
       role: 'design lead',
+      role_evidence: transcript,
+      role_source: 'extraction',
+      role_source_meeting_id: 'role-source',
     });
     expect(db.getMeetingEntities('role-source')).toContainEqual(
       expect.objectContaining({
@@ -135,5 +138,54 @@ describe('person role evidence boundary', () => {
 
     const person = db.findEntity('person', 'Avery Lane');
     expect(JSON.parse(person?.metadata || '{}')).not.toHaveProperty('role');
+  });
+
+  it('does not store a relationship description as a formal role', async () => {
+    const transcript = 'Avery Lane is a colleague helping with the review.';
+    await processExtractedEntities(
+      {
+        people: [
+          { name: 'Avery Lane', role: 'colleague', role_evidence: transcript },
+        ],
+        topics: [],
+        action_items: [],
+        decisions: [],
+      },
+      'role-source',
+      undefined,
+      transcript,
+    );
+    expect(
+      JSON.parse(db.findEntity('person', 'Avery Lane')?.metadata || '{}'),
+    ).not.toHaveProperty('role');
+  });
+
+  it('preserves an existing role when a later extraction suggests another one', async () => {
+    db.upsertEntity({
+      type: 'person',
+      name: 'Avery Lane',
+      metadata: { role: 'Design director', role_source: 'user' },
+    });
+    const transcript = 'Avery Lane is the design lead for this launch.';
+    await processExtractedEntities(
+      {
+        people: [
+          {
+            name: 'Avery Lane',
+            role: 'design lead',
+            role_evidence: transcript,
+          },
+        ],
+        topics: [],
+        action_items: [],
+        decisions: [],
+      },
+      'role-source',
+      undefined,
+      transcript,
+    );
+    expect(
+      JSON.parse(db.findEntity('person', 'Avery Lane')?.metadata || '{}'),
+    ).toMatchObject({ role: 'Design director', role_source: 'user' });
   });
 });

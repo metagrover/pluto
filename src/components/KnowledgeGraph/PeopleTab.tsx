@@ -1,7 +1,5 @@
 import {
   ArrowLeft,
-  ArrowRight,
-  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -21,6 +19,7 @@ import {
 } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { refreshKnowledgeDoc } from '../../api/knowledgeDocs';
 import {
   type Entity,
   type EntityMeeting,
@@ -64,29 +63,6 @@ import {
 } from './knowledgeDocument';
 
 export type PersonBriefingRow = PersonBriefingSummary;
-
-const isMeaningfulMeetingContext = (
-  context: string | null | undefined,
-): boolean => {
-  if (!context) return false;
-  const trimmed = context.trim().toLowerCase();
-  const nonMeaningful = [
-    'manual participant',
-    'confirmed participant',
-    'participant',
-    'attendee',
-    'speaker',
-    'mentioned',
-    'scheduled',
-    'confirmed',
-  ];
-  if (nonMeaningful.includes(trimmed)) return false;
-  if (trimmed.startsWith('manual participant')) return false;
-  if (trimmed.startsWith('confirmed participant')) return false;
-  if (trimmed.startsWith('participant in')) return false;
-  if (trimmed.length < 8) return false;
-  return true;
-};
 
 export interface ParsedWorkstream {
   id: string;
@@ -845,6 +821,23 @@ export const PersonDossier = ({
   }, [editingName]);
 
   const role = parsePersonRole(currentDetail.person.metadata);
+  let roleSourceMeetingId: string | null = null;
+  let roleEvidence: string | null = null;
+  try {
+    const metadata = JSON.parse(
+      currentDetail.person.metadata || '{}',
+    ) as Record<string, unknown>;
+    roleSourceMeetingId =
+      typeof metadata.role_source_meeting_id === 'string'
+        ? metadata.role_source_meeting_id
+        : null;
+    roleEvidence =
+      typeof metadata.role_evidence === 'string'
+        ? metadata.role_evidence
+        : null;
+  } catch {
+    // Older person metadata can be malformed.
+  }
   const brief = compileKnowledgeBrief(
     currentDetail.knowledgeDoc,
     currentDetail.workingMemorySnapshot,
@@ -873,32 +866,13 @@ export const PersonDossier = ({
   );
 
   // Temporal provenance for working context
-  const latestMeeting = currentDetail.meetings[0] ?? null;
-  const rawDate =
-    latestMeeting?.started_at || latestMeeting?.created_at || brief.freshnessAt;
+  const rawDate = brief.freshnessAt;
   const parsedDate = rawDate ? Date.parse(rawDate) : Number.NaN;
   const isValidDate = !Number.isNaN(parsedDate);
 
   const daysSince = isValidDate
     ? Math.floor((Date.now() - parsedDate) / (1000 * 60 * 60 * 24))
     : null;
-
-  let recencyTier: 'fresh' | 'aging' | 'historical' = 'fresh';
-  let ageLabel = '';
-  if (daysSince !== null) {
-    if (daysSince <= 14) {
-      recencyTier = 'fresh';
-      ageLabel = daysSince <= 1 ? 'recently' : `${daysSince}d ago`;
-    } else if (daysSince <= 45) {
-      recencyTier = 'aging';
-      const weeks = Math.max(2, Math.round(daysSince / 7));
-      ageLabel = `${weeks} weeks ago`;
-    } else {
-      recencyTier = 'historical';
-      const months = Math.max(2, Math.round(daysSince / 30));
-      ageLabel = `${months} months ago`;
-    }
-  }
 
   const formattedDate = isValidDate
     ? new Date(parsedDate).toLocaleDateString(undefined, {
@@ -1177,7 +1151,21 @@ export const PersonDossier = ({
   );
 
   const handleSynthesizeFreshRead = async () => {
+    if (!currentDetail.knowledgeDoc) return;
+    setDreamingState('running');
     try {
+      const refreshed = await refreshKnowledgeDoc(
+        currentDetail.knowledgeDoc.id,
+      );
+      if (
+        !refreshed ||
+        refreshed.status !== 'up_to_date' ||
+        refreshed.last_synthesized_at ===
+          currentDetail.knowledgeDoc.last_synthesized_at
+      ) {
+        setDreamingState('error');
+        return;
+      }
       let parsed: Record<string, unknown> = {};
       try {
         parsed = JSON.parse(currentDetail.person.metadata || '{}');
@@ -1195,9 +1183,10 @@ export const PersonDossier = ({
         ...prev,
         person: updatedPerson,
       }));
-      await handleDreamNow();
       await onIdentityChanged();
+      setDreamingState('idle');
     } catch (err) {
+      setDreamingState('error');
       console.error('Failed to synthesize fresh read:', err);
     }
   };
@@ -1223,216 +1212,6 @@ export const PersonDossier = ({
   const { workstreams, plainBullets } = useMemo(() => {
     return extractWorkstreams(brief.activeStreams, brief.supportingBullets);
   }, [brief.activeStreams, brief.supportingBullets]);
-
-  const activitySummary = useMemo(() => {
-    const rawName = (currentDetail.person.name || '').trim();
-    const isSelf = Boolean(currentDetail.isSelf);
-    const firstName = isSelf ? 'you' : rawName.split(/\s+/)[0] || rawName;
-    const sectionTitle = isSelf
-      ? "What you've been up to"
-      : firstName && firstName.toLowerCase() !== 'unknown'
-        ? `What ${firstName} has been up to`
-        : "What they've been up to";
-
-    const allMeetings = currentDetail.meetings || [];
-    const confirmedMeetings = [...allMeetings]
-      .filter((m) => m.evidence === 'confirmed')
-      .sort(
-        (a, b) =>
-          (Date.parse(b.started_at || b.created_at || '') || 0) -
-          (Date.parse(a.started_at || a.created_at || '') || 0),
-      );
-
-    const delivered = (currentDetail.commitments.delivered || []).slice(0, 3);
-    const open = (currentDetail.commitments.open || []).slice(0, 3);
-
-    const touchpoints: Array<{
-      id: string;
-      kind: 'discussion' | 'delivered' | 'open';
-      title: string;
-      detail?: string | null;
-      date?: string | null;
-      timestamp: number;
-      meetingId?: string;
-      meetingTitle?: string;
-    }> = [];
-
-    // Recent confirmed discussions (up to 3)
-    for (const m of confirmedMeetings.slice(0, 3)) {
-      const dateStr = m.started_at || m.created_at;
-      const meaningful = isMeaningfulMeetingContext(m.context);
-      touchpoints.push({
-        id: `meeting-${m.id}`,
-        kind: 'discussion',
-        title: `Discussed in “${m.title || 'Conversation'}”`,
-        detail: meaningful ? m.context : undefined,
-        date: dateStr ? formatDate(dateStr) : null,
-        timestamp: Date.parse(dateStr || '') || 0,
-        meetingId: m.id,
-        meetingTitle: m.title || undefined,
-      });
-    }
-
-    // Delivered commitments
-    for (const d of delivered) {
-      const dateStr = d.updatedAt || d.dueDate;
-      touchpoints.push({
-        id: `delivered-${d.id}`,
-        kind: 'delivered',
-        title: `Delivered: “${d.text}”`,
-        detail:
-          d.evidence ||
-          (d.sourceMeetingTitle
-            ? `Referenced in ${d.sourceMeetingTitle}`
-            : undefined),
-        date: dateStr ? formatDate(dateStr) : null,
-        timestamp: Date.parse(dateStr || '') || 0,
-        meetingId: d.sourceMeetingId || undefined,
-        meetingTitle: d.sourceMeetingTitle || undefined,
-      });
-    }
-
-    // Open commitments in flight
-    for (const o of open) {
-      const dateStr = o.dueDate || o.updatedAt;
-      touchpoints.push({
-        id: `open-${o.id}`,
-        kind: 'open',
-        title: `In progress: “${o.text}”`,
-        detail: o.dueDate
-          ? `Due ${formatDate(o.dueDate)}`
-          : o.evidence || undefined,
-        date: dateStr ? formatDate(dateStr) : null,
-        timestamp: Date.parse(dateStr || '') || 0,
-        meetingId: o.sourceMeetingId || undefined,
-        meetingTitle: o.sourceMeetingTitle || undefined,
-      });
-    }
-
-    touchpoints.sort((a, b) => b.timestamp - a.timestamp);
-
-    // Formulate a natural, comprehensive insight narrative
-    const subjectIs = isSelf ? 'You are' : `${firstName} is`;
-    const headline =
-      brief.headline && !brief.headline.startsWith('No reliable')
-        ? brief.headline
-        : undefined;
-
-    const sentences: string[] = [];
-
-    // 1. Primary Focus Statement
-    if (headline) {
-      const trimmed = headline.trim().replace(/[.]+$/, '');
-      if (/^focus on\s+/i.test(trimmed)) {
-        const topic = trimmed.replace(/^focus on\s+/i, '');
-        sentences.push(
-          `${subjectIs} currently focused on ${topic.toLowerCase()}.`,
-        );
-      } else if (
-        new RegExp(`^(${firstName}|you|he|she|they)\\b`, 'i').test(trimmed)
-      ) {
-        sentences.push(`${trimmed}.`);
-      } else {
-        sentences.push(`${subjectIs} focused on ${trimmed.toLowerCase()}.`);
-      }
-    } else if (workstreams.length > 0) {
-      sentences.push(
-        `${subjectIs} currently driving work across ${workstreams
-          .slice(0, 2)
-          .map((w) => w.title)
-          .join(' and ')}.`,
-      );
-    }
-
-    // 2. Active Initiatives / Streams Context
-    if (workstreams.length > 0) {
-      if (workstreams.length === 1) {
-        sentences.push(`Key work centers on ${workstreams[0].title}.`);
-      } else if (workstreams.length === 2) {
-        sentences.push(
-          `Key initiatives include ${workstreams[0].title} and ${workstreams[1].title}.`,
-        );
-      } else {
-        const titles = workstreams.map((w) => w.title);
-        sentences.push(
-          `Core initiatives span ${titles.slice(0, 2).join(', ')}, alongside ${titles[2]}.`,
-        );
-      }
-    }
-
-    // 3. Discussions across recent meetings (with sanitized context)
-    const meaningfulMeetings = confirmedMeetings.map((m) => ({
-      title: m.title || 'Discussion',
-      hasMeaningfulContext: isMeaningfulMeetingContext(m.context),
-      context: m.context ? m.context.trim().replace(/[.]+$/, '') : null,
-    }));
-
-    if (meaningfulMeetings.length > 0) {
-      const top = meaningfulMeetings[0];
-      if (meaningfulMeetings.length > 1) {
-        const second = meaningfulMeetings[1];
-        if (top.hasMeaningfulContext && top.context) {
-          sentences.push(
-            `Recently in discussions across “${top.title}” (${top.context.toLowerCase()}) and “${second.title}”.`,
-          );
-        } else {
-          sentences.push(
-            `Recently in discussions across “${top.title}” and “${second.title}”.`,
-          );
-        }
-      } else {
-        if (top.hasMeaningfulContext && top.context) {
-          sentences.push(
-            `Recently active in “${top.title}”, focusing on ${top.context.toLowerCase()}.`,
-          );
-        } else {
-          sentences.push(`Recently active in “${top.title}”.`);
-        }
-      }
-    }
-
-    // 4. Delivered and In-Flight Commitments
-    if (delivered.length > 0 && open.length > 0) {
-      const d = delivered[0];
-      const o = open[0];
-      const due = o.dueDate ? ` (due ${formatDate(o.dueDate)})` : '';
-      sentences.push(
-        `Recently delivered “${d.text}”, while currently driving “${o.text}”${due}.`,
-      );
-    } else if (delivered.length > 0) {
-      const d = delivered[0];
-      sentences.push(`Recently delivered “${d.text}”.`);
-    } else if (open.length > 0) {
-      const o = open[0];
-      const due = o.dueDate ? ` (due ${formatDate(o.dueDate)})` : '';
-      sentences.push(`Currently driving “${o.text}”${due}.`);
-    }
-
-    let insightText = sentences.join(' ');
-    if (!insightText) {
-      insightText = `${isSelf ? 'You have' : `${firstName} has`} no recorded recent activity yet.`;
-    }
-
-    const total = touchpoints.length;
-    const metaLabel = `${total} recent touchpoint${total === 1 ? '' : 's'}${
-      formattedDate ? ` · Last active ${formattedDate}` : ''
-    }`;
-
-    return {
-      sectionTitle,
-      metaLabel,
-      insightText,
-      touchpoints,
-    };
-  }, [
-    currentDetail.person.name,
-    currentDetail.isSelf,
-    currentDetail.meetings,
-    currentDetail.commitments,
-    brief.headline,
-    workstreams,
-    formattedDate,
-  ]);
 
   return (
     <article className="person-dossier">
@@ -1613,7 +1392,22 @@ export const PersonDossier = ({
             </div>
           )}
           <div className="person-dossier__identity-meta">
-            <p>{role}</p>
+            <p>
+              {role === 'Known from conversations'
+                ? 'Role not established'
+                : roleSourceMeetingId
+                  ? `Role from conversation: ${role}`
+                  : `Recorded role, source unavailable: ${role}`}
+            </p>
+            {role !== 'Known from conversations' && roleSourceMeetingId && (
+              <button
+                type="button"
+                title={roleEvidence || undefined}
+                onClick={() => onOpenMeeting(roleSourceMeetingId!)}
+              >
+                View role source
+              </button>
+            )}
             {possibleDuplicateCount > 0 ? (
               <button
                 type="button"
@@ -1888,282 +1682,147 @@ export const PersonDossier = ({
         </section>
       ) : null}
 
-      <section className="person-dossier__about" aria-label="About this person">
-        {hasReliableRead ? (
-          <div>
-            <div className="person-dossier__section-heading mb-3">
-              <h2>
-                {recencyTier === 'fresh'
-                  ? 'Active Focus'
-                  : recencyTier === 'aging'
-                    ? `Recent Focus${formattedDate ? ` · as of ${formattedDate}` : ''}`
-                    : `Historical Context${formattedDate ? ` · Discussed ${formattedDate}` : ''}`}
-              </h2>
-            </div>
-
-            {isContextOutdated && (
-              <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-800 dark:text-amber-300 space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-semibold">Context marked as outdated</p>
+      <section
+        className="person-dossier__about"
+        aria-labelledby="person-recent-work"
+      >
+        <div className="person-dossier__section-heading mb-3">
+          <h2 id="person-recent-work">What they've been working on</h2>
+        </div>
+        {(currentDetail.recentActivity ?? []).length > 0 ? (
+          <>
+            <p className="mb-5 max-w-[68ch] text-sm leading-6 text-pro-text-muted">
+              Specific updates from recent conversations. Open a meeting to see
+              the source.
+            </p>
+            <ol className="space-y-4">
+              {currentDetail.recentActivity?.map((item) => (
+                <li
+                  key={`${item.meetingId}-${item.text}`}
+                  className="border-b border-pro-border/50 pb-4 last:border-0"
+                >
+                  <p className="max-w-[68ch] text-sm leading-6 text-pro-text-main">
+                    {item.text}
+                  </p>
                   <button
                     type="button"
-                    disabled={dreamingState === 'running'}
-                    onClick={() => void handleSynthesizeFreshRead()}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/30 bg-amber-500/20 px-2.5 py-1 text-xs font-medium text-amber-900 dark:text-amber-200 hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                    className="mt-1 text-xs text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
+                    onClick={() => onOpenMeeting(item.meetingId)}
                   >
-                    <Sparkles className="h-3 w-3" />
-                    <span>
-                      {dreamingState === 'running'
-                        ? 'Synthesizing…'
-                        : 'Synthesize fresh read'}
-                    </span>
+                    {item.source === 'accepted_focus'
+                      ? 'Accepted focus update'
+                      : item.evidence === 'confirmed'
+                        ? 'Confirmed conversation'
+                        : 'Mentioned in notes'}
+                    {' · '}
+                    {item.meetingTitle}
+                    {item.occurredAt ? ` · ${formatDate(item.occurredAt)}` : ''}
                   </button>
-                </div>
-                <p className="text-pro-text-muted">
-                  You acknowledged this working context as stale. Pluto will
-                  synthesize a new brief across available conversation history.
-                </p>
-              </div>
-            )}
-
-            {isValidDate && formattedDate ? (
-              <div className="mb-4 rounded-xl border border-pro-border/70 bg-pro-surface/50 p-3 space-y-1.5 shadow-2xs">
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <div className="flex items-center gap-2 font-medium">
-                    {recencyTier === 'fresh' ? (
-                      <>
-                        <span
-                          className="h-2 w-2 rounded-full bg-emerald-500"
-                          aria-hidden="true"
-                        />
-                        <span className="text-emerald-900 dark:text-emerald-300">
-                          Active context · Last discussed {formattedDate}
-                        </span>
-                      </>
-                    ) : recencyTier === 'aging' ? (
-                      <>
-                        <Clock3
-                          className="h-3.5 w-3.5 text-stone-500"
-                          aria-hidden="true"
-                        />
-                        <span className="text-pro-text-muted">
-                          Discussed {formattedDate} ({ageLabel})
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <Clock3
-                          className="h-3.5 w-3.5 text-stone-500"
-                          aria-hidden="true"
-                        />
-                        <span className="text-pro-text-muted">
-                          Historical context · Discussed {formattedDate} (
-                          {ageLabel})
-                        </span>
-                      </>
-                    )}
-                  </div>
-
-                  {latestMeeting && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenMeeting(latestMeeting.id)}
-                      className="group inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 -mr-1 text-xs text-pro-text-main transition-colors hover:bg-pro-surface hover:text-pro-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
-                      aria-label={`Open source meeting: ${latestMeeting.title}`}
-                    >
-                      <span className="text-pro-text-muted font-normal group-hover:text-pro-text-muted">
-                        From
-                      </span>
-                      <span className="font-medium text-pro-text-main max-w-[220px] truncate group-hover:text-pro-accent group-hover:underline underline-offset-2 decoration-pro-accent/40 transition-colors">
-                        &ldquo;{latestMeeting.title}&rdquo;
-                      </span>
-                      <ChevronRight
-                        className="h-3 w-3 text-pro-text-muted group-hover:text-pro-accent group-hover:translate-x-0.5 transition-all"
-                        aria-hidden="true"
-                      />
-                    </button>
-                  )}
-                </div>
-
-                {daysSince !== null && daysSince > 30 && (
-                  <p className="text-[11.5px] text-pro-text-muted/80 leading-relaxed pt-0.5 border-t border-pro-border/40">
-                    Captured during past conversations; active focus or
-                    responsibilities may have evolved since then.
-                  </p>
-                )}
-              </div>
-            ) : null}
-
-            <p className="max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main">
-              {brief.headline}
-            </p>
-            {workstreams.length > 0 ? (
-              <div className="mt-5 space-y-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-pro-text-muted">
-                  Active Workstreams & Initiatives
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {workstreams.map((stream) => (
-                    <div
-                      key={stream.id}
-                      className="rounded-xl border border-pro-border/70 bg-pro-surface/40 p-3.5 space-y-1.5 transition-colors hover:border-pro-accent/40 shadow-2xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-1.5 w-1.5 rounded-full bg-pro-accent shrink-0"
-                          aria-hidden="true"
-                        />
-                        <h3 className="text-xs font-semibold text-pro-text-main truncate">
-                          {stream.title}
-                        </h3>
-                      </div>
-                      <p className="text-xs text-pro-text-muted leading-relaxed">
-                        {stream.detail}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : plainBullets.length > 0 ? (
-              <div className="mt-3 space-y-1.5">
-                {plainBullets.map((bullet, idx) => (
-                  <p
-                    key={idx}
-                    className="text-sm text-pro-text-muted leading-relaxed"
-                  >
-                    {bullet}
-                  </p>
-                ))}
-              </div>
-            ) : null}
-          </div>
+                </li>
+              ))}
+            </ol>
+          </>
         ) : (
           <p className="person-dossier__about-empty">
-            {meetingCount > 0
-              ? 'There is not enough verified context to describe this person yet.'
-              : 'No confirmed conversations are linked to this person yet.'}
+            Recent notes do not yet describe this person's work specifically.
           </p>
         )}
       </section>
 
-      {(activitySummary.touchpoints.length > 0 || hasReliableRead) && (
-        <section
-          aria-labelledby="person-activity-insight"
-          className="person-dossier__activity-insight mt-8 mb-10"
-        >
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <h2
-              id="person-activity-insight"
-              className="text-sm font-semibold tracking-tight text-pro-text-main"
-            >
-              {activitySummary.sectionTitle}
-            </h2>
-            {activitySummary.metaLabel && (
-              <span className="text-[11px] text-pro-text-muted/70 tabular-nums shrink-0">
-                {activitySummary.metaLabel}
-              </span>
-            )}
-          </div>
-
-          <div className="rounded-2xl border border-pro-border/60 bg-pro-surface/50 shadow-xs">
-            {/* Insight prose */}
-            <div className="p-6">
-              <p className="text-sm leading-[1.7] text-pro-text-main max-w-[65ch]">
-                <Sparkles
-                  className="inline h-3 w-3 text-pro-accent mr-1.5 relative -top-px"
-                  aria-hidden="true"
-                />
-                {activitySummary.insightText}
-              </p>
-            </div>
-
-            {activitySummary.touchpoints.length > 0 && (
-              <div className="border-t border-pro-border/40 px-6 py-5">
-                <div className="text-[10.5px] font-semibold uppercase tracking-widest text-pro-text-muted/60 mb-4">
-                  Recent Movements & Evidence
-                </div>
-                <div className="space-y-4">
-                  {activitySummary.touchpoints.map((tp) => (
-                    <div
-                      key={tp.id}
-                      className="flex items-start gap-3 text-xs group"
-                    >
-                      <span
-                        className={`mt-0.5 inline-flex items-center justify-center h-4 w-4 rounded-full shrink-0 ${
-                          tp.kind === 'delivered'
-                            ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-400'
-                            : tp.kind === 'open'
-                              ? 'bg-amber-500/12 text-amber-600 dark:text-amber-400'
-                              : 'bg-pro-accent/10 text-pro-accent'
-                        }`}
-                        aria-hidden="true"
+      {(hasReliableRead ||
+        (currentDetail.recentActivity ?? []).length === 0) && (
+        <section className="person-dossier__about" aria-label="Earlier context">
+          {hasReliableRead ? (
+            <details open={(currentDetail.recentActivity ?? []).length === 0}>
+              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 rounded-md text-sm font-semibold text-pro-text-main hover:text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
+                <span>Earlier context</span>
+                <span className="flex items-center gap-2 text-xs font-normal text-pro-text-muted">
+                  {formattedDate
+                    ? `Brief evidence · ${formattedDate}`
+                    : 'Older brief'}
+                  <ChevronDown aria-hidden="true" size={15} />
+                </span>
+              </summary>
+              <div className="mt-5">
+                {isContextOutdated && (
+                  <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-800 dark:text-amber-300 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-semibold">
+                        Context marked as outdated
+                      </p>
+                      <button
+                        type="button"
+                        disabled={dreamingState === 'running'}
+                        onClick={() => void handleSynthesizeFreshRead()}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/30 bg-amber-500/20 px-2.5 py-1 text-xs font-medium text-amber-900 dark:text-amber-200 hover:bg-amber-500/30 transition-colors disabled:opacity-50"
                       >
-                        {tp.kind === 'delivered' ? (
-                          <Check className="h-2.5 w-2.5 stroke-[2.5]" />
-                        ) : tp.kind === 'open' ? (
-                          <ArrowRight className="h-2.5 w-2.5 stroke-[2.5]" />
-                        ) : (
-                          <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                        )}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                          {tp.kind === 'discussion' &&
-                          tp.meetingId &&
-                          onOpenMeeting ? (
-                            <button
-                              type="button"
-                              onClick={() => onOpenMeeting(tp.meetingId!)}
-                              className="font-medium text-pro-text-main hover:text-pro-accent hover:underline underline-offset-2 decoration-pro-accent/40 inline-flex items-center gap-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent rounded transition-colors"
-                            >
-                              <span>{tp.title}</span>
-                              <span
-                                aria-hidden="true"
-                                className="text-pro-accent/60 text-[10px]"
-                              >
-                                ↗
-                              </span>
-                            </button>
-                          ) : (
-                            <span className="font-medium text-pro-text-main">
-                              {tp.title}
-                            </span>
-                          )}
-                          {tp.kind !== 'discussion' &&
-                            tp.meetingId &&
-                            onOpenMeeting && (
-                              <button
-                                type="button"
-                                onClick={() => onOpenMeeting(tp.meetingId!)}
-                                className="text-pro-accent hover:text-pro-accent-hover hover:underline underline-offset-2 decoration-pro-accent/40 inline-flex items-center gap-0.5 rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent transition-colors"
-                              >
-                                <span>from "{tp.meetingTitle}"</span>
-                                <span
-                                  aria-hidden="true"
-                                  className="text-[10px]"
-                                >
-                                  ↗
-                                </span>
-                              </button>
-                            )}
-                          {tp.date && (
-                            <span className="text-pro-text-muted/70">
-                              · {tp.date}
-                            </span>
-                          )}
-                        </div>
-                        {tp.detail && (
-                          <p className="mt-1 text-pro-text-muted/80 leading-relaxed max-w-[60ch]">
-                            {tp.detail}
-                          </p>
-                        )}
-                      </div>
+                        <Sparkles className="h-3 w-3" />
+                        <span>
+                          {dreamingState === 'running'
+                            ? 'Synthesizing…'
+                            : 'Refresh brief'}
+                        </span>
+                      </button>
                     </div>
-                  ))}
-                </div>
+                    <p className="text-pro-text-muted">
+                      This context is marked as outdated. Refresh the brief from
+                      available conversations.
+                    </p>
+                  </div>
+                )}
+
+                {daysSince !== null && daysSince > 30 ? (
+                  <p className="mb-4 max-w-[68ch] text-xs leading-5 text-pro-text-muted">
+                    This synthesis predates the recent notes above. Focus and
+                    responsibilities may have changed.
+                  </p>
+                ) : null}
+
+                <p className="max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main">
+                  {brief.headline}
+                </p>
+                {workstreams.length > 0 ? (
+                  <div className="mt-5 space-y-3">
+                    <h3 className="text-sm font-semibold text-pro-text-main">
+                      Previously discussed workstreams
+                    </h3>
+                    <div className="space-y-0">
+                      {workstreams.map((stream) => (
+                        <div
+                          key={stream.id}
+                          className="border-b border-pro-border/50 py-3 last:border-0"
+                        >
+                          <h4 className="text-sm font-semibold text-pro-text-main">
+                            {stream.title}
+                          </h4>
+                          <p className="mt-1 max-w-[68ch] text-sm leading-6 text-pro-text-muted">
+                            {stream.detail}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : plainBullets.length > 0 ? (
+                  <div className="mt-3 space-y-1.5">
+                    {plainBullets.map((bullet, idx) => (
+                      <p
+                        key={idx}
+                        className="text-sm text-pro-text-muted leading-relaxed"
+                      >
+                        {bullet}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-            )}
-          </div>
+            </details>
+          ) : (
+            <p className="person-dossier__about-empty">
+              {meetingCount > 0
+                ? 'There is not enough verified context to describe this person yet.'
+                : 'No confirmed conversations are linked to this person yet.'}
+            </p>
+          )}
         </section>
       )}
 

@@ -56,7 +56,7 @@ export const parsePersonRole = (metadata: unknown): string => {
     const value = JSON.parse(metadata) as { role?: unknown };
     if (typeof value.role !== 'string') return 'Known from conversations';
     const role = value.role.trim();
-    return role &&
+    return isUsablePersonRole(role) &&
       !['undefined', 'null', 'n/a', 'none', 'nobody', 'unknown'].includes(
         role.toLowerCase(),
       )
@@ -66,6 +66,16 @@ export const parsePersonRole = (metadata: unknown): string => {
     return 'Known from conversations';
   }
 };
+
+export const isUsablePersonRole = (role: string): boolean =>
+  Boolean(
+    role.trim() &&
+      role.length <= 80 &&
+      !/^(?:colleague|collaborator|stakeholder|participant|team member|person\b|responsible for\b)/i.test(
+        role.trim(),
+      ) &&
+      !/\b(?:helped|worked on|working on)\b/i.test(role),
+  );
 
 export interface PersonMeetingRecord {
   id: string;
@@ -79,6 +89,105 @@ export interface PersonMeetingRecord {
 export interface PersonBriefingMeeting extends PersonMeetingRecord {
   evidence: PersonMeetingEvidence;
 }
+
+export interface PersonActivityItem {
+  text: string;
+  meetingId: string;
+  meetingTitle: string;
+  occurredAt: string | null;
+  evidence: PersonMeetingEvidence;
+  source?: 'accepted_focus';
+}
+
+/** Meeting notes can describe activity, but do not establish a person's role or ownership. */
+export const selectPersonActivity = (
+  meetings: PersonBriefingMeeting[],
+  names: string[],
+  analyses: Map<string, unknown>,
+  limit = 5,
+  acceptedFocus: Array<{ value: string; sourceMeetingIds: string[] }> = [],
+  confirmedFirstName: string | null = null,
+): PersonActivityItem[] => {
+  const namePrefixes = names
+    .map((name) => name.trim().toLocaleLowerCase())
+    .filter((name) => name.length > 2);
+  const seen = new Set<string>();
+  const firstNamePrefix = confirmedFirstName?.trim().toLocaleLowerCase();
+  const result: PersonActivityItem[] = [];
+  for (const meeting of meetings) {
+    let itemsFromMeeting = 0;
+    const analysis = analyses.get(meeting.id);
+    if (!analysis || typeof analysis !== 'object') continue;
+    const record = analysis as {
+      topics?: Array<{ key_points?: Array<{ text?: unknown }> }>;
+      all_action_items?: Array<{ text?: unknown }>;
+    };
+    const points = [
+      ...(Array.isArray(record.topics)
+        ? record.topics.flatMap((topic) =>
+            Array.isArray(topic.key_points) ? topic.key_points : [],
+          )
+        : []),
+      ...(Array.isArray(record.all_action_items)
+        ? record.all_action_items
+        : []),
+    ];
+    for (const point of points) {
+      if (typeof point.text !== 'string') continue;
+      const value = point.text.trim();
+      const key = value.toLocaleLowerCase();
+      if (
+        value.length < 24 ||
+        value.length > 300 ||
+        seen.has(key) ||
+        (!namePrefixes.some(
+          (name) => key.startsWith(`${name} `) || key.startsWith(`${name}'s `),
+        ) &&
+          !(
+            meeting.evidence === 'confirmed' &&
+            firstNamePrefix &&
+            (key.startsWith(`${firstNamePrefix} `) ||
+              key.startsWith(`${firstNamePrefix}'s `))
+          ))
+      )
+        continue;
+      seen.add(key);
+      result.push({
+        text: value,
+        meetingId: meeting.id,
+        meetingTitle: meeting.title,
+        occurredAt: meeting.started_at || meeting.created_at,
+        evidence: meeting.evidence,
+      });
+      itemsFromMeeting++;
+      if (itemsFromMeeting >= 2) break;
+    }
+  }
+  for (const claim of acceptedFocus) {
+    const value = claim.value.trim();
+    const key = value.toLocaleLowerCase();
+    const meeting = meetings.find((item) =>
+      claim.sourceMeetingIds.includes(item.id),
+    );
+    if (!meeting || !value || seen.has(key)) continue;
+    seen.add(key);
+    result.push({
+      text: value,
+      meetingId: meeting.id,
+      meetingTitle: meeting.title,
+      occurredAt: meeting.started_at || meeting.created_at,
+      evidence: meeting.evidence,
+      source: 'accepted_focus',
+    });
+  }
+  return result
+    .sort(
+      (a, b) =>
+        (Date.parse(b.occurredAt || '') || 0) -
+        (Date.parse(a.occurredAt || '') || 0),
+    )
+    .slice(0, limit);
+};
 
 export interface PersonCommitmentCandidate {
   id: string;
