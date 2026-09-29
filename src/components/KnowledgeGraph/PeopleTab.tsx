@@ -817,7 +817,8 @@ export const PersonDossier = ({
   })();
   const hasPersonSummary =
     summaryVersion >= 6 &&
-    currentDetail.knowledgeDoc?.status === 'up_to_date' &&
+    (currentDetail.knowledgeDoc?.status === 'up_to_date' ||
+      currentDetail.knowledgeDoc?.status === 'synthesizing') &&
     Boolean(personRead.headline);
   const personActivity = (currentDetail.recentActivity ?? []).filter(
     (item) => !/\bwill (?:notify|ping|inform)\b/i.test(item.text),
