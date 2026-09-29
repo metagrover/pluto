@@ -120,6 +120,37 @@ describe('knowledge V2 utilities', () => {
     expect(explicitOwnership.active_streams[0].current_read).toBe(
       'Avery manages launch reviews.',
     );
+    const anotherPersonOwnsIt = groundPersonKnowledgeV2Document(
+      {
+        ...doc,
+        current_read: {
+          ...doc.current_read,
+          headline: 'Avery oversees launch reviews.',
+        },
+        evidence_index: [
+          {
+            ...doc.evidence_index[0],
+            quote: 'Morgan manages launch reviews.',
+          },
+        ],
+      },
+      new Map([['m1', 'morgan manages launch reviews.']]),
+    );
+    expect(anotherPersonOwnsIt.current_read.headline).toBe(
+      'Avery works on launch reviews.',
+    );
+    const wrongSubject = groundPersonKnowledgeV2Document(
+      {
+        ...doc,
+        current_read: {
+          ...doc.current_read,
+          headline: 'Morgan leads launch reviews.',
+        },
+      },
+      new Map([['m1', 'avery reviewed the launch.']]),
+      'Avery Chen',
+    );
+    expect(wrongSubject.current_read.headline).toBe('');
   });
 
   it('filters true throwaway recordings without blocking testing strategy meetings', () => {

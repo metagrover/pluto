@@ -484,7 +484,7 @@ describe('PersonDossier', () => {
           ...briefingDetail,
           knowledgeDoc: {
             ...briefingDetail.knowledgeDoc!,
-            config: JSON.stringify({ synthesis_version: 5 }),
+            config: JSON.stringify({ synthesis_version: 6 }),
           },
         }}
         onBack={() => {}}
@@ -508,7 +508,7 @@ describe('PersonDossier', () => {
           knowledgeDoc: {
             ...briefingDetail.knowledgeDoc!,
             status: 'synthesizing',
-            config: JSON.stringify({ synthesis_version: 5 }),
+            config: JSON.stringify({ synthesis_version: 6 }),
           },
         }}
         onBack={() => {}}
@@ -517,6 +517,27 @@ describe('PersonDossier', () => {
     );
     expect(markup).toContain('Draft from recent conversations');
     expect(markup).toContain('Avery is coordinating the launch handoff.');
+  });
+
+  it('suppresses the earlier broad-meeting summary until person-specific synthesis replaces it', () => {
+    const markup = renderToStaticMarkup(
+      <PersonDossier
+        detail={{
+          ...briefingDetail,
+          knowledgeDoc: {
+            ...briefingDetail.knowledgeDoc!,
+            config: JSON.stringify({ synthesis_version: 5 }),
+          },
+        }}
+        onBack={() => {}}
+        onOpenMeeting={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('What they work on');
+    expect(markup).toContain('Avery Chen revised the launch handoff');
+    expect(markup).not.toContain('Avery is coordinating the launch handoff.');
+    expect(markup).not.toContain('Earlier context');
   });
 
   it('puts direct work ahead of conversational observations while a summary is pending', () => {
@@ -575,7 +596,7 @@ describe('PersonDossier', () => {
       />,
     );
 
-    expect(markup).toContain('Avery is coordinating the launch handoff.');
+    expect(markup).not.toContain('Avery is coordinating the launch handoff.');
     expect(markup).toContain('Commitments');
     expect(markup).toContain('Send the final launch review');
     expect(markup).toContain('Meetings');
@@ -621,7 +642,7 @@ describe('PersonDossier', () => {
     expect(markup).not.toContain('No mention-only conversations');
   });
 
-  it('dates the older brief independently from recent work', () => {
+  it('does not present an older unverified brief as person context', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
         detail={briefingDetail}
@@ -631,9 +652,9 @@ describe('PersonDossier', () => {
     );
 
     expect(markup).toContain('Product review');
-    expect(markup).toContain('Brief evidence · Jul 12');
-    expect(markup).toContain('This synthesis predates the recent notes above.');
-    expect(markup).toContain('Earlier context');
+    expect(markup).not.toContain('Brief evidence · Jul 12');
+    expect(markup).not.toContain('Avery is coordinating the launch handoff.');
+    expect(markup).not.toContain('Earlier context');
   });
 
   it('renders custom back label when returning from meeting context', () => {
@@ -661,7 +682,7 @@ describe('PersonDossier', () => {
     // Shows temporal heading
     expect(markup).toContain('What they work on');
     expect(markup).toContain('From person-specific meeting notes');
-    expect(markup).toContain('Earlier context');
+    expect(markup).not.toContain('Earlier context');
     // Shows Mark context as outdated button in More dropdown
     expect(markup).toContain('Mark context as outdated');
   });
@@ -684,14 +705,14 @@ describe('PersonDossier', () => {
     expect(markup.match(/Avery Chen revised the launch handoff/g)).toHaveLength(
       1,
     );
-    expect(markup).toContain('Avery is coordinating the launch handoff.');
+    expect(markup).not.toContain('Avery is coordinating the launch handoff.');
     expect(markup).toContain('Product review');
     expect(markup).toContain('Design handoff');
     expect(markup).toContain('Shared the prototype walkthrough');
     expect(markup).toContain('Send the final launch review');
   });
 
-  it('renders comprehensive insight and structured workstream cards without leaking manual participant', () => {
+  it('hides old workstream claims without leaking manual participant', () => {
     const ayushDetail: PersonBriefingDetail = {
       ...briefingDetail,
       person: {
@@ -825,10 +846,9 @@ describe('PersonDossier', () => {
       />,
     );
 
-    // Verifies workstream cards
-    expect(markup).toContain('Previously discussed workstreams');
-    expect(markup).toContain('API Performance &amp; Infrastructure');
-    expect(markup).toContain('Infrastructure &amp; Monitoring');
+    expect(markup).not.toContain('Previously discussed workstreams');
+    expect(markup).not.toContain('API Performance &amp; Infrastructure');
+    expect(markup).not.toContain('Infrastructure &amp; Monitoring');
 
     // Verifies comprehensive insight prose
     expect(markup).not.toContain(
