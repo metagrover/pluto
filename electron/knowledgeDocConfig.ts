@@ -3,6 +3,10 @@ import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
 export const KNOWLEDGE_SYNTHESIS_VERSION = KNOWLEDGE_V2_SYNTHESIS_VERSION;
 export const PERSON_CONTEXT_SYNTHESIS_VERSION = 7;
 
+/** Person dossiers only publish complete reads; keep the last cited read during refresh. */
+export const shouldPublishPartialKnowledgeDoc = (scopeType: string): boolean =>
+  scopeType !== 'person_context';
+
 const synthesisVersionForScope = (scopeType?: string): number =>
   scopeType === 'person_context'
     ? PERSON_CONTEXT_SYNTHESIS_VERSION

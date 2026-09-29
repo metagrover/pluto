@@ -6,10 +6,16 @@ import {
   getKnowledgeSynthesisInputConfig,
   knowledgeDocNeedsSynthesis,
   knowledgeDocSatisfiesMeetingRefresh,
+  shouldPublishPartialKnowledgeDoc,
   withCurrentKnowledgeSynthesisConfig,
 } from '../../electron/knowledgeDocConfig';
 
 describe('knowledge doc config', () => {
+  it('keeps a complete person read in place until its replacement is ready', () => {
+    expect(shouldPublishPartialKnowledgeDoc('person_context')).toBe(false);
+    expect(shouldPublishPartialKnowledgeDoc('project')).toBe(true);
+  });
+
   it('preserves existing doc config while stamping the current synthesis version', () => {
     expect(
       withCurrentKnowledgeSynthesisConfig(
