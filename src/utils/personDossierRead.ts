@@ -17,6 +17,7 @@ export const isCurrentPersonDossier = (
 interface PersonReadEvidence {
   meeting_id: string;
   meeting_title: string;
+  captured_at?: string | null;
   quote: string;
   stream_ids: string[];
 }
@@ -79,6 +80,10 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
             .filter((item) => item.stream_ids.includes(stream.id))
             .map((item) => [item.meeting_id, item]),
         ).values(),
+      ).sort(
+        (a, b) =>
+          (Date.parse(b.captured_at ?? '') || 0) -
+          (Date.parse(a.captured_at ?? '') || 0),
       );
       return {
         id: stream.id,

@@ -25,12 +25,14 @@ describe('person dossier read', () => {
         {
           meeting_id: 'meeting-one',
           meeting_title: 'Launch review',
-          quote: 'Avery revised the partner launch plan.',
+          captured_at: '2026-07-10T12:00:00.000Z',
+          quote: 'Avery worked on the partner launch plan.',
           stream_ids: ['launch'],
         },
         {
           meeting_id: 'meeting-two',
           meeting_title: 'Partner check-in',
+          captured_at: '2026-07-12T12:00:00.000Z',
           quote: 'Avery worked through the partner handoff.',
           stream_ids: ['launch'],
         },
@@ -43,6 +45,7 @@ describe('person dossier read', () => {
     expect(result.workstreams[0]?.detail).toBe(
       'Avery worked through the partner handoff.',
     );
+    expect(result.workstreams[0]?.sources[0]?.meeting_id).toBe('meeting-two');
   });
 
   it('does not merge unrelated one-off tasks into a recurring work area', () => {
