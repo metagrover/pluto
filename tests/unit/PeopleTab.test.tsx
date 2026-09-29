@@ -612,8 +612,8 @@ describe('PersonDossier', () => {
     );
 
     // Shows temporal heading
-    expect(markup).toContain('Who they are in this work');
-    expect(markup).toContain('Recent developments');
+    expect(markup).toContain('What they work on');
+    expect(markup).toContain('From person-specific meeting notes');
     expect(markup).toContain('Earlier context');
     // Shows Mark context as outdated button in More dropdown
     expect(markup).toContain('Mark context as outdated');
@@ -630,6 +630,12 @@ describe('PersonDossier', () => {
 
     expect(markup).toContain(
       'Avery Chen revised the launch handoff after the product review.',
+    );
+    expect(markup.indexOf('What they work on')).toBeLessThan(
+      markup.indexOf('Avery Chen revised the launch handoff'),
+    );
+    expect(markup.match(/Avery Chen revised the launch handoff/g)).toHaveLength(
+      1,
     );
     expect(markup).toContain('Avery is coordinating the launch handoff.');
     expect(markup).toContain('Product review');

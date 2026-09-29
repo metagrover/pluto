@@ -862,6 +862,12 @@ export const PersonDossier = ({
     brief.evidenceIndex.length > 0;
   const isDraftSummary =
     hasPersonSummary && currentDetail.knowledgeDoc?.status === 'synthesizing';
+  const sourceNoteOverview = hasPersonSummary
+    ? []
+    : (currentDetail.recentActivity ?? []).slice(0, 2);
+  const remainingActivity = hasPersonSummary
+    ? (currentDetail.recentActivity ?? [])
+    : (currentDetail.recentActivity ?? []).slice(sourceNoteOverview.length);
   const summarySources = Array.from(
     new Map(
       brief.evidenceIndex.map((source) => [source.meeting_id, source]),
@@ -1763,7 +1769,11 @@ export const PersonDossier = ({
         aria-labelledby="person-summary"
       >
         <div className="person-dossier__major-heading mb-3">
-          <h2 id="person-summary">Who they are in this work</h2>
+          <h2 id="person-summary">
+            {hasPersonSummary
+              ? 'Who they are in this work'
+              : 'What they work on'}
+          </h2>
         </div>
         {hasPersonSummary ? (
           <div>
@@ -1814,6 +1824,31 @@ export const PersonDossier = ({
               </div>
             )}
           </div>
+        ) : sourceNoteOverview.length > 0 ? (
+          <div>
+            <div className="max-w-[68ch] space-y-3 font-serif text-lg leading-7 text-pro-text-main">
+              {sourceNoteOverview.map((item) => (
+                <p key={`${item.meetingId}-${item.text}`}>{item.text}</p>
+              ))}
+            </div>
+            <p className="mt-3 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-muted">
+              From person-specific meeting notes. A broader account of their
+              role and contributions is being prepared.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              {sourceNoteOverview.map((item) => (
+                <button
+                  key={`${item.meetingId}-${item.text}`}
+                  type="button"
+                  className="text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
+                  onClick={() => onOpenMeeting(item.meetingId)}
+                >
+                  {item.meetingTitle}
+                  {item.occurredAt ? ` · ${formatDate(item.occurredAt)}` : ''}
+                </button>
+              ))}
+            </div>
+          </div>
         ) : (
           <div>
             <p className="max-w-[68ch] font-sans text-sm leading-6 text-pro-text-muted">
@@ -1839,52 +1874,56 @@ export const PersonDossier = ({
         )}
       </section>
 
-      <section
-        className="person-dossier__about"
-        aria-labelledby="person-recent-work"
-      >
-        <div className="person-dossier__major-heading mb-3">
-          <h2 id="person-recent-work">Recent developments</h2>
-        </div>
-        {(currentDetail.recentActivity ?? []).length > 0 ? (
-          <>
-            <span className="mb-5 block max-w-[68ch] text-sm leading-6 text-pro-text-muted">
-              Specific updates from recent conversations. Open a meeting to see
-              the source.
-            </span>
-            <ol className="space-y-4">
-              {currentDetail.recentActivity?.map((item) => (
-                <li
-                  key={`${item.meetingId}-${item.text}`}
-                  className="border-b border-pro-border/50 pb-4 last:border-0"
-                >
-                  <p className="max-w-[68ch] text-sm leading-6 text-pro-text-main">
-                    {item.text}
-                  </p>
-                  <button
-                    type="button"
-                    className="mt-1 text-xs text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
-                    onClick={() => onOpenMeeting(item.meetingId)}
+      {(remainingActivity.length > 0 || sourceNoteOverview.length === 0) && (
+        <section
+          className="person-dossier__about"
+          aria-labelledby="person-recent-work"
+        >
+          <div className="person-dossier__major-heading mb-3">
+            <h2 id="person-recent-work">Recent developments</h2>
+          </div>
+          {remainingActivity.length > 0 ? (
+            <>
+              <span className="mb-5 block max-w-[68ch] text-sm leading-6 text-pro-text-muted">
+                Specific updates from recent conversations. Open a meeting to
+                see the source.
+              </span>
+              <ol className="space-y-4">
+                {remainingActivity.map((item) => (
+                  <li
+                    key={`${item.meetingId}-${item.text}`}
+                    className="border-b border-pro-border/50 pb-4 last:border-0"
                   >
-                    {item.source === 'accepted_focus'
-                      ? 'Accepted focus update'
-                      : item.evidence === 'confirmed'
-                        ? 'Confirmed conversation'
-                        : 'Mentioned in notes'}
-                    {' · '}
-                    {item.meetingTitle}
-                    {item.occurredAt ? ` · ${formatDate(item.occurredAt)}` : ''}
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </>
-        ) : (
-          <p className="person-dossier__about-empty">
-            Recent notes do not yet describe this person's work specifically.
-          </p>
-        )}
-      </section>
+                    <p className="max-w-[68ch] text-sm leading-6 text-pro-text-main">
+                      {item.text}
+                    </p>
+                    <button
+                      type="button"
+                      className="mt-1 text-xs text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
+                      onClick={() => onOpenMeeting(item.meetingId)}
+                    >
+                      {item.source === 'accepted_focus'
+                        ? 'Accepted focus update'
+                        : item.evidence === 'confirmed'
+                          ? 'Confirmed conversation'
+                          : 'Mentioned in notes'}
+                      {' · '}
+                      {item.meetingTitle}
+                      {item.occurredAt
+                        ? ` · ${formatDate(item.occurredAt)}`
+                        : ''}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </>
+          ) : sourceNoteOverview.length === 0 ? (
+            <p className="person-dossier__about-empty">
+              Recent notes do not yet describe this person's work specifically.
+            </p>
+          ) : null}
+        </section>
+      )}
 
       {((!hasPersonSummary && hasReliableRead) ||
         (currentDetail.recentActivity ?? []).length === 0) && (
