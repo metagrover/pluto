@@ -79,18 +79,25 @@ const normalizeText = (value: string): string =>
 export const buildKnowledgeSourceChunks = (
   sourceMeetings: KnowledgeChunkSourceMeeting[],
   maxMeetingsPerChunk: number,
+  firstChunkSize = maxMeetingsPerChunk,
 ): KnowledgeSourceChunk[] => {
   const chunkSize = Math.max(1, maxMeetingsPerChunk);
-  const totalChunks = Math.ceil(sourceMeetings.length / chunkSize);
+  const initialSize = Math.min(chunkSize, Math.max(1, firstChunkSize));
+  const totalChunks = sourceMeetings.length
+    ? 1 +
+      Math.ceil(Math.max(0, sourceMeetings.length - initialSize) / chunkSize)
+    : 0;
   const chunks: KnowledgeSourceChunk[] = [];
 
-  for (let start = 0; start < sourceMeetings.length; start += chunkSize) {
+  for (let start = 0; start < sourceMeetings.length; ) {
     const index = chunks.length;
+    const size = start === 0 ? initialSize : chunkSize;
     chunks.push({
       index,
       label: `Chunk ${index + 1} of ${totalChunks}`,
-      sourceMeetings: sourceMeetings.slice(start, start + chunkSize),
+      sourceMeetings: sourceMeetings.slice(start, start + size),
     });
+    start += size;
   }
 
   return chunks;
