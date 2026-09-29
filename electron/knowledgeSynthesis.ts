@@ -27,6 +27,7 @@ import {
   type KnowledgeV2Document,
   applyKnowledgeCorrectionsToDocument,
   buildDeterministicKnowledgeV2Document,
+  groundPersonKnowledgeV2Document,
   isKnowledgeV2Document,
   mergeKnowledgeV2Documents,
   parseKnowledgeV2Document,
@@ -1085,6 +1086,11 @@ const countStructuredStatements = (doc: KnowledgeCompiledDocument): number =>
 
 const MIN_USEFUL_SYNTHESIS_STATEMENTS = 4;
 
+const promptScopeTitle = (doc: db.KnowledgeDoc): string =>
+  doc.scope_type === 'person_context'
+    ? db.getEntity(doc.scope_key)?.name || doc.title
+    : doc.title;
+
 const synthesizeStructuredFromPrompt = async (params: {
   provider: Awaited<ReturnType<typeof getProvider>>;
   prompt: string;
@@ -1121,7 +1127,10 @@ const synthesizeKnowledgeChunkWithRetry = async (params: {
   try {
     const prompt = getKnowledgeDocumentPrompt({
       scopeType: params.doc.scope_type,
-      scopeTitle: `${params.doc.title} - ${params.chunk.label}`,
+      scopeTitle:
+        params.doc.scope_type === 'person_context'
+          ? promptScopeTitle(params.doc)
+          : `${params.doc.title} - ${params.chunk.label}`,
       sourceMeetings: params.chunk.sourceMeetings,
       previousStructuredJson: null,
       claimCorrections: params.claimCorrections,
@@ -1310,7 +1319,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
   try {
     const mergePrompt = getKnowledgeDocumentMergePrompt({
       scopeType: params.doc.scope_type,
-      scopeTitle: params.doc.title,
+      scopeTitle: promptScopeTitle(params.doc),
       chunkDocuments: chunkDocs.map((chunk) => ({
         label: chunk.label,
         structuredJson: JSON.stringify(chunk.structured),
@@ -1660,7 +1669,7 @@ const buildKnowledgeSynthesisRequest = (
   const inputHash = createHash('sha256')
     .update(
       JSON.stringify({
-        config: getKnowledgeSynthesisInputConfig(doc.config),
+        config: getKnowledgeSynthesisInputConfig(doc.config, doc.scope_type),
         corrections,
         sourceMeetings,
       }),
@@ -1754,6 +1763,7 @@ const synthesizeKnowledgeDocNowInternal = async (
       config: withCurrentKnowledgeSynthesisConfig(
         doc.config,
         request.inputHash,
+        doc.scope_type,
       ),
       status: 'up_to_date',
       last_synthesized_at: new Date().toISOString(),
@@ -1829,7 +1839,11 @@ const synthesizeKnowledgeDocNowInternal = async (
       },
     });
     assertKnowledgeSynthesisCurrent(request);
-    const correctedStructured = applyCorrections(structured);
+    const grounded =
+      doc.scope_type === 'person_context' && isKnowledgeV2Document(structured)
+        ? groundPersonKnowledgeV2Document(structured, sourceEvidenceByMeeting)
+        : structured;
+    const correctedStructured = applyCorrections(grounded);
 
     const rendered = renderStructuredDocument(correctedStructured);
     const previous = parseStoredCompiledDoc(doc.structured_json);
@@ -1873,6 +1887,7 @@ const synthesizeKnowledgeDocNowInternal = async (
       config: withCurrentKnowledgeSynthesisConfig(
         doc.config,
         request.inputHash,
+        doc.scope_type,
       ),
       status: 'up_to_date',
       last_synthesized_at: new Date().toISOString(),

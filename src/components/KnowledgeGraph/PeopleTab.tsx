@@ -843,6 +843,24 @@ export const PersonDossier = ({
       'No reliable compiled brief yet.',
       'Indexed knowledge needs a stronger synthesis.',
     ].includes(brief.headline);
+  const summaryVersion = (() => {
+    try {
+      return JSON.parse(currentDetail.knowledgeDoc?.config || '{}')
+        .synthesis_version;
+    } catch {
+      return null;
+    }
+  })();
+  const hasPersonSummary =
+    summaryVersion >= 5 &&
+    currentDetail.knowledgeDoc?.status === 'up_to_date' &&
+    hasReliableRead &&
+    brief.evidenceIndex.length > 0;
+  const summarySources = Array.from(
+    new Map(
+      brief.evidenceIndex.map((source) => [source.meeting_id, source]),
+    ).values(),
+  ).slice(0, 3);
   const meetingCount = currentDetail.meetings.length;
   const confirmedMeetings = currentDetail.meetings.filter(
     (meeting) => meeting.evidence === 'confirmed',
@@ -1388,11 +1406,9 @@ export const PersonDossier = ({
           )}
           <div className="person-dossier__identity-meta">
             <p>
-              {role === 'Known from conversations'
-                ? 'Role not established'
-                : roleSourceMeetingId
-                  ? `Role from conversation: ${role}`
-                  : `Recorded role, source unavailable: ${role}`}
+              {roleSourceMeetingId && role !== 'Known from conversations'
+                ? `Recorded title: ${role}`
+                : 'Formal role not established'}
             </p>
             {role !== 'Known from conversations' && roleSourceMeetingId && (
               <button
@@ -1679,10 +1695,74 @@ export const PersonDossier = ({
 
       <section
         className="person-dossier__about"
+        aria-labelledby="person-summary"
+      >
+        <div className="person-dossier__major-heading mb-3">
+          <h2 id="person-summary">Who they are in this work</h2>
+        </div>
+        {hasPersonSummary ? (
+          <>
+            <p className="max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main">
+              {brief.headline}
+            </p>
+            <p className="mt-2 text-xs text-pro-text-muted">
+              Based on conversations through{' '}
+              {formattedDate ?? 'the latest linked source'}.
+              {!roleSourceMeetingId || role === 'Known from conversations'
+                ? ' A formal job title has not been established.'
+                : ''}
+            </p>
+            {workstreams.length > 0 && (
+              <div className="mt-6 space-y-3">
+                <h3 className="text-sm font-semibold text-pro-text-main">
+                  Responsibilities and contributions
+                </h3>
+                {workstreams.slice(0, 4).map((stream) => (
+                  <div
+                    key={stream.id}
+                    className="border-b border-pro-border/50 pb-3 last:border-0"
+                  >
+                    <h4 className="text-sm font-semibold text-pro-text-main">
+                      {stream.title}
+                    </h4>
+                    <p className="mt-1 max-w-[68ch] text-sm leading-6 text-pro-text-muted">
+                      {stream.detail}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {summarySources.length > 0 && (
+              <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                <span className="text-pro-text-muted">Sources used</span>
+                {summarySources.map((source) => (
+                  <button
+                    key={source.meeting_id}
+                    type="button"
+                    className="text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
+                    onClick={() => onOpenMeeting(source.meeting_id)}
+                  >
+                    {source.meeting_title}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="person-dossier__about-empty">
+            {meetingCount > 0
+              ? 'A source-backed summary of this person’s role and contributions is being prepared. Recent developments are below.'
+              : 'No conversations are linked to this person yet.'}
+          </p>
+        )}
+      </section>
+
+      <section
+        className="person-dossier__about"
         aria-labelledby="person-recent-work"
       >
         <div className="person-dossier__major-heading mb-3">
-          <h2 id="person-recent-work">What they've been working on</h2>
+          <h2 id="person-recent-work">Recent developments</h2>
         </div>
         {(currentDetail.recentActivity ?? []).length > 0 ? (
           <>
@@ -1724,7 +1804,7 @@ export const PersonDossier = ({
         )}
       </section>
 
-      {(hasReliableRead ||
+      {((!hasPersonSummary && hasReliableRead) ||
         (currentDetail.recentActivity ?? []).length === 0) && (
         <section className="person-dossier__about" aria-label="Earlier context">
           {hasReliableRead ? (

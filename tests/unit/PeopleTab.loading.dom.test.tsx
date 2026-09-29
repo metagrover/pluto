@@ -67,7 +67,7 @@ describe('PeopleTab loading', () => {
     expect(api.getPeopleBriefingSummaries).toHaveBeenCalledOnce();
     expect(api.getPersonBriefing).not.toHaveBeenCalled();
     expect(container.textContent).toContain('Avery Chen');
-    expect(container.textContent).toContain('Reviewed launch evidence.');
+    expect(container.textContent).toContain('Latest link: Product review');
   });
 
   it('fetches one full dossier only after that person is selected', async () => {

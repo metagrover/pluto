@@ -141,6 +141,64 @@ export interface KnowledgeV2SourceMeeting {
   entity_names?: string[];
 }
 
+export const groundPersonKnowledgeV2Document = (
+  doc: KnowledgeV2Document,
+  sourceEvidenceByMeeting: Map<string, string>,
+): KnowledgeV2Document => {
+  const supported = (meetingId: string, quote: string): boolean => {
+    const source = sourceEvidenceByMeeting.get(meetingId);
+    return Boolean(
+      source &&
+        quote.trim().length >= 6 &&
+        source.includes(normalizeText(quote)),
+    );
+  };
+  const keepItems = (items: KnowledgeV2Item[]): KnowledgeV2Item[] =>
+    items
+      .map((item) => ({
+        ...item,
+        citations: item.citations.filter((citation) =>
+          supported(citation.meeting_id, citation.quote),
+        ),
+      }))
+      .filter((item) => item.citations.length > 0);
+  const needsAttention = keepItems(doc.needs_attention);
+  const patterns = keepItems(doc.patterns);
+  const risksAndUnknowns = keepItems(doc.risks_and_unknowns);
+  const evidenceIndex = doc.evidence_index.filter((entry) =>
+    supported(entry.meeting_id, entry.quote),
+  );
+  const supportedStreamIds = new Set([
+    ...evidenceIndex.flatMap((entry) => entry.stream_ids),
+    ...[...needsAttention, ...patterns, ...risksAndUnknowns].flatMap(
+      (item) => item.stream_ids,
+    ),
+  ]);
+  const activeStreams = doc.active_streams.filter((stream) =>
+    supportedStreamIds.has(stream.id),
+  );
+  const citedMeetingIds = new Set([
+    ...evidenceIndex.map((entry) => entry.meeting_id),
+    ...[...needsAttention, ...patterns, ...risksAndUnknowns].flatMap((item) =>
+      item.citations.map((citation) => citation.meeting_id),
+    ),
+  ]);
+  return {
+    ...doc,
+    current_read: {
+      ...doc.current_read,
+      cited_item_count:
+        needsAttention.length + patterns.length + risksAndUnknowns.length,
+      cited_meeting_count: citedMeetingIds.size,
+    },
+    active_streams: activeStreams,
+    needs_attention: needsAttention,
+    patterns,
+    risks_and_unknowns: risksAndUnknowns,
+    evidence_index: evidenceIndex,
+  };
+};
+
 export interface KnowledgeV2Correction {
   target_kind: 'source' | 'stream' | 'item' | 'claim';
   target_id: string;

@@ -313,12 +313,16 @@ const getScopeGuidance = (scopeType: string): string => {
 - Surface cross-cutting risks that affect multiple team members.
 - Capture evolving team priorities and shifts in direction over time.`;
     case 'person_context':
-      return `Focus on RELATIONSHIP context:
-- Capture all meaningful topics discussed with this person across meetings.
-- Track commitments, action items, and follow-ups involving them.
-- Note their perspectives, concerns, and recurring themes.
+      return `Build a PERSON DOSSIER for the individual named by scope.title. The reader needs to understand who this person is in the work, the capacity in which they operate, and what they have been doing.
+- Current Read headline: write a concise, person-specific summary of their evidenced function or operating capacity and main work. Prefer "In these conversations, [name] has handled..." to a broad meeting recap. Do not use a project update as a biography.
+- Distinguish an explicit job title from an inferred operating capacity. Never invent a title, employer, reporting line, authority, ownership, or attendance. If the evidence does not establish a formal role, describe only what they demonstrably did or were responsible for; omit a role claim entirely if neither is established.
+- Active streams: group the person's own responsibilities and recurring contributions, not every topic discussed in meetings linked to them. Each stream's current_read should explain what this person did, decided, owned, or advised and when. Do not attribute group work or another person's action to them.
+- Supporting bullets: prioritize a few concrete developments in their work, grounded in cited items and ordered by recency. Separate durable capacity from recent activity.
+- Only include a meeting's topic when the evidence explicitly connects this individual to it. A mention, calendar invitation, or meeting association alone does not prove participation or responsibility.
+- Use citations that actually name or unambiguously identify this person and support the specific claim. If the sources only show a passing mention, leave the dossier sparse rather than generalizing from the whole meeting.
+- Track commitments only when assigned to or explicitly accepted by this person. Note their perspectives and recurring themes only when directly attributable.
 - CRITICAL TEMPORAL GROUNDING: Distinguish current active state from historical discussions. If meetings are older than 14 days, use past tense (e.g. "Discussed in June", "Previously collaborated on", "Historically worked on") instead of present continuous ("is working on"). Never assert someone is currently doing something unless recent evidence from the last 14 days explicitly confirms it.
-- Surface useful context for preparing future 1-on-1s or check-ins.`;
+- When new evidence conflicts with an older responsibility or title, prefer the newer explicit statement and describe the change instead of silently carrying forward the old claim.`;
     case 'project':
       return `Focus on PROJECT trajectory:
 - Track decisions, milestones, and evolving requirements.
@@ -488,6 +492,7 @@ Non-negotiable requirements:
 You are generating a structured knowledge document for this scope:
 - scope.type: ${scopeType}
 - scope.title: ${scopeTitle}
+${scopeType === 'person_context' ? '- For this person dossier, merge only claims specifically attributable to this individual. Preserve the distinction between formal role, observed capacity, and recent work. The Current Read must answer who this person is in the work and what they have been doing; omit unsupported role claims.\n' : ''}
 
 Chunk documents:
 ${chunksBlock || '(none)'}

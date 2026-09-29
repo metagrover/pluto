@@ -477,6 +477,29 @@ const briefingDetail: PersonBriefingDetail = {
 };
 
 describe('PersonDossier', () => {
+  it('leads with a sourced person summary after the new synthesis completes', () => {
+    const markup = renderToStaticMarkup(
+      <PersonDossier
+        detail={{
+          ...briefingDetail,
+          knowledgeDoc: {
+            ...briefingDetail.knowledgeDoc!,
+            config: JSON.stringify({ synthesis_version: 5 }),
+          },
+        }}
+        onBack={() => {}}
+        onOpenMeeting={() => {}}
+      />,
+    );
+
+    expect(markup.indexOf('Who they are in this work')).toBeLessThan(
+      markup.indexOf('Recent developments'),
+    );
+    expect(markup).toContain('Avery is coordinating the launch handoff.');
+    expect(markup).toContain('Sources used');
+    expect(markup).not.toContain('Earlier context');
+  });
+
   it('shows a concise description, verified commitments, and meetings', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
@@ -570,7 +593,8 @@ describe('PersonDossier', () => {
     );
 
     // Shows temporal heading
-    expect(markup).toContain('What they&#x27;ve been working on');
+    expect(markup).toContain('Who they are in this work');
+    expect(markup).toContain('Recent developments');
     expect(markup).toContain('Earlier context');
     // Shows Mark context as outdated button in More dropdown
     expect(markup).toContain('Mark context as outdated');

@@ -4,6 +4,7 @@ import {
   applyKnowledgeCorrectionsToDocument,
   buildDeterministicKnowledgeV2Document,
   classifyKnowledgeV2Item,
+  groundPersonKnowledgeV2Document,
   isKnowledgeV2Document,
   mergeKnowledgeV2Documents,
   repairKnowledgeV2Document,
@@ -37,6 +38,69 @@ const makeCorrection = (overrides = {}) => ({
 });
 
 describe('knowledge V2 utilities', () => {
+  it('drops invented person-profile citations and unsupported streams', () => {
+    const base = buildDeterministicKnowledgeV2Document(
+      { type: 'person_context', title: 'Avery Chen' },
+      [],
+    );
+    const doc = {
+      ...base,
+      current_read: {
+        ...base.current_read,
+        headline: 'Avery coordinates launch reviews.',
+      },
+      active_streams: [
+        {
+          id: 'launch',
+          title: 'Launch reviews',
+          domain: 'work' as const,
+          status: 'active',
+          current_read: 'Avery reviewed the launch.',
+          last_touched_at: null,
+          source_count: 1,
+          open_follow_up_count: 0,
+          decision_count: 0,
+          unresolved_question_count: 0,
+          pinned: false,
+          evidence_quality: base.current_read.evidence_quality,
+        },
+      ],
+      evidence_index: [
+        {
+          id: 'valid',
+          meeting_id: 'm1',
+          meeting_title: 'Launch review',
+          captured_at: null,
+          quote: 'Avery reviewed the launch.',
+          stream_ids: ['launch'],
+          item_ids: [],
+          mode: 'direct' as const,
+          confidence: 0.9,
+        },
+        {
+          id: 'invented',
+          meeting_id: 'm1',
+          meeting_title: 'Launch review',
+          captured_at: null,
+          quote: 'Avery is the CEO.',
+          stream_ids: [],
+          item_ids: [],
+          mode: 'direct' as const,
+          confidence: 0.9,
+        },
+      ],
+    };
+    const grounded = groundPersonKnowledgeV2Document(
+      doc,
+      new Map([['m1', 'avery reviewed the launch.']]),
+    );
+    expect(grounded.evidence_index.map((entry) => entry.id)).toEqual(['valid']);
+    expect(grounded.active_streams.map((stream) => stream.id)).toEqual([
+      'launch',
+    ]);
+    expect(grounded.current_read.cited_meeting_count).toBe(1);
+  });
+
   it('filters true throwaway recordings without blocking testing strategy meetings', () => {
     expect(
       scoreKnowledgeV2Source(
