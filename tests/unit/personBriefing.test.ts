@@ -5,6 +5,7 @@ import {
   isUsablePersonName,
   mergePersonMeetingEvidence,
   selectCandidatePersonCommitments,
+  selectPersonActivity,
   selectPersonCommitments,
   selectVerifiedPersonCommitments,
 } from '../../src/utils/personBriefing';
@@ -39,6 +40,140 @@ describe('person meeting evidence', () => {
     ]);
     expect(result.filter((item) => item.id === 'shared')).toHaveLength(1);
   });
+});
+
+it('shows recent named work without treating nearby people or generic discussion as their activity', () => {
+  const meetings = mergePersonMeetingEvidence({
+    confirmed: [meeting('new', '2026-09-20T10:00:00.000Z')],
+    scheduled: [],
+    mentioned: [meeting('old', '2026-08-01T10:00:00.000Z')],
+  });
+  const analyses = new Map<string, unknown>([
+    [
+      'new',
+      {
+        topics: [
+          {
+            key_points: [
+              {
+                text: 'Avery Chen revised the launch handoff after the product review.',
+              },
+              { text: 'Jordan asked Avery Chen to review the release plan.' },
+              { text: 'The team discussed the launch handoff.' },
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      'old',
+      {
+        topics: [
+          {
+            key_points: [
+              {
+                text: 'Avery Chen proposed an earlier review of the launch materials.',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  ]);
+
+  expect(selectPersonActivity(meetings, ['Avery Chen'], analyses)).toEqual([
+    expect.objectContaining({
+      meetingId: 'new',
+      text: 'Avery Chen revised the launch handoff after the product review.',
+      evidence: 'confirmed',
+    }),
+    expect.objectContaining({
+      meetingId: 'old',
+      text: 'Avery Chen proposed an earlier review of the launch materials.',
+      evidence: 'mentioned',
+    }),
+  ]);
+});
+
+it('includes accepted focus updates with a linked source among recent activity', () => {
+  const meetings = mergePersonMeetingEvidence({
+    confirmed: [meeting('recent', '2026-09-20T10:00:00.000Z')],
+    scheduled: [],
+    mentioned: [meeting('older', '2026-09-10T10:00:00.000Z')],
+  });
+  const activity = selectPersonActivity(
+    meetings,
+    ['Avery Chen'],
+    new Map([
+      [
+        'older',
+        {
+          topics: [
+            {
+              key_points: [{ text: 'Avery Chen prepared the launch handoff.' }],
+            },
+          ],
+        },
+      ],
+    ]),
+    5,
+    [
+      {
+        value: 'Coordinating the product review',
+        sourceMeetingIds: ['recent'],
+      },
+      { value: 'Unsupported claim', sourceMeetingIds: ['missing'] },
+    ],
+  );
+
+  expect(activity).toEqual([
+    expect.objectContaining({
+      text: 'Coordinating the product review',
+      meetingId: 'recent',
+      source: 'accepted_focus',
+    }),
+    expect.objectContaining({
+      text: 'Avery Chen prepared the launch handoff.',
+      meetingId: 'older',
+    }),
+  ]);
+});
+
+it('uses an unambiguous first name only in a confirmed conversation', () => {
+  const meetings = mergePersonMeetingEvidence({
+    confirmed: [meeting('confirmed', '2026-09-20T10:00:00.000Z')],
+    scheduled: [],
+    mentioned: [meeting('mentioned', '2026-09-19T10:00:00.000Z')],
+  });
+  const analyses = new Map<string, unknown>([
+    [
+      'confirmed',
+      {
+        topics: [
+          {
+            key_points: [
+              { text: 'Avery prepared the launch handoff for review.' },
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      'mentioned',
+      {
+        topics: [
+          {
+            key_points: [{ text: 'Avery discussed a separate launch idea.' }],
+          },
+        ],
+      },
+    ],
+  ]);
+
+  expect(
+    selectPersonActivity(meetings, ['Avery Chen'], analyses, 5, [], 'Avery'),
+  ).toEqual([expect.objectContaining({ meetingId: 'confirmed' })]);
+  expect(selectPersonActivity(meetings, ['Avery Chen'], analyses)).toEqual([]);
 });
 
 describe('person identity hygiene', () => {

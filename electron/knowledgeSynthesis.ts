@@ -1594,9 +1594,11 @@ const buildSourceMeetings = (doc: db.KnowledgeDoc): SynthSourceMeeting[] => {
   const candidates = viable.length >= MIN_SOURCE_MEETINGS ? viable : nonEmpty;
 
   candidates.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
     const aTime = a.occurred_at ? new Date(a.occurred_at).getTime() : 0;
     const bTime = b.occurred_at ? new Date(b.occurred_at).getTime() : 0;
+    if (doc.scope_type === 'person_context' && bTime !== aTime)
+      return bTime - aTime;
+    if (b.score !== a.score) return b.score - a.score;
     return bTime - aTime;
   });
 

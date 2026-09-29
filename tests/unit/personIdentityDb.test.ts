@@ -95,6 +95,27 @@ describe('canonical person identity', () => {
     db.correctActionOwner(action.id, duplicate.id);
 
     db.mergePerson(duplicate.id, canonical.id);
+    db.db
+      .prepare(
+        'UPDATE meetings SET duration_seconds = 300, user_notes = ? WHERE id IN (?, ?)',
+      )
+      .run(
+        'The team reviewed the launch sequence and discussed the next design review. '.repeat(
+          2,
+        ),
+        'merge-meeting-a',
+        'merge-meeting-b',
+      );
+    const personDoc = db.upsertKnowledgeDoc({
+      scope_type: 'person_context',
+      scope_key: canonical.id,
+      title: 'Avery Chen',
+    });
+    expect(
+      db
+        .getKnowledgeDocSourceMeetings(personDoc.id)
+        .map((meeting) => meeting.id),
+    ).toEqual(['merge-meeting-b', 'merge-meeting-a']);
 
     expect(db.resolvePersonIdentityId(duplicate.id)).toBe(canonical.id);
     const visiblePersonIds = db
@@ -267,6 +288,43 @@ describe('canonical person identity', () => {
     );
   });
 
+  it('does not reset a current person brief to stale during lifecycle discovery', () => {
+    const person = db.upsertEntity({
+      id: 'lifecycle-person',
+      type: 'person',
+      name: 'Jordan Vale',
+      dedupe_by_name: false,
+    });
+    saveMeeting('lifecycle-meeting-a', 23);
+    saveMeeting('lifecycle-meeting-b', 24);
+    for (const meetingId of ['lifecycle-meeting-a', 'lifecycle-meeting-b']) {
+      db.addMeetingEntity({
+        meeting_id: meetingId,
+        entity_id: person.id,
+        mention_count: 2,
+      });
+    }
+    const doc = db.upsertKnowledgeDoc({
+      scope_type: 'person_context',
+      scope_key: person.id,
+      title: 'Jordan Vale',
+      status: 'up_to_date',
+      last_synthesized_at: '2026-09-01T12:00:00.000Z',
+    });
+
+    db.syncKnowledgePersonLifecycle({
+      activeDays: 36500,
+      minMeetings: 2,
+      minMentions: 3,
+      inactiveDays: 365,
+    });
+
+    expect(db.getKnowledgeDoc(doc.id)).toMatchObject({
+      status: 'up_to_date',
+      last_synthesized_at: '2026-09-01T12:00:00.000Z',
+    });
+  });
+
   it('derives confirmed People evidence from a binding and removes it when cleared', () => {
     const person = db.upsertEntity({
       id: 'binding-only-person',
@@ -282,6 +340,21 @@ describe('canonical person identity', () => {
       source: 'user',
       sourceRevision: 'source-v1',
       evidence: [],
+    });
+    db.db
+      .prepare(
+        'UPDATE meetings SET duration_seconds = 300, user_notes = ? WHERE id = ?',
+      )
+      .run(
+        'The team reviewed the launch sequence and discussed the next design review. '.repeat(
+          2,
+        ),
+        'binding-only-meeting',
+      );
+    const personDoc = db.upsertKnowledgeDoc({
+      scope_type: 'person_context',
+      scope_key: person.id,
+      title: 'Morgan Hale',
     });
 
     expect(db.getPersonEntityIdsForMeeting('binding-only-meeting')).toEqual([
@@ -301,6 +374,11 @@ describe('canonical person identity', () => {
         evidence: 'confirmed',
       }),
     ]);
+    expect(
+      db
+        .getKnowledgeDocSourceMeetings(personDoc.id)
+        .map((meeting) => meeting.id),
+    ).toEqual(['binding-only-meeting']);
 
     db.identityStore.clearBinding('binding-only-meeting', 'Remote Speaker 1');
 
@@ -310,5 +388,50 @@ describe('canonical person identity', () => {
         ?.meetingCount,
     ).toBe(0);
     expect(db.getPersonBriefing(person.id)?.meetings).toEqual([]);
+    expect(db.getKnowledgeDocSourceMeetings(personDoc.id)).toEqual([]);
+  });
+
+  it('uses a first-name note only while that name identifies one confirmed person', () => {
+    const person = db.upsertEntity({
+      id: 'first-name-person',
+      type: 'person',
+      name: 'Quinn Chen',
+      dedupe_by_name: false,
+    });
+    saveMeeting('first-name-meeting', 25);
+    db.identityStore.setBinding('first-name-meeting', {
+      speaker: 'Remote Speaker 1',
+      personId: person.id,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'source-v1',
+      evidence: [],
+    });
+    db.db.prepare('UPDATE meetings SET analysis_json = ? WHERE id = ?').run(
+      JSON.stringify({
+        analysis_schema_version: 3,
+        overview: 'The launch handoff was discussed.',
+        topics: [
+          {
+            key_points: [
+              { text: 'Quinn prepared the launch handoff for review.' },
+            ],
+          },
+        ],
+      }),
+      'first-name-meeting',
+    );
+
+    expect(db.getPersonBriefing(person.id)?.recentActivity).toEqual([
+      expect.objectContaining({ meetingId: 'first-name-meeting' }),
+    ]);
+
+    db.upsertEntity({
+      id: 'other-first-name-person',
+      type: 'person',
+      name: 'Quinn Brooks',
+      dedupe_by_name: false,
+    });
+    expect(db.getPersonBriefing(person.id)?.recentActivity).toEqual([]);
   });
 });

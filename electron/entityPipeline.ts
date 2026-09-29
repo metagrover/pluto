@@ -11,7 +11,10 @@ import {
   type ActionCommitmentMetadata,
   canonicalizeActionText,
 } from '../src/utils/actionCommitment';
-import { isUsablePersonName } from '../src/utils/personBriefing';
+import {
+  isUsablePersonName,
+  isUsablePersonRole,
+} from '../src/utils/personBriefing';
 import {
   assessProjectProposal,
   readProjectQualification,
@@ -196,6 +199,7 @@ export function sanitizeExtractedPersonRoles(
 
     if (
       !role ||
+      !isUsablePersonRole(role) ||
       !evidence ||
       roleIsPersonName ||
       !evidenceIsExact ||
@@ -421,6 +425,20 @@ function persistExtractedEntities(
         `[EntityPipeline] Resolved "${person.name}" to existing "${similar.name}"`,
       );
 
+      const previousMetadata = JSON.parse(similar.metadata || '{}') as Record<
+        string,
+        unknown
+      >;
+      const roleMetadata =
+        person.role && !previousMetadata.role
+          ? {
+              role: person.role,
+              role_evidence: person.role_evidence,
+              role_source: 'extraction',
+              role_source_meeting_id: meetingId,
+            }
+          : null;
+
       // Enrichment logic
       if (shouldEnrichEntity(similar.name, person.name)) {
         console.log(
@@ -429,21 +447,18 @@ function persistExtractedEntities(
         entity = db.upsertEntity({
           ...similar, // Keep id
           name: person.name, // Update name
-          metadata: person.role
-            ? { ...JSON.parse(similar.metadata || '{}'), role: person.role }
+          metadata: roleMetadata
+            ? { ...previousMetadata, ...roleMetadata }
             : undefined,
         });
         updated++;
       } else {
         entity = similar;
         // Still might want to update metadata if missing role
-        if (person.role && !JSON.parse(similar.metadata || '{}').role) {
+        if (roleMetadata) {
           entity = db.upsertEntity({
             ...similar,
-            metadata: {
-              ...JSON.parse(similar.metadata || '{}'),
-              role: person.role,
-            },
+            metadata: { ...previousMetadata, ...roleMetadata },
           });
           updated++;
         }
@@ -453,7 +468,14 @@ function persistExtractedEntities(
       entity = db.upsertEntity({
         type: 'person',
         name: person.name,
-        metadata: person.role ? { role: person.role } : undefined,
+        metadata: person.role
+          ? {
+              role: person.role,
+              role_evidence: person.role_evidence,
+              role_source: 'extraction',
+              role_source_meeting_id: meetingId,
+            }
+          : undefined,
       });
       created++;
       // Add to cache for next iterations in this loop

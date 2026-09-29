@@ -55,6 +55,7 @@ import {
 } from '../src/utils/meetingNotesHistory';
 import { meetingTitleNeedsGeneration } from '../src/utils/meetingTitle';
 import {
+  type PersonActivityItem,
   type PersonBriefingCommitment,
   type PersonBriefingCommitmentCandidate,
   type PersonBriefingMeeting,
@@ -64,6 +65,7 @@ import {
   isUsablePersonName,
   mergePersonMeetingEvidence,
   parsePersonRole,
+  selectPersonActivity,
   selectPersonCommitments,
 } from '../src/utils/personBriefing';
 import {
@@ -5073,7 +5075,10 @@ export const syncKnowledgePersonLifecycle = (options?: {
       scope_type: 'person_context',
       scope_key: candidate.person_id,
       title: `Conversations with ${candidate.person_name}`,
-      status: 'stale',
+      status:
+        existing?.status === 'inactive'
+          ? 'stale'
+          : (existing?.status ?? 'stale'),
     });
     activeDocIds.push(saved.id);
     if (!existing) createdDocIds.push(saved.id);
@@ -5296,22 +5301,36 @@ export const getKnowledgeDocSourceMeetings = (
       .all(doc.scope_key, doc.scope_key, limit) as KnowledgeDocSourceMeeting[];
   }
 
-  // person_context uses scope_key = entity id.
+  // Use the same canonical family and confirmed participation as the dossier.
   return db
     .prepare(`
+      WITH family(id) AS (
+        SELECT ? UNION SELECT person_id FROM person_aliases
+        WHERE canonical_id = ? AND active = 1
+      ), source_meetings(meeting_id) AS (
+        SELECT meeting_id FROM meeting_entities
+        WHERE entity_id IN (SELECT id FROM family)
+        UNION SELECT meeting_id FROM identity_bindings
+        WHERE json_valid(payload)
+          AND json_extract(payload, '$.individual') = 1
+          AND json_extract(payload, '$.personId') IN (SELECT id FROM family)
+        UNION SELECT meeting_id FROM identity_captures
+        WHERE origin = 'local' AND self_person_id IN (SELECT id FROM family)
+      )
       SELECT
         m.*,
         COALESCE(SUM(me.mention_count), 0) AS mention_count,
         MAX(me.context) AS context
       FROM meetings m
-      JOIN meeting_entities me ON me.meeting_id = m.id
-      WHERE me.entity_id = ?
+      LEFT JOIN meeting_entities me ON me.meeting_id = m.id
+        AND me.entity_id IN (SELECT id FROM family)
+      WHERE m.id IN (SELECT meeting_id FROM source_meetings)
         AND ${MEETING_QUALITY_FILTER}
       GROUP BY m.id
-      ORDER BY ${MEETING_SOURCE_ORDER}
+      ORDER BY COALESCE(m.started_at, m.created_at) DESC
       LIMIT ?
     `)
-    .all(doc.scope_key, limit) as KnowledgeDocSourceMeeting[];
+    .all(doc.scope_key, doc.scope_key, limit) as KnowledgeDocSourceMeeting[];
 };
 
 /**
@@ -9139,6 +9158,7 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
 export interface PersonBriefingDetail {
   person: Entity;
   meetings: PersonBriefingMeeting[];
+  recentActivity?: PersonActivityItem[];
   commitments: {
     open: PersonBriefingCommitment[];
     delivered: PersonBriefingCommitment[];
@@ -9417,6 +9437,27 @@ export const getPersonBriefing = (
       WHERE person_id IN (SELECT id FROM family)
     `)
     .all(canonicalId, canonicalId) as Array<{ name: string }>;
+  const firstName = person.name.trim().split(/\s+/)[0];
+  const firstNameCandidates =
+    person.name.trim().includes(' ') &&
+    /^[\p{L}][\p{L}'-]{2,}$/u.test(firstName)
+      ? (db
+          .prepare(`
+            SELECT id AS person_id, name FROM entities WHERE type = 'person'
+            UNION ALL SELECT person_id, display_name AS name FROM person_name_aliases
+          `)
+          .all() as Array<{ person_id: string; name: string }>)
+      : [];
+  const confirmedFirstName =
+    firstNameCandidates.length > 0 &&
+    firstNameCandidates.every(
+      (candidate) =>
+        candidate.name.trim().split(/\s+/)[0].toLocaleLowerCase() !==
+          firstName.toLocaleLowerCase() ||
+        resolvePersonIdentityId(candidate.person_id) === canonicalId,
+    )
+      ? firstName
+      : null;
 
   const mergedPeople = db
     .prepare(
@@ -9446,13 +9487,33 @@ export const getPersonBriefing = (
     selfPersonId !== null &&
     resolvePersonIdentityId(selfPersonId) === canonicalId;
 
+  const meetings = mergePersonMeetingEvidence({
+    confirmed,
+    scheduled,
+    mentioned: mentionedMeetings,
+  });
+  const analyses = new Map<string, unknown>();
+  for (const meeting of meetings
+    .filter((item) => item.evidence !== 'scheduled')
+    .slice(0, 12)) {
+    const row = db
+      .prepare('SELECT analysis_json FROM meetings WHERE id = ?')
+      .get(meeting.id) as { analysis_json: string | null } | undefined;
+    const analysis = parseAnalysisDocumentV3Json(row?.analysis_json);
+    if (analysis) analyses.set(meeting.id, analysis);
+  }
+
   return {
     person,
-    meetings: mergePersonMeetingEvidence({
-      confirmed,
-      scheduled,
-      mentioned: mentionedMeetings,
-    }),
+    meetings,
+    recentActivity: selectPersonActivity(
+      meetings.filter((item) => item.evidence !== 'scheduled'),
+      personNames.map((row) => row.name),
+      analyses,
+      5,
+      acceptedClaims.filter((claim) => claim.kind === 'person_focus'),
+      confirmedFirstName,
+    ),
     commitments: selectPersonCommitments({
       personId: canonicalId,
       personNames: personNames.map((row) => row.name),
