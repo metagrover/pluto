@@ -16,6 +16,18 @@ export const createWorkspaceChatThread = () =>
     'intelligence:workspace-chat:create-thread',
   );
 
+export const archiveWorkspaceChatThread = (threadId: string) =>
+  window.ipcRenderer.invoke<WorkspaceChatThread>(
+    'intelligence:workspace-chat:archive-thread',
+    threadId,
+  );
+
+export const restoreWorkspaceChatThread = (threadId: string) =>
+  window.ipcRenderer.invoke<WorkspaceChatThread>(
+    'intelligence:workspace-chat:resume-thread',
+    threadId,
+  );
+
 export const listWorkspaceChatMessages = (threadId: string) =>
   window.ipcRenderer.invoke<WorkspaceChatMessage[]>(
     'intelligence:workspace-chat:list-messages',

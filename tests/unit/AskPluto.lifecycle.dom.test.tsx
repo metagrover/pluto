@@ -155,11 +155,8 @@ describe('Ask Pluto request lifecycle', () => {
     const newConversation = [...container.querySelectorAll('button')].find(
       (button) => button.textContent?.includes('New conversation'),
     ) as HTMLButtonElement;
-    expect(newConversation.parentElement?.classList.contains('sticky')).toBe(
-      true,
-    );
-    expect(newConversation.parentElement?.classList.contains('top-0')).toBe(
-      true,
+    expect(newConversation.nextElementSibling?.getAttribute('aria-label')).toBe(
+      'Conversation history',
     );
     await act(async () => newConversation.click());
     expect(invoke).toHaveBeenCalledWith('intelligence:query:new-conversation');
@@ -209,6 +206,12 @@ describe('Ask Pluto request lifecycle', () => {
       'Partial answer · 4 draft statements need a closer check',
     );
     expect(container.textContent).not.toContain('Left out 4 details');
+    const conversation = container.querySelector('[role="log"]');
+    expect(conversation?.classList.contains('overflow-y-auto')).toBe(false);
+    expect(
+      conversation?.querySelector('[aria-label="Pluto"]')?.className,
+    ).not.toContain('min-h-[calc(100dvh-13rem)]');
+    expect(conversation?.contains(container.querySelector('form'))).toBe(false);
   });
 
   it('shows request phases, exposes cancellation, and restores the composer', async () => {
@@ -292,6 +295,9 @@ describe('Ask Pluto request lifecycle', () => {
         'aria-label',
       ),
     ).toBe('You');
+    expect(
+      container.querySelector('[aria-label="Pluto"]')?.className,
+    ).toContain('min-h-[calc(100dvh-13rem)]');
     expect(
       container.querySelector('output[aria-live="polite"]'),
     ).not.toBeNull();
@@ -991,6 +997,144 @@ describe('Ask Pluto request lifecycle', () => {
       'Start with the production handoff.',
     );
     expect(container.textContent).toContain('Release priorities');
+    expect(
+      container.querySelector('[aria-label="Pluto"]')?.className,
+    ).not.toContain('min-h-[calc(100dvh-13rem)]');
+  });
+
+  it('opens a scrollable history drawer with every saved conversation', async () => {
+    let threads = Array.from({ length: 10 }, (_, index) => ({
+      id: `thread-${index}`,
+      title: `Conversation ${index + 1}`,
+      memory: { corrections: [], unresolvedQuestions: [] },
+      createdAt: '2026-09-28T10:00:00.000Z',
+      updatedAt: '2026-09-28T10:00:00.000Z',
+      archivedAt: null,
+    }));
+    const invoke = vi.fn((channel: string, threadId?: string) => {
+      if (channel === 'intelligence:workspace-chat:list-threads')
+        return Promise.resolve(threads);
+      if (channel === 'intelligence:workspace-chat:list-messages')
+        return Promise.resolve([
+          {
+            id: 'message-1',
+            threadId: 'thread-0',
+            role: 'user',
+            content: 'Old question',
+            payload: {},
+            createdAt: '2026-09-28T10:00:00.000Z',
+          },
+        ]);
+      if (channel === 'intelligence:workspace-chat:archive-thread') {
+        threads = threads.map((thread) =>
+          thread.id === threadId
+            ? { ...thread, archivedAt: '2026-09-28T11:00:00.000Z' }
+            : thread,
+        );
+        return Promise.resolve(
+          threads.find((thread) => thread.id === threadId),
+        );
+      }
+      if (channel === 'intelligence:suggested-queries')
+        return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+
+    await act(async () => {
+      root.render(
+        <AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />,
+      );
+    });
+    expect(invoke).toHaveBeenCalledWith(
+      'intelligence:workspace-chat:list-threads',
+      { includeArchived: false },
+    );
+
+    const historyButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Conversation history"]',
+    );
+    expect(historyButton?.getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('#ask-pluto-history')?.className).toContain(
+      'translate-x-full',
+    );
+    expect(container.textContent).toContain('Old question');
+    await act(async () => historyButton?.click());
+    expect(historyButton?.getAttribute('aria-expanded')).toBe('true');
+    const drawer = document.querySelector('#ask-pluto-history');
+    expect(
+      drawer?.querySelectorAll('button[aria-label^="Delete conversation"]'),
+    ).toHaveLength(10);
+    expect(drawer?.textContent).toContain('Conversation 10');
+    expect(drawer?.querySelector('time')?.getAttribute('dateTime')).toBe(
+      '2026-09-28T10:00:00.000Z',
+    );
+    expect(drawer?.className).toContain('translate-x-0');
+    expect(drawer?.className).toContain('transition-transform');
+    expect(drawer?.className).not.toContain('fade-in');
+    expect(
+      drawer?.querySelector('nav')?.classList.contains('overflow-y-auto'),
+    ).toBe(true);
+    scrollIntoView.mockClear();
+    await act(async () => {
+      [...(drawer?.querySelectorAll('nav button') ?? [])]
+        .find((button) => button.textContent?.startsWith('Conversation 2'))
+        ?.click();
+    });
+    expect(invoke).toHaveBeenCalledWith(
+      'intelligence:workspace-chat:list-messages',
+      'thread-1',
+    );
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'instant',
+      block: 'end',
+    });
+    expect(
+      (scrollIntoView.mock.instances[0] as HTMLElement).getAttribute(
+        'aria-hidden',
+      ),
+    ).toBe('true');
+    await act(async () => historyButton?.click());
+    await act(async () => {
+      document
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Delete conversation Conversation 2"]',
+        )
+        ?.click();
+    });
+    expect(invoke).toHaveBeenCalledWith(
+      'intelligence:workspace-chat:archive-thread',
+      'thread-1',
+    );
+    expect(container.textContent).not.toContain('Old question');
+    expect(drawer?.textContent).not.toContain('Recently deleted');
+    expect(
+      drawer?.querySelectorAll('button[aria-label^="Delete conversation"]'),
+    ).toHaveLength(9);
+    const closeButton = drawer?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Close conversation history"]',
+    );
+    expect(closeButton).not.toBeNull();
+    await act(async () => closeButton?.click());
+    expect(drawer?.className).toContain('translate-x-full');
+    expect(drawer?.parentElement?.getAttribute('aria-hidden')).toBe('true');
+    expect(drawer?.parentElement?.hasAttribute('inert')).toBe(true);
+    expect(historyButton?.getAttribute('aria-expanded')).toBe('false');
+
+    await act(async () => historyButton?.click());
+    await act(async () => {
+      drawer?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+    expect(drawer?.className).toContain('translate-x-full');
+    expect(drawer?.parentElement?.getAttribute('aria-hidden')).toBe('true');
+    expect(drawer?.parentElement?.hasAttribute('inert')).toBe(true);
+    expect(historyButton?.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('requires confirmation before creating a commitment', async () => {

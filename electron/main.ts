@@ -4566,6 +4566,16 @@ app.whenReady().then(async () => {
     workspaceChatStore.createThread(),
   );
   ipcMain.handle(
+    'intelligence:workspace-chat:archive-thread',
+    (_event, threadId: unknown) =>
+      workspaceChatStore.archiveThread(String(threadId ?? '')),
+  );
+  ipcMain.handle(
+    'intelligence:workspace-chat:resume-thread',
+    (_event, threadId: unknown) =>
+      workspaceChatStore.resumeThread(String(threadId ?? '')),
+  );
+  ipcMain.handle(
     'intelligence:workspace-chat:list-messages',
     (_event, threadId: unknown) =>
       workspaceChatStore.listMessages(String(threadId ?? '')),

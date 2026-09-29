@@ -4,16 +4,27 @@ import {
   Brain,
   ChevronDown,
   MessageSquarePlus,
+  PanelRight,
   Sparkles,
   Square,
+  Trash2,
+  X,
 } from 'lucide-react';
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { upsertEntity } from '../../api/knowledgeGraph';
 import {
   appendWorkspaceChatMessage,
+  archiveWorkspaceChatThread,
   createWorkspaceChatThread,
   listWorkspaceChatMessages,
   listWorkspaceChatThreads,
@@ -144,6 +155,17 @@ const toWorkspacePayload = (
 const summarizeAnswer = (content: string): string =>
   content.replace(/\s+/g, ' ').trim().slice(0, 600);
 
+const formatConversationDate = (value: string): string => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year:
+      date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric',
+  }).format(date);
+};
+
 export const AskPluto: React.FC<AskPlutoProps> = ({
   onOpenMeeting,
   onOpenArtifact,
@@ -187,6 +209,11 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     null,
   );
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyBusyId, setHistoryBusyId] = useState<string | null>(null);
+  const [anchoredUserMessageId, setAnchoredUserMessageId] = useState<
+    string | null
+  >(null);
 
   const queryCacheRef = useRef<{ queries: string[]; fetchedAt: number } | null>(
     null,
@@ -197,9 +224,22 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   const workspaceThreadPromiseRef = useRef<Promise<string> | null>(null);
   const workspaceHydratedRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const historyCloseRef = useRef<HTMLButtonElement>(null);
+  const conversationEndRef = useRef<HTMLDivElement>(null);
+  const pendingRestoredScrollRef = useRef(false);
   const { anchorTurn, conversationRef } = useChatTurnAnchor<HTMLDivElement>(
     messages.length,
   );
+
+  useLayoutEffect(() => {
+    if (!pendingRestoredScrollRef.current) return;
+    pendingRestoredScrollRef.current = false;
+    conversationEndRef.current?.scrollIntoView({
+      behavior: 'instant',
+      block: 'end',
+    });
+  }, [messages]);
 
   const nextMessageId = () =>
     `msg-${Date.now()}-${messageCounterRef.current++}`;
@@ -225,6 +265,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       }));
       workspaceThreadIdRef.current = threadId;
       setWorkspaceThreadId(threadId);
+      setAnchoredUserMessageId(null);
+      pendingRestoredScrollRef.current = restored.length > 0;
       setMessages(restored);
       setHistoryOpen(false);
     },
@@ -263,7 +305,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     workspaceHydratedRef.current = true;
     void refreshWorkspaceThreads()
       .then(async (threads) => {
-        const latest = threads[0];
+        const latest = threads.find((thread) => thread.archivedAt === null);
         if (latest) await loadWorkspaceThread(latest.id);
       })
       .catch(() => {
@@ -395,6 +437,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       ? ensureWorkspaceThread().catch(() => null)
       : Promise.resolve(null);
     anchorTurn(userMessageId);
+    setAnchoredUserMessageId(userMessageId);
     setMessages((prev) => {
       const cleaned = prev.map((m) =>
         m.isLoading
@@ -744,6 +787,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       .catch(() => undefined);
     workspaceThreadIdRef.current = null;
     setWorkspaceThreadId(null);
+    setAnchoredUserMessageId(null);
     setHistoryOpen(false);
     setMessages([]);
     setQuery('');
@@ -788,52 +832,56 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     return resolvedScopeLabel;
   };
 
+  useEffect(() => {
+    if (historyOpen) historyCloseRef.current?.focus({ preventScroll: true });
+  }, [historyOpen]);
+
   if (!visible) return null;
 
   const activeWorkspaceThread = workspaceThreads.find(
     (thread) => thread.id === workspaceThreadId,
   );
 
+  const closeHistory = () => {
+    setHistoryOpen(false);
+    requestAnimationFrame(() =>
+      historyButtonRef.current?.focus({ preventScroll: true }),
+    );
+  };
+
+  const deleteConversation = async (threadId: string) => {
+    if (historyBusyId || isProcessing) return;
+    setHistoryBusyId(threadId);
+    setHistoryError(null);
+    try {
+      await archiveWorkspaceChatThread(threadId);
+      await refreshWorkspaceThreads();
+      if (threadId === workspaceThreadIdRef.current) {
+        workspaceThreadIdRef.current = null;
+        setWorkspaceThreadId(null);
+        setAnchoredUserMessageId(null);
+        setMessages([]);
+        setQuery('');
+        void window.ipcRenderer
+          ?.invoke('intelligence:query:new-conversation')
+          .catch(() => undefined);
+      }
+    } catch {
+      setHistoryError('Could not delete this conversation. Try again.');
+    } finally {
+      setHistoryBusyId(null);
+    }
+  };
+
+  const activeThreads = workspaceThreads.filter((thread) => !thread.archivedAt);
+
   return (
-    <div className="flex flex-col flex-1 w-full relative animate-in fade-in duration-300 motion-reduce:animate-none bg-pro-bg">
-      {messages.length > 0 || workspaceThreads.length > 1 ? (
-        <div className="sticky top-0 z-20 flex min-h-14 shrink-0 items-center justify-between bg-pro-bg/95 px-4 backdrop-blur-sm sm:px-8">
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setHistoryOpen((open) => !open)}
-              aria-expanded={historyOpen}
-              aria-haspopup="menu"
-              className="inline-flex h-8 max-w-[18rem] items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40"
-            >
-              <span className="truncate">
-                {activeWorkspaceThread?.title || 'Conversation history'}
-              </span>
-              <ChevronDown
-                aria-hidden="true"
-                className={`h-3.5 w-3.5 shrink-0 transition-transform ${historyOpen ? 'rotate-180' : ''}`}
-              />
-            </button>
-            {historyOpen ? (
-              <div
-                role="menu"
-                aria-label="Conversation history"
-                className="absolute left-0 top-10 z-40 w-72 rounded-xl border border-pro-border/60 bg-pro-bg p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.12)]"
-              >
-                {workspaceThreads.slice(0, 8).map((thread) => (
-                  <button
-                    key={thread.id}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => void loadWorkspaceThread(thread.id)}
-                    className={`flex min-h-10 w-full items-center rounded-lg px-3 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 ${thread.id === workspaceThreadId ? 'bg-pro-surface text-pro-text-main' : 'text-pro-text-muted hover:bg-pro-surface/70 hover:text-pro-text-main'}`}
-                  >
-                    <span className="truncate">{thread.title}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
+    <div className="relative flex min-h-full w-full flex-none flex-col bg-pro-bg">
+      <div className="sticky top-0 z-20 flex min-h-14 shrink-0 items-center justify-between gap-3 border-b border-pro-border/40 bg-pro-bg px-4 sm:px-8">
+        <span className="min-w-0 truncate text-[13px] font-medium text-pro-text-muted">
+          {activeWorkspaceThread?.title || 'Chat with Pluto'}
+        </span>
+        <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
             onClick={handleNewConversation}
@@ -843,8 +891,147 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             <MessageSquarePlus aria-hidden="true" className="h-3.5 w-3.5" />
             New conversation
           </button>
+          <button
+            ref={historyButtonRef}
+            type="button"
+            onClick={() => setHistoryOpen((open) => !open)}
+            aria-label="Conversation history"
+            aria-controls="ask-pluto-history"
+            aria-expanded={historyOpen}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40"
+          >
+            <PanelRight aria-hidden="true" className="h-[18px] w-[18px]" />
+          </button>
         </div>
-      ) : null}
+      </div>
+      {createPortal(
+        <div
+          className={`fixed inset-x-0 bottom-0 top-10 z-[70] flex justify-end overflow-hidden ${historyOpen ? '' : 'pointer-events-none'}`}
+          aria-hidden={!historyOpen}
+          ref={(element) => {
+            if (!element) return;
+            if (historyOpen) element.removeAttribute('inert');
+            else element.setAttribute('inert', '');
+          }}
+        >
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-hidden="true"
+            onClick={closeHistory}
+            className={`absolute inset-0 bg-black/10 transition-opacity duration-150 ease-linear motion-reduce:transition-none dark:bg-black/40 ${historyOpen ? 'opacity-100' : 'opacity-0'}`}
+          />
+          <aside
+            id="ask-pluto-history"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Conversation history"
+            className={`relative flex h-full w-[min(24rem,calc(100vw-3rem))] flex-col bg-pro-bg shadow-[-16px_0_40px_rgba(0,0,0,0.1)] transition-transform duration-[180ms] ease-[cubic-bezier(0.2,0,0,1)] will-change-transform motion-reduce:transition-none dark:shadow-[-16px_0_40px_rgba(0,0,0,0.35)] ${historyOpen ? 'translate-x-0' : 'translate-x-full'}`}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') closeHistory();
+              if (event.key !== 'Tab') return;
+              const buttons = Array.from(
+                event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                  'button:not(:disabled)',
+                ),
+              );
+              const first = buttons[0];
+              const last = buttons.at(-1);
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last?.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first?.focus();
+              }
+            }}
+          >
+            <div className="flex min-h-[72px] items-center justify-between gap-3 border-b border-pro-border/50 px-6">
+              <h2 className="font-serif text-[22px] font-medium leading-tight tracking-[-0.02em] text-pro-text-main">
+                Conversations
+              </h2>
+              <button
+                ref={historyCloseRef}
+                type="button"
+                onClick={closeHistory}
+                aria-label="Close conversation history"
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-pro-text-main transition-colors hover:bg-pro-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40"
+              >
+                <X aria-hidden="true" className="h-[18px] w-[18px]" />
+              </button>
+            </div>
+            <nav
+              aria-label="Saved conversations"
+              className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+            >
+              {historyError ? (
+                <p role="alert" className="px-2 py-2 text-[12px] text-red-600">
+                  {historyError}
+                </p>
+              ) : null}
+              {activeThreads.length === 0 ? (
+                <div className="mx-2 mt-6 border-t border-pro-border/60 pt-7">
+                  <h3 className="font-serif text-[19px] font-medium text-pro-text-main">
+                    No conversations yet
+                  </h3>
+                  <p className="mt-2 max-w-[26ch] text-[13px] leading-6 text-pro-text-muted">
+                    Your conversations will appear here after you start
+                    chatting.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleNewConversation}
+                    disabled={isProcessing}
+                    className="mt-5 inline-flex min-h-10 items-center gap-2 text-[13px] font-medium text-pro-text-main underline decoration-pro-border underline-offset-4 transition-colors hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 disabled:opacity-40"
+                  >
+                    Start a conversation
+                    <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                activeThreads.map((thread) => (
+                  <div
+                    key={thread.id}
+                    className={`group flex items-center gap-1 border-b border-pro-border/40 px-2 transition-colors last:border-b-0 hover:bg-pro-surface/50 ${thread.id === workspaceThreadId ? 'bg-pro-surface/60' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      aria-current={
+                        thread.id === workspaceThreadId ? 'page' : undefined
+                      }
+                      onClick={() => void loadWorkspaceThread(thread.id)}
+                      className={`min-h-16 min-w-0 flex-1 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 ${thread.id === workspaceThreadId ? 'text-pro-text-main' : 'text-pro-text-muted hover:text-pro-text-main'}`}
+                    >
+                      <span
+                        className={`block truncate text-[13px] leading-5 ${thread.id === workspaceThreadId ? 'font-semibold' : 'font-medium'}`}
+                      >
+                        {thread.title}
+                      </span>
+                      <time
+                        dateTime={thread.updatedAt}
+                        className="mt-1 block text-[11px] tabular-nums text-pro-text-muted/80"
+                      >
+                        {formatConversationDate(thread.updatedAt)}
+                      </time>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete conversation ${thread.title}`}
+                      title="Delete conversation"
+                      disabled={Boolean(historyBusyId) || isProcessing}
+                      onClick={() => void deleteConversation(thread.id)}
+                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-pro-text-muted/70 opacity-0 transition-[color,opacity] hover:text-red-600 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 group-hover:opacity-100 group-focus-within:opacity-100 disabled:opacity-30 [@media(hover:none)]:opacity-100"
+                    >
+                      <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </nav>
+          </aside>
+        </div>,
+        document.body,
+      )}
       {/* Scrollable message area — same width as the input */}
       <div className="flex-1 relative flex flex-col w-full max-w-3xl mx-auto px-4 sm:px-8">
         <div
@@ -852,10 +1039,10 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           role="log"
           aria-label="Conversation with Pluto"
           aria-live="polite"
-          className={`flex-1 space-y-10 pb-32 flex flex-col w-full ${messages.length > 0 ? 'pt-4' : 'pt-16'}`}
+          className={`flex-1 space-y-10 flex flex-col w-full pb-6 ${messages.length > 0 ? 'pt-4' : 'pt-8'}`}
         >
           {messages.length === 0 ? (
-            <div className="flex flex-col items-start justify-center h-full space-y-8 pb-20 mt-4 animate-in fade-in zoom-in-95 duration-700 motion-reduce:animate-none">
+            <div className="flex flex-1 flex-col items-start justify-center space-y-8">
               {/* Greeting — serif, left-aligned to match input */}
               <div>
                 <h1 className="font-serif text-[36px] font-medium tracking-[-0.01em] text-pro-text-main leading-tight">
@@ -897,15 +1084,17 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               const citationGroups = groupCitationsByMeeting(
                 msg.citations ?? [],
               );
-              const isLatestAssistant =
-                msg.role === 'assistant' && index === messages.length - 1;
+              const isAnchoredReply =
+                msg.role === 'assistant' &&
+                index === messages.length - 1 &&
+                messages[index - 1]?.id === anchoredUserMessageId;
               return (
                 <div
                   key={msg.id}
                   data-chat-turn-id={msg.id}
                   role="article"
                   aria-label={msg.role === 'user' ? 'You' : 'Pluto'}
-                  className={`scroll-mt-20 flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'} ${isLatestAssistant ? 'min-h-[calc(100dvh-13rem)]' : ''}`}
+                  className={`scroll-mt-20 flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'} ${isAnchoredReply ? 'min-h-[calc(100dvh-13rem)]' : ''}`}
                 >
                   {msg.role === 'assistant' && (
                     <div
@@ -1215,8 +1404,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           )}
         </div>
 
-        {/* Input bar — sticky at the bottom */}
-        <div className="pb-8 pt-6 sticky bottom-0 left-0 right-0 z-10 flex justify-center bg-gradient-to-t from-pro-bg via-pro-bg/95 to-transparent pointer-events-none mt-auto">
+        {/* Keep the composer visible while the full chat view scrolls. */}
+        <div className="sticky bottom-0 z-10 flex shrink-0 justify-center bg-pro-bg pb-6 pt-4">
           <form
             onSubmit={handleSubmit}
             className="relative flex items-center w-full pointer-events-auto bg-white dark:bg-[#202020] border border-black/10 dark:border-white/10 rounded-full shadow-[0_4px_16px_-4px_rgba(0,0,0,0.04)] dark:shadow-[0_4px_16px_-4px_rgba(0,0,0,0.2)] transition-all duration-300 focus-within:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.08)] dark:focus-within:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.3)] hover:border-black/20 dark:hover:border-white/20"
@@ -1277,6 +1466,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             )}
           </form>
         </div>
+        <div ref={conversationEndRef} aria-hidden="true" />
       </div>
     </div>
   );

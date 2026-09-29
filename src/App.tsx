@@ -2193,7 +2193,7 @@ function App() {
           </div>
           <div
             ref={contentScrollRef}
-            className={`flex-1 flex flex-col scroll-smooth relative overflow-y-scroll ${
+            className={`min-h-0 flex-1 flex flex-col scroll-smooth relative overflow-y-scroll ${
               preMeetingBriefVisible
                 ? 'px-4 py-6 md:px-8'
                 : selectedMeetingId
@@ -2369,7 +2369,7 @@ function App() {
             ) : SOURCES_ENABLED && activeTab === 'sources' ? (
               <LocalSourcesTab selectedSourceId={selectedSourceId} />
             ) : activeTab === 'chat' ? (
-              <div className="flex-1 w-full animate-in flex flex-col">
+              <div className="min-h-full w-full flex flex-col">
                 <AskPluto
                   visible={true}
                   messages={askPlutoConversation}
