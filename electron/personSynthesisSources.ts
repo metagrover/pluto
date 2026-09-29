@@ -1,4 +1,9 @@
-import type { PersonActivityItem } from '../src/utils/personBriefing';
+import { parseAnalysisDocumentV3Json } from '../src/utils/analysisDocument';
+import {
+  type PersonActivityItem,
+  type PersonBriefingMeeting,
+  selectPersonActivity,
+} from '../src/utils/personBriefing';
 
 export interface PersonSynthesisSource {
   id: string;
@@ -7,6 +12,34 @@ export interface PersonSynthesisSource {
   user_notes?: string | null;
   entity_names?: string[];
 }
+
+/** Read beyond the dossier's five recent highlights, without admitting meeting-wide topics. */
+export const collectPersonSynthesisActivity = (
+  meetings: PersonBriefingMeeting[],
+  sources: Array<{ id: string; analysis_json?: string | null }>,
+  personName: string,
+  recentActivity: PersonActivityItem[],
+): PersonActivityItem[] => {
+  const sourceIds = new Set(sources.map((source) => source.id));
+  const analyses = new Map(
+    sources.flatMap((source) => {
+      const analysis = parseAnalysisDocumentV3Json(source.analysis_json);
+      return analysis ? [[source.id, analysis] as const] : [];
+    }),
+  );
+  return [
+    ...selectPersonActivity(
+      meetings.filter(
+        (meeting) =>
+          meeting.evidence !== 'scheduled' && sourceIds.has(meeting.id),
+      ),
+      [personName],
+      analyses,
+      40,
+    ),
+    ...recentActivity,
+  ];
+};
 
 /** A linked meeting is only a source for a person read when its notes describe that person. */
 export const focusPersonSynthesisSources = <T extends PersonSynthesisSource>(
