@@ -1,4 +1,5 @@
 @import url("https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap");
+@import url("./assets/fonts/pluto-site/fonts.css");
 
 @tailwind base;
 @tailwind components;
@@ -1101,18 +1102,30 @@
   }
   .meeting-document-menu > summary {
     @apply flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
-    color: var(--notes-muted);
+    color: hsl(var(--pro-text-muted));
   }
   .meeting-document-menu > summary::-webkit-details-marker {
     @apply hidden;
   }
   .meeting-document-menu__panel {
     @apply absolute right-0 top-full mt-1.5 z-50 flex min-w-64 w-max max-w-xs flex-col rounded-xl border p-1.5 shadow-lg;
-    border-color: var(--notes-rule);
-    background: var(--notes-paper-raised);
+    border-color: hsl(var(--pro-border));
+    background: hsl(var(--pro-bg));
   }
   .meeting-document-menu__panel .meeting-toolbar-button {
     @apply min-h-9 h-auto w-full justify-start rounded-lg px-2.5 py-1.5 text-left text-xs whitespace-nowrap;
+    color: hsl(var(--pro-text-muted));
+  }
+  .meeting-document-menu__panel .meeting-toolbar-button:hover {
+    color: hsl(var(--pro-text-main));
+    background: hsl(var(--pro-hover));
+  }
+  .meeting-document-menu__panel .meeting-toolbar-button--danger {
+    color: hsl(var(--pro-urgent));
+  }
+  .meeting-document-menu__panel .meeting-toolbar-button--danger:hover {
+    color: hsl(var(--pro-urgent));
+    background: hsl(var(--pro-urgent) / 0.08);
   }
   .meeting-document-menu__panel .meeting-toolbar-button svg {
     @apply shrink-0;
@@ -1122,7 +1135,7 @@
   }
   .meeting-document-menu__section + .meeting-document-menu__section {
     @apply border-t pt-2;
-    border-color: var(--notes-rule);
+    border-color: hsl(var(--pro-border));
   }
   .meeting-document-menu__section--danger {
     @apply mt-1;
@@ -1138,7 +1151,7 @@
   }
   .meeting-template-picker__label {
     @apply text-[11px] font-semibold uppercase tracking-[0.1em];
-    color: var(--notes-muted);
+    color: hsl(var(--pro-text-muted));
   }
   .meeting-template-picker select {
     @apply min-h-10 w-full rounded-md border border-pro-border bg-pro-surface px-2.5 text-sm font-medium text-pro-text-main outline-none hover:bg-pro-hover focus-visible:ring-2 focus-visible:ring-pro-accent;
@@ -2392,6 +2405,12 @@
 }
 
 /* Scoped Sidebar Styling for Terracotta */
+.terracotta .app-sidebar,
+.claude .app-sidebar {
+  background-color: #eeede8 !important;
+  border-right-color: #ddddd7 !important;
+}
+
 .terracotta .app-sidebar [data-active="true"],
 .claude .app-sidebar [data-active="true"] {
   background-color: rgba(217, 119, 87, 0.12) !important;
@@ -2411,83 +2430,88 @@
 }
 
 /* ==========================================================================
-   Coral Theme (Airbnb Inspired)
-   Warm minimalist white, deep black typography, hospitable Rausch Coral
+   Pluto Theme
+   Cool paper, deep ink, softened blue, and restrained editorial typography
    ========================================================================== */
-.coral,
-.airbnb {
-  /* Main Canvas: Pure Modern White */
-  --pro-bg: 0 0% 100%; /* #FFFFFF */
-  /* Sidebar & Surfaces: Soft Pillowy Warm Tint */
-  --pro-surface: 0 0% 97.5%; /* #F8F8F8 */
-  /* Typography: High-Contrast Airbnb Charcoal (16:1 AAA contrast) */
-  --pro-text-main: 0 0% 13%; /* #222222 */
-  --pro-text-muted: 0 0% 44%; /* #717171 */
-  /* Borders & Dividers: Clean Hairline */
-  --pro-border: 0 0% 90%; /* #E5E5E5 */
-  --pro-hover: 0 0% 95%; /* #F2F2F2 */
-
-  /* Hero Accent: Airbnb Rausch Coral */
-  --pro-accent: 349 100% 60%; /* #FF385C */
-  --pro-accent-alt: 349 90% 48%; /* #E00B41 */
-
-  /* Semantic Status */
-  --pro-urgent: 349 100% 60%; /* #FF385C */
-  --pro-warning: 38 92% 50%; /* #F59E0B */
-  --pro-success: 160 84% 39%; /* #10B981 */
-
-  --pro-shadow-premium: 0 2px 8px rgba(0, 0, 0, 0.04), 0 14px 28px -4px
-    rgba(255, 56, 92, 0.08);
+.pluto-site {
+  --font-main: 'Inter', ui-sans-serif, -apple-system, sans-serif;
+  --pro-bg: 200 27% 98%; /* #F9FBFC */
+  --pro-surface: 205 26% 96%; /* #F2F5F7 */
+  --pro-text-main: 214 30% 18%; /* #202C3C */
+  --pro-text-muted: 215 14% 40%; /* #586475 */
+  --pro-border: 213 13% 86%; /* #D8DCE1 */
+  --pro-hover: 204 28% 93%; /* #E9EEF2 */
+  --pro-accent: 214 53% 43%; /* #3467A8 */
+  --pro-accent-alt: 215 41% 21%; /* #20334D */
+  --pro-urgent: 0 70% 43%;
+  --pro-warning: 32 79% 35%;
+  --pro-success: 151 60% 29%;
+  --pro-shadow-premium: 0 2px 8px rgba(32, 44, 60, 0.03),
+    0 12px 28px -6px rgba(32, 44, 60, 0.07);
 }
 
-.coral ::selection,
-.airbnb ::selection {
-  background-color: hsla(349, 100%, 60%, 0.18);
-  color: #222222;
+.pluto-site ::selection {
+  background-color: #c9d8eb;
+  color: #202c3c;
 }
 
-.coral input,
-.coral textarea,
-.airbnb input,
-.airbnb textarea {
-  caret-color: #ff385c;
+.pluto-site input,
+.pluto-site textarea {
+  caret-color: #3467a8;
 }
 
-.coral *:focus-visible,
-.airbnb *:focus-visible {
-  outline-color: #ff385c;
+.pluto-site *:focus-visible {
+  outline-color: #3467a8;
 }
 
-.coral ::-webkit-scrollbar-thumb,
-.airbnb ::-webkit-scrollbar-thumb {
-  background-color: #dddddd;
+.pluto-site ::-webkit-scrollbar-thumb {
+  background-color: #bac9d8;
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: padding-box;
 }
 
-.coral ::-webkit-scrollbar-thumb:hover,
-.airbnb ::-webkit-scrollbar-thumb:hover {
-  background-color: #ff385c;
+.pluto-site ::-webkit-scrollbar-thumb:hover {
+  background-color: #3467a8;
 }
 
-/* Scoped Sidebar Styling for Coral */
-.coral .app-sidebar [data-active="true"],
-.airbnb .app-sidebar [data-active="true"] {
-  background-color: rgba(255, 56, 92, 0.08) !important;
-  color: #ff385c !important;
+.pluto-site .app-sidebar {
+  background-color: #192b43 !important;
+  border-right-color: #354a63 !important;
+  --pro-text-main: 60 19% 95%; /* #F4F4EF */
+  --pro-text-muted: 211 31% 84%; /* #CAD6E3 */
+  --pro-border: 213 23% 31%;
+  --pro-accent: 211 71% 79%; /* #A5C9F0 */
+}
+
+.pluto-site .app-sidebar .sidebar-search-btn:hover,
+.pluto-site .app-sidebar .sidebar-nav-btn:hover,
+.pluto-site .app-sidebar .sidebar-footer-btn:hover,
+.pluto-site .app-sidebar button[title^="Theme:"]:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.pluto-site .app-sidebar [data-active="true"] {
+  background-color: #304c6b !important;
+  color: #f4f4ef !important;
   font-weight: 600 !important;
 }
 
-.coral .app-sidebar [data-active="true"] svg,
-.airbnb .app-sidebar [data-active="true"] svg {
-  color: #ff385c !important;
+.pluto-site .app-sidebar [data-active="true"] svg {
+  color: #a5c9f0 !important;
 }
 
-.coral .app-sidebar .sidebar-record-btn:hover,
-.airbnb .app-sidebar .sidebar-record-btn:hover {
-  border-color: rgba(255, 56, 92, 0.35) !important;
-  box-shadow: 0 0 12px rgba(255, 56, 92, 0.12) !important;
+.pluto-site .app-sidebar .sidebar-record-btn {
+  --pro-text-main: 214 30% 18%;
+  --pro-text-muted: 215 14% 40%;
+  background-color: #f9fbfc;
+  border-color: #c5d0db;
+  color: #202c3c;
+}
+
+.pluto-site .app-sidebar .sidebar-record-btn:hover {
+  border-color: #3467a8 !important;
+  box-shadow: 0 3px 12px rgba(32, 44, 60, 0.08) !important;
 }
 
 /* ==========================================================================

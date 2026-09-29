@@ -1,8 +1,8 @@
 import {
+  BookOpen,
   Files,
   FolderKanban,
   Hash,
-  Heart,
   Home,
   Library,
   MessageSquare,
@@ -86,7 +86,12 @@ export const Sidebar = ({
           size={24}
           showText
           variant={
-            theme === 'aubergine' || theme === 'slack' || theme === 'dark'
+            theme === 'aubergine' ||
+            theme === 'slack' ||
+            theme === 'dark' ||
+            theme === 'pluto-site' ||
+            theme === 'airbnb' ||
+            theme === 'coral'
               ? 'light'
               : 'default'
           }
@@ -426,7 +431,7 @@ export const Sidebar = ({
               'light',
               'dark',
               'terracotta',
-              'coral',
+              'pluto-site',
               'aubergine',
               'system',
             ];
@@ -435,8 +440,8 @@ export const Sidebar = ({
               theme === 'celestial' ||
               theme === 'botanical'
                 ? 'terracotta'
-                : theme === 'airbnb'
-                  ? 'coral'
+                : theme === 'airbnb' || theme === 'coral'
+                  ? 'pluto-site'
                   : theme === 'slack'
                     ? 'aubergine'
                     : theme;
@@ -446,7 +451,11 @@ export const Sidebar = ({
             setTheme(themeCycle[nextIndex]);
           }}
           className="w-6 h-6 rounded-md hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-pro-text-main/70 hover:text-pro-text-main transition-colors"
-          title={`Theme: ${theme}`}
+          title={`Theme: ${
+            theme === 'pluto-site' || theme === 'coral' || theme === 'airbnb'
+              ? 'Pluto'
+              : theme
+          }`}
         >
           {theme === 'dark' ? (
             <Moon size={14} />
@@ -457,8 +466,10 @@ export const Sidebar = ({
             theme === 'celestial' ||
             theme === 'botanical' ? (
             <Sparkles size={14} className="text-[#D97757]" />
-          ) : theme === 'coral' || theme === 'airbnb' ? (
-            <Heart size={14} className="text-[#FF385C]" />
+          ) : theme === 'pluto-site' ||
+            theme === 'coral' ||
+            theme === 'airbnb' ? (
+            <BookOpen size={14} className="text-[#3467A8]" />
           ) : theme === 'aubergine' || theme === 'slack' ? (
             <Hash size={14} className="text-[#9E629F]" />
           ) : (

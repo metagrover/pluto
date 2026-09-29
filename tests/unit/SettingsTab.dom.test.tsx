@@ -467,7 +467,7 @@ describe('SettingsTab', () => {
     act(() => root.unmount());
   });
 
-  it('renders theme options including Terracotta, Coral, Aubergine and handles theme changes', async () => {
+  it('renders theme options including Pluto and handles theme changes', async () => {
     const setTheme = vi.fn();
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -490,7 +490,7 @@ describe('SettingsTab', () => {
       'Light',
       'Dark',
       'Terracotta',
-      'Coral',
+      'Pluto',
       'Aubergine',
       'System',
     ];
@@ -504,6 +504,12 @@ describe('SettingsTab', () => {
     )!;
     await act(async () => terracottaBtn.click());
     expect(setTheme).toHaveBeenCalledWith('terracotta');
+
+    const plutoSiteBtn = themeButtons.find((b) =>
+      b.textContent?.trim().startsWith('Pluto'),
+    )!;
+    await act(async () => plutoSiteBtn.click());
+    expect(setTheme).toHaveBeenCalledWith('pluto-site');
 
     act(() => root.unmount());
   });

@@ -123,6 +123,6 @@ describe('Sidebar navigation', () => {
     act(() => {
       themeToggle.click();
     });
-    expect(setTheme).toHaveBeenCalledWith('coral');
+    expect(setTheme).toHaveBeenCalledWith('pluto-site');
   });
 });

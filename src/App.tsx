@@ -759,6 +759,7 @@ function App() {
       'light',
       'dark',
       'terracotta',
+      'pluto-site',
       'coral',
       'aubergine',
       'claude',
@@ -780,8 +781,12 @@ function App() {
       root.classList.add(systemTheme);
     } else if (theme === 'aubergine' || theme === 'slack') {
       root.classList.add('aubergine');
-    } else if (theme === 'coral' || theme === 'airbnb') {
-      root.classList.add('coral');
+    } else if (
+      theme === 'pluto-site' ||
+      theme === 'coral' ||
+      theme === 'airbnb'
+    ) {
+      root.classList.add('pluto-site');
     } else if (
       theme === 'terracotta' ||
       theme === 'claude' ||
@@ -800,6 +805,7 @@ function App() {
           'light',
           'dark',
           'terracotta',
+          'pluto-site',
           'coral',
           'aubergine',
           'claude',
@@ -897,6 +903,7 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'theme').then((val) => {
       if (
         val === 'terracotta' ||
+        val === 'pluto-site' ||
         val === 'coral' ||
         val === 'aubergine' ||
         val === 'claude' ||
@@ -906,7 +913,11 @@ function App() {
         val === 'dark' ||
         val === 'system'
       ) {
-        setTheme(val as AppTheme);
+        setTheme(
+          val === 'coral' || val === 'airbnb'
+            ? 'pluto-site'
+            : (val as AppTheme),
+        );
       } else if (val === 'celestial' || val === 'botanical') {
         setTheme('terracotta');
       }

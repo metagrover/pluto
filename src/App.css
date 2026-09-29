@@ -36,6 +36,10 @@
   background: oklch(62% 0.04 82 / 0.08);
 }
 
+.pluto-site .app-background-glow {
+  display: none;
+}
+
 .botanical .app-background-glow {
   display: none;
 }
