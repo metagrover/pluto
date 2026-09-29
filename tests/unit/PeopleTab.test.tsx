@@ -519,6 +519,53 @@ describe('PersonDossier', () => {
     expect(markup).toContain('Avery is coordinating the launch handoff.');
   });
 
+  it('puts direct work ahead of conversational observations while a summary is pending', () => {
+    const markup = renderToStaticMarkup(
+      <PersonDossier
+        detail={{
+          ...briefingDetail,
+          knowledgeDoc: null,
+          recentActivity: [
+            {
+              text: 'Avery Chen noted the team might change the review process.',
+              meetingId: 'meeting-1',
+              meetingTitle: 'Product review',
+              occurredAt: '2026-07-12T12:00:00.000Z',
+              evidence: 'confirmed',
+            },
+            {
+              text: 'Avery Chen will revise the launch handoff.',
+              meetingId: 'meeting-1',
+              meetingTitle: 'Product review',
+              occurredAt: '2026-07-12T12:00:00.000Z',
+              evidence: 'confirmed',
+            },
+            {
+              text: 'Avery will coordinate the design review.',
+              meetingId: 'meeting-4',
+              meetingTitle: 'Design handoff',
+              occurredAt: '2026-07-10T12:00:00.000Z',
+              evidence: 'confirmed',
+            },
+          ],
+        }}
+        onBack={() => {}}
+        onOpenMeeting={() => {}}
+      />,
+    );
+
+    expect(markup.indexOf('Avery Chen will revise')).toBeLessThan(
+      markup.indexOf('Recent developments'),
+    );
+    expect(markup.indexOf('Avery will coordinate')).toBeLessThan(
+      markup.indexOf('Recent developments'),
+    );
+    expect(markup.indexOf('Avery Chen noted')).toBeGreaterThan(
+      markup.indexOf('Recent developments'),
+    );
+    expect(markup.match(/>Product review ·/g)).toHaveLength(1);
+  });
+
   it('shows a concise description, verified commitments, and meetings', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier

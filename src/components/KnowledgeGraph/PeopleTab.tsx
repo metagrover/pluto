@@ -862,12 +862,28 @@ export const PersonDossier = ({
     brief.evidenceIndex.length > 0;
   const isDraftSummary =
     hasPersonSummary && currentDetail.knowledgeDoc?.status === 'synthesizing';
+  const personActivity = currentDetail.recentActivity ?? [];
+  const directWorkScore = (text: string) => {
+    const name = currentDetail.person.name.toLocaleLowerCase();
+    const normalized = text.toLocaleLowerCase();
+    const prefix = [name, name.split(' ')[0]].find((candidate) =>
+      normalized.startsWith(`${candidate} `),
+    );
+    const remainder = prefix ? normalized.slice(prefix.length + 1) : '';
+    return /^(?:will|is (?:working|coordinating|building|reviewing|leading)|has (?:worked|built|reviewed|delivered)|worked|coordinated|built|reviewed|updated|revised|designed|implemented|delivered|owns|manages|leads)\b/.test(
+      remainder,
+    )
+      ? 1
+      : 0;
+  };
   const sourceNoteOverview = hasPersonSummary
     ? []
-    : (currentDetail.recentActivity ?? []).slice(0, 2);
+    : [...personActivity]
+        .sort((a, b) => directWorkScore(b.text) - directWorkScore(a.text))
+        .slice(0, 2);
   const remainingActivity = hasPersonSummary
-    ? (currentDetail.recentActivity ?? [])
-    : (currentDetail.recentActivity ?? []).slice(sourceNoteOverview.length);
+    ? personActivity
+    : personActivity.filter((item) => !sourceNoteOverview.includes(item));
   const summarySources = Array.from(
     new Map(
       brief.evidenceIndex.map((source) => [source.meeting_id, source]),
@@ -1836,7 +1852,11 @@ export const PersonDossier = ({
               role and contributions is being prepared.
             </p>
             <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              {sourceNoteOverview.map((item) => (
+              {Array.from(
+                new Map(
+                  sourceNoteOverview.map((item) => [item.meetingId, item]),
+                ).values(),
+              ).map((item) => (
                 <button
                   key={`${item.meetingId}-${item.text}`}
                   type="button"
