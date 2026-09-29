@@ -521,7 +521,9 @@ describe('PersonDossier', () => {
     expect(markup).toContain(
       'Avery Chen has worked on launch handoffs across multiple conversations.',
     );
-    expect(markup).toContain('Recurring work');
+    expect(markup).toContain('Based on 2 cited conversations');
+    expect(markup).toContain('Product review · Jul 12');
+    expect(markup).not.toContain('Recurring work');
     expect(markup).not.toContain('208a5a10');
     expect(markup).not.toContain('Earlier context');
   });
@@ -541,7 +543,7 @@ describe('PersonDossier', () => {
         onOpenMeeting={() => {}}
       />,
     );
-    expect(markup).toContain('Recurring work');
+    expect(markup).not.toContain('Recurring work');
     expect(markup).toContain(
       'Avery Chen has worked on launch handoffs across multiple conversations.',
     );
@@ -623,7 +625,7 @@ describe('PersonDossier', () => {
       />,
     );
 
-    expect(markup).toContain('What they work on');
+    expect(markup).toContain('Recent work we can verify');
     expect(markup).toContain('Avery Chen revised the launch handoff');
     expect(markup).not.toContain('Avery is coordinating the launch handoff.');
     expect(markup).not.toContain('Earlier context');
@@ -769,7 +771,7 @@ describe('PersonDossier', () => {
     );
 
     // Shows temporal heading
-    expect(markup).toContain('What they work on');
+    expect(markup).toContain('Recent work we can verify');
     expect(markup).toContain('From person-specific meeting notes');
     expect(markup).not.toContain('Earlier context');
     // Shows Mark context as outdated button in More dropdown
@@ -788,7 +790,7 @@ describe('PersonDossier', () => {
     expect(markup).toContain(
       'Avery Chen revised the launch handoff after the product review.',
     );
-    expect(markup.indexOf('What they work on')).toBeLessThan(
+    expect(markup.indexOf('Recent work we can verify')).toBeLessThan(
       markup.indexOf('Avery Chen revised the launch handoff'),
     );
     expect(markup.match(/Avery Chen revised the launch handoff/g)).toHaveLength(
