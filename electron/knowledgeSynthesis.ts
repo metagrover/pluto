@@ -21,6 +21,7 @@ import {
   knowledgeDocNeedsSynthesis,
   knowledgeDocSatisfiesMeetingRefresh,
   parseKnowledgeDocConfig,
+  shouldPublishPartialKnowledgeDoc,
   withCurrentKnowledgeSynthesisConfig,
 } from './knowledgeDocConfig';
 import { parseKnowledgeJsonResponse } from './knowledgeJson';
@@ -1859,6 +1860,7 @@ const synthesizeKnowledgeDocNowInternal = async (
       // real content progressively instead of waiting for the full merge.
       onChunkProgress: (partial) => {
         if (request.canCommit?.() === false || request.signal?.aborted) return;
+        if (!shouldPublishPartialKnowledgeDoc(doc.scope_type)) return;
         try {
           const groundedPartial =
             doc.scope_type === 'person_context' &&
