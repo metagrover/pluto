@@ -1230,6 +1230,40 @@ export const PersonDossier = ({
     summaryVersion,
   ]);
 
+  useEffect(() => {
+    if (
+      !currentDetail.knowledgeDoc ||
+      (currentDetail.knowledgeDoc.status === 'up_to_date' &&
+        summaryVersion >= 5)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setInterval(async () => {
+      try {
+        const fresh = await getPersonBriefing(currentDetail.person.id);
+        if (!fresh || cancelled) return;
+        setCurrentDetail((current) =>
+          current.person.id === fresh.person.id &&
+          current.knowledgeDoc?.updated_at !== fresh.knowledgeDoc?.updated_at
+            ? fresh
+            : current,
+        );
+      } catch {
+        // Keep the last visible evidence while the background read retries.
+      }
+    }, 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    currentDetail.person.id,
+    currentDetail.knowledgeDoc?.id,
+    currentDetail.knowledgeDoc?.status,
+    summaryVersion,
+  ]);
+
   const handleDeletePerson = async () => {
     if (currentDetail.isSelf || isDeleting) return;
     const confirmed = window.confirm(
