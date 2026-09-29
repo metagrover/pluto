@@ -144,13 +144,23 @@ export interface KnowledgeV2SourceMeeting {
 export const groundPersonKnowledgeV2Document = (
   doc: KnowledgeV2Document,
   sourceEvidenceByMeeting: Map<string, string>,
+  expectedPersonName = doc.scope.title,
 ): KnowledgeV2Document => {
+  const personName = normalizeText(expectedPersonName).replace(
+    /^conversations with /,
+    '',
+  );
+  const firstName = personName.split(' ')[0];
   const supported = (meetingId: string, quote: string): boolean => {
     const source = sourceEvidenceByMeeting.get(meetingId);
+    const normalizedQuote = normalizeText(quote);
     return Boolean(
       source &&
         quote.trim().length >= 6 &&
-        source.includes(normalizeText(quote)),
+        source.includes(normalizedQuote) &&
+        [personName, firstName].some((name) =>
+          normalizedQuote.startsWith(`${name} `),
+        ),
     );
   };
   const keepItems = (items: KnowledgeV2Item[]): KnowledgeV2Item[] =>
@@ -188,11 +198,18 @@ export const groundPersonKnowledgeV2Document = (
     ...[...needsAttention, ...patterns, ...risksAndUnknowns].flatMap((item) =>
       item.citations.map((citation) => citation.quote),
     ),
-  ].some((quote) =>
-    /\b(responsible for|owns|owned|leads|led|manages|managed|assigned to|accountable for)\b/i.test(
-      quote,
-    ),
-  );
+  ].some((quote) => {
+    const normalized = normalizeText(quote);
+    const prefix = [personName, firstName].find((name) =>
+      normalized.startsWith(`${name} `),
+    );
+    return Boolean(
+      prefix &&
+        /^(?:is |was |has been |will )?(?:responsible for|accountable for|assigned to|owns|owned|leads|led|manages|managed|oversees|oversaw)\b/.test(
+          normalized.slice(prefix.length + 1),
+        ),
+    );
+  });
   const describeObservedWork = (text: string): string =>
     quotedOwnership
       ? text
@@ -200,12 +217,23 @@ export const groundPersonKnowledgeV2Document = (
           .replace(/\bis responsible for\b/gi, 'has worked on')
           .replace(/\band managing\b/gi, 'and on')
           .replace(/\bmanages\b/gi, 'works on')
-          .replace(/\bleads\b/gi, 'works on');
+          .replace(/\bleads\b/gi, 'works on')
+          .replace(/\bowns\b/gi, 'works on')
+          .replace(/\boversees\b/gi, 'works on')
+          .replace(/\boverseeing\b/gi, 'working on');
+  const headline = doc.current_read.headline.trim();
+  const normalizedHeadline = normalizeText(headline).replace(
+    /^in these conversations, /,
+    '',
+  );
+  const isPersonHeadline = [personName, firstName].some((name) =>
+    normalizedHeadline.startsWith(`${name} `),
+  );
   return {
     ...doc,
     current_read: {
       ...doc.current_read,
-      headline: describeObservedWork(doc.current_read.headline),
+      headline: isPersonHeadline ? describeObservedWork(headline) : '',
       cited_item_count:
         needsAttention.length + patterns.length + risksAndUnknowns.length,
       cited_meeting_count: citedMeetingIds.size,

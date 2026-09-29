@@ -41,6 +41,7 @@ import {
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
 } from './llm/prompts';
+import { focusPersonSynthesisSources } from './personSynthesisSources';
 import {
   createSerializedTaskGate,
   isSerializedTaskPreemption,
@@ -1593,6 +1594,21 @@ const buildSourceMeetings = (doc: db.KnowledgeDoc): SynthSourceMeeting[] => {
     .getKnowledgeDocSourceMeetings(doc.id, MAX_SOURCE_MEETINGS)
     .filter((meeting) => !excludedMeetingIds.has(String(meeting.id)));
 
+  if (doc.scope_type === 'person_context') {
+    const person = db.getPersonBriefing(doc.scope_key);
+    return focusPersonSynthesisSources(
+      sourceMeetings.map((meeting) => ({
+        id: String(meeting.id),
+        title: meeting.title || 'Untitled Session',
+        occurred_at: meeting.started_at || meeting.created_at || null,
+        evidence: '',
+        duration_seconds: meeting.duration_seconds,
+      })),
+      person?.recentActivity ?? [],
+      person?.person.name ?? doc.title,
+    );
+  }
+
   const scored = sourceMeetings.map((meeting) => {
     const bundle = buildMeetingEvidence(meeting);
     return {
@@ -1836,6 +1852,7 @@ const synthesizeKnowledgeDocNowInternal = async (
               ? groundPersonKnowledgeV2Document(
                   partial,
                   sourceEvidenceByMeeting,
+                  promptScopeTitle(doc),
                 )
               : partial;
           const correctedPartial = applyCorrections(groundedPartial);
@@ -1863,7 +1880,11 @@ const synthesizeKnowledgeDocNowInternal = async (
     assertKnowledgeSynthesisCurrent(request);
     const grounded =
       doc.scope_type === 'person_context' && isKnowledgeV2Document(structured)
-        ? groundPersonKnowledgeV2Document(structured, sourceEvidenceByMeeting)
+        ? groundPersonKnowledgeV2Document(
+            structured,
+            sourceEvidenceByMeeting,
+            promptScopeTitle(doc),
+          )
         : structured;
     const correctedStructured = applyCorrections(grounded);
 

@@ -855,7 +855,7 @@ export const PersonDossier = ({
     }
   })();
   const hasPersonSummary =
-    summaryVersion >= 5 &&
+    summaryVersion >= 6 &&
     (currentDetail.knowledgeDoc?.status === 'up_to_date' ||
       currentDetail.knowledgeDoc?.status === 'synthesizing') &&
     hasReliableRead &&
@@ -1237,7 +1237,7 @@ export const PersonDossier = ({
       !currentDetail.knowledgeDoc ||
       meetingCount === 0 ||
       hasPersonSummary ||
-      (typeof summaryVersion === 'number' && summaryVersion >= 5) ||
+      (typeof summaryVersion === 'number' && summaryVersion >= 6) ||
       autoRefreshedPersonId.current === currentDetail.person.id
     ) {
       return;
@@ -1256,7 +1256,7 @@ export const PersonDossier = ({
     if (
       !currentDetail.knowledgeDoc ||
       (currentDetail.knowledgeDoc.status === 'up_to_date' &&
-        summaryVersion >= 5)
+        summaryVersion >= 6)
     ) {
       return;
     }
@@ -1874,12 +1874,15 @@ export const PersonDossier = ({
             <p className="max-w-[68ch] font-sans text-sm leading-6 text-pro-text-muted">
               {dreamingState === 'error'
                 ? 'The person summary could not be updated. Recent developments remain available below.'
-                : summaryVersion >= 5 &&
+                : summaryVersion >= 6 &&
                     currentDetail.knowledgeDoc?.status === 'up_to_date'
                   ? 'The linked conversations do not yet establish a reliable summary of this person’s role and contributions.'
-                  : meetingCount > 0
-                    ? 'A source-backed summary of this person’s role and contributions is being prepared. Recent developments are below.'
-                    : 'No conversations are linked to this person yet.'}
+                  : confirmedMeetings.length === 0 &&
+                      (currentDetail.recentActivity ?? []).length === 0
+                    ? 'There is not enough verified context to describe this person yet.'
+                    : meetingCount > 0
+                      ? 'A source-backed summary of this person’s role and contributions is being prepared. Recent developments are below.'
+                      : 'No conversations are linked to this person yet.'}
             </p>
             {dreamingState === 'error' && currentDetail.knowledgeDoc && (
               <button
@@ -1945,102 +1948,106 @@ export const PersonDossier = ({
         </section>
       )}
 
-      {((!hasPersonSummary && hasReliableRead) ||
-        (currentDetail.recentActivity ?? []).length === 0) && (
-        <section className="person-dossier__about" aria-label="Earlier context">
-          {hasReliableRead ? (
-            <details open={(currentDetail.recentActivity ?? []).length === 0}>
-              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 rounded-md text-sm font-semibold text-pro-text-main hover:text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
-                <span>Earlier context</span>
-                <span className="flex items-center gap-2 text-xs font-normal text-pro-text-muted">
-                  {formattedDate
-                    ? `Brief evidence · ${formattedDate}`
-                    : 'Older brief'}
-                  <ChevronDown aria-hidden="true" size={15} />
-                </span>
-              </summary>
-              <div className="mt-5">
-                {isContextOutdated && (
-                  <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-800 dark:text-amber-300 space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-semibold">
-                        Context marked as outdated
-                      </p>
-                      <button
-                        type="button"
-                        disabled={dreamingState === 'running'}
-                        onClick={() => void handleSynthesizeFreshRead()}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/30 bg-amber-500/20 px-2.5 py-1 text-xs font-medium text-amber-900 dark:text-amber-200 hover:bg-amber-500/30 transition-colors disabled:opacity-50"
-                      >
-                        <Sparkles className="h-3 w-3" />
-                        <span>
-                          {dreamingState === 'running'
-                            ? 'Synthesizing…'
-                            : 'Refresh brief'}
-                        </span>
-                      </button>
-                    </div>
-                    <p className="text-pro-text-muted">
-                      This context is marked as outdated. Refresh the brief from
-                      available conversations.
-                    </p>
-                  </div>
-                )}
-
-                {daysSince !== null && daysSince > 30 ? (
-                  <p className="mb-4 max-w-[68ch] text-xs leading-5 text-pro-text-muted">
-                    This synthesis predates the recent notes above. Focus and
-                    responsibilities may have changed.
-                  </p>
-                ) : null}
-
-                <p className="max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main">
-                  {brief.headline}
-                </p>
-                {workstreams.length > 0 ? (
-                  <div className="mt-5 space-y-3">
-                    <h3 className="text-sm font-semibold text-pro-text-main">
-                      Previously discussed workstreams
-                    </h3>
-                    <div className="space-y-0">
-                      {workstreams.map((stream) => (
-                        <div
-                          key={stream.id}
-                          className="border-b border-pro-border/50 py-3 last:border-0"
+      {summaryVersion >= 6 &&
+        ((!hasPersonSummary && hasReliableRead) ||
+          (currentDetail.recentActivity ?? []).length === 0) && (
+          <section
+            className="person-dossier__about"
+            aria-label="Earlier context"
+          >
+            {hasReliableRead ? (
+              <details open={(currentDetail.recentActivity ?? []).length === 0}>
+                <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 rounded-md text-sm font-semibold text-pro-text-main hover:text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
+                  <span>Earlier context</span>
+                  <span className="flex items-center gap-2 text-xs font-normal text-pro-text-muted">
+                    {formattedDate
+                      ? `Brief evidence · ${formattedDate}`
+                      : 'Older brief'}
+                    <ChevronDown aria-hidden="true" size={15} />
+                  </span>
+                </summary>
+                <div className="mt-5">
+                  {isContextOutdated && (
+                    <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-800 dark:text-amber-300 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-semibold">
+                          Context marked as outdated
+                        </p>
+                        <button
+                          type="button"
+                          disabled={dreamingState === 'running'}
+                          onClick={() => void handleSynthesizeFreshRead()}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/30 bg-amber-500/20 px-2.5 py-1 text-xs font-medium text-amber-900 dark:text-amber-200 hover:bg-amber-500/30 transition-colors disabled:opacity-50"
                         >
-                          <h4 className="text-sm font-semibold text-pro-text-main">
-                            {stream.title}
-                          </h4>
-                          <p className="mt-1 max-w-[68ch] text-sm leading-6 text-pro-text-muted">
-                            {stream.detail}
-                          </p>
-                        </div>
+                          <Sparkles className="h-3 w-3" />
+                          <span>
+                            {dreamingState === 'running'
+                              ? 'Synthesizing…'
+                              : 'Refresh brief'}
+                          </span>
+                        </button>
+                      </div>
+                      <p className="text-pro-text-muted">
+                        This context is marked as outdated. Refresh the brief
+                        from available conversations.
+                      </p>
+                    </div>
+                  )}
+
+                  {daysSince !== null && daysSince > 30 ? (
+                    <p className="mb-4 max-w-[68ch] text-xs leading-5 text-pro-text-muted">
+                      This synthesis predates the recent notes above. Focus and
+                      responsibilities may have changed.
+                    </p>
+                  ) : null}
+
+                  <p className="max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main">
+                    {brief.headline}
+                  </p>
+                  {workstreams.length > 0 ? (
+                    <div className="mt-5 space-y-3">
+                      <h3 className="text-sm font-semibold text-pro-text-main">
+                        Previously discussed workstreams
+                      </h3>
+                      <div className="space-y-0">
+                        {workstreams.map((stream) => (
+                          <div
+                            key={stream.id}
+                            className="border-b border-pro-border/50 py-3 last:border-0"
+                          >
+                            <h4 className="text-sm font-semibold text-pro-text-main">
+                              {stream.title}
+                            </h4>
+                            <p className="mt-1 max-w-[68ch] text-sm leading-6 text-pro-text-muted">
+                              {stream.detail}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : plainBullets.length > 0 ? (
+                    <div className="mt-3 space-y-1.5">
+                      {plainBullets.map((bullet, idx) => (
+                        <p
+                          key={idx}
+                          className="text-sm text-pro-text-muted leading-relaxed"
+                        >
+                          {bullet}
+                        </p>
                       ))}
                     </div>
-                  </div>
-                ) : plainBullets.length > 0 ? (
-                  <div className="mt-3 space-y-1.5">
-                    {plainBullets.map((bullet, idx) => (
-                      <p
-                        key={idx}
-                        className="text-sm text-pro-text-muted leading-relaxed"
-                      >
-                        {bullet}
-                      </p>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </details>
-          ) : (
-            <p className="person-dossier__about-empty">
-              {meetingCount > 0
-                ? 'There is not enough verified context to describe this person yet.'
-                : 'No confirmed conversations are linked to this person yet.'}
-            </p>
-          )}
-        </section>
-      )}
+                  ) : null}
+                </div>
+              </details>
+            ) : (
+              <p className="person-dossier__about-empty">
+                {meetingCount > 0
+                  ? 'There is not enough verified context to describe this person yet.'
+                  : 'No confirmed conversations are linked to this person yet.'}
+              </p>
+            )}
+          </section>
+        )}
 
       <section className="person-dossier__open-loops">
         <div className="person-dossier__major-heading">
