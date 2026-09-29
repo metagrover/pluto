@@ -1746,7 +1746,7 @@ export const PersonDossier = ({
             <p className="max-w-[64ch] font-serif text-lg leading-7 text-pro-text-main">
               {personRead.headline}
             </p>
-            <p className="mt-2 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-muted">
+            <p className="mt-2 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-main/80">
               {`Based on ${personReadSourceCount} cited conversations through ${formattedDate ?? 'the latest linked source'}.`}
               {!roleSourceMeetingId || role === 'Known from conversations'
                 ? ' A formal job title has not been established.'
@@ -1780,7 +1780,7 @@ export const PersonDossier = ({
                         <button
                           key={source.meeting_id}
                           type="button"
-                          className="text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
+                          className="text-left leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
                           onClick={() => onOpenMeeting(source.meeting_id)}
                         >
                           {source.meeting_title || 'Open source meeting'}
@@ -1802,7 +1802,7 @@ export const PersonDossier = ({
                 <p key={`${item.meetingId}-${item.text}`}>{item.text}</p>
               ))}
             </div>
-            <p className="mt-3 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-muted">
+            <p className="mt-3 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-main/80">
               From person-specific meeting notes. A broader account of their
               role and contributions is being prepared.
             </p>
@@ -1815,7 +1815,7 @@ export const PersonDossier = ({
                 <button
                   key={`${item.meetingId}-${item.text}`}
                   type="button"
-                  className="text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
+                  className="text-left leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
                   onClick={() => onOpenMeeting(item.meetingId)}
                 >
                   {item.meetingTitle}
@@ -1877,7 +1877,7 @@ export const PersonDossier = ({
                     </p>
                     <button
                       type="button"
-                      className="mt-1 text-xs text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
+                      className="mt-1 text-left text-xs leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
                       onClick={() => onOpenMeeting(item.meetingId)}
                     >
                       {item.source === 'accepted_focus'
