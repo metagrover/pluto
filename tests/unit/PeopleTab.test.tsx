@@ -500,6 +500,25 @@ describe('PersonDossier', () => {
     expect(markup).not.toContain('Earlier context');
   });
 
+  it('shows a grounded draft while the person history is still compiling', () => {
+    const markup = renderToStaticMarkup(
+      <PersonDossier
+        detail={{
+          ...briefingDetail,
+          knowledgeDoc: {
+            ...briefingDetail.knowledgeDoc!,
+            status: 'synthesizing',
+            config: JSON.stringify({ synthesis_version: 5 }),
+          },
+        }}
+        onBack={() => {}}
+        onOpenMeeting={() => {}}
+      />,
+    );
+    expect(markup).toContain('Draft from recent conversations');
+    expect(markup).toContain('Avery is coordinating the launch handoff.');
+  });
+
   it('shows a concise description, verified commitments, and meetings', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier

@@ -16,6 +16,7 @@ import {
   splitKnowledgeSourceChunk,
 } from './knowledgeChunking';
 import {
+  PERSON_CONTEXT_SYNTHESIS_VERSION,
   getKnowledgeSynthesisInputConfig,
   knowledgeDocNeedsSynthesis,
   knowledgeDocSatisfiesMeetingRefresh,
@@ -1324,7 +1325,12 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
         label: chunk.label,
         structuredJson: JSON.stringify(chunk.structured),
       })),
-      previousStructuredJson: params.doc.structured_json,
+      previousStructuredJson:
+        params.doc.scope_type === 'person_context' &&
+        (parseKnowledgeDocConfig(params.doc.config).synthesis_version ?? 0) <
+          PERSON_CONTEXT_SYNTHESIS_VERSION
+          ? null
+          : params.doc.structured_json,
       claimCorrections: params.claimCorrections,
     });
     const merged = await synthesizeStructuredFromPrompt({
@@ -1821,7 +1827,15 @@ const synthesizeKnowledgeDocNowInternal = async (
       onChunkProgress: (partial) => {
         if (request.canCommit?.() === false || request.signal?.aborted) return;
         try {
-          const correctedPartial = applyCorrections(partial);
+          const groundedPartial =
+            doc.scope_type === 'person_context' &&
+            isKnowledgeV2Document(partial)
+              ? groundPersonKnowledgeV2Document(
+                  partial,
+                  sourceEvidenceByMeeting,
+                )
+              : partial;
+          const correctedPartial = applyCorrections(groundedPartial);
           const partialRendered = renderStructuredDocument(correctedPartial);
           db.upsertKnowledgeDoc({
             id: doc.id,
@@ -1830,6 +1844,11 @@ const synthesizeKnowledgeDocNowInternal = async (
             title: doc.title,
             structured_json: JSON.stringify(correctedPartial),
             rendered_content: partialRendered,
+            config: withCurrentKnowledgeSynthesisConfig(
+              doc.config,
+              request.inputHash,
+              doc.scope_type,
+            ),
             status: 'synthesizing', // stays 'synthesizing' until the full merge completes
           });
         } catch (flushErr) {

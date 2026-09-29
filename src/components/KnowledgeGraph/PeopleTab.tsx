@@ -836,7 +836,9 @@ export const PersonDossier = ({
   }
   const brief = compileKnowledgeBrief(
     currentDetail.knowledgeDoc,
-    currentDetail.workingMemorySnapshot,
+    currentDetail.knowledgeDoc?.status === 'synthesizing'
+      ? null
+      : currentDetail.workingMemorySnapshot,
   );
   const hasReliableRead =
     brief.isCompiled &&
@@ -854,9 +856,12 @@ export const PersonDossier = ({
   })();
   const hasPersonSummary =
     summaryVersion >= 5 &&
-    currentDetail.knowledgeDoc?.status === 'up_to_date' &&
+    (currentDetail.knowledgeDoc?.status === 'up_to_date' ||
+      currentDetail.knowledgeDoc?.status === 'synthesizing') &&
     hasReliableRead &&
     brief.evidenceIndex.length > 0;
+  const isDraftSummary =
+    hasPersonSummary && currentDetail.knowledgeDoc?.status === 'synthesizing';
   const summarySources = Array.from(
     new Map(
       brief.evidenceIndex.map((source) => [source.meeting_id, source]),
@@ -1727,7 +1732,9 @@ export const PersonDossier = ({
               {brief.headline}
             </p>
             <p className="mt-2 text-xs text-pro-text-muted">
-              Based on conversations through{' '}
+              {isDraftSummary
+                ? 'Draft from recent conversations; Pluto is still compiling the full history through '
+                : 'Based on conversations through '}
               {formattedDate ?? 'the latest linked source'}.
               {!roleSourceMeetingId || role === 'Known from conversations'
                 ? ' A formal job title has not been established.'
