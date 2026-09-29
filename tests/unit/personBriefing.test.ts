@@ -139,6 +139,39 @@ it('includes accepted focus updates with a linked source among recent activity',
   ]);
 });
 
+it('prefers a specific note over a focus label from the same meeting', () => {
+  const meetings = mergePersonMeetingEvidence({
+    confirmed: [meeting('source', '2026-09-20T10:00:00.000Z')],
+    scheduled: [],
+    mentioned: [],
+  });
+  const activity = selectPersonActivity(
+    meetings,
+    ['Avery Chen'],
+    new Map([
+      [
+        'source',
+        {
+          topics: [
+            {
+              key_points: [
+                { text: 'Avery Chen prepared the launch handoff for review.' },
+              ],
+            },
+          ],
+        },
+      ],
+    ]),
+    5,
+    [{ value: 'Launch coordination', sourceMeetingIds: ['source'] }],
+  );
+
+  expect(activity).toHaveLength(1);
+  expect(activity[0].text).toBe(
+    'Avery Chen prepared the launch handoff for review.',
+  );
+});
+
 it('uses an unambiguous first name only in a confirmed conversation', () => {
   const meetings = mergePersonMeetingEvidence({
     confirmed: [meeting('confirmed', '2026-09-20T10:00:00.000Z')],

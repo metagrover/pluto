@@ -233,17 +233,12 @@ export const PeopleBriefing = ({
 
   const renderPerson = (person: PersonBriefingRow) => {
     const selected = selectedPersonId === person.id;
-    const rawCue =
-      person.briefHeadline ??
-      (person.context && !person.context.startsWith('Role:')
-        ? person.context
-        : null) ??
-      person.latestMeetingTitle ??
-      'No linked conversation yet';
-    const cue = rawCue.startsWith(`${person.name}: `)
-      ? rawCue.slice(person.name.length + 2).trim() || rawCue
-      : rawCue;
-    const showRole = person.role !== 'Known from conversations';
+    const cue = person.latestMeetingTitle
+      ? `Latest link: ${person.latestMeetingTitle}`
+      : 'No linked conversation yet';
+    const showRole =
+      person.role !== 'Known from conversations' &&
+      Boolean(person.roleSourceMeetingId);
     return (
       <article
         className={`person-row group relative ${selected ? 'person-row--selected' : ''}`}
@@ -1686,15 +1681,15 @@ export const PersonDossier = ({
         className="person-dossier__about"
         aria-labelledby="person-recent-work"
       >
-        <div className="person-dossier__section-heading mb-3">
+        <div className="person-dossier__major-heading mb-3">
           <h2 id="person-recent-work">What they've been working on</h2>
         </div>
         {(currentDetail.recentActivity ?? []).length > 0 ? (
           <>
-            <p className="mb-5 max-w-[68ch] text-sm leading-6 text-pro-text-muted">
+            <span className="mb-5 block max-w-[68ch] text-sm leading-6 text-pro-text-muted">
               Specific updates from recent conversations. Open a meeting to see
               the source.
-            </p>
+            </span>
             <ol className="space-y-4">
               {currentDetail.recentActivity?.map((item) => (
                 <li

@@ -15,6 +15,7 @@ const rows: PersonBriefingRow[] = [
     id: 'person-1',
     name: 'Avery Chen',
     role: 'Design lead',
+    roleSourceMeetingId: 'meeting-1',
     meetingCount: 4,
     mentionCount: 9,
     latestMeetingId: 'meeting-1',
@@ -36,32 +37,31 @@ describe('PeopleBriefing', () => {
       <PeopleBriefing rows={rows} onSelectPerson={() => {}} />,
     );
     expect(markup).not.toContain('Needs you now');
-    expect(markup).toContain('Avery is preparing the launch handoff.');
+    expect(markup).toContain('Latest link: Product review');
+    expect(markup).not.toContain('Avery is preparing the launch handoff.');
     expect(markup).toContain('2 open loops');
     expect(markup).toContain('1 to confirm');
     expect(markup).toContain('person-row__meeting');
     expect(markup).toContain(
-      '<span class="person-copy"><span class="person-identity"><strong>Avery Chen</strong></span><span class="person-context"><span class="person-role">Design lead</span><span>Avery is preparing the launch handoff.</span></span></span>',
+      '<span class="person-copy"><span class="person-identity"><strong>Avery Chen</strong></span><span class="person-context"><span class="person-role">Design lead</span><span>Latest link: Product review</span></span></span>',
     );
     expect(markup).not.toContain('>Open <');
   });
 
-  it('strips redundant person name prefix from the row cue', () => {
-    const rowWithPrefix: PersonBriefingRow = {
+  it('does not promote an old brief or uncited role into a directory fact', () => {
+    const rowWithOldBrief: PersonBriefingRow = {
       ...rows[0],
       name: 'Sarah Chen',
+      roleSourceMeetingId: null,
       briefHeadline:
         'Sarah Chen: The conversation centered around design principles.',
     };
     const markup = renderToStaticMarkup(
-      <PeopleBriefing rows={[rowWithPrefix]} onSelectPerson={() => {}} />,
+      <PeopleBriefing rows={[rowWithOldBrief]} onSelectPerson={() => {}} />,
     );
-    expect(markup).toContain(
-      'The conversation centered around design principles.',
-    );
-    expect(markup).not.toContain(
-      'Sarah Chen: The conversation centered around design principles.',
-    );
+    expect(markup).toContain('Latest link: Product review');
+    expect(markup).not.toContain('The conversation centered around');
+    expect(markup).not.toContain('person-role');
   });
 
   it('renders every linked person in ranked order without a loader', () => {

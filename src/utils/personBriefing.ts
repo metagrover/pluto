@@ -7,6 +7,7 @@ export interface PersonBriefingSummary {
   id: string;
   name: string;
   role: string;
+  roleSourceMeetingId?: string | null;
   meetingCount: number;
   mentionCount: number;
   latestMeetingId: string | null;
@@ -64,6 +65,20 @@ export const parsePersonRole = (metadata: unknown): string => {
       : 'Known from conversations';
   } catch {
     return 'Known from conversations';
+  }
+};
+
+export const parsePersonRoleSourceMeetingId = (
+  metadata: unknown,
+): string | null => {
+  if (typeof metadata !== 'string') return null;
+  try {
+    const value = JSON.parse(metadata) as { role_source_meeting_id?: unknown };
+    return typeof value.role_source_meeting_id === 'string'
+      ? value.role_source_meeting_id
+      : null;
+  } catch {
+    return null;
   }
 };
 
@@ -169,7 +184,13 @@ export const selectPersonActivity = (
     const meeting = meetings.find((item) =>
       claim.sourceMeetingIds.includes(item.id),
     );
-    if (!meeting || !value || seen.has(key)) continue;
+    if (
+      !meeting ||
+      !value ||
+      seen.has(key) ||
+      result.some((item) => item.meetingId === meeting.id)
+    )
+      continue;
     seen.add(key);
     result.push({
       text: value,

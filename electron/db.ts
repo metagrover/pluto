@@ -65,6 +65,7 @@ import {
   isUsablePersonName,
   mergePersonMeetingEvidence,
   parsePersonRole,
+  parsePersonRoleSourceMeetingId,
   selectPersonActivity,
   selectPersonCommitments,
 } from '../src/utils/personBriefing';
@@ -9128,6 +9129,7 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         id: row.id,
         name: row.name,
         role: parsePersonRole(row.metadata),
+        roleSourceMeetingId: parsePersonRoleSourceMeetingId(row.metadata),
         meetingCount: Number(row.meeting_count),
         mentionCount: Number(row.mention_count),
         latestMeetingId: row.latest_meeting_id,

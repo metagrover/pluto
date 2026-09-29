@@ -64,6 +64,12 @@ describe('person role evidence boundary', () => {
         context: 'Role: design lead',
       }),
     );
+    expect(db.getPeopleBriefingSummaries()).toContainEqual(
+      expect.objectContaining({
+        id: person?.id,
+        roleSourceMeetingId: 'role-source',
+      }),
+    );
   });
 
   it('rejects another person name even when the quote contains both names', async () => {
