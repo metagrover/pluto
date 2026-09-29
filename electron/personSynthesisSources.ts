@@ -13,7 +13,7 @@ export interface PersonSynthesisSource {
   entity_names?: string[];
 }
 
-/** Read beyond the dossier's five recent highlights, without admitting meeting-wide topics. */
+/** Read beyond the dossier's recent highlights, without admitting meeting-wide topics. */
 export const collectPersonSynthesisActivity = (
   meetings: PersonBriefingMeeting[],
   sources: Array<{ id: string; analysis_json?: string | null }>,
