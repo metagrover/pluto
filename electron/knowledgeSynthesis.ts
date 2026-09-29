@@ -1185,6 +1185,9 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
   const chunks = buildKnowledgeSourceChunks(
     params.sourceMeetings,
     MAX_SOURCE_MEETINGS_PER_SYNTHESIS_CHUNK,
+    params.doc.scope_type === 'person_context'
+      ? 2
+      : MAX_SOURCE_MEETINGS_PER_SYNTHESIS_CHUNK,
   );
 
   if (chunks.length > 1) {

@@ -37,6 +37,26 @@ describe('knowledge chunking', () => {
     expect(chunks[2].sourceMeetings[0].id).toBe('m21');
   });
 
+  it('publishes a small first person chunk before processing the rest', () => {
+    const chunks = buildKnowledgeSourceChunks(
+      Array.from({ length: 14 }, (_, index) => makeSource(index + 1)),
+      6,
+      2,
+    );
+
+    expect(chunks.map((chunk) => chunk.sourceMeetings.length)).toEqual([
+      2, 6, 6,
+    ]);
+    expect(chunks.map((chunk) => chunk.label)).toEqual([
+      'Chunk 1 of 3',
+      'Chunk 2 of 3',
+      'Chunk 3 of 3',
+    ]);
+    expect(
+      chunks.flatMap((chunk) => chunk.sourceMeetings.map((item) => item.id)),
+    ).toEqual(Array.from({ length: 14 }, (_, index) => `m${index + 1}`));
+  });
+
   it('splits a failed chunk into smaller retry chunks', () => {
     const [chunk] = buildKnowledgeSourceChunks(
       Array.from({ length: 9 }, (_, index) => makeSource(index + 1)),
