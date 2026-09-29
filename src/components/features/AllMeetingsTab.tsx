@@ -178,7 +178,7 @@ export const AllMeetingsTab = ({
                     <button
                       type="button"
                       onClick={() => onOpenMeeting(meeting.id)}
-                      className="meetings-index__row-open"
+                      className={`meetings-index__row-open ${canDeleteMeeting(meeting.finalization_status) ? 'meetings-index__row-open--deletable' : ''}`}
                     >
                       <span
                         className="meetings-index__row-icon"

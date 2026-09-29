@@ -527,6 +527,9 @@
   .meetings-index__row-open {
     @apply flex min-h-16 w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors duration-150 hover:bg-pro-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
+  .meetings-index__row-open--deletable {
+    @apply pr-12;
+  }
   .meetings-index__row-icon {
     @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-pro-border bg-pro-surface text-pro-text-muted transition-colors;
   }

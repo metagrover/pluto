@@ -6,6 +6,7 @@ export function buildMeetingPrepBrief(
   deps: {
     entities: (id: string) => Entity[];
     blockers: () => BlockedActionItem[];
+    selfPersonId?: string | null;
   },
 ): PreMeetingBrief {
   const references = [...(prep.meetings || [])]
@@ -63,6 +64,12 @@ export function buildMeetingPrepBrief(
         id: `follow-up:${entity.id}`,
         text: `${entity.name}${entity.due_date ? ` · Due ${entity.due_date}` : ''}${blockers.has(entity.id) ? ` · Blocked by ${blockers.get(entity.id)}` : ''}`,
         trustStatus: 'grounded',
+        ownerScope:
+          !deps.selfPersonId || !entity.assigned_to
+            ? 'unconfirmed'
+            : entity.assigned_to === deps.selfPersonId
+              ? 'self'
+              : 'other',
         ...source,
       });
     }

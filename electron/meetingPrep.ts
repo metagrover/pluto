@@ -298,6 +298,7 @@ export function createMeetingPrepStore(
       references: string,
       brief: import('./preMeetingBrief').PreMeetingBrief,
     ) => {
+      if (brief.synthesisStatus !== 'ready') return false;
       const current = get(value);
       if (!current || JSON.stringify(current.meetings || []) !== references)
         return false;

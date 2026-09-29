@@ -22,6 +22,25 @@ export const isNoOpMeetingNotesEdit = (
   edited: string,
 ): boolean => normalizeNoOpEdit(original) === normalizeNoOpEdit(edited);
 
+export const applyMeetingNotesUserEdit = (
+  edits: UserEditsMap,
+  path: string,
+  original: string,
+  edited: string,
+  editedAt: string,
+): { edits: UserEditsMap; changed: boolean } => {
+  if (isNoOpMeetingNotesEdit(original, edited)) {
+    if (!Object.hasOwn(edits, path)) return { edits, changed: false };
+    const next = { ...edits };
+    delete next[path];
+    return { edits: next, changed: true };
+  }
+  return {
+    edits: { ...edits, [path]: { original, edited, edited_at: editedAt } },
+    changed: true,
+  };
+};
+
 export const rebaseMeetingNotesEdits = ({
   edits,
   previousBlocks,

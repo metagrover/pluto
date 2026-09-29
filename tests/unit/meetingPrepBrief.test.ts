@@ -130,3 +130,35 @@ it('removes completed action items from a saved generated briefing', () => {
   expect(refreshed.evidenceItems).toEqual([historical]);
   expect(refreshed.talkingPoints).toEqual([]);
 });
+
+it('separates confirmed personal, other, and unassigned commitments without guessing ownership', () => {
+  const action = (id: string, assigned_to: string | null) =>
+    ({
+      id,
+      name: `Action ${id}`,
+      type: 'action_item',
+      status: 'active',
+      assigned_to,
+      metadata: JSON.stringify({ commitment_state: 'confirmed' }),
+    }) as Entity;
+  const result = buildMeetingPrepBrief(prep, {
+    entities: () => [
+      action('mine', 'self'),
+      action('theirs', 'other'),
+      action('unknown', null),
+    ],
+    blockers: () => [],
+    selfPersonId: 'self',
+  });
+  expect(result.stillOpen.map((item) => [item.id, item.ownerScope])).toEqual([
+    ['follow-up:mine', 'self'],
+    ['follow-up:theirs', 'other'],
+    ['follow-up:unknown', 'unconfirmed'],
+  ]);
+  expect(
+    buildMeetingPrepBrief(prep, {
+      entities: () => [action('mine', 'self')],
+      blockers: () => [],
+    }).stillOpen[0].ownerScope,
+  ).toBe('unconfirmed');
+});

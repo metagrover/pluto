@@ -464,7 +464,7 @@ app.on('activate', () => {
 
 import { describeMeetingAskPlutoRequest } from '../src/utils/askPlutoDiagnostics';
 import { parseMeetingAskPlutoRequest } from '../src/utils/meetingAskPlutoRequest';
-import { isNoOpMeetingNotesEdit } from '../src/utils/meetingNotesEditRebase';
+import { applyMeetingNotesUserEdit } from '../src/utils/meetingNotesEditRebase';
 import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
 import { handleActionCommitmentReview } from './actionCommitmentReviewIpc';
@@ -1806,9 +1806,19 @@ app.whenReady().then(async () => {
         db.getMeetingEntities(id).flatMap((entity) => {
           if (entity.type !== 'action_item') return [];
           const current = db.resolveCommitmentIdentity(entity.id);
-          return current && !db.isRetiredCommitment(entity.id) ? [current] : [];
+          return current && !db.isRetiredCommitment(entity.id)
+            ? [
+                {
+                  ...current,
+                  assigned_to: current.assigned_to
+                    ? db.resolvePersonIdentityId(current.assigned_to)
+                    : null,
+                },
+              ]
+            : [];
         }),
       blockers: db.getBlockedActionItems,
+      selfPersonId: db.identityStore.getSelfPersonId(),
     });
   const prepareLinkedMeetingBrief = (key: unknown) => {
     const prep = db.meetingPrepStore.get(key);
@@ -1837,7 +1847,10 @@ app.whenReady().then(async () => {
         (prompt, signal) =>
           provider.answerAskPluto(prompt, { signal, mode: 'deep' }),
       );
-      if (prepSynthesisRequests.get(prep.occurrenceKey) === token)
+      if (
+        generated.synthesisStatus === 'ready' &&
+        prepSynthesisRequests.get(prep.occurrenceKey) === token
+      )
         db.meetingPrepStore.saveBrief(key, references, generated);
       return generated;
     } catch {
@@ -3955,9 +3968,6 @@ app.whenReady().then(async () => {
         ) {
           throw new Error('invalid_user_edit');
         }
-        if (isNoOpMeetingNotesEdit(original, edited)) {
-          return { success: true };
-        }
         let editsMap: Record<
           string,
           { original: string; edited: string; edited_at: string }
@@ -3969,14 +3979,17 @@ app.whenReady().then(async () => {
             editsMap = {};
           }
         }
-        editsMap[path] = {
+        const updated = applyMeetingNotesUserEdit(
+          editsMap,
+          path,
           original,
           edited,
-          edited_at: new Date().toISOString(),
-        };
+          new Date().toISOString(),
+        );
+        if (!updated.changed) return { success: true };
         db.saveMeeting({
           ...meeting,
-          user_edits_json: JSON.stringify(editsMap),
+          user_edits_json: JSON.stringify(updated.edits),
         });
         syncMeetingActionEntitiesFromUserEdits(
           getApplicationDatabase(),

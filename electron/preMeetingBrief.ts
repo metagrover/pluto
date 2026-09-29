@@ -31,7 +31,10 @@ export type BriefTrustStatus =
 export interface PreMeetingBriefItem {
   id: string;
   text: string;
+  summary?: string;
+  sourceQuote?: string;
   trustStatus: BriefTrustStatus;
+  ownerScope?: 'self' | 'other' | 'unconfirmed';
   sourceMeetingId: string | null;
   sourceLabel: string;
   sourceDate: string | null;

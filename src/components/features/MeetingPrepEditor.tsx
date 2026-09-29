@@ -1,4 +1,4 @@
-import { BookOpen, ChevronDown, Plus, X } from 'lucide-react';
+import { BookOpen, ChevronDown, Plus, RefreshCw, X } from 'lucide-react';
 import {
   forwardRef,
   useEffect,
@@ -414,6 +414,19 @@ export const MeetingPrepEditor = forwardRef<
                       ? ` · ${formatPrepParticipants(meeting.participants)}`
                       : ''}
                   </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-label={`Refresh saved notes for ${meeting.title}`}
+                  title="Refresh saved notes from this meeting"
+                  onClick={() =>
+                    void mutateMeeting({ refreshMeetingId: meeting.id })
+                  }
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-pro-text-muted hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-40"
+                >
+                  <RefreshCw size={14} aria-hidden="true" />
                 </button>
 
                 <button

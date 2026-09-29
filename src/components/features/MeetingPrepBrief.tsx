@@ -43,16 +43,20 @@ export function MeetingPrepBrief({
   disabled?: boolean;
   readOnly?: boolean;
 }) {
-  const [brief, setBrief] = useState<PreMeetingBrief | null>(null);
+  const [brief, setBrief] = useState<PreMeetingBrief | null>(
+    prep.briefing ?? null,
+  );
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(false);
   const lastRegeneration = useRef(0);
   const contextKey = JSON.stringify(prep.meetings || []);
+  const previousContextKey = useRef(contextKey);
   useEffect(() => {
     let current = true;
     const synthesize = regeneration !== lastRegeneration.current;
     lastRegeneration.current = regeneration;
-    setBrief(null);
+    if (previousContextKey.current !== contextKey) setBrief(null);
+    previousContextKey.current = contextKey;
     setError(false);
     if (readOnly) {
       setBrief(
@@ -85,7 +89,9 @@ export function MeetingPrepBrief({
         setBrief(value);
         if (!synthesize) return;
         return synthesizePrepBrief(prep.occurrenceKey).then((generated) => {
-          if (current) setBrief(generated);
+          if (!current) return;
+          if (generated.synthesisStatus === 'ready') setBrief(generated);
+          else setError(true);
         });
       })
       .catch(() => {
@@ -114,7 +120,6 @@ export function MeetingPrepBrief({
     ...overview.slice(0, 2),
     ...additional,
     ...overview.slice(2),
-    ...(brief?.talkingPoints || []).slice(0, 1),
   ];
   const bullets = candidates.filter(
     (item, index) =>
@@ -128,6 +133,13 @@ export function MeetingPrepBrief({
   );
   const visibleBullets = bullets.slice(0, 6);
   const openItems = brief?.stillOpen || [];
+  const myCommitments = openItems.filter((item) => item.ownerScope === 'self');
+  const otherCommitments = openItems.filter(
+    (item) => item.ownerScope === 'other',
+  );
+  const unconfirmedCommitments = openItems.filter(
+    (item) => item.ownerScope !== 'self' && item.ownerScope !== 'other',
+  );
   const sources = Array.from(
     new Map(
       [...visibleBullets, ...openItems]
@@ -151,7 +163,7 @@ export function MeetingPrepBrief({
       <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-pro-accent">
           <Sparkles size={14} aria-hidden="true" className="shrink-0" />
-          Executive briefing
+          Meeting recap
         </h3>
         {!readOnly && (
           <button
@@ -171,80 +183,34 @@ export function MeetingPrepBrief({
       </div>
       {error && (
         <p role="alert" className="mb-3 text-xs text-pro-text-muted">
-          Briefing could not be generated. Saved meeting context is available
-          below.
+          {brief?.synthesisStatus === 'ready'
+            ? 'Could not refresh the recap. The last successful version is still shown.'
+            : 'Could not generate a recap. Saved meeting excerpts are shown below.'}
         </p>
       )}
-      {generating && <MeetingPrepBriefSkeleton />}
-      {!generating && !!visibleBullets.length && (
-        <ul className="space-y-4">
-          {visibleBullets.map((item) => {
-            const number =
-              sources.findIndex(
-                (source) => source.sourceMeetingId === item.sourceMeetingId,
-              ) + 1;
-            const short = excerpt(item.text);
-            return (
-              <li
-                key={item.id}
-                className="flex items-start gap-3 text-sm leading-6 text-pro-text-main"
-              >
-                <span
-                  aria-hidden="true"
-                  className="flex h-6 w-1.5 shrink-0 items-center"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-pro-accent" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <span>{short}</span>
-                  {item.sourceMeetingId && (
-                    <button
-                      type="button"
-                      aria-label={`Open source: ${item.sourceLabel}`}
-                      title={`${item.sourceLabel}${item.sourceDate ? ` · ${formatPrepDate(item.sourceDate)}` : ''}`}
-                      onClick={() => onOpenMeeting?.(item.sourceMeetingId!)}
-                      className="relative -top-0.5 ml-1.5 text-[10px] leading-none text-pro-accent"
-                    >
-                      [{number}]
-                    </button>
-                  )}
-                  {short !== item.text && (
-                    <details className="group/context mt-1 text-xs text-pro-text-muted">
-                      <summary className="flex min-h-6 w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
-                        Read full context
-                        <ChevronDown
-                          size={16}
-                          aria-hidden="true"
-                          className="shrink-0 motion-reduce:transition-none transition-transform group-open/context:rotate-180"
-                        />
-                      </summary>
-                      <p className="mt-2 text-xs leading-5 text-pro-text-muted">
-                        {item.text}
-                      </p>
-                    </details>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {!generating && brief && !visibleBullets.length && !openItems.length && (
-        <p className="text-sm text-pro-text-muted">
-          The selected meetings have no saved discussion notes.
+      {generating && brief && (
+        <p role="status" className="mb-3 text-xs text-pro-text-muted">
+          Refreshing recap…
         </p>
       )}
-      {!generating && !!openItems.length && (
-        <div className="mt-5 border-t border-pro-border pt-4">
+      {generating && !brief && <MeetingPrepBriefSkeleton />}
+      {brief?.synthesisStatus === 'fallback' && !generating && !error && (
+        <p className="mb-3 text-xs text-pro-text-muted">
+          Showing saved excerpts. Regenerate to choose highlights.
+        </p>
+      )}
+      {!!visibleBullets.length && (
+        <div>
           <h4 className="mb-3 text-xs font-medium text-pro-text-muted">
-            Open action items
+            Last discussion
           </h4>
-          <ul className="space-y-3">
-            {openItems.map((item) => {
+          <ul className="space-y-4">
+            {visibleBullets.map((item) => {
               const number =
                 sources.findIndex(
                   (source) => source.sourceMeetingId === item.sourceMeetingId,
                 ) + 1;
+              const short = item.summary || excerpt(item.text);
               return (
                 <li
                   key={item.id}
@@ -256,27 +222,116 @@ export function MeetingPrepBrief({
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-pro-accent" />
                   </span>
-                  <span>
-                    {item.text}
+                  <div className="min-w-0 flex-1">
+                    <span>{short}</span>
+                    {item.trustStatus !== 'grounded' && !!item.trustStatus && (
+                      <span className="ml-2 text-xs text-pro-text-muted">
+                        {item.trustStatus === 'stale'
+                          ? 'Source may be outdated'
+                          : item.trustStatus === 'inferred'
+                            ? 'Suggested interpretation'
+                            : 'Needs review'}
+                      </span>
+                    )}
                     {item.sourceMeetingId && (
                       <button
                         type="button"
-                        aria-label={`Open action item source: ${item.sourceLabel}`}
+                        aria-label={`Open source: ${item.sourceLabel}`}
                         title={`${item.sourceLabel}${item.sourceDate ? ` · ${formatPrepDate(item.sourceDate)}` : ''}`}
                         onClick={() => onOpenMeeting?.(item.sourceMeetingId!)}
-                        className="ml-1.5 rounded-sm text-xs text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                        className="relative -top-0.5 ml-1.5 text-[10px] leading-none text-pro-accent"
                       >
                         [{number}]
                       </button>
                     )}
-                  </span>
+                    {(short !== item.text || item.sourceQuote) && (
+                      <details className="group/context mt-1 text-xs text-pro-text-muted">
+                        <summary className="flex min-h-6 w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
+                          {item.summary
+                            ? 'Read source excerpt'
+                            : 'Read full context'}
+                          <ChevronDown
+                            size={16}
+                            aria-hidden="true"
+                            className="shrink-0 motion-reduce:transition-none transition-transform group-open/context:rotate-180"
+                          />
+                        </summary>
+                        <p className="mt-2 text-xs leading-5 text-pro-text-muted">
+                          {item.text}
+                        </p>
+                      </details>
+                    )}
+                  </div>
                 </li>
               );
             })}
           </ul>
         </div>
       )}
-      {!generating && !!sources.length && (
+      {!generating && brief && !visibleBullets.length && !openItems.length && (
+        <p className="text-sm text-pro-text-muted">
+          The selected meetings have no saved discussion notes.
+        </p>
+      )}
+      {!!openItems.length && (
+        <div className="mt-5 border-t border-pro-border pt-4">
+          {(
+            [
+              ['Your commitments', myCommitments],
+              ['Other commitments', otherCommitments],
+              ['Ownership unconfirmed', unconfirmedCommitments],
+            ] as const
+          ).map(
+            ([heading, items]) =>
+              !!items.length && (
+                <div key={heading} className="mb-4 last:mb-0">
+                  <h4 className="mb-3 text-xs font-medium text-pro-text-muted">
+                    {heading}
+                  </h4>
+                  <ul className="space-y-3">
+                    {items.map((item) => {
+                      const number =
+                        sources.findIndex(
+                          (source) =>
+                            source.sourceMeetingId === item.sourceMeetingId,
+                        ) + 1;
+                      return (
+                        <li
+                          key={item.id}
+                          className="flex items-start gap-3 text-sm leading-6 text-pro-text-main"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="flex h-6 w-1.5 shrink-0 items-center"
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-pro-accent" />
+                          </span>
+                          <span>
+                            {item.text}
+                            {item.sourceMeetingId && (
+                              <button
+                                type="button"
+                                aria-label={`Open action item source: ${item.sourceLabel}`}
+                                title={`${item.sourceLabel}${item.sourceDate ? ` · ${formatPrepDate(item.sourceDate)}` : ''}`}
+                                onClick={() =>
+                                  onOpenMeeting?.(item.sourceMeetingId!)
+                                }
+                                className="ml-1.5 rounded-sm text-xs text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                              >
+                                [{number}]
+                              </button>
+                            )}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ),
+          )}
+        </div>
+      )}
+      {!!sources.length && (
         <details className="group/sources mt-5 text-xs text-pro-text-muted">
           <summary className="flex min-h-6 w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
             Sources · {sources.length}

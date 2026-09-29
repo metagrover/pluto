@@ -287,6 +287,7 @@ const InlineEditableText = ({
   const editSessionStartRef = useRef(text);
   const suppressNextBlurSaveRef = useRef(false);
   const mountedRef = useRef(true);
+  const refreshAfterEditingRef = useRef(false);
   const flushPendingSaveRef = useRef<() => void>(() => {});
 
   useEffect(() => {
@@ -402,7 +403,12 @@ const InlineEditableText = ({
           });
         }
         lastSavedValueRef.current = next;
-        onSaved();
+        if (editingRef.current) {
+          refreshAfterEditingRef.current = true;
+        } else {
+          refreshAfterEditingRef.current = false;
+          onSaved();
+        }
         if (mountedRef.current && generation === saveGenerationRef.current) {
           setError(null);
           reportSaveState('saved');
@@ -656,6 +662,7 @@ const InlineEditableText = ({
           draftRef.current = event.target.value;
         }}
         onBlur={(event) => {
+          editingRef.current = false;
           setEditing(false);
           if (suppressNextBlurSaveRef.current) {
             suppressNextBlurSaveRef.current = false;
@@ -663,6 +670,10 @@ const InlineEditableText = ({
           }
           draftRef.current = event.target.value;
           void save(event.target.value);
+          if (refreshAfterEditingRef.current) {
+            refreshAfterEditingRef.current = false;
+            onSaved();
+          }
         }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
@@ -1058,6 +1069,7 @@ export const MeetingNotesDocument = ({
   const nativeContinuationSaveChainsRef = useRef(
     new Map<string, Promise<void>>(),
   );
+  const unsavedContinuationIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
     meetingRef.current = meeting;
@@ -1075,6 +1087,7 @@ export const MeetingNotesDocument = ({
     setNativeContinuationOverrides(new Map());
     nativeContinuationStateRef.current.clear();
     nativeContinuationSaveChainsRef.current.clear();
+    unsavedContinuationIdsRef.current.clear();
   }, [meeting.id]);
   useEffect(() => {
     if (!deletedContinuation) return;
@@ -1133,31 +1146,16 @@ export const MeetingNotesDocument = ({
     const parentPath = block.nativeContinuation?.parentPath || block.path;
     if (!parentPath || creatingContinuationPath === parentPath) return;
     setCreatingContinuationPath(parentPath);
-    handleSaveStateChange('saving');
     const id =
       globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
     const latest = getNativeContinuations(
       parentPath,
       block.nativeContinuations || [],
     );
-    try {
-      const continuations = [...latest, { id, text: '' }];
-      setPendingNativeContinuationId(id);
-      await saveNativeContinuations(parentPath, continuations);
-      handleSaveStateChange('saved');
-      onDocumentChanged();
-    } catch (cause) {
-      setNativeContinuationState(parentPath, latest);
-      setPendingNativeContinuationId((pendingId) =>
-        pendingId === id ? null : pendingId,
-      );
-      handleSaveStateChange('error', () => {
-        void createNativeContinuation(block);
-      });
-      throw cause;
-    } finally {
-      setCreatingContinuationPath(null);
-    }
+    unsavedContinuationIdsRef.current.add(id);
+    setPendingNativeContinuationId(id);
+    setNativeContinuationState(parentPath, [...latest, { id, text: '' }]);
+    setCreatingContinuationPath(null);
   };
 
   const updateNativeContinuation = async (
@@ -1177,6 +1175,7 @@ export const MeetingNotesDocument = ({
       )
       .filter((continuation) => continuation.text.trim());
     await saveNativeContinuations(parentPath, continuations);
+    unsavedContinuationIdsRef.current.delete(block.nativeContinuation.id);
   };
 
   const deleteNativeContinuation = async (block: MeetingNotesBlock) => {
@@ -1197,6 +1196,11 @@ export const MeetingNotesDocument = ({
     const remaining = latest.filter(
       (candidate) => candidate.id !== continuationId,
     );
+    if (unsavedContinuationIdsRef.current.delete(continuationId)) {
+      setNativeContinuationState(parentPath, remaining);
+      handleSaveStateChange('saved');
+      return;
+    }
     try {
       await saveNativeContinuations(parentPath, remaining);
       setDeletedContinuation({ parentPath, continuation });

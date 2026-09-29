@@ -399,7 +399,13 @@ it('keeps briefing compact without duplicate overview or empty sections and uses
     lastTime: [item, { ...item, id: 'duplicate' }],
     overview: [item],
     stillOpen: [],
-    talkingPoints: [],
+    talkingPoints: [
+      {
+        ...item,
+        id: 'suggested:discussion',
+        text: 'What is the latest update on this?',
+      },
+    ],
   });
   prep.meetings = [
     {
@@ -416,11 +422,15 @@ it('keeps briefing compact without duplicate overview or empty sections and uses
   const headings = Array.from(host.querySelectorAll('h3,h4')).map(
     (node) => node.textContent,
   );
-  expect(headings).toContain('Executive briefing');
+  expect(headings).toContain('Meeting recap');
+  expect(headings).toContain('Last discussion');
   expect(headings).not.toContain('Overview');
   expect(headings).not.toContain('Open follow-ups');
   const briefing = host.querySelector('[aria-label="Meeting briefing"]')!;
   expect(briefing.querySelectorAll('li')).toHaveLength(1);
+  expect(briefing.textContent).not.toContain(
+    'What is the latest update on this?',
+  );
   expect(
     briefing.querySelector('[aria-label="Open source: Launch review"]')
       ?.textContent,
@@ -428,7 +438,59 @@ it('keeps briefing compact without duplicate overview or empty sections and uses
   expect(Array.from(briefing.querySelectorAll('details'))[0].open).toBe(false);
 });
 
-it('shows a skeleton while regenerating and replaces it with the completed briefing', async () => {
+it('shows a concise generated recap with the original excerpt behind disclosure', async () => {
+  const source =
+    'Local speaker said the review was delayed until the new draft arrived.';
+  const summary =
+    'The review is waiting for the new draft before it can proceed.';
+  prep.meetings = [
+    {
+      id: 'past',
+      title: 'Launch review',
+      date: event.start,
+      participants: '',
+      preview: source,
+      context: source,
+      capturedAt: event.start,
+    },
+  ];
+  api.buildPrepBrief.mockResolvedValue({
+    overview: [
+      {
+        id: 'history',
+        text: source,
+        summary,
+        sourceQuote: source,
+        trustStatus: 'grounded',
+        sourceMeetingId: 'past',
+        sourceLabel: 'Launch review',
+        sourceDate: event.start,
+      },
+    ],
+    lastTime: [],
+    stillOpen: [],
+    talkingPoints: [],
+    synthesisStatus: 'ready',
+  });
+  await render();
+  const briefing = host.querySelector('[aria-label="Meeting briefing"]')!;
+  expect(briefing.textContent).toContain(summary);
+  expect(briefing.querySelector('summary')?.textContent).toContain(
+    'Read source excerpt',
+  );
+  expect(briefing.querySelector('details p')?.textContent).toBe(source);
+});
+
+it('keeps existing excerpts visible while regenerating and replaces them with a completed recap', async () => {
+  api.buildPrepBrief.mockResolvedValue({
+    overview: [
+      { id: 'old', text: 'The previous discussion remains readable.' },
+    ],
+    lastTime: [],
+    stillOpen: [],
+    talkingPoints: [],
+    synthesisStatus: 'fallback',
+  });
   prep.meetings = [
     {
       id: 'past',
@@ -448,9 +510,10 @@ it('shows a skeleton while regenerating and replaces it with the completed brief
     }),
   );
   await act(async () => button('Regenerate').click());
-  expect(
-    host.querySelector('[aria-label="Preparing meeting briefing"]'),
-  ).not.toBeNull();
+  expect(host.textContent).toContain(
+    'The previous discussion remains readable.',
+  );
+  expect(host.textContent).toContain('Refreshing recap…');
   expect(
     host
       .querySelector('[aria-label="Meeting briefing"]')
@@ -472,6 +535,7 @@ it('shows a skeleton while regenerating and replaces it with the completed brief
       lastTime: [],
       stillOpen: [],
       talkingPoints: [],
+      synthesisStatus: 'ready',
     }),
   );
   expect(
@@ -479,6 +543,129 @@ it('shows a skeleton while regenerating and replaces it with the completed brief
   ).toBeNull();
   expect(host.textContent).toContain('Review the latest customer pricing.');
   expect(button('Regenerate').disabled).toBe(false);
+});
+
+it('keeps the last successful recap when regeneration falls back', async () => {
+  const previous = {
+    id: 'previous',
+    text: 'The prior decision remains visible.',
+    sourceMeetingId: 'past',
+    sourceLabel: 'Launch review',
+    sourceDate: event.start,
+    trustStatus: 'grounded',
+  };
+  prep.meetings = [
+    {
+      id: 'past',
+      title: 'Launch review',
+      date: event.start,
+      participants: '',
+      preview: previous.text,
+      context: previous.text,
+      capturedAt: event.start,
+    },
+  ];
+  api.buildPrepBrief.mockResolvedValue({
+    overview: [previous],
+    lastTime: [previous],
+    stillOpen: [],
+    talkingPoints: [],
+    synthesisStatus: 'ready',
+  });
+  api.synthesizePrepBrief.mockResolvedValueOnce({
+    overview: [],
+    lastTime: [],
+    stillOpen: [],
+    talkingPoints: [],
+    synthesisStatus: 'fallback',
+  });
+  await render();
+  await act(async () => button('Regenerate').click());
+  expect(host.textContent).toContain(previous.text);
+  expect(host.textContent).toContain('last successful version is still shown');
+});
+
+it('refreshes a selected meeting snapshot through the explicit card control', async () => {
+  prep.meetings = [
+    {
+      id: 'past',
+      title: 'Launch',
+      date: event.start,
+      participants: '',
+      preview: 'Earlier context',
+      context: 'Earlier context',
+      capturedAt: event.start,
+    },
+  ];
+  await render();
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>(
+        '[aria-label="Refresh saved notes for Launch"]',
+      )!
+      .click(),
+  );
+  expect(api.saveMeetingPrep).toHaveBeenCalledWith(
+    expect.objectContaining({ occurrenceKey: 'event' }),
+    { refreshMeetingId: 'past' },
+  );
+});
+
+it('labels uncertain excerpts and separates commitments by confirmed ownership', async () => {
+  prep.meetings = [
+    {
+      id: 'past',
+      title: 'Launch review',
+      date: event.start,
+      participants: '',
+      preview: '',
+      context: 'Review required',
+      capturedAt: event.start,
+    },
+  ];
+  api.buildPrepBrief.mockResolvedValue({
+    overview: [
+      {
+        id: 'history',
+        text: 'A point that needs verification.',
+        trustStatus: 'needs_review',
+        sourceMeetingId: 'past',
+        sourceLabel: 'Launch review',
+        sourceDate: event.start,
+      },
+    ],
+    lastTime: [],
+    stillOpen: [
+      {
+        id: 'mine',
+        text: 'Send the draft',
+        ownerScope: 'self',
+        sourceMeetingId: 'past',
+        sourceLabel: 'Launch review',
+      },
+      {
+        id: 'theirs',
+        text: 'Review the draft',
+        ownerScope: 'other',
+        sourceMeetingId: 'past',
+        sourceLabel: 'Launch review',
+      },
+      {
+        id: 'unknown',
+        text: 'Confirm the date',
+        ownerScope: 'unconfirmed',
+        sourceMeetingId: 'past',
+        sourceLabel: 'Launch review',
+      },
+    ],
+    talkingPoints: [],
+    synthesisStatus: 'fallback',
+  });
+  await render();
+  expect(host.textContent).toContain('Needs review');
+  expect(host.textContent).toContain('Your commitments');
+  expect(host.textContent).toContain('Other commitments');
+  expect(host.textContent).toContain('Ownership unconfirmed');
 });
 
 it('shows calendar agenda in a collapsible tile with a right-side chevron', async () => {
@@ -624,7 +811,7 @@ it('shows all open action items even when the overview fills the briefing budget
   ];
   const open = vi.fn();
   await render({ onOpenMeeting: open });
-  expect(host.textContent).toContain('Open action items');
+  expect(host.textContent).toContain('Ownership unconfirmed');
   expect(host.textContent).toContain('Send the updated launch checklist');
   expect(host.textContent).toContain('Confirm the customer trial dates');
   await act(async () =>

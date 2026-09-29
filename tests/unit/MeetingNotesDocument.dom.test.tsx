@@ -296,6 +296,35 @@ describe('MeetingNotesDocument', () => {
     });
   });
 
+  it('refreshes the meeting after editing rather than during typing', async () => {
+    vi.useFakeTimers();
+    const onDocumentChanged = vi.fn();
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={meeting}
+          model={model}
+          transcriptSegments={transcript}
+          onDocumentChanged={onDocumentChanged}
+          onShowTranscript={vi.fn()}
+        />,
+      ),
+    );
+    const textarea = await openBlockEditor('Use docs as code.');
+    await changeTextarea(textarea!, 'Use the reviewed guide.');
+    await act(async () => vi.advanceTimersByTimeAsync(650));
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SAVE_USER_EDIT',
+      expect.objectContaining({
+        edited: 'Use the reviewed guide.',
+      }),
+    );
+    expect(onDocumentChanged).not.toHaveBeenCalled();
+    await act(async () => textarea?.blur());
+    expect(onDocumentChanged).toHaveBeenCalledTimes(1);
+  });
+
   it('flushes a pending inline edit when the document unmounts', async () => {
     vi.useFakeTimers();
     await act(async () => renderDocument());
@@ -541,13 +570,6 @@ describe('MeetingNotesDocument', () => {
   });
 
   it('offers an explicit Add item action for an editable section', async () => {
-    let finishSave: (() => void) | undefined;
-    invoke.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finishSave = () => resolve(null);
-        }),
-    );
     await act(async () => renderDocument());
     const outcomes = container.querySelector('[data-notes-section="outcomes"]');
     const addItem = Array.from(outcomes?.querySelectorAll('button') || []).find(
@@ -557,33 +579,16 @@ describe('MeetingNotesDocument', () => {
 
     await act(async () => addItem?.click());
 
-    expect(invoke).toHaveBeenCalledWith(
-      'SAVE_USER_EDIT',
-      expect.objectContaining({
-        meetingId: meeting.id,
-        path: 'native_continuations:all_decisions:0',
-        original: '[]',
-        edited: expect.stringMatching(/^\[{"id":".+","text":""}\]$/),
-      }),
-    );
+    expect(invoke).not.toHaveBeenCalled();
     expect(outcomes?.querySelectorAll('.meeting-note-block')).toHaveLength(2);
     expect(
       outcomes?.querySelector<HTMLTextAreaElement>(
         'textarea[aria-label="Edit new item"]',
       ),
     ).toBe(document.activeElement);
-    await act(async () => finishSave?.());
   });
 
-  it('removes an optimistic new item when its initial save fails', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    let failSave: ((cause: Error) => void) | undefined;
-    invoke.mockImplementationOnce(
-      () =>
-        new Promise((_, reject) => {
-          failSave = reject;
-        }),
-    );
+  it('discards an untouched new item without writing an empty row', async () => {
     await act(async () => renderDocument());
     const outcomes = container.querySelector('[data-notes-section="outcomes"]');
     const addItem = Array.from(outcomes?.querySelectorAll('button') || []).find(
@@ -592,18 +597,33 @@ describe('MeetingNotesDocument', () => {
 
     await act(async () => addItem?.click());
     expect(outcomes?.querySelectorAll('.meeting-note-block')).toHaveLength(2);
-    await act(async () => {
-      for (let index = 0; index < 2; index += 1) await Promise.resolve();
-    });
-    expect(failSave).toBeTypeOf('function');
-    await act(async () => {
-      failSave?.(new Error('synthetic create failure'));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(container.textContent).toContain('Notes were not saved');
-    expect(container.textContent).toContain('Retry save');
+    await act(async () => outcomes?.querySelector('textarea')?.blur());
     expect(outcomes?.querySelectorAll('.meeting-note-block')).toHaveLength(1);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('persists a new item once it has text', async () => {
+    await act(async () => renderDocument());
+    const outcomes = container.querySelector('[data-notes-section="outcomes"]');
+    const addItem = Array.from(outcomes?.querySelectorAll('button') || []).find(
+      (button) => button.textContent?.trim() === 'Add item',
+    );
+    await act(async () => addItem?.click());
+    const textarea = outcomes?.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Edit new item"]',
+    );
+    await changeTextarea(textarea!, 'Send the reviewed plan.');
+    await act(async () => textarea?.blur());
+
+    const writes = invoke.mock.calls.filter(
+      ([channel, payload]) =>
+        channel === 'SAVE_USER_EDIT' &&
+        payload.path === 'native_continuations:all_decisions:0',
+    );
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(writes[0][1].edited)).toEqual([
+      { id: expect.any(String), text: 'Send the reviewed plan.' },
+    ]);
   });
 
   it('uses a real persisted checkbox for generated actions', async () => {
@@ -653,7 +673,7 @@ describe('MeetingNotesDocument', () => {
     });
   });
 
-  it('creates a native continuation record when pressing Enter at a decision block end', async () => {
+  it('opens an unsaved continuation when pressing Enter at a decision block end', async () => {
     await act(async () => renderDocument());
     const textarea = await openBlockEditor('Use docs as code.');
     expect(textarea).toBeTruthy();
@@ -661,14 +681,10 @@ describe('MeetingNotesDocument', () => {
     const nextValue = await pressEnterAtEnd(textarea!);
     await act(async () => Promise.resolve());
     expect(nextValue).toBe('Use docs as code.');
-    expect(invoke).toHaveBeenCalledWith(
-      'SAVE_USER_EDIT',
-      expect.objectContaining({
-        path: 'native_continuations:all_decisions:0',
-        original: '[]',
-        edited: expect.stringMatching(/^\[{"id":".+","text":""}\]$/),
-      }),
-    );
+    expect(invoke).not.toHaveBeenCalled();
+    expect(
+      container.querySelector('textarea[aria-label="Edit new item"]'),
+    ).toBe(document.activeElement);
   });
 
   it('continues note-like outcomes blocks as markdown list items without explicit type', async () => {

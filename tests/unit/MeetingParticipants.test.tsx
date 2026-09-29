@@ -189,6 +189,59 @@ describe('MeetingParticipants', () => {
       expect(result[0].isVoiceMatched).toBe(true);
     });
 
+    it('counts one person when two speaker labels share a person binding', () => {
+      const identityState = {
+        speakers: ['Speaker 1', 'Speaker 2'],
+        people: [{ id: 'person-avery', name: 'Avery Davis' }],
+        bindings: [
+          { speaker: 'Speaker 1', personId: 'person-avery' },
+          { speaker: 'Speaker 2', personId: 'person-avery' },
+        ],
+      } as MeetingIdentityState;
+
+      const result = resolveMeetingParticipants({
+        transcriptSegments: [
+          { speaker: 'Speaker 1' },
+          { speaker: 'Speaker 1' },
+          { speaker: 'Speaker 2' },
+        ],
+        identityState,
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        name: 'Avery Davis',
+        personId: 'person-avery',
+        speakerKeys: ['Speaker 1', 'Speaker 2'],
+        turnCount: 3,
+      });
+    });
+
+    it('keeps distinct people with the same name separate', () => {
+      const result = resolveMeetingParticipants({
+        transcriptSegments: [
+          { speaker: 'Speaker 1' },
+          { speaker: 'Speaker 2' },
+        ],
+        identityState: {
+          speakers: ['Speaker 1', 'Speaker 2'],
+          people: [
+            { id: 'person-1', name: 'Alex Kim' },
+            { id: 'person-2', name: 'Alex Kim' },
+          ],
+          bindings: [
+            { speaker: 'Speaker 1', personId: 'person-1' },
+            { speaker: 'Speaker 2', personId: 'person-2' },
+          ],
+        } as MeetingIdentityState,
+      });
+
+      expect(result.map((person) => person.personId)).toEqual([
+        'person-1',
+        'person-2',
+      ]);
+    });
+
     it('does not add calendar attendees as non-speaking participants', () => {
       const segments = [{ speaker: 'Me' }];
       const calendarAttendeeNames = ['Avery Davis', 'Jordan Lee'];
@@ -367,6 +420,39 @@ describe('MeetingParticipants', () => {
       });
 
       expect(onClose).toHaveBeenCalled();
+    });
+
+    it('lets either grouped speaker identification be corrected', async () => {
+      const onIdentifySpeaker = vi.fn();
+      await act(async () => {
+        root.render(
+          <MeetingParticipantsPopover
+            participants={[
+              {
+                id: 'speaker:Speaker 1',
+                name: 'Avery Davis',
+                speakerKey: 'Speaker 1',
+                speakerKeys: ['Speaker 1', 'Speaker 2'],
+                personId: 'person-avery',
+                isSelf: false,
+                isAnonymous: false,
+                turnCount: 3,
+                source: 'transcript',
+              },
+            ]}
+            onClose={vi.fn()}
+            onOpenPerson={vi.fn()}
+            onIdentifySpeaker={onIdentifySpeaker}
+          />,
+        );
+      });
+
+      expect(container.textContent).toContain('1 person');
+      const secondSpeakerChange = container.querySelector<HTMLButtonElement>(
+        '[title="Change identification for Speaker 2"]',
+      );
+      await act(async () => secondSpeakerChange?.click());
+      expect(onIdentifySpeaker).toHaveBeenCalledWith('Speaker 2');
     });
   });
 });

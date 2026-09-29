@@ -258,8 +258,18 @@ it('persists briefings without changing personal notes, rejects stale generation
     meetingIds: ['past'],
   });
   const fingerprint = JSON.stringify(prep.meetings);
-  const brief = { title: 'Generated prep' } as PreMeetingBrief;
+  const brief = {
+    title: 'Generated prep',
+    synthesisStatus: 'ready',
+  } as PreMeetingBrief;
   expect(store.saveBrief(prep.occurrenceKey, fingerprint, brief)).toBe(true);
+  expect(
+    store.saveBrief(prep.occurrenceKey, fingerprint, {
+      ...brief,
+      title: 'Fallback excerpts',
+      synthesisStatus: 'fallback',
+    }),
+  ).toBe(false);
   expect(reopen().get(prep.occurrenceKey)?.briefing?.title).toBe(
     'Generated prep',
   );

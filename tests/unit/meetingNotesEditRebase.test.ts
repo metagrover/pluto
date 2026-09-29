@@ -1,5 +1,30 @@
 import { expect, it } from 'vitest';
-import { rebaseMeetingNotesEdits } from '../../src/utils/meetingNotesEditRebase';
+import {
+  applyMeetingNotesUserEdit,
+  rebaseMeetingNotesEdits,
+} from '../../src/utils/meetingNotesEditRebase';
+
+it('removes a saved continuation edit when its value returns to the original', () => {
+  const path = 'native_continuations:all_decisions:0';
+  const result = applyMeetingNotesUserEdit(
+    {
+      [path]: {
+        original: '[]',
+        edited: '[{"id":"row","text":""}]',
+        edited_at: '2026-01-01T00:00:00Z',
+      },
+    },
+    path,
+    '[]',
+    '[]',
+    '2026-01-02T00:00:00Z',
+  );
+
+  expect(result).toEqual({ edits: {}, changed: true });
+  expect(applyMeetingNotesUserEdit({}, path, '[]', '[]', 'now').changed).toBe(
+    false,
+  );
+});
 
 it('does not preserve a trailing-space-only edit over regenerated notes', () => {
   const result = rebaseMeetingNotesEdits({

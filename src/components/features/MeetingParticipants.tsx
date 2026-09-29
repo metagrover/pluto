@@ -17,6 +17,7 @@ export interface ResolvedMeetingParticipant {
   id: string;
   name: string;
   speakerKey?: string;
+  speakerKeys?: string[];
   personId?: string | null;
   isSelf: boolean;
   isAnonymous: boolean;
@@ -120,8 +121,7 @@ export function resolveMeetingParticipants(params: {
   }
 
   const participants: ResolvedMeetingParticipant[] = [];
-  const processedPersonIds = new Set<string>();
-  const processedNames = new Set<string>();
+  const participantByPersonId = new Map<string, ResolvedMeetingParticipant>();
 
   // 1. Process transcript speakers
   for (const [speakerKey, turns] of turnCounts.entries()) {
@@ -181,21 +181,27 @@ export function resolveMeetingParticipants(params: {
       ? roleByPersonId.get(resolvedPersonId) || null
       : null;
 
-    if (resolvedPersonId) {
-      processedPersonIds.add(resolvedPersonId);
-    }
-    processedNames.add(cleanName.toLowerCase());
-
     const binding = identityState?.bindings?.find(
       (b) => b.speaker === speakerKey,
     );
     const isVoiceMatched =
       binding?.assignment?.kind === 'voice_match_strong_v1';
 
-    participants.push({
+    const existing = resolvedPersonId
+      ? participantByPersonId.get(resolvedPersonId)
+      : undefined;
+    if (existing) {
+      existing.speakerKeys?.push(speakerKey);
+      existing.turnCount += turns;
+      existing.isVoiceMatched ||= isVoiceMatched;
+      continue;
+    }
+
+    const participant: ResolvedMeetingParticipant = {
       id: `speaker:${speakerKey}`,
       name: cleanName,
       speakerKey,
+      speakerKeys: [speakerKey],
       personId: resolvedPersonId,
       isSelf,
       isAnonymous: false,
@@ -203,7 +209,10 @@ export function resolveMeetingParticipants(params: {
       turnCount: turns,
       role,
       source: 'transcript',
-    });
+    };
+    participants.push(participant);
+    if (resolvedPersonId)
+      participantByPersonId.set(resolvedPersonId, participant);
   }
 
   // Sort: self first, then participants with profile, then by turn count, then alphabetical
@@ -359,40 +368,61 @@ export const MeetingParticipantsPopover: React.FC<
                     </>
                   )}
                 </div>
-                {(participant.isVoiceMatched ||
-                  (participant.speakerKey &&
-                    !participant.isAnonymous &&
-                    !participant.isSelf &&
-                    participant.speakerKey !== participant.name)) && (
-                  <div className="mt-1 flex min-w-0 flex-col items-start gap-1 text-[11px] leading-4">
-                    {participant.isVoiceMatched ? (
-                      <span className="inline-flex max-w-full items-center gap-1 whitespace-nowrap text-emerald-700 dark:text-emerald-300">
-                        <span className="h-1 w-1 rounded-full bg-current" />
-                        Recognized voice
-                        {participant.speakerKey && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onIdentifySpeaker(participant.speakerKey || null)
-                            }
-                            className="ml-1 rounded px-0.5 font-medium text-pro-text-muted underline decoration-pro-border underline-offset-2 transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                            title={`Change speaker identification for ${participant.name}`}
-                          >
-                            Change
-                          </button>
-                        )}
+                {participant.speakerKeys &&
+                participant.speakerKeys.length > 1 ? (
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] leading-4 text-pro-text-muted">
+                    {participant.speakerKeys.map((speakerKey) => (
+                      <span key={speakerKey}>
+                        {getAnonymousSpeakerDisplayLabel(speakerKey)}{' '}
+                        <button
+                          type="button"
+                          onClick={() => onIdentifySpeaker(speakerKey)}
+                          className="rounded px-0.5 font-medium underline decoration-pro-border underline-offset-2 hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                          title={`Change identification for ${speakerKey}`}
+                        >
+                          Change
+                        </button>
                       </span>
-                    ) : participant.speakerKey &&
+                    ))}
+                  </div>
+                ) : (
+                  (participant.isVoiceMatched ||
+                    (participant.speakerKey &&
                       !participant.isAnonymous &&
                       !participant.isSelf &&
-                      participant.speakerKey !== participant.name ? (
-                      <span className="text-pro-text-muted/70">
-                        {getAnonymousSpeakerDisplayLabel(
-                          participant.speakerKey,
-                        )}
-                      </span>
-                    ) : null}
-                  </div>
+                      participant.speakerKey !== participant.name)) && (
+                    <div className="mt-1 flex min-w-0 flex-col items-start gap-1 text-[11px] leading-4">
+                      {participant.isVoiceMatched ? (
+                        <span className="inline-flex max-w-full items-center gap-1 whitespace-nowrap text-emerald-700 dark:text-emerald-300">
+                          <span className="h-1 w-1 rounded-full bg-current" />
+                          Recognized voice
+                          {participant.speakerKey && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onIdentifySpeaker(
+                                  participant.speakerKey || null,
+                                )
+                              }
+                              className="ml-1 rounded px-0.5 font-medium text-pro-text-muted underline decoration-pro-border underline-offset-2 transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                              title={`Change speaker identification for ${participant.name}`}
+                            >
+                              Change
+                            </button>
+                          )}
+                        </span>
+                      ) : participant.speakerKey &&
+                        !participant.isAnonymous &&
+                        !participant.isSelf &&
+                        participant.speakerKey !== participant.name ? (
+                        <span className="text-pro-text-muted/70">
+                          {getAnonymousSpeakerDisplayLabel(
+                            participant.speakerKey,
+                          )}
+                        </span>
+                      ) : null}
+                    </div>
+                  )
                 )}
               </div>
 

@@ -103,6 +103,8 @@ import {
   formatMeetingTranscriptForClipboard,
 } from './meetingTranscriptPresentation';
 
+const EMPTY_SPEAKER_DISPLAY_NAMES: Record<string, string> = {};
+
 const SOURCES_ENABLED = isFeatureEnabled('sources');
 
 const speakerDisplayNamesCache: Record<string, Record<string, string>> = {};
@@ -1014,12 +1016,18 @@ const SelectedMeetingView = ({
     }
   };
 
-  const { v2, v3 } = resolveMeetingAnalysis(selectedMeeting);
+  const { v2, v3 } = useMemo(
+    () => resolveMeetingAnalysis(selectedMeeting),
+    [selectedMeeting],
+  );
   const downstreamPresentation =
     getDownstreamProcessingPresentation(selectedMeeting);
   const canRegenerateMeetingIntelligence =
     canGenerateMeetingIntelligence(selectedMeeting);
-  const editsMap = parseUserEditsJson(selectedMeeting.user_edits_json);
+  const editsMap = useMemo(
+    () => parseUserEditsJson(selectedMeeting.user_edits_json),
+    [selectedMeeting.user_edits_json],
+  );
   const editConflicts = parseAnalysisEditConflictsJson(
     selectedMeeting.analysis_edit_conflicts_json,
   );
@@ -1039,7 +1047,7 @@ const SelectedMeetingView = ({
     speakerDisplayNamesByMeeting[String(selectedMeeting.id)] ??
     selectedMeeting.speaker_display_names ??
     meetingIdentityState?.speakerDisplayNames ??
-    {};
+    EMPTY_SPEAKER_DISPLAY_NAMES;
   const rawTranscriptTurns = buildMeetingTranscriptTurns(
     readableTranscriptSegments,
   );
@@ -1257,7 +1265,10 @@ const SelectedMeetingView = ({
     const map = new Map<string, string>();
     for (const p of resolvedParticipants) {
       if (p.personId) {
-        if (p.speakerKey) map.set(p.speakerKey, p.personId);
+        for (const speakerKey of p.speakerKeys ??
+          (p.speakerKey ? [p.speakerKey] : [])) {
+          map.set(speakerKey, p.personId);
+        }
         map.set(p.name, p.personId);
       }
     }
@@ -1272,13 +1283,17 @@ const SelectedMeetingView = ({
   const canImproveHistoricalSpeakerLabelsForMeeting =
     canImproveHistoricalSpeakerLabels(selectedMeeting);
 
-  const notesDocument = buildMeetingNotesDocument({
-    v2,
-    v3,
-    userNotes: selectedMeeting.user_notes || '',
-    editsMap,
-    displayNames,
-  });
+  const notesDocument = useMemo(
+    () =>
+      buildMeetingNotesDocument({
+        v2,
+        v3,
+        userNotes: selectedMeeting.user_notes || '',
+        editsMap,
+        displayNames,
+      }),
+    [v2, v3, selectedMeeting.user_notes, editsMap, displayNames],
+  );
   const draftPreview = !notesDocument.hasAnalysis
     ? currentNotesPreview(selectedMeeting)
     : null;
