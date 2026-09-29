@@ -633,7 +633,7 @@ describe('PersonDossier', () => {
     expect(markup).not.toContain('Earlier context');
   });
 
-  it('puts direct work ahead of conversational observations while a summary is pending', () => {
+  it('pairs work from distinct conversations with its source while a summary is pending', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
         detail={{
@@ -669,14 +669,19 @@ describe('PersonDossier', () => {
     );
 
     expect(markup.indexOf('Avery Chen will revise')).toBeLessThan(
-      markup.indexOf('Recent developments'),
+      markup.indexOf('Commitments'),
     );
     expect(markup.indexOf('Avery will coordinate')).toBeLessThan(
-      markup.indexOf('Recent developments'),
+      markup.indexOf('Commitments'),
     );
-    expect(markup.indexOf('Avery Chen noted')).toBeGreaterThan(
-      markup.indexOf('Recent developments'),
+    expect(markup.indexOf('Product review · Jul 12')).toBeGreaterThan(
+      markup.indexOf('Avery Chen will revise'),
     );
+    expect(markup.indexOf('Product review · Jul 12')).toBeLessThan(
+      markup.indexOf('Avery will coordinate'),
+    );
+    expect(markup).not.toContain('Avery Chen noted');
+    expect(markup).not.toContain('Recent developments');
     expect(markup.match(/>Product review ·/g)).toHaveLength(1);
   });
 
