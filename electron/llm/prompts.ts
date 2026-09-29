@@ -315,6 +315,8 @@ const getScopeGuidance = (scopeType: string): string => {
     case 'person_context':
       return `Build a PERSON DOSSIER for the individual named by scope.title. The reader needs to understand who this person is in the work, the capacity in which they operate, and what they have been doing.
 - Current Read headline: write a concise, person-specific summary of their evidenced function or operating capacity and main work. Prefer "In these conversations, [name] has handled..." to a broad meeting recap. Do not use a project update as a biography.
+- A one-off task or promise is not a person summary. Describe recurring work across distinct meetings, or leave the headline empty when the history cannot support one.
+- Put meeting IDs only in citation fields. Never include an ID or citation marker in a headline, stream title, or prose.
 - Distinguish an explicit job title from an inferred operating capacity. Never invent a title, employer, reporting line, authority, ownership, or attendance. If the evidence does not establish a formal role, describe only what they demonstrably did or were responsible for; omit a role claim entirely if neither is established.
 - Active streams: group the person's own responsibilities and recurring contributions, not every topic discussed in meetings linked to them. Each stream's current_read should explain what this person did, decided, owned, or advised and when. Do not attribute group work or another person's action to them.
 - Supporting bullets: prioritize a few concrete developments in their work, grounded in cited items and ordered by recency. Separate durable capacity from recent activity.
@@ -492,7 +494,7 @@ Non-negotiable requirements:
 You are generating a structured knowledge document for this scope:
 - scope.type: ${scopeType}
 - scope.title: ${scopeTitle}
-${scopeType === 'person_context' ? '- For this person dossier, merge only claims specifically attributable to this individual. Preserve the distinction between formal role, observed capacity, and recent work. The Current Read must answer who this person is in the work and what they have been doing; omit unsupported role claims.\n' : ''}
+${scopeType === 'person_context' ? '- For this person dossier, merge only claims specifically attributable to this individual. Preserve the distinction between formal role, observed capacity, and recent work. Group recurring work across distinct meetings; keep one-off tasks out of the headline and active streams. Put meeting IDs only in citation fields, never prose. Omit unsupported role claims.\n' : ''}
 
 Chunk documents:
 ${chunksBlock || '(none)'}

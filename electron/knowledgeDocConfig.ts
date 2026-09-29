@@ -1,7 +1,7 @@
 import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
 
 export const KNOWLEDGE_SYNTHESIS_VERSION = KNOWLEDGE_V2_SYNTHESIS_VERSION;
-export const PERSON_CONTEXT_SYNTHESIS_VERSION = 6;
+export const PERSON_CONTEXT_SYNTHESIS_VERSION = 7;
 
 const synthesisVersionForScope = (scopeType?: string): number =>
   scopeType === 'person_context'

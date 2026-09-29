@@ -1,3 +1,8 @@
+import {
+  buildPersonDossierRead,
+  cleanPersonReadText,
+} from '../src/utils/personDossierRead';
+
 export const KNOWLEDGE_V2_SCHEMA_VERSION = 2;
 export const KNOWLEDGE_V2_SYNTHESIS_VERSION = 4;
 
@@ -187,64 +192,57 @@ export const groundPersonKnowledgeV2Document = (
   const activeStreams = doc.active_streams.filter((stream) =>
     supportedStreamIds.has(stream.id),
   );
-  const citedMeetingIds = new Set([
-    ...evidenceIndex.map((entry) => entry.meeting_id),
-    ...[...needsAttention, ...patterns, ...risksAndUnknowns].flatMap((item) =>
-      item.citations.map((citation) => citation.meeting_id),
+  const personRead = buildPersonDossierRead(
+    expectedPersonName,
+    activeStreams,
+    evidenceIndex,
+  );
+  const recurringStreamIds = new Set(
+    personRead.workstreams.map((stream) => stream.id),
+  );
+  const headlineMeetingIds = new Set(
+    personRead.workstreams.flatMap((stream) =>
+      stream.sources.map((source) => source.meeting_id),
     ),
-  ]);
-  const quotedOwnership = [
-    ...evidenceIndex.map((entry) => entry.quote),
-    ...[...needsAttention, ...patterns, ...risksAndUnknowns].flatMap((item) =>
-      item.citations.map((citation) => citation.quote),
-    ),
-  ].some((quote) => {
-    const normalized = normalizeText(quote);
-    const prefix = [personName, firstName].find((name) =>
-      normalized.startsWith(`${name} `),
-    );
-    return Boolean(
-      prefix &&
-        /^(?:is |was |has been |will )?(?:responsible for|accountable for|assigned to|owns|owned|leads|led|manages|managed|oversees|oversaw)\b/.test(
-          normalized.slice(prefix.length + 1),
-        ),
-    );
+  );
+  const cleanItem = (item: KnowledgeV2Item): KnowledgeV2Item => ({
+    ...item,
+    title: cleanPersonReadText(item.title),
+    summary: cleanPersonReadText(item.summary),
+    why_now: cleanPersonReadText(item.why_now),
   });
-  const describeObservedWork = (text: string): string =>
-    quotedOwnership
-      ? text
-      : text
-          .replace(/\bis responsible for\b/gi, 'has worked on')
-          .replace(/\band managing\b/gi, 'and on')
-          .replace(/\bmanages\b/gi, 'works on')
-          .replace(/\bleads\b/gi, 'works on')
-          .replace(/\bowns\b/gi, 'works on')
-          .replace(/\boversees\b/gi, 'works on')
-          .replace(/\boverseeing\b/gi, 'working on');
-  const headline = doc.current_read.headline.trim();
-  const normalizedHeadline = normalizeText(headline).replace(
-    /^in these conversations, /,
-    '',
-  );
-  const isPersonHeadline = [personName, firstName].some((name) =>
-    normalizedHeadline.startsWith(`${name} `),
-  );
   return {
     ...doc,
     current_read: {
       ...doc.current_read,
-      headline: isPersonHeadline ? describeObservedWork(headline) : '',
+      headline: personRead.headline ?? '',
+      supporting_bullets: personRead.workstreams.map(
+        (stream) => `${stream.title}: ${stream.detail}`,
+      ),
       cited_item_count:
         needsAttention.length + patterns.length + risksAndUnknowns.length,
-      cited_meeting_count: citedMeetingIds.size,
+      cited_meeting_count: headlineMeetingIds.size,
+      source_count: headlineMeetingIds.size,
+      trust_message:
+        headlineMeetingIds.size > 0
+          ? `Based on ${headlineMeetingIds.size} cited conversations.`
+          : 'No attributable sources support this read yet.',
+      evidence_quality: {
+        ...doc.current_read.evidence_quality,
+        cited_meeting_count: headlineMeetingIds.size,
+        source_count: headlineMeetingIds.size,
+      },
     },
-    active_streams: activeStreams.map((stream) => ({
-      ...stream,
-      current_read: describeObservedWork(stream.current_read),
-    })),
-    needs_attention: needsAttention,
-    patterns,
-    risks_and_unknowns: risksAndUnknowns,
+    active_streams: activeStreams
+      .filter((stream) => recurringStreamIds.has(stream.id))
+      .map((stream) => ({
+        ...stream,
+        title: cleanPersonReadText(stream.title),
+        current_read: cleanPersonReadText(stream.current_read),
+      })),
+    needs_attention: needsAttention.map(cleanItem),
+    patterns: patterns.map(cleanItem),
+    risks_and_unknowns: risksAndUnknowns.map(cleanItem),
     evidence_index: evidenceIndex,
   };
 };
