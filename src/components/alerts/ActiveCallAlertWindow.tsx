@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import plutoLogo from '../../assets/brand/pluto_logo.svg?inline';
 import plutoLogoDark from '../../assets/brand/pluto_logo_dark_mode.svg?inline';
+import { formatRelativeStartTime } from '../../utils/relativeStartTime';
 
 const LIFETIME_MS = 15_000;
 
@@ -18,20 +19,6 @@ type AlertData =
       hasLink: boolean;
       attendees?: number;
     };
-
-const formatRelativeStartTime = (isoStart: string): string => {
-  const startMs = new Date(isoStart).getTime();
-  const diffMs = startMs - Date.now();
-  const diffMinutes = Math.round(diffMs / 60000);
-
-  if (Math.abs(diffMinutes) <= 1) {
-    return 'Starts now';
-  }
-  if (diffMinutes > 1) {
-    return `Starts in ${diffMinutes}m`;
-  }
-  return `Started ${Math.abs(diffMinutes)}m ago`;
-};
 
 const getAlertData = (): AlertData => {
   const params = new URLSearchParams(window.location.search);

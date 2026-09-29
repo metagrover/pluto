@@ -3,6 +3,7 @@ import type React from 'react';
 import { useEffect, useState } from 'react';
 import type { CalendarEvent } from '../../../electron/calendar/types';
 import { hasConferenceLink } from '../../utils/conferenceUrl';
+import { formatRelativeStartTime } from '../../utils/relativeStartTime';
 
 interface CalendarStartPromptBannerProps {
   event: CalendarEvent;
@@ -10,20 +11,6 @@ interface CalendarStartPromptBannerProps {
   onPrepare: (event: CalendarEvent) => void;
   onDismiss: (occurrenceKey: string) => void;
 }
-
-const formatRelativeStartTime = (isoStart: string): string => {
-  const startMs = new Date(isoStart).getTime();
-  const diffMs = startMs - Date.now();
-  const diffMinutes = Math.round(diffMs / 60000);
-
-  if (Math.abs(diffMinutes) <= 1) {
-    return 'Starts now';
-  }
-  if (diffMinutes > 1) {
-    return `Starts in ${diffMinutes}m`;
-  }
-  return `Started ${Math.abs(diffMinutes)}m ago`;
-};
 
 export const CalendarStartPromptBanner: React.FC<
   CalendarStartPromptBannerProps
