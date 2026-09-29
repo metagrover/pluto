@@ -3,6 +3,7 @@ export type AppTheme =
   | 'dark'
   | 'system'
   | 'terracotta'
+  | 'pluto-site'
   | 'coral'
   | 'aubergine'
   | 'claude'

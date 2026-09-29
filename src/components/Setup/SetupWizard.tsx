@@ -300,8 +300,8 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                   : 'Preparing your local workspace.'}
               </span>
             }
-            description="Pluto keeps this screen current as each recording requirement becomes ready."
-            footer="The transcription model is downloaded once."
+            description="Your microphone, system audio, and local transcription need to be ready before you record."
+            footer="Recording and transcription happen on this Mac."
           />
 
           <section className="flex min-h-[38rem] items-center px-7 py-12 sm:px-12 lg:px-16 xl:px-24">

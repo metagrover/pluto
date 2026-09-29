@@ -1,8 +1,8 @@
 import {
+  BookOpen,
   Files,
   FolderKanban,
   Hash,
-  Heart,
   Home,
   Library,
   MessageSquare,
@@ -85,7 +85,12 @@ export const Sidebar = ({
           size={24}
           showText
           variant={
-            theme === 'aubergine' || theme === 'slack' || theme === 'dark'
+            theme === 'aubergine' ||
+            theme === 'slack' ||
+            theme === 'dark' ||
+            theme === 'pluto-site' ||
+            theme === 'airbnb' ||
+            theme === 'coral'
               ? 'light'
               : 'default'
           }
@@ -152,7 +157,9 @@ export const Sidebar = ({
         <div className="space-y-0.5">
           <button
             type="button"
-            data-active={activeTab === 'hub' && !selectedMeetingId ? 'true' : undefined}
+            data-active={
+              activeTab === 'hub' && !selectedMeetingId ? 'true' : undefined
+            }
             onClick={() => {
               setActiveTab('hub');
               setSelectedMeetingId(null);
@@ -178,7 +185,11 @@ export const Sidebar = ({
           </h3>
           <button
             type="button"
-            data-active={activeTab === 'projects' && !selectedMeetingId ? 'true' : undefined}
+            data-active={
+              activeTab === 'projects' && !selectedMeetingId
+                ? 'true'
+                : undefined
+            }
             onClick={() => {
               setActiveTab('projects');
               setSelectedMeetingId(null);
@@ -204,7 +215,9 @@ export const Sidebar = ({
           </h3>
           <button
             type="button"
-            data-active={activeTab === 'chat' && !selectedMeetingId ? 'true' : undefined}
+            data-active={
+              activeTab === 'chat' && !selectedMeetingId ? 'true' : undefined
+            }
             onClick={() => {
               setActiveTab('chat');
               setSelectedMeetingId(null);
@@ -228,7 +241,9 @@ export const Sidebar = ({
           </button>
           <button
             type="button"
-            data-active={activeTab === 'people' && !selectedMeetingId ? 'true' : undefined}
+            data-active={
+              activeTab === 'people' && !selectedMeetingId ? 'true' : undefined
+            }
             onClick={onOpenPeopleHome}
             className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'people' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
@@ -244,7 +259,9 @@ export const Sidebar = ({
           </button>
           <button
             type="button"
-            data-active={activeTab === 'sources' && !selectedMeetingId ? 'true' : undefined}
+            data-active={
+              activeTab === 'sources' && !selectedMeetingId ? 'true' : undefined
+            }
             onClick={() => {
               setActiveTab('sources');
               setSelectedMeetingId(null);
@@ -270,7 +287,11 @@ export const Sidebar = ({
           </h3>
           <button
             type="button"
-            data-active={activeTab === 'meetings' && !selectedMeetingId ? 'true' : undefined}
+            data-active={
+              activeTab === 'meetings' && !selectedMeetingId
+                ? 'true'
+                : undefined
+            }
             onClick={() => {
               setActiveTab('meetings');
               setSelectedMeetingId(null);
@@ -339,7 +360,9 @@ export const Sidebar = ({
                   <div key={m.id}>
                     <button
                       type="button"
-                      data-active={selectedMeetingId === m.id ? 'true' : undefined}
+                      data-active={
+                        selectedMeetingId === m.id ? 'true' : undefined
+                      }
                       onClick={() => {
                         setSelectedMeetingId(m.id);
                         setActiveTab('hub');
@@ -376,7 +399,9 @@ export const Sidebar = ({
       <div className="px-3 py-3 border-t border-pro-border flex items-center justify-between gap-2">
         <button
           type="button"
-          data-active={activeTab === 'settings' && !selectedMeetingId ? 'true' : undefined}
+          data-active={
+            activeTab === 'settings' && !selectedMeetingId ? 'true' : undefined
+          }
           onClick={() => {
             setActiveTab('settings');
             setSelectedMeetingId(null);
@@ -401,7 +426,7 @@ export const Sidebar = ({
               'light',
               'dark',
               'terracotta',
-              'coral',
+              'pluto-site',
               'aubergine',
               'system',
             ];
@@ -410,8 +435,8 @@ export const Sidebar = ({
               theme === 'celestial' ||
               theme === 'botanical'
                 ? 'terracotta'
-                : theme === 'airbnb'
-                  ? 'coral'
+                : theme === 'airbnb' || theme === 'coral'
+                  ? 'pluto-site'
                   : theme === 'slack'
                     ? 'aubergine'
                     : theme;
@@ -421,7 +446,11 @@ export const Sidebar = ({
             setTheme(themeCycle[nextIndex]);
           }}
           className="w-6 h-6 rounded-md hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-pro-text-main/70 hover:text-pro-text-main transition-colors"
-          title={`Theme: ${theme}`}
+          title={`Theme: ${
+            theme === 'pluto-site' || theme === 'coral' || theme === 'airbnb'
+              ? 'Pluto'
+              : theme
+          }`}
         >
           {theme === 'dark' ? (
             <Moon size={14} />
@@ -432,8 +461,10 @@ export const Sidebar = ({
             theme === 'celestial' ||
             theme === 'botanical' ? (
             <Sparkles size={14} className="text-[#D97757]" />
-          ) : theme === 'coral' || theme === 'airbnb' ? (
-            <Heart size={14} className="text-[#FF385C]" />
+          ) : theme === 'pluto-site' ||
+            theme === 'coral' ||
+            theme === 'airbnb' ? (
+            <BookOpen size={14} className="text-[#3467A8]" />
           ) : theme === 'aubergine' || theme === 'slack' ? (
             <Hash size={14} className="text-[#9E629F]" />
           ) : (

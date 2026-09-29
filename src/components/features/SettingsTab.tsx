@@ -1,11 +1,11 @@
 import {
+  BookOpen,
   Check,
   CheckCircle2,
   Cloud,
   Cpu,
   FileWarning,
   Hash,
-  Heart,
   Laptop,
   Moon,
   RefreshCw,
@@ -88,6 +88,8 @@ interface ThemeOptionPreview {
   accentColor: string;
   textColor: string;
   sidebarBorder?: string;
+  sidebarTextColor?: string;
+  sidebarAccentColor?: string;
 }
 
 interface ThemeOption {
@@ -131,25 +133,26 @@ const themeOptions: ThemeOption[] = [
     description: 'Warm sand & earthy clay',
     icon: Sparkles,
     preview: {
-      sidebarBg: '#F3EFE6',
+      sidebarBg: '#EEEDE8',
       canvasBg: '#FBF9F5',
       accentColor: '#D97757',
       textColor: '#24211D',
-      sidebarBorder: '#DED8CE',
+      sidebarBorder: '#DDDDD7',
     },
   },
   {
-    id: 'coral',
-    name: 'Coral',
-    badge: 'Airbnb',
-    description: 'Modern white & Rausch coral',
-    icon: Heart,
+    id: 'pluto-site',
+    name: 'Pluto',
+    description: 'Soft white canvas & deep blue sidebar',
+    icon: BookOpen,
     preview: {
-      sidebarBg: '#F8F8F8',
-      canvasBg: '#FFFFFF',
-      accentColor: '#FF385C',
-      textColor: '#222222',
-      sidebarBorder: '#E5E5E5',
+      sidebarBg: '#192B43',
+      canvasBg: '#F9FBFC',
+      accentColor: '#3467A8',
+      textColor: '#202C3C',
+      sidebarBorder: '#354A63',
+      sidebarTextColor: '#F4F4EF',
+      sidebarAccentColor: '#A5C9F0',
     },
   },
   {
@@ -558,7 +561,8 @@ export const SettingsTab = ({
                       (theme === 'claude' ||
                         theme === 'celestial' ||
                         theme === 'botanical')) ||
-                    (option.id === 'coral' && theme === 'airbnb') ||
+                    (option.id === 'pluto-site' &&
+                      (theme === 'coral' || theme === 'airbnb')) ||
                     (option.id === 'aubergine' && theme === 'slack');
                   return (
                     <button
@@ -625,25 +629,33 @@ export const SettingsTab = ({
                               <div
                                 className="h-1.5 w-1.5 rounded-full"
                                 style={{
-                                  backgroundColor: option.preview.accentColor,
+                                  backgroundColor:
+                                    option.preview.sidebarAccentColor ||
+                                    option.preview.accentColor,
                                 }}
                               />
                               <div
                                 className="h-0.5 w-full rounded-full opacity-40 mt-0.5"
                                 style={{
-                                  backgroundColor: option.preview.textColor,
+                                  backgroundColor:
+                                    option.preview.sidebarTextColor ||
+                                    option.preview.textColor,
                                 }}
                               />
                               <div
                                 className="h-0.5 w-3/4 rounded-full opacity-25"
                                 style={{
-                                  backgroundColor: option.preview.textColor,
+                                  backgroundColor:
+                                    option.preview.sidebarTextColor ||
+                                    option.preview.textColor,
                                 }}
                               />
                               <div
                                 className="h-0.5 w-1/2 rounded-full opacity-25"
                                 style={{
-                                  backgroundColor: option.preview.textColor,
+                                  backgroundColor:
+                                    option.preview.sidebarTextColor ||
+                                    option.preview.textColor,
                                 }}
                               />
                             </div>
