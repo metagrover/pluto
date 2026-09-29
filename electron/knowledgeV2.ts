@@ -183,15 +183,37 @@ export const groundPersonKnowledgeV2Document = (
       item.citations.map((citation) => citation.meeting_id),
     ),
   ]);
+  const quotedOwnership = [
+    ...evidenceIndex.map((entry) => entry.quote),
+    ...[...needsAttention, ...patterns, ...risksAndUnknowns].flatMap((item) =>
+      item.citations.map((citation) => citation.quote),
+    ),
+  ].some((quote) =>
+    /\b(responsible for|owns|owned|leads|led|manages|managed|assigned to|accountable for)\b/i.test(
+      quote,
+    ),
+  );
+  const describeObservedWork = (text: string): string =>
+    quotedOwnership
+      ? text
+      : text
+          .replace(/\bis responsible for\b/gi, 'has worked on')
+          .replace(/\band managing\b/gi, 'and on')
+          .replace(/\bmanages\b/gi, 'works on')
+          .replace(/\bleads\b/gi, 'works on');
   return {
     ...doc,
     current_read: {
       ...doc.current_read,
+      headline: describeObservedWork(doc.current_read.headline),
       cited_item_count:
         needsAttention.length + patterns.length + risksAndUnknowns.length,
       cited_meeting_count: citedMeetingIds.size,
     },
-    active_streams: activeStreams,
+    active_streams: activeStreams.map((stream) => ({
+      ...stream,
+      current_read: describeObservedWork(stream.current_read),
+    })),
     needs_attention: needsAttention,
     patterns,
     risks_and_unknowns: risksAndUnknowns,

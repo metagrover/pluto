@@ -47,7 +47,7 @@ describe('knowledge V2 utilities', () => {
       ...base,
       current_read: {
         ...base.current_read,
-        headline: 'Avery coordinates launch reviews.',
+        headline: 'Avery is responsible for launch reviews.',
       },
       active_streams: [
         {
@@ -55,7 +55,7 @@ describe('knowledge V2 utilities', () => {
           title: 'Launch reviews',
           domain: 'work' as const,
           status: 'active',
-          current_read: 'Avery reviewed the launch.',
+          current_read: 'Avery manages launch reviews.',
           last_touched_at: null,
           source_count: 1,
           open_follow_up_count: 0,
@@ -99,6 +99,27 @@ describe('knowledge V2 utilities', () => {
       'launch',
     ]);
     expect(grounded.current_read.cited_meeting_count).toBe(1);
+    expect(grounded.current_read.headline).toBe(
+      'Avery has worked on launch reviews.',
+    );
+    expect(grounded.active_streams[0].current_read).toBe(
+      'Avery works on launch reviews.',
+    );
+    const explicitOwnership = groundPersonKnowledgeV2Document(
+      {
+        ...doc,
+        evidence_index: [
+          {
+            ...doc.evidence_index[0],
+            quote: 'Avery manages launch reviews.',
+          },
+        ],
+      },
+      new Map([['m1', 'avery manages launch reviews.']]),
+    );
+    expect(explicitOwnership.active_streams[0].current_read).toBe(
+      'Avery manages launch reviews.',
+    );
   });
 
   it('filters true throwaway recordings without blocking testing strategy meetings', () => {
