@@ -792,9 +792,7 @@ export const PersonDossier = ({
   }
   const brief = compileKnowledgeBrief(
     currentDetail.knowledgeDoc,
-    currentDetail.knowledgeDoc?.status === 'synthesizing'
-      ? null
-      : currentDetail.workingMemorySnapshot,
+    currentDetail.workingMemorySnapshot,
   );
   const hasReliableRead =
     brief.isCompiled &&

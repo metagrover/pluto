@@ -548,6 +548,66 @@ describe('PersonDossier', () => {
     expect(markup).not.toContain('Avery is coordinating the launch handoff.');
   });
 
+  it('uses the durable person snapshot while a saved draft is incomplete', () => {
+    const completed = JSON.parse(briefingDetail.knowledgeDoc!.structured_json!);
+    const marker = briefingDetail.knowledgeDoc!.last_synthesized_at;
+    const markup = renderToStaticMarkup(
+      <PersonDossier
+        detail={{
+          ...briefingDetail,
+          knowledgeDoc: {
+            ...briefingDetail.knowledgeDoc!,
+            status: 'synthesizing',
+            config: JSON.stringify({ synthesis_version: 7 }),
+            structured_json: JSON.stringify({ headline: 'Incomplete draft' }),
+          },
+          workingMemorySnapshot: {
+            id: 'snapshot-1',
+            scope_type: 'person_context',
+            scope_key: 'person-1',
+            title: 'Conversations with Avery Chen',
+            source_doc_id: 'person-context-1',
+            source_doc_last_synthesized_at: marker,
+            freshness: 'fresh',
+            trust_status: 'grounded',
+            source_count: 2,
+            cited_meeting_count: 2,
+            generated_at: marker!,
+            updated_at: marker!,
+            payload: {
+              schema_version: 1,
+              scope: {
+                type: 'person_context',
+                key: 'person-1',
+                title: 'Conversations with Avery Chen',
+              },
+              source: {
+                knowledge_doc_id: 'person-context-1',
+                knowledge_doc_last_synthesized_at: marker,
+              },
+              current_read: {
+                ...completed.current_read,
+                trust_status: 'grounded',
+              },
+              active_streams: completed.active_streams,
+              open_loops: completed.needs_attention,
+              patterns: completed.patterns,
+              risks_and_unknowns: completed.risks_and_unknowns,
+              evidence_index: completed.evidence_index,
+            },
+          },
+        }}
+        onBack={() => {}}
+        onOpenMeeting={() => {}}
+      />,
+    );
+
+    expect(markup).toContain(
+      'Avery Chen has worked on launch handoffs across multiple conversations.',
+    );
+    expect(markup).not.toContain('Incomplete draft');
+  });
+
   it('suppresses the earlier broad-meeting summary until person-specific synthesis replaces it', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
