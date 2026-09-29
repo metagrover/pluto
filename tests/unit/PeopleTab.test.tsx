@@ -525,6 +525,13 @@ describe('PersonDossier', () => {
     expect(markup).toContain('through Jul 12');
     expect(markup).not.toContain('through Jul 18');
     expect(markup).toContain('Product review · Jul 12');
+    expect(markup.indexOf('Avery reviewed the launch handoff.')).toBeLessThan(
+      markup.indexOf('Product review · Jul 12'),
+    );
+    expect(markup.indexOf('Avery worked on the written handoff.')).toBeLessThan(
+      markup.indexOf('Design handoff · Jul 10'),
+    );
+    expect(markup).not.toContain('One example:');
     expect(markup).not.toContain('Recurring work');
     expect(markup).not.toContain('208a5a10');
     expect(markup).not.toContain('Earlier context');

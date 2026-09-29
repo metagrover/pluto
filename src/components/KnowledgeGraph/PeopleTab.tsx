@@ -1785,25 +1785,23 @@ export const PersonDossier = ({
                         {stream.title}
                       </h4>
                     )}
-                    <p className="mt-1 max-w-[68ch] text-sm leading-6 text-pro-text-main/80">
-                      <span className="font-medium text-pro-text-main">
-                        One example:{' '}
-                      </span>
-                      {stream.detail}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                    <div className="mt-3 space-y-3">
                       {stream.sources.slice(0, 2).map((source) => (
-                        <button
-                          key={source.meeting_id}
-                          type="button"
-                          className="text-left leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                          onClick={() => onOpenMeeting(source.meeting_id)}
-                        >
-                          {source.meeting_title || 'Open source meeting'}
-                          {source.captured_at
-                            ? ` · ${formatDate(source.captured_at)}`
-                            : ''}
-                        </button>
+                        <div key={source.meeting_id}>
+                          <p className="text-sm leading-6 text-pro-text-main/90">
+                            {source.quote}
+                          </p>
+                          <button
+                            type="button"
+                            className="mt-1 text-left text-xs leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                            onClick={() => onOpenMeeting(source.meeting_id)}
+                          >
+                            {source.meeting_title || 'Open source meeting'}
+                            {source.captured_at
+                              ? ` · ${formatDate(source.captured_at)}`
+                              : ''}
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>
