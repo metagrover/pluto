@@ -41,7 +41,10 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
       return {
         id: stream.id,
         title: cleanPersonReadText(stream.title),
-        detail: cleanPersonReadText(stream.current_read),
+        detail: cleanPersonReadText(
+          sources.find((source) => observedWork.test(source.quote))?.quote ??
+            stream.current_read,
+        ),
         sources,
       };
     })
@@ -53,8 +56,8 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
     )
     .sort((a, b) => b.sources.length - a.sources.length)
     .slice(0, 3);
-  const topic = recurring[0]?.title.replace(/^\p{Lu}/u, (letter) =>
-    letter.toLocaleLowerCase(),
+  const topic = recurring[0]?.title.replace(/\b[A-Z][a-z]+\b/g, (word) =>
+    word.toLocaleLowerCase(),
   );
   return {
     headline: topic
