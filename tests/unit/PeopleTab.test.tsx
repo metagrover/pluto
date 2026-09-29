@@ -526,7 +526,7 @@ describe('PersonDossier', () => {
     expect(markup).not.toContain('Earlier context');
   });
 
-  it('keeps a partial draft out of the identity summary while history is compiling', () => {
+  it('keeps the prior cited summary visible while a refresh is compiling', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
         detail={{
@@ -541,9 +541,11 @@ describe('PersonDossier', () => {
         onOpenMeeting={() => {}}
       />,
     );
-    expect(markup).not.toContain('Recurring work');
+    expect(markup).toContain('Recurring work');
+    expect(markup).toContain(
+      'Avery Chen has worked on launch handoffs across multiple conversations.',
+    );
     expect(markup).not.toContain('Avery is coordinating the launch handoff.');
-    expect(markup).toContain('From person-specific meeting notes.');
   });
 
   it('suppresses the earlier broad-meeting summary until person-specific synthesis replaces it', () => {
