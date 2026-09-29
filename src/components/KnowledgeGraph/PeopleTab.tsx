@@ -1198,7 +1198,9 @@ export const PersonDossier = ({
     if (
       !currentDetail.knowledgeDoc ||
       meetingCount === 0 ||
-      (typeof summaryVersion === 'number' && summaryVersion >= 7) ||
+      (currentDetail.knowledgeDoc.status === 'up_to_date' &&
+        typeof summaryVersion === 'number' &&
+        summaryVersion >= 7) ||
       autoRefreshedPersonId.current === currentDetail.person.id
     ) {
       return;
