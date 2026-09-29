@@ -1,6 +1,12 @@
 import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
 
 export const KNOWLEDGE_SYNTHESIS_VERSION = KNOWLEDGE_V2_SYNTHESIS_VERSION;
+export const PERSON_CONTEXT_SYNTHESIS_VERSION = 5;
+
+const synthesisVersionForScope = (scopeType?: string): number =>
+  scopeType === 'person_context'
+    ? PERSON_CONTEXT_SYNTHESIS_VERSION
+    : KNOWLEDGE_SYNTHESIS_VERSION;
 
 export interface KnowledgeDocConfigShape {
   member_entity_ids?: string[];
@@ -26,33 +32,36 @@ export const parseKnowledgeDocConfig = (
 export const withCurrentKnowledgeSynthesisConfig = (
   raw: string | null | undefined,
   synthesisInputHash?: string,
+  scopeType?: string,
 ): KnowledgeDocConfigShape => ({
   ...parseKnowledgeDocConfig(raw),
-  synthesis_version: KNOWLEDGE_SYNTHESIS_VERSION,
+  synthesis_version: synthesisVersionForScope(scopeType),
   ...(synthesisInputHash ? { synthesis_input_hash: synthesisInputHash } : {}),
 });
 
 export const getKnowledgeSynthesisInputConfig = (
   raw: string | null | undefined,
+  scopeType?: string,
 ): KnowledgeDocConfigShape => {
   const { synthesis_input_hash: _storedHash, ...inputConfig } =
-    withCurrentKnowledgeSynthesisConfig(raw);
+    withCurrentKnowledgeSynthesisConfig(raw, undefined, scopeType);
   return inputConfig;
 };
 
 export const knowledgeDocNeedsSynthesis = (doc: {
   status: string;
   config: string | null;
+  scope_type?: string;
 }): boolean => {
   if (doc.status !== 'up_to_date') return true;
   return (
     parseKnowledgeDocConfig(doc.config).synthesis_version !==
-    KNOWLEDGE_SYNTHESIS_VERSION
+    synthesisVersionForScope(doc.scope_type)
   );
 };
 
 export const knowledgeDocSatisfiesMeetingRefresh = (
-  doc: { status: string; config: string | null },
+  doc: { status: string; config: string | null; scope_type?: string },
   coverage: {
     meetingIsCandidate: boolean;
     meetingIsPersistedSource: boolean;

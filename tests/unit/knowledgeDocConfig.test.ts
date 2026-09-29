@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   KNOWLEDGE_SYNTHESIS_VERSION,
+  PERSON_CONTEXT_SYNTHESIS_VERSION,
   getKnowledgeSynthesisInputConfig,
   knowledgeDocNeedsSynthesis,
   knowledgeDocSatisfiesMeetingRefresh,
@@ -49,6 +50,30 @@ describe('knowledge doc config', () => {
         }),
       }),
     ).toBe(false);
+  });
+
+  it('refreshes person dossiers for the person-specific synthesis contract only', () => {
+    const previousConfig = JSON.stringify({
+      synthesis_version: KNOWLEDGE_SYNTHESIS_VERSION,
+    });
+    expect(
+      knowledgeDocNeedsSynthesis({
+        status: 'up_to_date',
+        scope_type: 'person_context',
+        config: previousConfig,
+      }),
+    ).toBe(true);
+    expect(
+      knowledgeDocNeedsSynthesis({
+        status: 'up_to_date',
+        scope_type: 'project',
+        config: previousConfig,
+      }),
+    ).toBe(false);
+    expect(
+      withCurrentKnowledgeSynthesisConfig(null, undefined, 'person_context')
+        .synthesis_version,
+    ).toBe(PERSON_CONTEXT_SYNTHESIS_VERSION);
   });
 
   it('reuses a current durable doc only when it covers every eligible meeting', () => {

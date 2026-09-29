@@ -61,6 +61,7 @@ describe('person briefing database read model', () => {
       id: person.id,
       name: 'Avery Summary',
       role: 'Design lead',
+      roleSourceMeetingId: null,
       meetingCount: 1,
       mentionCount: 3,
       latestMeetingId: 'summary-meeting',

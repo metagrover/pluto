@@ -475,6 +475,9 @@ describe('knowledge document prompts', () => {
 
     expect(personPrompt).toContain('TEMPORAL INTEGRITY (MANDATORY)');
     expect(personPrompt).toContain('CRITICAL TEMPORAL GROUNDING');
+    expect(personPrompt).toContain('who this person is in the work');
+    expect(personPrompt).toContain('formal role');
+    expect(personPrompt).toContain('not every topic discussed');
     expect(personPrompt).toContain('use past tense');
     expect(personPrompt).toContain(
       'NEVER claim someone "is currently", "is actively"',
