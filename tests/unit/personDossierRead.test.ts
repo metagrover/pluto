@@ -35,4 +35,34 @@ describe('person dossier read', () => {
       'Avery worked through the partner handoff.',
     );
   });
+
+  it('does not merge unrelated one-off tasks into a recurring work area', () => {
+    const result = buildPersonDossierRead(
+      'Avery',
+      [
+        {
+          id: 'mixed',
+          title: 'Testing and Content Preparation',
+          current_read: 'Avery handled testing and wrote content.',
+        },
+      ],
+      [
+        {
+          meeting_id: 'meeting-one',
+          meeting_title: 'Release review',
+          quote: 'Avery worked through test coverage for the release.',
+          stream_ids: ['mixed'],
+        },
+        {
+          meeting_id: 'meeting-two',
+          meeting_title: 'Editorial review',
+          quote: 'Avery drafted the customer email.',
+          stream_ids: ['mixed'],
+        },
+      ],
+    );
+
+    expect(result.headline).toBeNull();
+    expect(result.workstreams).toEqual([]);
+  });
 });
