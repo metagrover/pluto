@@ -1966,6 +1966,27 @@ const createInvokeFallback =
       case 'intelligence:person-chat:capability':
         result = { enabled: true };
         break;
+      case 'intelligence:workspace-chat:list-threads':
+      case 'intelligence:workspace-chat:list-messages':
+        result = [];
+        break;
+      case 'intelligence:workspace-chat:create-thread':
+        result = {
+          id: `preview-workspace-chat-${Date.now()}`,
+          title: 'New conversation',
+          memory: { corrections: [], unresolvedQuestions: [] },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          archivedAt: null,
+        };
+        break;
+      case 'intelligence:workspace-chat:append-message':
+      case 'intelligence:workspace-chat:update-message-payload':
+        result = args[0] ?? null;
+        break;
+      case 'intelligence:workspace-chat:update-memory':
+        result = null;
+        break;
       case 'intelligence:person-chat:list-threads': {
         const request = args[0] as { personId?: string } | undefined;
         const personId = request?.personId ?? 'preview-avery';

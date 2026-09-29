@@ -25,9 +25,17 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 describe('PersonChatDock', () => {
   let host: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
+  let ipcListeners: Map<string, (...args: unknown[]) => void>;
+  let scrollIntoView: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    ipcListeners = new Map();
+    scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
     host = document.createElement('div');
     document.body.append(host);
     root = createRoot(host);
@@ -69,7 +77,10 @@ describe('PersonChatDock', () => {
     Object.defineProperty(window, 'ipcRenderer', {
       configurable: true,
       value: {
-        on: vi.fn(() => () => {}),
+        on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => {
+          ipcListeners.set(channel, listener);
+          return () => ipcListeners.delete(channel);
+        }),
         off: vi.fn(),
         invoke: vi.fn(),
         send: vi.fn(),
@@ -124,6 +135,11 @@ describe('PersonChatDock', () => {
       }),
     );
     expect(document.body.textContent).toContain('Start with the shared goal.');
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: 'start',
+    });
     expect(document.body.textContent).toContain('1 source');
     expect(document.body.textContent).not.toContain('Your conversations');
     expect(
@@ -139,6 +155,74 @@ describe('PersonChatDock', () => {
     ) as HTMLButtonElement;
     source.click();
     expect(onOpenMeeting).toHaveBeenCalledWith('meeting-1');
+  });
+
+  it('keeps the reading position stable while a person-chat answer streams', async () => {
+    let resolveAnswer!: (
+      value: Awaited<ReturnType<typeof api.sendPersonChatMessage>>,
+    ) => void;
+    api.sendPersonChatMessage.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveAnswer = resolve;
+        }),
+    );
+
+    await act(async () => {
+      root.render(
+        <PersonChatDock
+          personId="person-alpha"
+          personName="Colleague"
+          onOpenMeeting={vi.fn()}
+        />,
+      );
+      await Promise.resolve();
+    });
+    const launcher = document.querySelector(
+      'button[aria-label="Ask about Colleague"]',
+    ) as HTMLButtonElement;
+    await act(async () => launcher.click());
+    const starter = [...document.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Catch me up on Colleague',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      starter.click();
+      await Promise.resolve();
+    });
+
+    const requestId = api.sendPersonChatMessage.mock.calls[0]?.[0]
+      ?.requestId as string;
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      ipcListeners.get('intelligence:person-chat:delta')?.(
+        {},
+        {
+          requestId,
+          delta: 'A useful first point.',
+        },
+      );
+      await Promise.resolve();
+    });
+    expect(document.body.textContent).toContain('A useful first point.');
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveAnswer({
+        status: 'answered',
+        message: {
+          id: 'assistant-final',
+          threadId: 'thread-1',
+          role: 'assistant',
+          content: 'A useful first point, with context.',
+          status: 'complete',
+          createdAt: '2026-09-13T12:01:00Z',
+          citations: [],
+        },
+      });
+      await Promise.resolve();
+    });
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
   });
 
   it('uses a hamburger sidebar menu to show past conversations and a header plus button for new threads', async () => {

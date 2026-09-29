@@ -46,7 +46,42 @@ describe('resolveAskPlutoReasoningMode', () => {
         intent: 'factual',
         task: 'draft',
       }),
+    ).toBe('fast');
+  });
+
+  it('keeps detail retrieval fast without downgrading new analysis', () => {
+    expect(
+      resolveAskPlutoReasoningMode({
+        query: 'Tell me more about the Project Atlas pipeline.',
+        intent: 'factual',
+        task: 'analysis',
+        relation: 'expansion',
+      }),
+    ).toBe('fast');
+    expect(
+      resolveAskPlutoReasoningMode({
+        query: 'Give me feedback on how I handled this.',
+        intent: 'factual',
+        task: 'analysis',
+        relation: 'new_topic',
+      }),
     ).toBe('deep');
+    expect(
+      resolveAskPlutoReasoningMode({
+        query: 'What do you think I should focus on?',
+        intent: 'factual',
+        task: 'analysis',
+        relation: 'new_topic',
+      }),
+    ).toBe('fast');
+    expect(
+      resolveAskPlutoReasoningMode({
+        query: 'What do you think will satisfy Alpha Contact?',
+        intent: 'factual',
+        task: 'analysis',
+        relation: 'new_topic',
+      }),
+    ).toBe('fast');
   });
 
   it('uses deep synthesis for multi-meeting summaries and breakdowns', () => {
@@ -171,6 +206,32 @@ describe('resolveAskPlutoReasoningMode', () => {
         intent: 'factual',
         priorPinnedCount: 1,
         task: 'analysis',
+      }),
+    ).toBe(false);
+    expect(
+      shouldRestrictToPriorConversationEvidence({
+        currentMeetingRequested: false,
+        intent: 'factual',
+        priorPinnedCount: 1,
+        task: 'analysis',
+        relation: 'follow_up',
+      }),
+    ).toBe(true);
+    expect(
+      shouldRestrictToPriorConversationEvidence({
+        currentMeetingRequested: false,
+        intent: 'factual',
+        priorPinnedCount: 1,
+        task: 'analysis',
+        retrievalPolicy: 'reuse',
+      }),
+    ).toBe(true);
+    expect(
+      shouldRestrictToPriorConversationEvidence({
+        currentMeetingRequested: false,
+        intent: 'factual',
+        priorPinnedCount: 1,
+        retrievalPolicy: 'fresh',
       }),
     ).toBe(false);
     expect(

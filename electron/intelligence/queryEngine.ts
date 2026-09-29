@@ -1,10 +1,7 @@
-import { createHash } from 'node:crypto';
 import type { AskPlutoActiveMeetingSnapshot } from '../../src/types/askPlutoQuery';
-import { parseTranscriptSegments } from '../../src/utils/transcript';
 import {
   searchMeetingContextSectionsFts,
   searchMeetingNotesFts,
-  searchMeetingsFts,
   walkEntityGraph,
 } from '../db';
 
@@ -38,10 +35,7 @@ export const buildMeetingRetrievalResult = (
   meeting: dbModule.PersistedMeeting,
   label = 'Current meeting',
 ): RetrievalResult => {
-  const document = buildMeetingNotesEvidenceDocument(
-    meeting,
-    dbModule.getMeetingNotesIdentityProjection(meeting.id).speakerDisplayNames,
-  );
+  const document = buildMeetingNotesEvidenceDocument(meeting);
   const evidence: string[] = [`[${label}]: ${document.title}`];
   const occurredAt = meeting.started_at || meeting.created_at;
   if (occurredAt) evidence.push(`[Occurred]: ${occurredAt}`);
@@ -77,9 +71,7 @@ export const buildMeetingRetrievalResult = (
 export const buildLiveMeetingRetrievalResult = (
   snapshot: AskPlutoActiveMeetingSnapshot,
 ): RetrievalResult => {
-  const evidence = [
-    `[Current recording - provisional]: ${snapshot.title || 'Meeting'}`,
-  ];
+  const evidence = [`[Current meeting notes]: ${snapshot.title || 'Meeting'}`];
   if (snapshot.participants.length > 0) {
     evidence.push(
       `[Participants]: ${snapshot.participants.slice(0, 8).join(', ')}`,
@@ -88,24 +80,12 @@ export const buildLiveMeetingRetrievalResult = (
   if (snapshot.notes.trim()) {
     evidence.push(`[Live notes]: ${snapshot.notes.trim().slice(0, 1200)}`);
   }
-  const transcript = snapshot.transcript
-    .slice(-24)
-    .map((segment) => `${segment.speaker || 'Speaker'}: ${segment.text.trim()}`)
-    .filter((line) => !line.endsWith(': '))
-    .join('\n');
-  if (transcript)
-    evidence.push(`[Live transcript - provisional]:\n${transcript}`);
-  if (snapshot.interimText.trim()) {
-    evidence.push(
-      `[Interim transcript - unconfirmed]: ${snapshot.interimText.trim().slice(0, 700)}`,
-    );
-  }
 
   return {
     meeting_id: snapshot.meetingId,
     meeting_title: snapshot.title || 'Meeting',
     mid: null,
-    evidence_text: evidence.join('\n').slice(0, 4800),
+    evidence_text: evidence.join('\n').slice(0, 1800),
     score: 0,
     score_breakdown: {
       fts_rank: 0,
@@ -113,7 +93,7 @@ export const buildLiveMeetingRetrievalResult = (
       recency_decay: 1,
       mention_weight: 0,
     },
-    evidence_kind: 'live',
+    evidence_kind: 'note',
     trust_status: 'inferred',
   };
 };
@@ -153,7 +133,32 @@ export interface MatchedProjectEntity {
   name: string;
   displayTitle: string;
   keyTerms: string[];
+  matchKind: 'explicit_label' | 'entity_mention' | 'key_term';
 }
+
+export const shouldKeepActiveProjectScope = (input: {
+  relation: 'new_topic' | 'follow_up' | 'expansion' | 'omission_follow_up';
+  hasActiveProject: boolean;
+  candidateMatchKind?: MatchedProjectEntity['matchKind'];
+}): boolean =>
+  input.hasActiveProject &&
+  input.relation !== 'new_topic' &&
+  input.candidateMatchKind !== 'explicit_label';
+
+const GENERIC_PROJECT_LABELS = new Set([
+  'initiative',
+  'pipeline',
+  'program',
+  'project',
+  'roadmap',
+  'stream',
+  'workstream',
+]);
+
+const queryContainsProjectLabel = (query: string, label: string): boolean => {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'i').test(query);
+};
 
 const extractProjectKeyTerms = (
   metadata: string | null | undefined,
@@ -203,6 +208,48 @@ export const matchProjectEntity = (
   entityMentions: string[] = [],
 ): MatchedProjectEntity | null => {
   const normalizedQuery = query.toLocaleLowerCase();
+  const allProjects =
+    typeof dbModule.getEntitiesByType === 'function'
+      ? dbModule.getEntitiesByType('project')
+      : [];
+
+  const explicitMatches = allProjects
+    .flatMap((project) => {
+      const canonicalId =
+        typeof dbModule.resolveProjectIdentityId === 'function'
+          ? dbModule.resolveProjectIdentityId(project.id)
+          : project.id;
+      const displayTitle = readProjectDisplayTitle(
+        project.metadata,
+        project.name,
+      );
+      const theme = readProjectThemeSynthesis(project.metadata);
+      const keyTerms = extractProjectKeyTerms(project.metadata, theme);
+      const labels = [project.name, displayTitle]
+        .map((label) => label.toLocaleLowerCase().trim())
+        .filter(
+          (label) =>
+            label.length >= 3 &&
+            !GENERIC_PROJECT_LABELS.has(label) &&
+            queryContainsProjectLabel(normalizedQuery, label),
+        );
+      if (labels.length === 0) return [];
+      return [
+        {
+          score: Math.max(...labels.map((label) => label.length)),
+          match: {
+            id: project.id,
+            canonicalId,
+            name: project.name,
+            displayTitle,
+            keyTerms,
+            matchKind: 'explicit_label',
+          } satisfies MatchedProjectEntity,
+        },
+      ];
+    })
+    .sort((left, right) => right.score - left.score);
+  if (explicitMatches[0]) return explicitMatches[0].match;
 
   // 1. Direct match from entity mentions
   for (const entityId of entityMentions) {
@@ -227,15 +274,12 @@ export const matchProjectEntity = (
         name: entity.name,
         displayTitle,
         keyTerms,
+        matchKind: 'entity_mention',
       };
     }
   }
 
   // 2. Scan all project entities in db
-  const allProjects =
-    typeof dbModule.getEntitiesByType === 'function'
-      ? dbModule.getEntitiesByType('project')
-      : [];
   if (!allProjects.length) return null;
 
   for (const project of allProjects) {
@@ -250,24 +294,6 @@ export const matchProjectEntity = (
     const theme = readProjectThemeSynthesis(project.metadata);
     const keyTerms = extractProjectKeyTerms(project.metadata, theme);
 
-    const normalizedName = project.name.toLocaleLowerCase().trim();
-    const normalizedDisplay = displayTitle.toLocaleLowerCase().trim();
-
-    if (
-      (normalizedName.length >= 3 &&
-        normalizedQuery.includes(normalizedName)) ||
-      (normalizedDisplay.length >= 3 &&
-        normalizedQuery.includes(normalizedDisplay))
-    ) {
-      return {
-        id: project.id,
-        canonicalId,
-        name: project.name,
-        displayTitle,
-        keyTerms,
-      };
-    }
-
     if (
       /\b(?:project|initiative|workstream|stream|roadmap)\b/i.test(
         normalizedQuery,
@@ -277,6 +303,7 @@ export const matchProjectEntity = (
         const normalizedTerm = term.toLocaleLowerCase().trim();
         if (
           normalizedTerm.length >= 4 &&
+          !GENERIC_PROJECT_LABELS.has(normalizedTerm) &&
           normalizedQuery.includes(normalizedTerm)
         ) {
           return {
@@ -285,6 +312,7 @@ export const matchProjectEntity = (
             name: project.name,
             displayTitle,
             keyTerms,
+            matchKind: 'key_term',
           };
         }
       }
@@ -325,6 +353,7 @@ export const matchProjectEntity = (
             name: project.name,
             displayTitle,
             keyTerms,
+            matchKind: 'key_term',
           };
         }
       }
@@ -334,10 +363,80 @@ export const matchProjectEntity = (
   return null;
 };
 
+export const containsConfidentialAside = (text: string): boolean =>
+  /\bconfidential\b|\boff[\s-]+the[\s-]+record\b|\b(?:keep|remain|stay|treat|hold)\b.{0,80}\bprivate\b|\bprivate\b.{0,80}\b(?:between us|only us|do not share|don't share)\b/i.test(
+    text,
+  );
+
+export const enforceSynthesizedOnlyContext = (
+  context: RetrievalResult[],
+): RetrievalResult[] =>
+  context
+    .filter(
+      (result) =>
+        result.evidence_kind !== 'transcript' &&
+        !containsConfidentialAside(
+          `${result.evidence_text}\n${result.mid ? JSON.stringify(result.mid) : ''}`,
+        ),
+    )
+    .map((result) =>
+      result.transcript_passages?.length
+        ? { ...result, transcript_passages: undefined }
+        : result,
+    );
+
 export const isPlanningOrPriorityQuery = (query: string): boolean =>
   /\b(?:what\s+(?:should|do|can)\s+(?:i|we)\s+(?:need\s+to\s+)?(?:be\s+)?(?:focus|focusing|focused|working|work|do|prioritize|tackle)|what\s+(?:are|is)\s+(?:my|our|the\s+team(?:'s)?)\s+(?:top\s+)?(?:priorit(?:y|ies)|focus|deliverables?|next\s+steps?|action\s+items?|commitments?)|what(?:'s|\s+is)\s+(?:on\s+(?:my|our)\s+plate|(?:my|our)\s+(?:top\s+)?priorit(?:y|ies)|(?:my|our)\s+focus|top\s+of\s+mind|happening\s+with\s+(?:my|our)\s+work)|what\s+am\s+i\s+supposed\s+to\s+(?:be\s+)?(?:working|work|focus|do)|where\s+should\s+(?:i|we)\s+start|what\s+to\s+focus\s+on|next\s+steps?\s+for\s+(?:me|us)|current\s+priorities|active\s+streams|workspace\s+(?:overview|summary|update)|what(?:'s|\s+is)\s+going\s+on\s+across\s+(?:meetings|projects|my\s+work)|what\s+needs?\s+(?:my|our|immediate)?\s*attention|catch\s+me\s+up\s+on\s+(?:work|projects|priorities|everything)|how\s+should\s+i\s+prioritize|help\s+me\s+plan\s+(?:my|today|the\s+week)|what\s+did\s+i\s+commit\s+to)\b/i.test(
     query,
+  ) ||
+  /\b(?:i|we)\b.{0,30}\b(?:should|need\s+to|ought\s+to)\s+(?:be\s+)?(?:focus(?:ing)?|prioritiz(?:e|ing)|tackle)\b/i.test(
+    query,
   );
+
+const isWorkspaceRiskQuery = (query: string): boolean =>
+  /\b(?:anything|what|which)\b.{0,45}\b(?:concerned|concerns?|risks?|blockers?|watch out for|worry about)\b|\b(?:risks?|concerns?|blockers?)\b.{0,30}\b(?:across|overall|workspace|workstreams?|projects?)\b/i.test(
+    query,
+  );
+
+export type WorkspaceIntelligenceMode =
+  | 'summary'
+  | 'expanded'
+  | 'risks'
+  | 'risks_expanded'
+  | 'omitted';
+
+export const shouldUseWorkspaceIntelligence = (input: {
+  query: string;
+  relation: 'new_topic' | 'follow_up' | 'expansion' | 'omission_follow_up';
+  priorQuestion?: string;
+  conversationAnchor?: string;
+}): boolean =>
+  isPlanningOrPriorityQuery(input.query) ||
+  isWorkspaceRiskQuery(input.query) ||
+  (input.relation !== 'new_topic' &&
+    [input.priorQuestion, input.conversationAnchor].some(
+      (value) =>
+        value &&
+        (isPlanningOrPriorityQuery(value) || isWorkspaceRiskQuery(value)),
+    ));
+
+export const resolveWorkspaceIntelligenceMode = (
+  query: string,
+  relation: 'new_topic' | 'follow_up' | 'expansion' | 'omission_follow_up',
+  priorQuestion?: string,
+): WorkspaceIntelligenceMode => {
+  if (/\b(?:left out|omitted|excluded|stale|older)\b/i.test(query))
+    return 'omitted';
+  if (
+    isWorkspaceRiskQuery(query) ||
+    (relation === 'expansion' &&
+      !isPlanningOrPriorityQuery(query) &&
+      Boolean(priorQuestion && isWorkspaceRiskQuery(priorQuestion)))
+  )
+    return relation === 'expansion' ? 'risks_expanded' : 'risks';
+  if (relation === 'expansion') return 'expanded';
+  return 'summary';
+};
 
 /**
  * Parses a query string to extract intent, entities and semantic bounds.
@@ -521,7 +620,7 @@ export const parseQuery = async (
         "I'm Pluto, an AI meeting intelligence assistant. I can help you search through your meeting history, summarize discussions, and track action items.";
     } else if (/^what can you do\b/i.test(trimmed)) {
       cannedResponse =
-        'I can extract entities, search through meeting transcripts using semantic retrieval, and answer factual questions using your recording history as context.';
+        'I can search your synthesized meeting notes, project information, and people information to answer questions, compare decisions, and track action items.';
     } else if (isThanks) {
       cannedResponse = "You're welcome! Let me know if you need anything else.";
     }
@@ -888,7 +987,7 @@ export const buildAssigneeActionRecall = (
       { meeting: dbModule.PersistedMeeting; items: typeof selected }
     >();
     for (const item of selected) {
-      const meeting = dbModule.getMeeting(item.sourceMeetingId) as
+      const meeting = dbModule.getAskPlutoMeeting(item.sourceMeetingId) as
         | dbModule.PersistedMeeting
         | undefined;
       if (!meeting) continue;
@@ -1033,12 +1132,273 @@ export const buildAssigneeActionRecall = (
   };
 };
 
+export const extractNamedPersonQuestionSubject = (
+  query: string,
+): string | null => {
+  const patterns = [
+    /\b[Ww]hat\s+do\s+you\s+think\s+(?:will|would)\s+satisfy\s+([\p{Lu}][\p{L}'-]+(?:\s+[\p{Lu}][\p{L}'-]+)?)/u,
+    /\b(?:needed|required)\s+for\s+([\p{Lu}][\p{L}'-]+(?:\s+[\p{Lu}][\p{L}'-]+)?)/u,
+    /\b(?:present|show|demonstrate|send|share)\b[\s\S]{0,50}\bto\s+([\p{Lu}][\p{L}'-]+(?:\s+[\p{Lu}][\p{L}'-]+)?)/u,
+  ];
+  for (const pattern of patterns) {
+    const subject = query.match(pattern)?.[1]?.trim();
+    if (subject && subject.length <= 80) return subject;
+  }
+  return null;
+};
+
+export const buildNamedPersonEvidenceQuery = (
+  query: string,
+  subject: string,
+): string => {
+  const subjectPattern = new RegExp(
+    subject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    'i',
+  );
+  const relevantClause = query
+    .split(/[?!\.\n]+/u)
+    .map((clause) => clause.trim())
+    .find((clause) => subjectPattern.test(clause));
+  const evidenceQuery = (relevantClause || query)
+    .replace(
+      /^who\s+(?:said|asked|requested|assigned|decided|told|stated)\s+(?:that\s+)?/i,
+      '',
+    )
+    .trim();
+  return evidenceQuery || subject;
+};
+
+export const focusContextOnNamedPerson = (
+  query: string,
+  context: RetrievalResult[],
+): RetrievalResult[] => {
+  const subject =
+    extractNamedPersonQuestionSubject(query) || parsePersonWorkQuery(query);
+  if (!subject) return context;
+  if (/^(?:me|myself|mine)$/i.test(subject)) return context;
+  const normalizedSubject = subject.toLocaleLowerCase();
+  const matches = context.filter((result) =>
+    result.evidence_text.toLocaleLowerCase().includes(normalizedSubject),
+  );
+  // A retrieved meeting about the same project is not evidence of this
+  // person's work. An empty result is preferable to assigning them work by
+  // association.
+  return matches;
+};
+
+export const selectRecentPersonNoteContext = (
+  context: RetrievalResult[],
+  personName: string,
+  profileAsOf?: string,
+): RetrievalResult[] => {
+  const personPattern = new RegExp(
+    `(^|[^\\p{L}\\p{N}])${personName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}])`,
+    'iu',
+  );
+  const profileTimestamp = Date.parse(profileAsOf || '') || 0;
+  return context
+    .map((result) => ({
+      result,
+      occurredAt:
+        Date.parse(
+          result.evidence_text.match(
+            /\[(?:Occurred|Meeting date)\]:\s*([^\n]+)/,
+          )?.[1] || '',
+        ) || 0,
+    }))
+    .filter(({ result, occurredAt }) => {
+      if (!occurredAt || occurredAt <= profileTimestamp) return false;
+      if (result.evidence_kind === 'transcript') return false;
+      if (
+        containsConfidentialAside(
+          `${result.evidence_text}\n${result.mid ? JSON.stringify(result.mid) : ''}`,
+        )
+      )
+        return false;
+      const substantiveEvidence = result.evidence_text.replace(
+        /^\[(?:Section match|Notes match|Related notes|Occurred|Meeting date|Participants)\]:[^\n]*\n?/gim,
+        '',
+      );
+      return personPattern.test(substantiveEvidence);
+    })
+    .sort((left, right) => right.occurredAt - left.occurredAt)
+    .slice(0, 2)
+    .map(({ result, occurredAt }) => {
+      const personSentences = result.evidence_text
+        .replace(
+          /^\[(?:Section match|Notes match|Related notes|Occurred|Meeting date|Participants)\]:[^\n]*\n?/gim,
+          '',
+        )
+        .split(/(?<=[.!?])\s+(?=[\p{Lu}\[])/u)
+        .map((sentence) => sentence.trim())
+        .filter((sentence) => personPattern.test(sentence))
+        .slice(0, 4);
+      return {
+        ...result,
+        mid: null,
+        evidence_text: `[Meeting date]: ${new Date(occurredAt).toISOString()}\n[Person-specific notes]: ${personSentences.join(' ')}`,
+        retrieved_sections: undefined,
+      };
+    });
+};
+
+export const selectNamedPersonAnswerContext = (
+  query: string,
+  context: RetrievalResult[],
+  assignmentContext: RetrievalResult[] = [],
+): RetrievalResult[] =>
+  assignmentContext.length > 0
+    ? assignmentContext
+    : focusContextOnNamedPerson(query, context);
+
+export const shouldKeepActivePersonScope = (input: {
+  relation: 'new_topic' | 'follow_up' | 'expansion' | 'omission_follow_up';
+  hasActivePerson: boolean;
+  hasExplicitPersonSubject: boolean;
+  hasExplicitProject: boolean;
+}): boolean =>
+  input.relation !== 'new_topic' &&
+  input.hasActivePerson &&
+  !input.hasExplicitPersonSubject &&
+  !input.hasExplicitProject;
+
+export const focusContextOnExplicitNamedSubject = (
+  query: string,
+  context: RetrievalResult[],
+): RetrievalResult[] => {
+  // FTS searches terms with OR semantics. A clearly named, multi-word subject
+  // must occur as a unit before its matches can answer a question about it.
+  const subject = query.match(
+    /\b(?:about|regarding)\s+(?:the\s+)?((?:[\p{Lu}][\p{L}\d'-]*\s+){1,4}[\p{Lu}][\p{L}\d'-]*)\b/u,
+  )?.[1];
+  if (!subject) return context;
+  const normalizedSubject = subject.toLocaleLowerCase().replace(/\s+/g, ' ');
+  return context.filter((result) =>
+    [result.meeting_title, result.evidence_text]
+      .filter(Boolean)
+      .join('\n')
+      .toLocaleLowerCase()
+      .replace(/\s+/g, ' ')
+      .includes(normalizedSubject),
+  );
+};
+
+export const parsePersonWorkQuery = (query: string): string | null => {
+  const expectationSubject = extractNamedPersonQuestionSubject(query);
+  if (expectationSubject) return expectationSubject;
+  const overviewSubject = query
+    .match(/\b(?:tell me about|who is)\s+([^\n?.!,;]{1,80})/i)?.[1]
+    ?.trim();
+  if (overviewSubject && dbModule.findEntity('person', overviewSubject)) {
+    return overviewSubject;
+  }
+  const patterns = [
+    /\bwhat(?:'s|\s+is)\s+(.+?)\s+(?:working\s+on|focused\s+on|doing)(?:\s+(?:currently|now|right\s+now))?(?:\?|$)/i,
+    /\bwhat\s+does\s+(.+?)\s+(?:work\s+on|focus\s+on|do)(?:\s+(?:currently|now|right\s+now))?(?:\?|$)/i,
+  ];
+  for (const pattern of patterns) {
+    const personName = query.match(pattern)?.[1]?.trim();
+    if (personName && personName.length <= 80) return personName;
+  }
+  return null;
+};
+
+export const buildPersonWorkRecall = (
+  query: string,
+  inheritedPersonName?: string,
+): {
+  person: dbModule.Entity;
+  displayTitle: string;
+  asOf?: string;
+  context: RetrievalResult[];
+} | null => {
+  const requestedName = parsePersonWorkQuery(query) || inheritedPersonName;
+  if (!requestedName) return null;
+  const selfReference = /^(?:me|myself|mine)$/i.test(requestedName);
+  const person = selfReference
+    ? (() => {
+        const id = dbModule.identityStore.getSelfPersonId();
+        return id ? dbModule.getEntity(id) : undefined;
+      })()
+    : dbModule.findEntity('person', requestedName);
+  if (!person) return null;
+  const detail = dbModule.getPersonBriefing(person.id);
+  if (!detail) return null;
+  const snapshot = detail.workingMemorySnapshot?.payload;
+  const sections: string[] = [];
+  const profileAsOf =
+    detail.workingMemorySnapshot?.source_doc_last_synthesized_at ||
+    detail.knowledgeDoc?.last_synthesized_at;
+  const profileIsAged = Boolean(
+    profileAsOf &&
+      Date.parse(profileAsOf) < Date.now() - 3 * 24 * 60 * 60 * 1000,
+  );
+  if (profileAsOf) sections.push(`[Profile as of]: ${profileAsOf}`);
+  if (snapshot) {
+    sections.push(
+      `[${profileIsAged ? 'Last recorded read' : 'Current read'}]: ${snapshot.current_read.headline}\n${snapshot.current_read.supporting_bullets
+        .map((item) => `- ${item}`)
+        .join('\n')}`,
+    );
+    sections.push(
+      `[${profileIsAged ? 'Last recorded work' : 'Current work'}]: ${JSON.stringify(
+        {
+          active_streams: snapshot.active_streams,
+          open_loops: snapshot.open_loops,
+          risks_and_unknowns: snapshot.risks_and_unknowns,
+        },
+      )}`,
+    );
+  } else if (detail.knowledgeDoc?.rendered_content) {
+    sections.push(
+      `[${profileIsAged ? 'Last recorded person brief' : 'Person brief'}]: ${detail.knowledgeDoc.rendered_content.slice(0, 4_000)}`,
+    );
+  }
+  const commitments = detail.commitments.open
+    .map(
+      (item) => `- ${item.text}${item.dueDate ? ` (due ${item.dueDate})` : ''}`,
+    )
+    .join('\n');
+  if (commitments) sections.push(`[Open commitments]:\n${commitments}`);
+  const evidence = sections.join('\n\n').slice(0, 6_000);
+  if (!evidence.trim()) return null;
+
+  return {
+    person,
+    displayTitle: detail.isSelf ? 'Your work' : person.name,
+    ...(profileAsOf ? { asOf: profileAsOf } : {}),
+    context: [
+      {
+        meeting_id: `person:${person.id}`,
+        meeting_title: `${person.name} profile`,
+        source_type: 'artifact',
+        source_id: `person:${person.id}`,
+        mid: null,
+        evidence_text: `[Person profile]: ${person.name}\n${evidence}`,
+        score: 1,
+        score_breakdown: {
+          fts_rank: 1,
+          graph_proximity: 1,
+          recency_decay: 1,
+          mention_weight: 1,
+        },
+        evidence_kind: 'artifact',
+        trust_status:
+          detail.workingMemorySnapshot?.payload.current_read.trust_status ||
+          'grounded',
+      },
+    ],
+  };
+};
+
 export const buildProjectRecall = (
   query: string,
   entityMentions: string[] = [],
 ): {
   project: MatchedProjectEntity;
   displayTitle: string;
+  asOf?: string;
+  latestNoteAt?: string;
   context: RetrievalResult[];
 } | null => {
   const matched = matchProjectEntity(query, entityMentions);
@@ -1062,12 +1422,16 @@ export const buildProjectRecall = (
   const status = entity?.status || brief?.project.status || 'active';
   const theme = brief?.theme;
   const currentRead = snapshot?.payload?.current_read;
-
   const sections: string[] = [
     `[Project: ${displayTitle}]`,
     `[Identified Name]: ${matched.name}`,
     `[Status]: ${status}`,
   ];
+  const profileUpdatedAt =
+    snapshot?.source_doc_last_synthesized_at ||
+    snapshot?.generated_at ||
+    theme?.synthesizedAt;
+  if (profileUpdatedAt) sections.push(`[Profile as of]: ${profileUpdatedAt}`);
 
   if (theme) {
     if (theme.outcome) sections.push(`[Desired Outcome]: ${theme.outcome}`);
@@ -1102,36 +1466,27 @@ export const buildProjectRecall = (
   }
 
   if (brief?.milestones?.length) {
+    const today = new Date().toISOString().slice(0, 10);
     const milestonesText = brief.milestones
       .slice(0, 6)
       .map(
         (m) =>
-          `- ${m.title} (${m.status}${m.targetDate ? `, target: ${m.targetDate}` : ''})`,
+          `- ${m.title} (${m.targetDate && m.targetDate < today && m.status !== 'complete' ? `past target: ${m.targetDate}; current completion not confirmed` : `${m.status}${m.targetDate ? `, target: ${m.targetDate}` : ''}`})`,
       )
       .join('\n');
     sections.push(`[Milestones]:\n${milestonesText}`);
   }
 
   if (brief?.tasks?.length) {
+    const today = new Date().toISOString().slice(0, 10);
     const tasksText = brief.tasks
       .slice(0, 8)
       .map(
         (t) =>
-          `- ${t.name}${t.assigned_to ? ` [Owner: ${t.assigned_to}]` : ''}${t.due_date ? ` (due: ${t.due_date})` : ''} [Status: ${t.status || 'open'}]`,
+          `- ${t.name}${t.assigned_to ? ` [Owner: ${t.assigned_to}]` : ''}${t.due_date ? ` (${t.due_date < today ? 'past due date' : 'due'}: ${t.due_date})` : ''} [Last recorded status: ${t.status || 'open'}${t.due_date && t.due_date < today ? '; current completion unknown' : ''}]`,
       )
       .join('\n');
     sections.push(`[Tasks & Action Items]:\n${tasksText}`);
-  }
-
-  if (brief?.meetings?.length) {
-    const meetingsText = brief.meetings
-      .slice(0, 4)
-      .map(
-        (m) =>
-          `- Meeting: "${m.title}" (${m.started_at || m.created_at || 'date unknown'})${m.context ? ` — Context: ${m.context.slice(0, 160)}` : ''}`,
-      )
-      .join('\n');
-    sections.push(`[Recent Contributing Meetings]:\n${meetingsText}`);
   }
 
   const projectRetrievalResult: RetrievalResult = {
@@ -1153,27 +1508,313 @@ export const buildProjectRecall = (
   };
 
   const meetingResults: RetrievalResult[] = [];
-  if (brief?.meetings?.length) {
-    for (const m of brief.meetings.slice(0, 3)) {
-      const persisted = dbModule.getMeeting(m.id) as
-        | dbModule.PersistedMeeting
-        | undefined;
-      if (persisted) {
-        meetingResults.push(
-          buildMeetingRetrievalResult(
-            persisted,
-            `Project meeting (${displayTitle})`,
+  let latestNoteAt: string | undefined;
+  {
+    const projectNames = [displayTitle, matched.name]
+      .join(' ')
+      .toLocaleLowerCase();
+    const focusTerms = [
+      ...new Set(
+        (query.toLocaleLowerCase().match(/[\p{L}\p{N}]{4,}/gu) || []).filter(
+          (term) =>
+            !projectNames.includes(term) &&
+            !/^(?:about|across|after|again|all|and|before|changed|checking|concrete|current|detail|details|dive|doing|first|focus|from|given|give|has|have|into|know|latest|more|most|move|need|needs|next|please|project|recent|recently|right|same|should|status|tell|that|there|think|this|what|where|which|would)$/.test(
+              term,
+            ),
+        ),
+      ),
+    ];
+    const projectAliases = [displayTitle, matched.name].flatMap((name) => {
+      const acronym = name.match(/\b[A-Z0-9]{2,}\b/g) || [];
+      return [name, ...acronym];
+    });
+    const projectPhrases = [...new Set(projectAliases)]
+      .map((phrase) =>
+        phrase
+          .toLocaleLowerCase()
+          .replace(/["*()\[\]{}^:~?!,.\-]/g, ' ')
+          .split(/\s+/)
+          .filter((token) => token.length >= 2),
+      )
+      .filter((tokens) => tokens.length > 0)
+      .map(
+        (tokens) => `(${tokens.map((token) => `"${token}"`).join(' AND ')})`,
+      );
+    const projectSectionCandidates = projectPhrases.length
+      ? searchMeetingContextSectionsFts(projectPhrases.join(' OR '), {
+          limit: 40,
+        }).filter(
+          ({ section }) =>
+            !containsConfidentialAside(
+              `${section.heading}\n${section.summary}\n${section.content}`,
+            ),
+        )
+      : [];
+    const projectSectionMatches = projectSectionCandidates.filter(
+      ({ section }) =>
+        focusTerms.length === 0 ||
+        focusTerms.some((term) =>
+          `${section.heading} ${section.summary} ${section.content}`
+            .toLocaleLowerCase()
+            .includes(term),
+        ),
+    );
+    const projectLabels = projectAliases
+      .map((name) => name.trim().toLocaleLowerCase())
+      .filter((name) => name.length >= 3);
+    const stronglyAboutProject = (section: {
+      heading: string;
+      summary: string;
+      content: string;
+    }): boolean => {
+      const headingAndSummary =
+        `${section.heading} ${section.summary}`.toLocaleLowerCase();
+      const content = section.content.toLocaleLowerCase();
+      return projectLabels.some(
+        (label) =>
+          headingAndSummary.includes(label) ||
+          content.split(label).length > 2 ||
+          (focusTerms.length > 0 &&
+            content.includes(label) &&
+            focusTerms.some((term) => content.includes(term))),
+      );
+    };
+    const latestProjectSection = projectSectionCandidates
+      .filter(({ section }) => stronglyAboutProject(section))
+      .sort(
+        (left, right) =>
+          (Date.parse(
+            right.meeting.started_at || right.meeting.created_at || '',
+          ) || 0) -
+          (Date.parse(
+            left.meeting.started_at || left.meeting.created_at || '',
+          ) || 0),
+      )[0];
+    latestNoteAt =
+      latestProjectSection?.meeting.started_at ||
+      latestProjectSection?.meeting.created_at ||
+      undefined;
+    const sectionsByMeeting = new Map<string, typeof projectSectionMatches>();
+    for (const match of projectSectionMatches) {
+      if (!stronglyAboutProject(match.section)) continue;
+      const meetingId = String(match.meeting.id);
+      const matches = sectionsByMeeting.get(meetingId) || [];
+      if (matches.length < 2) matches.push(match);
+      sectionsByMeeting.set(meetingId, matches);
+    }
+    const recentSectionGroups = [...sectionsByMeeting].sort(
+      ([, left], [, right]) =>
+        (Date.parse(
+          right[0].meeting.started_at || right[0].meeting.created_at || '',
+        ) || 0) -
+        (Date.parse(
+          left[0].meeting.started_at || left[0].meeting.created_at || '',
+        ) || 0),
+    );
+    for (const [meetingId, matches] of recentSectionGroups.slice(0, 3)) {
+      const first = matches[0];
+      latestNoteAt ||=
+        first.meeting.started_at || first.meeting.created_at || undefined;
+      const prepared = buildMeetingRetrievalResult(
+        first.meeting,
+        `Project section (${displayTitle})`,
+      );
+      meetingResults.push({
+        ...prepared,
+        meeting_id: meetingId,
+        evidence_text: [
+          `[Project: ${displayTitle}]`,
+          `[Meeting date]: ${first.meeting.started_at || first.meeting.created_at || 'unknown'}`,
+          ...matches.map(
+            ({ section }) =>
+              `[Section: ${section.heading}]: ${section.content.slice(0, 1800)}`,
           ),
-        );
-      }
+        ].join('\n'),
+        evidence_kind: 'section',
+        retrieved_sections: matches.map(({ section }) => ({
+          section_id: section.section_id,
+          heading: section.heading,
+          kind: section.kind,
+          summary: section.summary,
+          trust_status: section.trust_status,
+          source_revision: section.source_revision,
+        })),
+        source_revision: first.section.source_revision,
+        trust_status: first.section.trust_status,
+      });
     }
   }
 
   return {
     project: matched,
     displayTitle,
+    ...(profileUpdatedAt ? { asOf: profileUpdatedAt } : {}),
+    ...(latestNoteAt ? { latestNoteAt } : {}),
     context: [projectRetrievalResult, ...meetingResults],
   };
+};
+
+export const buildAgedProjectAnswer = (
+  query: string,
+  recall: NonNullable<ReturnType<typeof buildProjectRecall>>,
+  now = new Date(),
+  previousAnswer = '',
+  continuesCurrentRead = false,
+  continuationKind?: 'expand' | 'clarify' | 'challenge',
+): string | null => {
+  if (
+    !continuesCurrentRead &&
+    !/\b(?:current|right now|latest|most recent|recently|changed|next|immediate|status|do first|focus on|pending|blocked|unresolved|needs checking|what we know|what is known)\b/i.test(
+      query,
+    )
+  ) {
+    return null;
+  }
+  const newestRecordedAt = [recall.latestNoteAt, recall.asOf]
+    .map((value) => Date.parse(value || ''))
+    .filter(Number.isFinite)
+    .sort((left, right) => right - left)[0];
+  if (
+    !newestRecordedAt ||
+    now.getTime() - newestRecordedAt < 3 * 24 * 60 * 60 * 1000
+  ) {
+    return null;
+  }
+
+  const dateLabel = (value: string): string =>
+    new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'UTC',
+    }).format(new Date(value));
+  const latestLabel = dateLabel(new Date(newestRecordedAt).toISOString());
+  const projectLabels = [recall.displayTitle, recall.project.name]
+    .flatMap((label) => [label, ...(label.match(/\b[A-Z0-9]{2,}\b/g) || [])])
+    .map((label) => label.toLocaleLowerCase())
+    .filter((label) => label.length >= 3);
+  const facetQuery = query
+    .toLocaleLowerCase()
+    .replace(recall.displayTitle.toLocaleLowerCase(), '');
+  const requestedFacet =
+    /\b(pipeline|release|outreach|quality|deployment|data|pilot|design|review|risk|blocker|issues?)\b/i
+      .exec(facetQuery)?.[1]
+      .toLocaleLowerCase();
+  const seenDetails = new Set<string>();
+  const candidateDetails = recall.context
+    .filter((source) => source.source_type !== 'artifact')
+    .flatMap((source) => {
+      const occurredAt = source.evidence_text.match(
+        /\[Meeting date\]:\s*([^\n]+)/,
+      )?.[1];
+      const date = occurredAt ? dateLabel(occurredAt) : latestLabel;
+      return (source.retrieved_sections || []).flatMap((section) => {
+        const summary = section.summary?.trim();
+        if (!summary) return [];
+        return summary
+          .split(/(?<=[.!?])\s+(?=[A-Z])/)
+          .map((sentence) => sentence.trim())
+          .filter((sentence) => {
+            const lower = sentence.toLocaleLowerCase();
+            if (/\b(?:today|tomorrow|next week|this week)\b/.test(lower))
+              return false;
+            if (
+              /\b(?:the other participant|local speaker|remote speaker)\b/.test(
+                lower,
+              )
+            )
+              return false;
+            return (
+              projectLabels.some((label) => lower.includes(label)) ||
+              (Boolean(requestedFacet) && lower.includes(requestedFacet ?? ''))
+            );
+          })
+          .filter((sentence) => {
+            const key = sentence.toLocaleLowerCase();
+            if (seenDetails.has(key)) return false;
+            seenDetails.add(key);
+            return true;
+          })
+          .map((sentence) => ({ date, sentence }));
+      });
+    });
+  const facetDetails = requestedFacet
+    ? candidateDetails.filter(({ sentence }) =>
+        sentence.toLocaleLowerCase().includes(requestedFacet ?? ''),
+      )
+    : [];
+  const details = (requestedFacet ? facetDetails : candidateDetails)
+    .filter(({ sentence }) => !previousAnswer.includes(sentence))
+    .slice(0, 3)
+    .map(({ date, sentence }) => `- ${date}: ${sentence}`);
+  const profileHeadline = recall.context[0]?.evidence_text
+    .match(/\[Current Read\]:\s*([^\n]+)/)?.[1]
+    ?.trim()
+    .replace(/[.]+$/, '');
+  const concreteProfileHeadline =
+    profileHeadline &&
+    /\b(?:is|are|will|has|have|focus(?:ed|ing)?|work(?:ing)?|build(?:ing)?|release|pilot|pipeline)\b/i.test(
+      profileHeadline,
+    )
+      ? profileHeadline
+      : undefined;
+  const profileFocus = recall.context[0]?.evidence_text
+    .match(/\[Current Focus\]:\s*([^\n]+)/)?.[1]
+    ?.trim()
+    .replace(/[.]+$/, '');
+  const profileMilestone = recall.context[0]?.evidence_text
+    .match(/\[Milestones\]:\n-\s*([^\n]+)/)?.[1]
+    ?.trim();
+  const profileOpenThreads = recall.context[0]?.evidence_text
+    .match(/\[Open Threads & Risks\]:\n([\s\S]*?)(?=\n\[|$)/)?.[1]
+    ?.split('\n')
+    .map((line) => line.replace(/^-\s*(?:\[[^\]]+\]\s*)?/, '').trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  const profilePicture =
+    profileFocus && profileFocus.length >= 16
+      ? profileFocus
+      : concreteProfileHeadline;
+  const recorded = details.length
+    ? `\n\nThe last notes say:\n${details.join('\n')}`
+    : (profilePicture || profileMilestone) && recall.asOf
+      ? `\n\nThe project profile (as of ${dateLabel(recall.asOf)}) ${profilePicture ? `said: ${profilePicture}.${profileMilestone ? ` It listed ${profileMilestone} as a milestone.` : ''}` : `listed ${profileMilestone} as a milestone.`}`
+      : '';
+  const nextStep =
+    /\b(?:next|immediate|do first|focus on|needs checking|what we know)\b/i.test(
+      query,
+    )
+      ? '\n\nI’d verify the release status and current owner before treating an older target or follow-up as today’s action.'
+      : '';
+  if (
+    /\b(?:what (?:would|should|could) (?:you|i|we) (?:do|tackle|check) (?:first|next)|first move|next move)\b/i.test(
+      query,
+    )
+  ) {
+    return `For ${recall.displayTitle}, I’d first confirm the release status and who owns the next step. The newest project information I found is from ${latestLabel}, so I wouldn’t assume an older target is still pending.`;
+  }
+  if (continuationKind === 'challenge') {
+    return `You're right to question the freshness. The newest project note I found for ${recall.displayTitle} is from ${latestLabel}, so my earlier description is a last recorded picture—not a verified status today. I can't confirm which recorded steps have since been completed.`;
+  }
+  if (continuationKind === 'clarify') {
+    return `I mean the latest record I found for ${recall.displayTitle} is dated ${latestLabel}. It tells us what was discussed then, but not whether those plans were completed or changed afterward. I wouldn't call that a live project status.`;
+  }
+  if (continuationKind === 'expand' && continuesCurrentRead) {
+    const addedDetail = details[0]
+      ? ` The additional dated detail I found is ${details[0].replace(/^- /, '')}`
+      : '';
+    return `I can add a little to the last recorded picture of ${recall.displayTitle}, but not confirm its status today.${addedDetail} The newest project note I found is from ${latestLabel}; I’d check what has actually shipped and who owns the next step before treating an older plan as current.`;
+  }
+  if (/\b(?:unresolved|issues?|risks?|blockers?)\b/i.test(facetQuery)) {
+    const openThreads = profileOpenThreads?.length
+      ? `\n\nThe project profile last listed${recall.asOf ? ` (as of ${dateLabel(recall.asOf)})` : ''}:\n${profileOpenThreads.map((thread) => `- ${thread}`).join('\n')}`
+      : '';
+    return `I can't confirm which issues are still open for ${recall.displayTitle} today. The newest project note I found is from ${latestLabel}.${openThreads} ${openThreads ? 'I’d verify which of those remain active before ranking them.' : 'I’d need a newer project update before ranking concerns.'}`.trim();
+  }
+  if (previousAnswer && requestedFacet && details.length === 0) {
+    return `I don't have a newer confirmed ${requestedFacet} update for ${recall.displayTitle} beyond what we just covered. The newest project note I found is from ${latestLabel}; it does not establish whether that work has shipped or who owns the next step today. I’d check those two points before calling it blocked or complete.`;
+  }
+  return `I can give you the last recorded picture of ${recall.displayTitle}, but I can't verify its status today. The newest project information I found is from ${latestLabel}.${recorded}${nextStep}`;
 };
 
 export const buildWorkingMemoryOverviewRecall = (
@@ -1226,7 +1867,7 @@ export const buildWorkingMemoryOverviewRecall = (
   const context = [...grouped.entries()]
     .slice(0, 6)
     .flatMap(([meetingId, quotes]) => {
-      const meeting = dbModule.getMeeting(meetingId) as
+      const meeting = dbModule.getAskPlutoMeeting(meetingId) as
         | dbModule.PersistedMeeting
         | undefined;
       if (!meeting) return [];
@@ -1325,6 +1966,7 @@ export const buildWorkingMemoryOverviewRecall = (
 };
 
 export interface WorkspaceIntelligenceRecall {
+  answer: string;
   context: RetrievalResult[];
   summary: {
     hasWorkingMemory: boolean;
@@ -1336,11 +1978,89 @@ export interface WorkspaceIntelligenceRecall {
   };
 }
 
+const truncateAtThoughtBoundary = (
+  value: string,
+  maxLength: number,
+): string => {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+
+  const candidate = normalized.slice(0, maxLength + 1);
+  const sentenceEnd = Math.max(
+    candidate.lastIndexOf('.'),
+    candidate.lastIndexOf('!'),
+    candidate.lastIndexOf('?'),
+  );
+  if (sentenceEnd >= Math.floor(maxLength * 0.55)) {
+    return candidate.slice(0, sentenceEnd + 1).trim();
+  }
+
+  const wordEnd = candidate.lastIndexOf(' ');
+  return `${candidate.slice(0, Math.max(1, wordEnd)).trim()}…`;
+};
+
+const isGenericProjectDescription = (value: string | null | undefined) =>
+  Boolean(
+    value &&
+      /\b(?:is|are)\s+(?:an?\s+)?(?:open[- ]source\s+)?project\b.*\b(?:focused on|designed to|built to|that helps)\b/i.test(
+        value,
+      ),
+  );
+
+interface WorkspaceFocusItem {
+  title: string;
+  current?: string;
+  nextMove?: string;
+  whyNow?: string;
+  source: string;
+}
+
+const renderWorkspaceFocusItem = (
+  item: WorkspaceFocusItem,
+  index: number,
+): string => {
+  const detail = item.current || item.nextMove || item.whyNow;
+  return `${index + 1}. **${item.title}**${detail ? ` — ${detail}` : ''} ${item.source}`;
+};
+
 export const buildWorkspaceIntelligenceRecall = (input: {
   query: string;
   persistedMeetings: dbModule.PersistedMeeting[];
   selfPersonId?: string | null;
+  now?: number;
+  mode?: WorkspaceIntelligenceMode;
 }): WorkspaceIntelligenceRecall => {
+  const now = input.now ?? Date.now();
+  const mode = input.mode ?? 'summary';
+  const recentCutoff = now - 14 * 24 * 60 * 60 * 1000;
+  const recordDate = (
+    item: Record<string, unknown>,
+    primaryKey: string,
+  ): number => {
+    const evidenceQuality =
+      item.evidence_quality && typeof item.evidence_quality === 'object'
+        ? (item.evidence_quality as Record<string, unknown>)
+        : null;
+    const rawDate =
+      item[primaryKey] ?? evidenceQuality?.last_reinforced_at ?? null;
+    return typeof rawDate === 'string' ? Date.parse(rawDate) || 0 : 0;
+  };
+  const isCurrentSynthesizedItem = (
+    item: Record<string, unknown>,
+    primaryKey: string,
+  ): boolean => {
+    const evidenceQuality =
+      item.evidence_quality && typeof item.evidence_quality === 'object'
+        ? (item.evidence_quality as Record<string, unknown>)
+        : null;
+    if (
+      evidenceQuality?.freshness === 'stale' ||
+      evidenceQuality?.freshness === 'aging'
+    )
+      return false;
+    const timestamp = recordDate(item, primaryKey);
+    return timestamp === 0 || timestamp >= recentCutoff;
+  };
   const selfPersonId =
     input.selfPersonId ??
     (typeof dbModule.identityStore?.getSelfPersonId === 'function'
@@ -1366,9 +2086,19 @@ export const buildWorkspaceIntelligenceRecall = (input: {
   )
     ? globalSnapshot.payload.active_streams
     : [];
-  const activeStreams: Array<Record<string, unknown>> = rawActiveStreams.filter(
-    (item): item is Record<string, unknown> =>
-      Boolean(item) && typeof item === 'object',
+  const allActiveStreams: Array<Record<string, unknown>> =
+    rawActiveStreams.filter(
+      (item): item is Record<string, unknown> =>
+        Boolean(item) && typeof item === 'object',
+    );
+  const activeStreams = allActiveStreams
+    .filter((item) => isCurrentSynthesizedItem(item, 'last_touched_at'))
+    .sort(
+      (a, b) =>
+        recordDate(b, 'last_touched_at') - recordDate(a, 'last_touched_at'),
+    );
+  const omittedStreams = allActiveStreams.filter(
+    (item) => !isCurrentSynthesizedItem(item, 'last_touched_at'),
   );
 
   const rawGlobalOpenLoops = Array.isArray(globalSnapshot?.payload?.open_loops)
@@ -1380,33 +2110,207 @@ export const buildWorkspaceIntelligenceRecall = (input: {
       ? ((globalSnapshot?.payload as unknown as Record<string, unknown>)
           ?.needs_attention as unknown[])
       : [];
-  const openLoops: Array<Record<string, unknown>> = rawGlobalOpenLoops.filter(
-    (item): item is Record<string, unknown> =>
-      Boolean(item) && typeof item === 'object',
-  );
+  const openLoops: Array<Record<string, unknown>> = rawGlobalOpenLoops
+    .filter(
+      (item): item is Record<string, unknown> =>
+        Boolean(item) && typeof item === 'object',
+    )
+    .filter((item) => isCurrentSynthesizedItem(item, 'last_touched_at'))
+    .sort(
+      (a, b) =>
+        recordDate(b, 'last_touched_at') - recordDate(a, 'last_touched_at'),
+    );
 
   const rawRisks = Array.isArray(globalSnapshot?.payload?.risks_and_unknowns)
     ? globalSnapshot.payload.risks_and_unknowns
     : [];
-  const risksAndUnknowns: Array<Record<string, unknown>> = rawRisks.filter(
-    (item): item is Record<string, unknown> =>
-      Boolean(item) && typeof item === 'object',
-  );
+  const risksAndUnknowns: Array<Record<string, unknown>> = rawRisks
+    .filter(
+      (item): item is Record<string, unknown> =>
+        Boolean(item) && typeof item === 'object',
+    )
+    .filter((item) => isCurrentSynthesizedItem(item, 'last_touched_at'))
+    .sort(
+      (a, b) =>
+        recordDate(b, 'last_touched_at') - recordDate(a, 'last_touched_at'),
+    );
 
   const portfolio =
     typeof dbModule.getProjectPortfolio === 'function'
       ? dbModule.getProjectPortfolio()
       : [];
 
-  const activeProjects = portfolio
-    .filter((p) => p.status !== 'completed')
+  const projectCandidates = portfolio.filter((project) => {
+    const actionableFocus =
+      project.current_focus &&
+      !isGenericProjectDescription(project.current_focus.trim());
+    return (
+      project.status !== 'completed' &&
+      Boolean(
+        actionableFocus || project.next_milestone || project.recent_change,
+      )
+    );
+  });
+  const isProjectCurrent = (project: (typeof projectCandidates)[number]) => {
+    const activityAt = Date.parse(
+      project.last_mentioned_at || project.updated_at || '',
+    );
+    if (!activityAt) return true;
+    const cadenceDays =
+      project.recurring_cadence === 'quarterly'
+        ? 150
+        : project.recurring_cadence === 'monthly'
+          ? 75
+          : project.recurring_cadence === 'biweekly'
+            ? 35
+            : project.recurring_cadence === 'weekly'
+              ? 21
+              : 45;
+    return activityAt >= now - cadenceDays * 24 * 60 * 60 * 1000;
+  };
+  const activeProjects = projectCandidates
+    .filter(isProjectCurrent)
+    .sort(
+      (a, b) =>
+        (Date.parse(b.last_mentioned_at || b.updated_at || '') || 0) -
+        (Date.parse(a.last_mentioned_at || a.updated_at || '') || 0),
+    )
     .slice(0, 4);
+  const omittedProjects = projectCandidates.filter(
+    (project) => !isProjectCurrent(project),
+  );
 
-  const recentMeetings = input.persistedMeetings.slice(0, 4);
+  // A recent meeting is not necessarily a useful update to a priority brief.
+  // Keep the source set bounded, but do not let greetings and small talk crowd
+  // out concrete changes recorded in newer synthesized notes.
+  const seekingRisks = mode === 'risks' || mode === 'risks_expanded';
+  const recentMeetings = input.persistedMeetings
+    .filter((meeting) => {
+      const occurredAt = Date.parse(
+        meeting.started_at || meeting.created_at || '',
+      );
+      if (!occurredAt || occurredAt < recentCutoff) return false;
+      const mid = parseMid(meeting.mid_json);
+      const notes = meeting.enhanced_notes || meeting.user_notes || '';
+      if (containsConfidentialAside(notes)) return false;
+      if (seekingRisks) {
+        const structuredItems = [
+          ...(mid?.decisions || []).map((item) => item.description),
+          ...(mid?.action_items || []).map((item) => item.description),
+        ].join(' ');
+        return /\b(?:risk|blocker|concern|issue|incident|failure|failed|unreliable|delay|approval)\b/i.test(
+          `${notes} ${structuredItems}`,
+        );
+      }
+      if (mid?.decisions?.length || mid?.action_items?.length) return true;
+      return /\b(?:blocker|risk|issue|incident|deadline|milestone|release|deploy(?:ment|ed)?|launch|pilot|approval|review|follow[- ]?up|next step|action item|pull request|\bPR\b|pipeline|rollout|ship(?:ped|ping)?|fix(?:ed|ing)?|decision)\b/i.test(
+        notes,
+      );
+    })
+    .sort(
+      (left, right) =>
+        (Date.parse(right.started_at || right.created_at || '') || 0) -
+        (Date.parse(left.started_at || left.created_at || '') || 0),
+    )
+    .slice(0, 4);
+  const recentMeetingResults = recentMeetings.map((meeting) =>
+    buildMeetingRetrievalResult(meeting, 'Recent meeting context'),
+  );
 
   const sections: string[] = ['[Workspace Intelligence & Executive Briefing]'];
 
-  if (currentRead?.headline) {
+  const workspaceRefreshedAt =
+    globalSnapshot?.source_doc_last_synthesized_at ||
+    globalSnapshot?.generated_at ||
+    globalSnapshot?.updated_at ||
+    null;
+  const workspaceRefreshedTimestamp = workspaceRefreshedAt
+    ? Date.parse(workspaceRefreshedAt) || 0
+    : 0;
+  const noteUpdatesSinceSnapshot = recentMeetings.flatMap((meeting, index) => {
+    const occurredAt = Date.parse(
+      meeting.started_at || meeting.created_at || '',
+    );
+    if (
+      !workspaceRefreshedTimestamp ||
+      !occurredAt ||
+      occurredAt <= workspaceRefreshedTimestamp
+    )
+      return [];
+    const result = recentMeetingResults[index];
+    const detail = result.evidence_text.match(
+      /\[(?:Decisions|Action items|Analysis)\]:\s*([^\n]+)/i,
+    )?.[1];
+    if (!detail?.trim()) return [];
+    return [
+      {
+        title: meeting.title || 'Untitled meeting',
+        occurredAt,
+        detail: truncateAtThoughtBoundary(
+          detail
+            .trim()
+            .replace(
+              /^\[(?:Summary|Overview|Analysis|Decisions|Action items)\]:\s*/i,
+              '',
+            ),
+          280,
+        ),
+        source: `[Source ${index + 2}]`,
+      },
+    ];
+  });
+  if (workspaceRefreshedAt) {
+    sections.push(`[Workspace refreshed]: ${workspaceRefreshedAt}`);
+  }
+  if (noteUpdatesSinceSnapshot.length > 0) {
+    const latestUpdate = Math.max(
+      ...noteUpdatesSinceSnapshot.map((update) => update.occurredAt),
+    );
+    sections.push(
+      `[Newer synthesized-note overlay]: ${noteUpdatesSinceSnapshot.length} meeting notes through ${new Date(latestUpdate).toISOString()}`,
+    );
+  }
+  sections.push(
+    '[Selection policy]: Older or stale threads are omitted from the main priority list.',
+  );
+  sections.push(
+    `[Omitted older or stale count]: ${omittedStreams.length + omittedProjects.length}`,
+  );
+
+  if (omittedStreams.length > 0 || omittedProjects.length > 0) {
+    const omittedLines = [
+      ...omittedStreams.map((item) => {
+        const title =
+          typeof item.title === 'string' ? item.title : 'Untitled stream';
+        const read =
+          typeof item.current_read === 'string' && item.current_read.trim()
+            ? ` — ${item.current_read.trim()}`
+            : '';
+        const timestamp = recordDate(item, 'last_touched_at');
+        return `- Stream "${title}"${read}${timestamp ? ` (last reinforced ${new Date(timestamp).toISOString()})` : ' (stale)'}`;
+      }),
+      ...omittedProjects.map((project) => {
+        const title = project.display_title || project.name;
+        const focus = project.current_focus
+          ? ` — ${project.current_focus}`
+          : project.next_milestone
+            ? ` — next: ${project.next_milestone}`
+            : '';
+        const activityAt =
+          project.last_mentioned_at || project.updated_at || null;
+        return `- Project "${title}"${focus}${activityAt ? ` (last active ${activityAt})` : ' (stale)'}`;
+      }),
+    ];
+    sections.push(`[Omitted older or stale work]:\n${omittedLines.join('\n')}`);
+  }
+
+  const currentReadIsUsable =
+    Boolean(currentRead?.headline) &&
+    currentRead?.freshness !== 'stale' &&
+    globalSnapshot?.freshness !== 'stale' &&
+    (!workspaceRefreshedTimestamp ||
+      workspaceRefreshedTimestamp >= now - 7 * 24 * 60 * 60 * 1000);
+  if (currentReadIsUsable && currentRead?.headline) {
     const bullets = (currentRead.supporting_bullets || [])
       .map((b) => `- ${b}`)
       .join('\n');
@@ -1561,13 +2465,336 @@ export const buildWorkspaceIntelligenceRecall = (input: {
     trust_status: globalSnapshot?.trust_status ?? 'grounded',
   };
 
-  const recentMeetingResults = recentMeetings
+  const source = '[Source 1]';
+
+  const immediatePriorities: WorkspaceFocusItem[] = openCommitments
     .slice(0, 3)
-    .map((meeting) =>
-      buildMeetingRetrievalResult(meeting, 'Recent meeting context'),
+    .map((commitment) => ({
+      title: commitment.text,
+      nextMove: commitment.dueDate
+        ? `Complete by ${commitment.dueDate}`
+        : undefined,
+      whyNow: commitment.evidence
+        ? truncateAtThoughtBoundary(commitment.evidence, 180)
+        : undefined,
+      source,
+    }));
+
+  const seenWork = new Set<string>();
+  const activeWork: WorkspaceFocusItem[] = [
+    ...activeStreams.map((stream) => {
+      const title =
+        typeof stream.title === 'string' ? stream.title : 'Active stream';
+      const current =
+        typeof stream.current_read === 'string' && stream.current_read.trim()
+          ? stream.current_read.trim()
+          : undefined;
+      return {
+        title,
+        current,
+        source,
+      };
+    }),
+    ...activeProjects.map((project) => {
+      const title = project.display_title || project.name;
+      const current =
+        project.current_focus &&
+        !isGenericProjectDescription(project.current_focus)
+          ? project.current_focus
+          : undefined;
+      return {
+        title,
+        current,
+        nextMove: project.next_milestone || undefined,
+        whyNow:
+          project.recent_change ||
+          (project.health_headline && project.health_headline.length >= 16
+            ? project.health_headline
+            : undefined),
+        source,
+      };
+    }),
+  ].filter((item) => {
+    const key = item.title.trim().toLocaleLowerCase();
+    if (seenWork.has(key)) return false;
+    seenWork.add(key);
+    return true;
+  });
+
+  const rankedFocus = [...immediatePriorities, ...activeWork].slice(0, 4);
+
+  const seenAttention = new Set<string>();
+  const attentionItems = [
+    ...openLoops.slice(0, 2).map((item) => {
+      const title = typeof item.title === 'string' ? item.title : 'Open loop';
+      const summary =
+        typeof item.summary === 'string' && item.summary.trim()
+          ? ` — ${item.summary.trim()}`
+          : '';
+      return `- ${title}${summary} ${source}`;
+    }),
+    ...risksAndUnknowns.slice(0, 2).map((risk) => {
+      const title = typeof risk.title === 'string' ? risk.title : 'Risk';
+      const summary =
+        typeof risk.summary === 'string' && risk.summary.trim()
+          ? ` — ${risk.summary.trim()}`
+          : '';
+      return `- ${title}${summary} ${source}`;
+    }),
+    ...candidateCommitments
+      .slice(0, 1)
+      .map(
+        (commitment) => `- Unconfirmed follow-up: ${commitment.text} ${source}`,
+      ),
+  ]
+    .filter((line) => {
+      const key = line
+        .replace(/^-\s*/, '')
+        .split(/\s+—\s+|\s+\[Source/)[0]
+        .toLocaleLowerCase();
+      if (seenAttention.has(key)) return false;
+      seenAttention.add(key);
+      return true;
+    })
+    .slice(0, 3);
+
+  const seenRisks = new Set<string>();
+  const riskItems = [...openLoops, ...risksAndUnknowns]
+    .filter((item) => {
+      const title = String(item.title || '')
+        .trim()
+        .toLocaleLowerCase();
+      if (!title || seenRisks.has(title)) return false;
+      seenRisks.add(title);
+      return true;
+    })
+    .slice(0, mode === 'risks_expanded' ? 5 : 3)
+    .map((item) => {
+      const title = String(item.title).trim();
+      const summary =
+        typeof item.summary === 'string' && item.summary.trim()
+          ? ` — ${item.summary.trim()}`
+          : '';
+      const whyNow =
+        mode === 'risks_expanded' &&
+        typeof item.why_now === 'string' &&
+        item.why_now.trim()
+          ? ` Why it was flagged: ${item.why_now.trim().replace(/[.!?]+$/, '')}.`
+          : '';
+      return `- ${title}${summary}${whyNow} ${source}`;
+    });
+
+  const answerSections: string[] = [];
+  const updateLines = noteUpdatesSinceSnapshot
+    .slice(0, 2)
+    .map((update) => `- ${update.title} — ${update.detail} ${update.source}`);
+  const omittedLines = [
+    ...omittedStreams.map((item) => {
+      const title =
+        typeof item.title === 'string' ? item.title : 'Untitled stream';
+      const read =
+        typeof item.current_read === 'string' && item.current_read.trim()
+          ? ` — ${item.current_read.trim()}`
+          : '';
+      const timestamp = recordDate(item, 'last_touched_at');
+      const date = timestamp
+        ? ` (last reinforced ${new Date(timestamp).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+          })})`
+        : '';
+      return `- ${title}${read}${date} ${source}`;
+    }),
+    ...omittedProjects.map((project) => {
+      const title = project.display_title || project.name;
+      const focus = project.current_focus
+        ? ` — ${project.current_focus}`
+        : project.next_milestone
+          ? ` — next: ${project.next_milestone}`
+          : '';
+      const activityAt = Date.parse(
+        project.last_mentioned_at || project.updated_at || '',
+      );
+      const date = activityAt
+        ? ` (last active ${new Date(activityAt).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+          })})`
+        : '';
+      return `- ${title}${focus}${date} ${source}`;
+    }),
+  ].slice(0, 8);
+  const snapshotNeedsConfirmation = Boolean(
+    workspaceRefreshedTimestamp &&
+      workspaceRefreshedTimestamp < now - 7 * 24 * 60 * 60 * 1000,
+  );
+  const refreshedLabel = workspaceRefreshedAt
+    ? new Date(workspaceRefreshedAt).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+      })
+    : null;
+
+  if (mode === 'omitted') {
+    if (omittedLines.length > 0) {
+      answerSections.push(
+        `I left these older or stale signals out of the main priority list. ${source}`,
+      );
+      answerSections.push(
+        `**Left out as older or stale**\n${omittedLines.join('\n')}`,
+      );
+    } else {
+      answerSections.push(
+        `I didn’t find any synthesized workstreams or projects marked stale. The shorter list came from deduplicating overlapping work and keeping the briefing focused. ${source}`,
+      );
+    }
+  }
+
+  if (mode === 'risks' || mode === 'risks_expanded') {
+    answerSections.push(
+      snapshotNeedsConfirmation
+        ? `I’d treat these as recorded watch points, not confirmed blockers today. The workspace synthesis is from ${refreshedLabel}.`
+        : 'Here are the concerns I’d check first.',
     );
+    const riskUpdates = noteUpdatesSinceSnapshot
+      .filter((update) =>
+        /\b(?:risk|blocker|incident|issue|unreliable|failure|failed|delay|approval)\b/i.test(
+          `${update.title} ${update.detail}`,
+        ),
+      )
+      .slice(0, mode === 'risks_expanded' ? 3 : 2)
+      .map((update) => `- ${update.title} — ${update.detail} ${update.source}`);
+    if (riskUpdates.length > 0) {
+      answerSections.push(
+        `**Relevant newer updates**\n${riskUpdates.join('\n')}`,
+      );
+    }
+    answerSections.push(
+      riskItems.length > 0
+        ? `**${snapshotNeedsConfirmation ? `Watch points recorded by ${refreshedLabel}` : 'Watch points'}**\n${riskItems.join('\n')}`
+        : 'I don’t see a specific recent risk or open loop in the workspace synthesis that I can confidently rank.',
+    );
+    if (mode === 'risks_expanded' && riskItems.length > 0) {
+      answerSections.push(
+        'The missing piece is whether each item remains open. I’d check its latest status and owner before treating it as an immediate blocker.',
+      );
+    }
+  }
+
+  if (mode === 'expanded') {
+    const priorityTerms = rankedFocus.flatMap((item) => [
+      item.title.toLocaleLowerCase(),
+      ...(item.title.match(/\b[A-Z0-9]{2,}\b/g) || []).map((term) =>
+        term.toLocaleLowerCase(),
+      ),
+      ...(
+        item.title.toLocaleLowerCase().match(/[\p{L}\p{N}]{5,}/gu) || []
+      ).filter(
+        (term) =>
+          !/^(?:client|project|program|initiative|workstream)$/.test(term),
+      ),
+    ]);
+    const additionalUpdates = noteUpdatesSinceSnapshot
+      .slice(2)
+      .filter((update) =>
+        priorityTerms.some((term) =>
+          update.title.toLocaleLowerCase().includes(term),
+        ),
+      )
+      .slice(0, 3)
+      .map((update) => `- ${update.title} — ${update.detail} ${update.source}`);
+    const addedFocusDetails = rankedFocus.flatMap((item) => {
+      const extra = item.current && item.nextMove ? item.nextMove : null;
+      return extra ? [`- **${item.title}:** ${extra} ${item.source}`] : [];
+    });
+    const currentReadDetails = currentReadIsUsable
+      ? (currentRead?.supporting_bullets || [])
+          .slice(0, 3)
+          .map((bullet) => `- ${bullet} ${source}`)
+      : [];
+    answerSections.push(
+      snapshotNeedsConfirmation
+        ? `I can add what the synthesis records, but the standing priorities are still from ${refreshedLabel}; I can't confirm their status today.`
+        : 'Here’s the additional detail I have on those priorities.',
+    );
+    if (additionalUpdates.length > 0) {
+      answerSections.push(
+        `**Additional recorded update**\n${additionalUpdates.join('\n')}`,
+      );
+    }
+    if (addedFocusDetails.length > 0 || currentReadDetails.length > 0) {
+      answerSections.push(
+        `**More context**\n${[...addedFocusDetails, ...currentReadDetails].join('\n')}`,
+      );
+    }
+    if (
+      additionalUpdates.length === 0 &&
+      addedFocusDetails.length === 0 &&
+      currentReadDetails.length === 0
+    ) {
+      answerSections.push(
+        'I don’t have a more specific synthesized update on those priorities yet. I’d check their current status before turning the older brief into a to-do list.',
+      );
+    }
+  }
+
+  if (mode === 'summary') {
+    if (currentReadIsUsable && currentRead?.headline) {
+      const headline = currentRead.headline.trim().replace(/[.!?]+$/, '');
+      answerSections.push(`Here’s my read: **${headline}.** ${source}`);
+    } else if (rankedFocus.length > 0) {
+      answerSections.push(
+        snapshotNeedsConfirmation
+          ? `The newest synthesized updates are below. The broader priorities come from the ${refreshedLabel} workspace snapshot, so I’d confirm their current status before acting.`
+          : 'Here’s where I’d put your attention right now.',
+      );
+    }
+
+    if (snapshotNeedsConfirmation && updateLines.length > 0) {
+      answerSections.push(`**Recent updates**\n${updateLines.join('\n')}`);
+    }
+
+    if (rankedFocus.length > 0) {
+      const visibleFocus = rankedFocus.slice(0, 3);
+      answerSections.push(
+        `${snapshotNeedsConfirmation ? `**Standing priorities (as of ${refreshedLabel})**` : '**Focus now**'}\n${visibleFocus
+          .map((item, index) => renderWorkspaceFocusItem(item, index))
+          .join('\n\n')}`,
+      );
+    }
+
+    if (!snapshotNeedsConfirmation && updateLines.length > 0) {
+      answerSections.push(`**Recent updates**\n${updateLines.join('\n')}`);
+    }
+  }
+
+  if (mode === 'summary' && attentionItems.length > 0) {
+    answerSections.push(`**Keep an eye on**\n${attentionItems.join('\n')}`);
+  }
+
+  if (workspaceRefreshedAt && mode !== 'expanded') {
+    const latestOverlay = noteUpdatesSinceSnapshot.length
+      ? new Date(
+          Math.max(
+            ...noteUpdatesSinceSnapshot.map((update) => update.occurredAt),
+          ),
+        ).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      : null;
+    answerSections.push(
+      mode === 'risks' || mode === 'risks_expanded'
+        ? `The base workspace synthesis was refreshed ${refreshedLabel}. ${source}`
+        : latestOverlay
+          ? `The base workspace synthesis was refreshed ${refreshedLabel}. ${source}\nNewer synthesized meeting notes are included through ${latestOverlay}. ${source}`
+          : `I left older or stale threads out of the main list. The workspace synthesis was refreshed ${refreshedLabel}. ${source}`,
+    );
+  }
+
+  const answer =
+    answerSections.join('\n\n') ||
+    'I don’t have enough recent synthesized context to give you a priority list I’d trust yet.';
 
   return {
+    answer,
     context: [primaryResult, ...recentMeetingResults],
     summary: {
       hasWorkingMemory: Boolean(globalSnapshot),
@@ -1741,7 +2968,6 @@ export const retrieveContext = async (
     pinnedResults?: RetrievalResult[];
     query?: string;
     meetingIds?: string[];
-    synthesizedOnly?: boolean;
   } = {},
 ): Promise<RetrievalResult[]> => {
   if (parsed.intent === 'conversational') {
@@ -1776,7 +3002,12 @@ export const retrieveContext = async (
     const sectionMatches = searchMeetingContextSectionsFts(ftsQueryStr, {
       limit: 30,
       ...(options.meetingIds?.length ? { meetingIds: options.meetingIds } : {}),
-    });
+    }).filter(
+      ({ section }) =>
+        !containsConfidentialAside(
+          `${section.heading}\n${section.summary}\n${section.content}`,
+        ),
+    );
     const sectionsByMeeting = new Map<string, typeof sectionMatches>();
     for (const match of sectionMatches) {
       const meetingId = String(match.meeting.id);
@@ -1859,80 +3090,6 @@ export const retrieveContext = async (
         },
       };
     }
-
-    if (
-      !options.meetingIds?.length &&
-      !/\b(?:meetings|calls)\b/i.test(options.query || '')
-    ) {
-      const searchFn =
-        dbModule.searchLocalArtifactsFts || dbModule.searchLocalArtifacts;
-      for (const artifact of searchFn(allKeywords, 8)) {
-        const titleLower = artifact.title.toLowerCase();
-        const textLower = artifact.extracted_text.toLowerCase();
-        const entityMatches = (parsed.entity_mentions || []).filter(
-          (entity: string) =>
-            titleLower.includes(entity.toLowerCase()) ||
-            textLower.includes(entity.toLowerCase()),
-        );
-        const entityWeight = entityMatches.length * 0.15;
-        const score = artifact.match_score * 0.4 + entityWeight;
-
-        resultsMap[`artifact:${artifact.id}`] = {
-          meeting_id: artifact.id,
-          meeting_title: artifact.title,
-          source_type: 'artifact',
-          source_id: artifact.id,
-          mid: null,
-          evidence_text: [
-            `[Local artifact]: ${artifact.title}`,
-            `[Captured]: ${artifact.captured_at}`,
-            `[Content]: ${artifact.extracted_text.slice(0, 3200)}`,
-          ].join('\n'),
-          score,
-          score_breakdown: {
-            fts_rank: artifact.match_score,
-            graph_proximity: entityWeight,
-            recency_decay: calculateRecencyDecay(artifact.captured_at),
-            mention_weight: entityWeight,
-          },
-          evidence_kind: 'artifact',
-          source_revision: artifact.content_hash,
-          trust_status: artifact.trust_status,
-        };
-      }
-    }
-
-    // Transcript-only meetings are considered only after notes and headings
-    // fail, and only when exact wording is explicitly requested and synthesizedOnly is not set.
-    if (
-      !options.synthesizedOnly &&
-      Object.keys(resultsMap).length === 0 &&
-      /\b(?:quote|verbatim|word for word|exact(?:ly)?(?: what| how)?|exact words?)\b/i.test(
-        options.query || '',
-      )
-    ) {
-      for (const [idx, meeting] of searchMeetingsFts(ftsQueryStr, {
-        limit: 12,
-      })
-        .filter(
-          (meeting) =>
-            !options.meetingIds?.length ||
-            options.meetingIds.includes(String(meeting.id)),
-        )
-        .entries()) {
-        const prepared = buildMeetingRetrievalResult(
-          meeting,
-          'Transcript candidate',
-        );
-        resultsMap[String(meeting.id)] = {
-          ...prepared,
-          score_breakdown: {
-            ...prepared.score_breakdown,
-            fts_rank: 1 / (idx + 1),
-          },
-        };
-      }
-    }
   }
 
   const walkedMeetingCount = new Map<
@@ -2001,7 +3158,7 @@ export const retrieveContext = async (
       );
     } else {
       // Add new structural hit
-      const m = dbModule.getMeeting(mId) as
+      const m = dbModule.getAskPlutoMeeting(mId) as
         | dbModule.PersistedMeeting
         | undefined;
       if (!m) continue;
@@ -2058,111 +3215,5 @@ export const retrieveContext = async (
             ),
         ),
       ].slice(0, 6);
-  const transcriptRequested =
-    !options.synthesizedOnly &&
-    /\b(?:quote|verbatim|word for word|exact(?:ly)?(?: what| how)?|exact words?)\b/i.test(
-      options.query || '',
-    );
-  if (!transcriptRequested) return selected;
-
-  const queryTokens = new Set(
-    allKeywords
-      .flatMap((keyword) => keyword.toLocaleLowerCase().split(/\s+/))
-      .filter((token) => token.length > 2),
-  );
-  return selected.map((result) => {
-    const meeting = dbModule.getMeeting(result.meeting_id) as
-      | dbModule.PersistedMeeting
-      | undefined;
-    if (!meeting?.transcript_json) return result;
-    const segments = parseTranscriptSegments(meeting.transcript_json);
-    const transcriptRevision = createHash('sha256')
-      .update(meeting.transcript_json)
-      .digest('hex');
-    const transcriptTrust =
-      meeting.transcript_status === 'validated'
-        ? ('grounded' as const)
-        : ('weak_evidence' as const);
-    const preferredRanges = result.retrieved_sections
-      ?.map((section) => section.transcript_range)
-      .filter((range): range is [number, number] => Boolean(range));
-    const ranked = segments
-      .map((segment, index) => {
-        const record = segment as Record<string, unknown>;
-        const text = typeof record.text === 'string' ? record.text.trim() : '';
-        const normalized = text.toLocaleLowerCase();
-        const keywordScore = [...queryTokens].filter((token) =>
-          normalized.includes(token),
-        ).length;
-        const rangeScore = preferredRanges?.some(
-          ([start, end]) => index >= start && index <= end,
-        )
-          ? 2
-          : 0;
-        return { index, record, text, score: keywordScore + rangeScore };
-      })
-      .filter((candidate) => candidate.text && candidate.score > 0)
-      .sort(
-        (left, right) => right.score - left.score || left.index - right.index,
-      )
-      .slice(0, 3);
-    const used = new Set<number>();
-    const passages = ranked.flatMap((candidate) => {
-      if (used.has(candidate.index)) return [];
-      const startIndex = Math.max(0, candidate.index - 1);
-      const endIndex = Math.min(segments.length - 1, candidate.index + 1);
-      for (let index = startIndex; index <= endIndex; index += 1)
-        used.add(index);
-      const window = segments.slice(startIndex, endIndex + 1);
-      const lines = window.flatMap((segment) => {
-        const record = segment as Record<string, unknown>;
-        const text = typeof record.text === 'string' ? record.text.trim() : '';
-        if (!text) return [];
-        const speaker =
-          typeof record.speaker === 'string' && record.speaker.trim()
-            ? record.speaker.trim()
-            : 'Speaker';
-        return [`${speaker}: ${text}`];
-      });
-      const first = window[0] as Record<string, unknown> | undefined;
-      const last = window.at(-1) as Record<string, unknown> | undefined;
-      const secondsToMs = (value: unknown) =>
-        typeof value === 'number' && Number.isFinite(value)
-          ? Math.max(0, Math.round(value * 1000))
-          : undefined;
-      const startMs = first
-        ? secondsToMs(first.start ?? first.startTime)
-        : undefined;
-      const endMs = last ? secondsToMs(last.end ?? last.endTime) : undefined;
-      return [
-        {
-          quote: lines.join('\n').slice(0, 1200),
-          speaker:
-            typeof candidate.record.speaker === 'string'
-              ? candidate.record.speaker
-              : 'Speaker',
-          ...(startMs !== undefined ? { start_ms: startMs } : {}),
-          ...(endMs !== undefined ? { end_ms: endMs } : {}),
-          start_segment_index: startIndex,
-          end_segment_index: endIndex,
-          source_revision: transcriptRevision,
-          trust_status: transcriptTrust,
-        },
-      ];
-    });
-    if (!passages.length) return result;
-    return {
-      ...result,
-      evidence_text: `${result.evidence_text}\n${passages
-        .map(
-          (passage) =>
-            `[Transcript passage${passage.start_ms !== undefined ? ` at ${Math.round(passage.start_ms / 1000)}s` : ''}]: ${passage.quote}`,
-        )
-        .join('\n')}`,
-      evidence_kind: 'transcript' as const,
-      transcript_passages: passages,
-      source_revision: transcriptRevision,
-      trust_status: transcriptTrust,
-    };
-  });
+  return selected;
 };

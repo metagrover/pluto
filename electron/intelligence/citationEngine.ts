@@ -1033,23 +1033,6 @@ export const auditCitations = (
     claimGroups.set(key, group);
   }
 
-  // Synthesized note/profile sources (evidence_kind: 'note' | 'section' | 'overview' |
-  // 'commitment' | 'artifact') are already grounded, verified truth. Running token-overlap
-  // validation against pre-verified text is wasteful and harmful: paraphrases of ground-truth
-  // notes fail the overlap check even when factually accurate, producing false negatives.
-  // Only bypass for explicitly synthesized kinds — unknown/undefined keeps the strict path.
-  const SYNTHESIZED_EVIDENCE_KINDS = new Set<string>([
-    'note',
-    'section',
-    'overview',
-    'commitment',
-    'artifact',
-  ]);
-  const isSynthesizedSource = (s: RetrievalResult | undefined): boolean =>
-    s !== undefined &&
-    s.evidence_kind !== undefined &&
-    SYNTHESIZED_EVIDENCE_KINDS.has(s.evidence_kind);
-
   return structural.map(({ citation, structurallyValid }) => {
     const source = sources.find(
       (candidate) => candidate.meeting_id === citation.meeting_id,
@@ -1072,41 +1055,30 @@ export const auditCitations = (
     const claimKey = normalizeClaimKey(citation.claim);
     const group = (claimKey ? claimGroups.get(claimKey) : undefined) || [];
 
-    // For synthesized sources, structural validity is sufficient — skip token-overlap.
-    const synthesized = isSynthesizedSource(source);
     const combinedSupport =
       !selfClaim &&
       group.length > 1 &&
       group.every((item) => item.structurallyValid) &&
-      (group.every((item) =>
-        isSynthesizedSource(
-          sources.find(
-            (candidate) => candidate.meeting_id === item.citation.meeting_id,
-          ),
-        ),
-      ) ||
-        claimIsSupportedByEvidence(
-          citation.claim,
-          group
-            .flatMap((item) => {
-              const itemSource = sources.find(
-                (candidate) =>
-                  candidate.meeting_id === item.citation.meeting_id,
-              );
-              return [
-                item.citation.evidence_span || '',
-                itemSource?.meeting_title || itemSource?.mid?.title || '',
-                itemSource?.evidence_text || '',
-              ];
-            })
-            .filter(Boolean)
-            .join('\n'),
-          selfName,
-        ));
+      claimIsSupportedByEvidence(
+        citation.claim,
+        group
+          .flatMap((item) => {
+            const itemSource = sources.find(
+              (candidate) => candidate.meeting_id === item.citation.meeting_id,
+            );
+            return [
+              item.citation.evidence_span || '',
+              itemSource?.meeting_title || itemSource?.mid?.title || '',
+              itemSource?.evidence_text || '',
+            ];
+          })
+          .filter(Boolean)
+          .join('\n'),
+        selfName,
+      );
     const evidence_valid =
       structurallyValid &&
-      (synthesized ||
-        claimIsSupportedByEvidence(citation.claim, directSupport, selfName) ||
+      (claimIsSupportedByEvidence(citation.claim, directSupport, selfName) ||
         combinedSupport);
 
     return {
@@ -1510,6 +1482,158 @@ export const buildSafeAnswerPresentation = (
 export type SafeAnswerPresentation = ReturnType<
   typeof buildSafeAnswerPresentation
 >;
+
+const trimDanglingTrailingSentence = (answer: string): string => {
+  if (
+    !/(?:\b(?:a|an|and|as|at|by|for|from|in|into|of|on|or|the|to|with)|\b(?:19|20)\d{0,2}|[,;:—-])\s*$/i.test(
+      answer,
+    )
+  ) {
+    return answer;
+  }
+
+  const lastSentenceEnd = Math.max(
+    answer.lastIndexOf('.'),
+    answer.lastIndexOf('!'),
+    answer.lastIndexOf('?'),
+  );
+  if (lastSentenceEnd < 0) return answer;
+
+  const trailingFragment = answer.slice(lastSentenceEnd + 1).trim();
+  return trailingFragment.split(/\s+/).length >= 4
+    ? answer.slice(0, lastSentenceEnd + 1).trimEnd()
+    : answer;
+};
+
+/**
+ * Treats synthesized notes, project profiles, and people profiles as the trust
+ * boundary. Citations remain attached for provenance, but lexical overlap no
+ * longer gates or rewrites the model's prose.
+ */
+export const buildSynthesizedAnswerPresentation = (
+  answer: string,
+  sources: RetrievalResult[],
+  _selfName?: string,
+  preserveIncomplete = false,
+): SafeAnswerPresentation => {
+  let strippedAnswer = answer
+    .replace(/\s*\[Sources?\s+[^\]]*\]/gi, '')
+    .replace(/\s*\[Sources?\s+[^\]]*$/gi, '')
+    .replace(/<?\-?cite[^>]*>[\s\S]*?<\/cite>/gi, '')
+    .replace(/\s+([.!?])/g, '$1')
+    .trim();
+  if (
+    preserveIncomplete &&
+    strippedAnswer.lastIndexOf('[') > strippedAnswer.lastIndexOf(']')
+  ) {
+    strippedAnswer = strippedAnswer
+      .slice(0, strippedAnswer.lastIndexOf('['))
+      .trimEnd();
+  }
+  const cleanAnswer = preserveIncomplete
+    ? strippedAnswer
+    : pruneOrphanHeadings(trimDanglingTrailingSentence(strippedAnswer));
+  const noEvidence = /^I couldn't (?:find|verify)/i.test(cleanAnswer);
+  const seenSources = new Set<string>();
+  const citations = noEvidence
+    ? []
+    : sources.flatMap((source): CitationChain[] => {
+        if (source.evidence_kind === 'transcript') return [];
+        const sourceType = source.source_type || 'meeting';
+        const sourceId = source.source_id || source.meeting_id;
+        const sourceKey = `${sourceType}:${sourceId}`;
+        if (seenSources.has(sourceKey)) return [];
+        seenSources.add(sourceKey);
+
+        const section = source.retrieved_sections?.[0];
+        const evidenceSpan = (section?.summary || source.evidence_text)
+          .trim()
+          .slice(0, 320);
+        return [
+          {
+            claim:
+              source.meeting_title || source.mid?.title || 'Response context',
+            meeting_id: source.meeting_id,
+            meeting_title:
+              source.meeting_title || source.mid?.title || 'Unknown source',
+            source_type: sourceType,
+            source_id: sourceId,
+            evidence_span: evidenceSpan || undefined,
+            evidence_valid: true,
+            trust_status:
+              source.trust_status || section?.trust_status || 'grounded',
+            evidence_kind: section ? 'section' : source.evidence_kind,
+            section_id: section?.section_id,
+            section_heading: section?.heading,
+            source_revision: section?.source_revision || source.source_revision,
+          },
+        ];
+      });
+
+  return {
+    answer: cleanAnswer,
+    citations,
+    outcome: noEvidence ? 'no_evidence' : 'answered',
+    trustStatus: noEvidence
+      ? undefined
+      : citations.some(
+            (citation) =>
+              !citation.evidence_valid || citation.trust_status === 'inferred',
+          )
+        ? 'inferred'
+        : 'grounded',
+    unsupportedClaimCount: 0,
+    unsupportedClaims: [],
+  };
+};
+
+export const createSynthesizedAnswerStream = (
+  sources: RetrievalResult[],
+  onDelta: (delta: string) => void,
+  onPresentation?: (presentation: SafeAnswerPresentation) => void,
+  selfName?: string,
+): {
+  push: (delta: string) => void;
+  finalize: (answer: string) => SafeAnswerPresentation;
+  readonly streamedAnswer: string;
+} => {
+  let rawAnswer = '';
+  let streamedAnswer = '';
+
+  const present = (preserveIncomplete = false): SafeAnswerPresentation => {
+    const presentation = buildSynthesizedAnswerPresentation(
+      rawAnswer,
+      sources,
+      selfName,
+      preserveIncomplete,
+    );
+    onPresentation?.(presentation);
+    if (
+      presentation.answer.startsWith(streamedAnswer) &&
+      presentation.answer.length > streamedAnswer.length
+    ) {
+      const delta = presentation.answer.slice(streamedAnswer.length);
+      streamedAnswer = presentation.answer;
+      onDelta(delta);
+    }
+    return presentation;
+  };
+
+  return {
+    push: (delta: string) => {
+      if (!delta) return;
+      rawAnswer += delta;
+      present(true);
+    },
+    finalize: (answer: string) => {
+      rawAnswer = answer;
+      return present(false);
+    },
+    get streamedAnswer() {
+      return streamedAnswer;
+    },
+  };
+};
 
 /**
  * Buffers provider tokens at the trust boundary and releases only claims that

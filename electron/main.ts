@@ -19,11 +19,13 @@ import {
   shell,
   systemPreferences,
 } from 'electron';
+import { assertFeatureEnabled } from '../src/config/featureFlags';
 import { parseMacMemoryPressureFreePercent } from '../src/services/finalTranscription/finalTranscriptionAdmission';
 import type { ScopedMeetingCapability } from '../src/services/transcription/contracts';
 import type {
   AskPlutoConversationTurn,
   AskPlutoCurrentMeeting,
+  AskPlutoPerformanceDiagnostics,
   AskPlutoQueryRequest,
   AskPlutoQueryStatus,
   AskPlutoRetrievalSummary,
@@ -33,6 +35,14 @@ import type {
   PersonChatResponse,
   PersonChatSendRequest,
 } from '../src/types/personChat';
+import type {
+  WorkspaceChatMemory,
+  WorkspaceChatMessagePayload,
+} from '../src/types/workspaceChat';
+import {
+  OLLAMA_GENERAL_MODEL,
+  OLLAMA_QUICK_CHAT_MODEL,
+} from '../src/utils/ollamaModels';
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
@@ -494,9 +504,13 @@ import {
 } from './entityPipeline';
 import { IDENTITY_CHANNELS, handleIdentityRequest } from './identityHandlers';
 import { startIdentityReconciliation } from './identityReconciliation';
-import { removeRepeatedAskPlutoClaims } from './intelligence/askPlutoAnswerText';
 import {
-  EXPANSION_FOLLOW_UP_PATTERN,
+  ensureAskPlutoAttributionAnswer,
+  removeRepeatedAskPlutoClaims,
+} from './intelligence/askPlutoAnswerText';
+import {
+  asksForExplicitAttribution,
+  asksToVerifyProjectAssociation,
   describePreviousConversationFailure,
   detectAttributionDispute,
   inheritConversationScope,
@@ -541,8 +555,20 @@ import {
 import { syncActionTrackerAttentionQueue } from './intelligence/attentionSync';
 import {
   type SafeAnswerPresentation,
+  createSynthesizedAnswerStream,
   createValidatedAnswerStream,
 } from './intelligence/citationEngine';
+import {
+  type ConversationRetrievalPolicy,
+  type ConversationTurnMode,
+  buildConversationBoundaryReply,
+  buildConversationalReplyPrompt,
+  buildNamedPersonNoEvidenceReply,
+  buildNoEvidenceDraftReply,
+  buildSocialReply,
+  isExplicitInformationRequest,
+  parseConversationActionProposal,
+} from './intelligence/conversationController';
 import {
   queryReferencesCurrentMeeting,
   resolveCurrentMeeting,
@@ -579,19 +605,32 @@ import {
   updateAlertStatus,
 } from './intelligence/proactiveEngine';
 import {
+  buildAgedProjectAnswer,
   buildAssigneeActionRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
   buildMeetingRetrievalResult,
+  buildNamedPersonEvidenceQuery,
+  buildPersonWorkRecall,
   buildProjectRecall,
   buildWorkingMemoryOverviewRecall,
   buildWorkspaceIntelligenceRecall,
-  isPlanningOrPriorityQuery,
+  containsConfidentialAside,
+  enforceSynthesizedOnlyContext,
+  extractNamedPersonQuestionSubject,
+  focusContextOnExplicitNamedSubject,
   mergeRetrievalResultsByMeeting,
+  parsePersonWorkQuery,
   parseQuery,
   resolveExplicitMeetingScope,
+  resolveWorkspaceIntelligenceMode,
   retrieveContext,
+  selectNamedPersonAnswerContext,
+  selectRecentPersonNoteContext,
+  shouldKeepActivePersonScope,
+  shouldKeepActiveProjectScope,
   shouldUsePreparedExtractiveAnswer,
+  shouldUseWorkspaceIntelligence,
 } from './intelligence/queryEngine';
 import { getAskPlutoPrompt } from './intelligence/queryPrompts';
 import { generateSuggestedQueries } from './intelligence/suggestedQueries';
@@ -666,6 +705,7 @@ import {
   shouldCleanupTranscriptOnSave,
 } from './transcriptCleanup';
 import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
+import { createWorkspaceChatStore } from './workspaceChatStore';
 
 let backgroundKnowledgeRefresh: BackgroundKnowledgeRefreshCoordinator | null =
   null;
@@ -858,6 +898,7 @@ const calendarService = createCalendarService({
   store: db.calendarStore,
 });
 const personChatStore = createPersonChatStore(getApplicationDatabase());
+const workspaceChatStore = createWorkspaceChatStore(getApplicationDatabase());
 
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
@@ -4516,6 +4557,77 @@ app.whenReady().then(async () => {
     FROM meetings WHERE id = ?
   `);
 
+  ipcMain.handle(
+    'intelligence:workspace-chat:list-threads',
+    (_event, payload: { includeArchived?: unknown } | undefined) =>
+      workspaceChatStore.listThreads(payload?.includeArchived === true),
+  );
+  ipcMain.handle('intelligence:workspace-chat:create-thread', () =>
+    workspaceChatStore.createThread(),
+  );
+  ipcMain.handle(
+    'intelligence:workspace-chat:list-messages',
+    (_event, threadId: unknown) =>
+      workspaceChatStore.listMessages(String(threadId ?? '')),
+  );
+  ipcMain.handle(
+    'intelligence:workspace-chat:append-message',
+    (
+      _event,
+      payload: {
+        id?: unknown;
+        threadId?: unknown;
+        role?: unknown;
+        content?: unknown;
+        payload?: unknown;
+      },
+    ) => {
+      const role = payload?.role;
+      if (role !== 'user' && role !== 'assistant') {
+        throw new Error('Workspace chat message role is invalid');
+      }
+      return workspaceChatStore.appendMessage({
+        ...(typeof payload?.id === 'string' && payload.id.trim()
+          ? { id: payload.id.trim().slice(0, 200) }
+          : {}),
+        threadId: String(payload?.threadId ?? ''),
+        role,
+        content: String(payload?.content ?? '').slice(0, 24_000),
+        payload:
+          payload?.payload && typeof payload.payload === 'object'
+            ? (payload.payload as WorkspaceChatMessagePayload)
+            : {},
+      });
+    },
+  );
+  ipcMain.handle(
+    'intelligence:workspace-chat:update-message-payload',
+    (
+      _event,
+      payload: {
+        threadId?: unknown;
+        messageId?: unknown;
+        payload?: unknown;
+      },
+    ) =>
+      workspaceChatStore.updateMessagePayload({
+        threadId: String(payload?.threadId ?? ''),
+        messageId: String(payload?.messageId ?? ''),
+        payload:
+          payload?.payload && typeof payload.payload === 'object'
+            ? (payload.payload as WorkspaceChatMessagePayload)
+            : {},
+      }),
+  );
+  ipcMain.handle(
+    'intelligence:workspace-chat:update-memory',
+    (_event, payload: { threadId?: unknown; memory?: WorkspaceChatMemory }) =>
+      workspaceChatStore.updateMemory(
+        String(payload?.threadId ?? ''),
+        payload?.memory ?? { corrections: [], unresolvedQuestions: [] },
+      ),
+  );
+
   ipcMain.handle('intelligence:person-chat:capability', () => ({
     enabled: personChatEnabled,
   }));
@@ -4628,13 +4740,20 @@ app.whenReady().then(async () => {
       let streamedAnswer = '';
       let firstTokenAt: number | null = null;
       try {
+        const priorPersonMessages = personChatStore.listMessages(
+          threadId,
+          personId,
+        );
+        const previousPersonAnswer = [...priorPersonMessages]
+          .reverse()
+          .find((message) => message.role === 'assistant')?.content;
         personChatStore.appendMessage({
           threadId,
           personId,
           role: 'user',
           content: query,
         });
-        const quickReply = getPersonChatQuickReply(query);
+        const quickReply = getPersonChatQuickReply(query, previousPersonAnswer);
         if (quickReply) {
           const message = personChatStore.appendMessage({
             threadId,
@@ -4906,6 +5025,7 @@ app.whenReady().then(async () => {
     db.listWorkingMemorySnapshots(),
   );
   const importLocalArtifactFile = async (filePath: string) => {
+    assertFeatureEnabled('sources');
     const stat = await fs.promises.stat(filePath);
     const ext = path.extname(filePath).toLowerCase();
     const isPagesPackage = ext === '.pages' && stat.isDirectory();
@@ -4925,8 +5045,12 @@ app.whenReady().then(async () => {
     );
   };
 
-  ipcMain.handle('LOCAL_ARTIFACTS_LIST', () => db.listLocalArtifacts());
+  ipcMain.handle('LOCAL_ARTIFACTS_LIST', () => {
+    assertFeatureEnabled('sources');
+    return db.listLocalArtifacts();
+  });
   ipcMain.handle('LOCAL_ARTIFACTS_IMPORT', async () => {
+    assertFeatureEnabled('sources');
     const selection = await dialog.showOpenDialog(win!, {
       title: 'Add local sources',
       buttonLabel: 'Add to Pluto',
@@ -4957,6 +5081,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'LOCAL_ARTIFACTS_IMPORT_PATHS',
     async (_event, paths: unknown) => {
+      assertFeatureEnabled('sources');
       if (!Array.isArray(paths)) return [];
       const imported = [];
       for (const filePath of paths) {
@@ -4970,6 +5095,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'LOCAL_ARTIFACTS_SET_STATUS',
     (_event, input: { id?: unknown; status?: unknown }) => {
+      assertFeatureEnabled('sources');
       const id = typeof input?.id === 'string' ? input.id : '';
       const status = input?.status;
       if (
@@ -4984,16 +5110,19 @@ app.whenReady().then(async () => {
     },
   );
   ipcMain.handle('LOCAL_ARTIFACTS_DELETE', (_event, id: unknown) => {
+    assertFeatureEnabled('sources');
     if (typeof id !== 'string' || !id) return false;
     return db.deleteLocalArtifact(id);
   });
   ipcMain.handle('MEETING_ARTIFACTS_LIST', (_event, meetingId: unknown) => {
+    assertFeatureEnabled('sources');
     if (!meetingId) return [];
     return db.listArtifactsForMeeting(String(meetingId));
   });
   ipcMain.handle(
     'MEETING_ARTIFACTS_ATTACH',
     (_event, input: { meetingId?: unknown; artifactId?: unknown }) => {
+      assertFeatureEnabled('sources');
       const meetingId = input?.meetingId;
       const artifactId = input?.artifactId;
       if (!meetingId || typeof artifactId !== 'string' || !artifactId) {
@@ -5005,6 +5134,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'MEETING_ARTIFACTS_DETACH',
     (_event, input: { meetingId?: unknown; artifactId?: unknown }) => {
+      assertFeatureEnabled('sources');
       const meetingId = input?.meetingId;
       const artifactId = input?.artifactId;
       if (!meetingId || typeof artifactId !== 'string' || !artifactId) {
@@ -5016,6 +5146,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'MEETING_ARTIFACTS_IMPORT_AND_ATTACH',
     async (_event, meetingId: unknown) => {
+      assertFeatureEnabled('sources');
       if (!meetingId) return [];
       const selection = await dialog.showOpenDialog(win!, {
         title: 'Attach document to meeting',
@@ -5059,6 +5190,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'MEETING_ARTIFACTS_IMPORT_PATHS_AND_ATTACH',
     async (_event, input: { meetingId?: unknown; paths?: unknown }) => {
+      assertFeatureEnabled('sources');
       const meetingId = input?.meetingId;
       const paths = input?.paths;
       if (!meetingId || !Array.isArray(paths)) return [];
@@ -5870,7 +6002,9 @@ app.whenReady().then(async () => {
           ? `ask-pluto-${randomUUID()}`
           : input.requestId;
       const controller = new AbortController();
+      const settingsStartedAt = Date.now();
       const settings = await getAllSettings(db);
+      const settingsCompletedAt = Date.now();
       const isLocalProvider =
         !settings.llm_provider || settings.llm_provider === 'ollama';
       const requestTimeoutMs = askPlutoTimeoutMs(
@@ -5878,7 +6012,7 @@ app.whenReady().then(async () => {
         { isLocal: isLocalProvider },
       );
       let recordProgress: (() => void) | undefined;
-      const persistedMeetings = db.getMeetings() as db.PersistedMeeting[];
+      const meetingHeaders = db.getAskPlutoMeetingHeaders();
       const priorTurns: AskPlutoConversationTurn[] =
         typeof input === 'string' || !Array.isArray(input.priorTurns)
           ? []
@@ -5899,6 +6033,10 @@ app.whenReady().then(async () => {
                       .slice(0, 8)
                   : [],
                 ...(turn.outcome ? { outcome: turn.outcome } : {}),
+                ...(turn.turnMode ? { turnMode: turn.turnMode } : {}),
+                ...(turn.retrievalPolicy
+                  ? { retrievalPolicy: turn.retrievalPolicy }
+                  : {}),
                 ...(typeof turn.unsupportedClaimCount === 'number'
                   ? { unsupportedClaimCount: turn.unsupportedClaimCount }
                   : {}),
@@ -5908,6 +6046,26 @@ app.whenReady().then(async () => {
                 ...(typeof turn.conversationAnchor === 'string'
                   ? {
                       conversationAnchor: turn.conversationAnchor.slice(0, 700),
+                    }
+                  : {}),
+                ...(turn.conversationContext &&
+                typeof turn.conversationContext.anchor === 'string'
+                  ? {
+                      conversationContext: {
+                        anchor: turn.conversationContext.anchor.slice(0, 700),
+                        meetingIds: Array.isArray(
+                          turn.conversationContext.meetingIds,
+                        )
+                          ? turn.conversationContext.meetingIds
+                              .filter(
+                                (id): id is string => typeof id === 'string',
+                              )
+                              .slice(0, 8)
+                          : [],
+                        ...(turn.conversationContext.topic
+                          ? { topic: turn.conversationContext.topic }
+                          : {}),
+                      },
                     }
                   : {}),
                 ...(turn.resolvedScope
@@ -5920,22 +6078,45 @@ app.whenReady().then(async () => {
                   ? { retrievalTrace: turn.retrievalTrace }
                   : {}),
               }));
+      if (
+        priorTurns.length === 0 &&
+        typeof input !== 'string' &&
+        typeof input.conversationMemory?.lastAnswerSummary === 'string' &&
+        input.conversationMemory.lastAnswerSummary.trim()
+      ) {
+        const memory = input.conversationMemory;
+        const lastAnswerSummary = memory.lastAnswerSummary?.trim() || '';
+        priorTurns.push({
+          role: 'assistant',
+          content: lastAnswerSummary.slice(0, 1200),
+          conversationAnchor: memory.currentGoal?.trim().slice(0, 700),
+          ...(memory.activeTopic
+            ? {
+                conversationContext: {
+                  anchor:
+                    memory.currentGoal?.trim().slice(0, 700) ||
+                    lastAnswerSummary.slice(0, 700),
+                  meetingIds: [],
+                  topic: memory.activeTopic,
+                },
+              }
+            : {}),
+        });
+      }
       const activeRecording = captureSessionLease.recordingForOwner(
         event.sender.id,
       );
       const currentMeeting = resolveCurrentMeeting({
         activeRecordingMeetingId: activeRecording?.meetingId,
-        meetings: persistedMeetings.map((meeting) => ({
+        meetings: meetingHeaders.map((meeting) => ({
           id: meeting.id,
           started_at: meeting.started_at,
           created_at: meeting.created_at,
         })),
       });
-      const currentMeetingRow = currentMeeting.meetingId
-        ? (db.getMeeting(currentMeeting.meetingId) as
-            | db.PersistedMeeting
-            | undefined)
-        : undefined;
+      const currentMeetingRow = meetingHeaders.find(
+        (meeting) => String(meeting.id) === currentMeeting.meetingId,
+      );
       const currentMeetingStatus: AskPlutoCurrentMeeting =
         currentMeeting.kind === 'active_recording'
           ? {
@@ -5958,7 +6139,10 @@ app.whenReady().then(async () => {
                   : {}),
               }
             : currentMeeting;
+      const setupCompletedAt = Date.now();
       let reasoningMode: AskPlutoReasoningMode | undefined;
+      let turnMode: ConversationTurnMode | undefined;
+      let retrievalPolicy: ConversationRetrievalPolicy | undefined;
       let comparisonMeetingCount = 0;
       let scopeLabel: string | undefined;
       let scopeMeetingCount = 0;
@@ -5969,8 +6153,69 @@ app.whenReady().then(async () => {
       let rawFirstTokenAt: number | undefined;
       let firstTokenAt: number | undefined;
       let generationCompletedAt: number | undefined;
+      let conversationResolutionStartedAt: number | undefined;
+      let conversationResolutionCompletedAt: number | undefined;
+      let recallStartedAt: number | undefined;
+      let recallCompletedAt: number | undefined;
+      let promptStartedAt: number | undefined;
+      let promptCompletedAt: number | undefined;
+      let providerAcquisitionStartedAt: number | undefined;
+      let providerAcquisitionCompletedAt: number | undefined;
+      let finalizationStartedAt: number | undefined;
+      let finalizationCompletedAt: number | undefined;
+      let contextCount = 0;
+      let promptCharacters = 0;
+      let outputCharacters = 0;
+      let providerName: string = settings.llm_provider || 'ollama';
+      let configuredModel =
+        settings.llm_model ||
+        (settings.llm_provider === 'gemini'
+          ? settings.gemini_model
+          : settings.llm_provider === 'openai'
+            ? settings.openai_model
+            : settings.llm_provider === 'openrouter'
+              ? settings.openrouter_model
+              : settings.llm_provider === 'claude'
+                ? settings.claude_model
+                : settings.ollama_model || OLLAMA_GENERAL_MODEL) ||
+        'default';
       let lastValidatedPresentation: SafeAnswerPresentation | undefined;
       let conversationAnchor: string | undefined;
+      const elapsed = (from?: number, to?: number): number | null =>
+        from !== undefined && to !== undefined ? to - from : null;
+      const buildPerformanceDiagnostics = (
+        finishedAt = Date.now(),
+      ): AskPlutoPerformanceDiagnostics => ({
+        provider: providerRequestedAt ? providerName : 'not_used',
+        model: providerRequestedAt ? configuredModel : 'not_used',
+        ...(reasoningMode ? { reasoningMode } : {}),
+        contextCount,
+        promptCharacters,
+        outputCharacters,
+        settingsMs: elapsed(settingsStartedAt, settingsCompletedAt),
+        setupMs: elapsed(settingsCompletedAt, setupCompletedAt),
+        conversationResolutionMs: elapsed(
+          conversationResolutionStartedAt,
+          conversationResolutionCompletedAt,
+        ),
+        recallMs: elapsed(recallStartedAt, recallCompletedAt),
+        retrievalMs: elapsed(retrievalStartedAt, retrievalCompletedAt),
+        promptConstructionMs: elapsed(promptStartedAt, promptCompletedAt),
+        providerAcquisitionMs: elapsed(
+          providerAcquisitionStartedAt,
+          providerAcquisitionCompletedAt,
+        ),
+        providerQueueMs: elapsed(providerRequestedAt, providerStartedAt),
+        providerRequestToFirstTokenMs: elapsed(
+          providerRequestedAt,
+          rawFirstTokenAt,
+        ),
+        rawFirstTokenMs: rawFirstTokenAt ? rawFirstTokenAt - startTime : null,
+        visibleFirstTokenMs: firstTokenAt ? firstTokenAt - startTime : null,
+        generationMs: elapsed(providerStartedAt, generationCompletedAt),
+        finalizationMs: elapsed(finalizationStartedAt, finalizationCompletedAt),
+        totalMs: finishedAt - startTime,
+      });
       const sendStatus = (phase: AskPlutoQueryStatus['phase']) => {
         if (event.sender.isDestroyed()) return;
         event.sender.send('intelligence:query:status', {
@@ -5997,27 +6242,29 @@ app.whenReady().then(async () => {
         console.log(
           `[Pluto] intelligence:query start [request_id=${requestId}, query_length=${queryText.trim().length}]`,
         );
-        sendStatus('scope_resolved');
-        sendStatus('retrieving');
-
+        conversationResolutionStartedAt = Date.now();
         const conversationResolution = resolveAskPlutoConversation(
           queryText,
           priorTurns,
         );
+        turnMode = conversationResolution.turnMode;
+        retrievalPolicy = conversationResolution.retrievalPolicy;
+        conversationResolutionCompletedAt = Date.now();
+        recallStartedAt = Date.now();
         conversationAnchor = conversationResolution.retrievalQuery.slice(
           0,
           700,
         );
         const previousAssistantTurn = latestAssistantTurn(priorTurns);
+        const previousConversationContext =
+          previousAssistantTurn?.conversationContext;
+        const activeConversationContext =
+          conversationResolution.relation === 'new_topic'
+            ? undefined
+            : previousConversationContext;
         const previousConversationAnswer =
           conversationResolution.relation !== 'new_topic'
-            ? priorTurns
-                .filter(
-                  (turn) =>
-                    turn.role === 'assistant' && Boolean(turn.content.trim()),
-                )
-                .map((turn) => turn.content)
-                .join('\n') || previousAssistantTurn?.content
+            ? previousAssistantTurn?.content
             : undefined;
         const previousExpansionAnswer =
           conversationResolution.relation === 'expansion'
@@ -6032,6 +6279,143 @@ app.whenReady().then(async () => {
             : undefined;
         const priorConversationContext =
           previousConversationAnswer || previousExpansionAnswer;
+        const safePriorConversationContext =
+          priorConversationContext &&
+          !containsConfidentialAside(priorConversationContext)
+            ? priorConversationContext
+            : undefined;
+        const answerConversationally = async (
+          promptOverride?: string,
+        ): Promise<string> => {
+          const boundaryReply = promptOverride
+            ? null
+            : buildConversationBoundaryReply(queryText);
+          if (boundaryReply) return boundaryReply;
+          if (!promptOverride && conversationResolution.turnMode === 'social') {
+            return buildSocialReply({
+              query: queryText,
+              previousAnswer: previousAssistantTurn?.content,
+              previousTurnMode: previousAssistantTurn?.turnMode,
+            });
+          }
+          providerAcquisitionStartedAt = Date.now();
+          const provider = await getProvider(settings);
+          providerAcquisitionCompletedAt = Date.now();
+          providerName = provider.name;
+          if (isLocalProvider) {
+            configuredModel =
+              (settings.ollama_fast_model || '').trim() ||
+              OLLAMA_QUICK_CHAT_MODEL;
+          }
+          const prompt =
+            promptOverride ||
+            buildConversationalReplyPrompt({
+              query: queryText,
+              turns: priorTurns,
+            });
+          promptCharacters = prompt.length;
+          promptStartedAt = providerAcquisitionCompletedAt;
+          promptCompletedAt = Date.now();
+          providerRequestedAt = Date.now();
+          let streamedAnswer = '';
+          try {
+            const returnedAnswer = await provider.answerAskPluto(prompt, {
+              signal: controller.signal,
+              mode: 'fast',
+              live: true,
+              onStart: () => {
+                providerStartedAt ??= Date.now();
+                sendStatus('writing');
+              },
+              onToken: (delta) => {
+                if (!delta || controller.signal.aborted) return;
+                rawFirstTokenAt ??= Date.now();
+                firstTokenAt ??= rawFirstTokenAt;
+                streamedAnswer += delta;
+                if (!event.sender.isDestroyed()) {
+                  event.sender.send('intelligence:query:delta', {
+                    requestId,
+                    delta,
+                  });
+                }
+              },
+            });
+            const answer = (returnedAnswer || streamedAnswer).trim();
+            if (answer) return answer;
+          } catch (error) {
+            if (controller.signal.aborted) throw error;
+            console.warn(
+              '[Pluto][Ask Pluto] conversational response failed; using safe fallback',
+              error,
+            );
+          }
+          return promptOverride
+            ? "I couldn't finish that response just now. I still don't have confirmed work details to build on; please retry or tell me what you'd like me to use."
+            : buildSocialReply({
+                query: queryText,
+                previousAnswer: previousAssistantTurn?.content,
+                previousTurnMode: previousAssistantTurn?.turnMode,
+              });
+        };
+        if (conversationResolution.relation === 'acknowledgment') {
+          const answer = await answerConversationally();
+          outputCharacters = answer.length;
+          generationCompletedAt = Date.now();
+          finalizationStartedAt = generationCompletedAt;
+          finalizationCompletedAt = generationCompletedAt;
+          return {
+            status: 'answered' as const,
+            answer,
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+            outcome: 'answered' as const,
+            resolvedScope: previousAssistantTurn?.resolvedScope,
+            conversationContext: previousConversationContext,
+          };
+        }
+        if (conversationResolution.turnMode === 'act') {
+          const actionProposal = parseConversationActionProposal(queryText);
+          const answer = actionProposal
+            ? `I can add “${actionProposal.text}” as an open commitment. Confirm it below and I’ll save it locally.`
+            : 'I haven’t made that change. Chat can currently prepare a commitment for your confirmation, but this action is not available yet.';
+          outputCharacters = answer.length;
+          generationCompletedAt = Date.now();
+          finalizationStartedAt = generationCompletedAt;
+          finalizationCompletedAt = generationCompletedAt;
+          return {
+            status: 'answered' as const,
+            answer,
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+            outcome: 'answered' as const,
+            resolvedScope: previousAssistantTurn?.resolvedScope,
+            conversationContext: previousConversationContext,
+            ...(actionProposal ? { actionProposal } : {}),
+          };
+        }
+        if (
+          previousAssistantTurn?.outcome === 'no_evidence' &&
+          conversationResolution.retrievalPolicy === 'reuse' &&
+          conversationResolution.task === 'draft'
+        ) {
+          const answer = buildNoEvidenceDraftReply(queryText);
+          outputCharacters = answer.length;
+          generationCompletedAt = Date.now();
+          finalizationStartedAt = generationCompletedAt;
+          finalizationCompletedAt = generationCompletedAt;
+          return {
+            status: 'answered' as const,
+            answer,
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+            outcome: 'no_evidence' as const,
+            resolvedScope: previousAssistantTurn.resolvedScope,
+            conversationContext: previousConversationContext,
+          };
+        }
+        const persistedMeetings = db.getAskPlutoMeetings();
+        sendStatus('scope_resolved');
+        sendStatus('retrieving');
         const omissionReview =
           conversationResolution.relation === 'omission_follow_up'
             ? getAskPlutoOmissionReview(
@@ -6039,21 +6423,31 @@ app.whenReady().then(async () => {
                 event.sender.id,
               )
             : undefined;
+        const explicitPersonSubject = parsePersonWorkQuery(queryText);
         const effectiveQueryText = omissionReview
           ? omissionReview.originalQuery
-          : conversationResolution.retrievalQuery;
+          : explicitPersonSubject
+            ? queryText
+            : conversationResolution.retrievalQuery;
         const attributionDispute = detectAttributionDispute(effectiveQueryText);
         const disputedEntity = attributionDispute?.disputedEntity || null;
-        const isPlanning =
-          isPlanningOrPriorityQuery(queryText) ||
-          (Boolean(conversationResolution.priorQuestion) &&
-            EXPANSION_FOLLOW_UP_PATTERN.test(queryText.trim()) &&
-            isPlanningOrPriorityQuery(
-              conversationResolution.priorQuestion || '',
-            ));
-        if (isPlanning && conversationResolution.task === 'lookup') {
-          conversationResolution.task = 'analysis';
-        }
+        const planningConversationAnchor = [...priorTurns]
+          .reverse()
+          .find(
+            (turn) =>
+              turn.role === 'assistant' && turn.conversationAnchor?.trim(),
+          )?.conversationAnchor;
+        const isPlanning = shouldUseWorkspaceIntelligence({
+          query: queryText,
+          relation: conversationResolution.relation,
+          priorQuestion: conversationResolution.priorQuestion,
+          conversationAnchor: planningConversationAnchor,
+        });
+        const workspaceIntelligenceMode = resolveWorkspaceIntelligenceMode(
+          queryText,
+          conversationResolution.relation,
+          conversationResolution.priorQuestion || planningConversationAnchor,
+        );
         const selfPersonId = db.identityStore.getSelfPersonId();
         const selfProfile = selfPersonId
           ? db.identityStore.getProfile()
@@ -6091,7 +6485,9 @@ app.whenReady().then(async () => {
             : selfReference.retrievalQuery;
         const parsed = await parseQuery(selfReference.retrievalQuery, {
           signal: controller.signal,
-          useModelClassification: false,
+          useModelClassification:
+            conversationResolution.relation === 'new_topic' &&
+            !isExplicitInformationRequest(queryText),
         });
         const assigneeRecall = buildAssigneeActionRecall(
           effectiveQueryText,
@@ -6112,11 +6508,93 @@ app.whenReady().then(async () => {
               query: effectiveQueryText,
               persistedMeetings,
               selfPersonId: selfPersonId || undefined,
+              mode: workspaceIntelligenceMode,
             })
           : null;
-        const projectRecall = buildProjectRecall(
-          effectiveQueryText,
-          parsed.entity_mentions,
+        const candidateProjectRecall =
+          asksToVerifyProjectAssociation(queryText) ||
+          asksForExplicitAttribution(queryText)
+            ? null
+            : buildProjectRecall(queryText, parsed.entity_mentions);
+        // A partial theme/term hit is not enough to establish project identity.
+        // Otherwise an unknown named initiative can inherit an unrelated brief.
+        const projectRecall =
+          candidateProjectRecall?.project.matchKind === 'explicit_label'
+            ? candidateProjectRecall
+            : null;
+        const keepActiveProjectScope = shouldKeepActiveProjectScope({
+          relation: conversationResolution.relation,
+          hasActiveProject:
+            activeConversationContext?.topic?.kind === 'project',
+          candidateMatchKind: projectRecall?.project.matchKind,
+        });
+        const inheritedProjectRecall =
+          keepActiveProjectScope &&
+          activeConversationContext?.topic?.kind === 'project'
+            ? buildProjectRecall(
+                `${activeConversationContext.topic.label || activeConversationContext.topic.id || ''} ${queryText}`,
+              )
+            : null;
+        const effectiveProjectRecall = inheritedProjectRecall ?? projectRecall;
+        if (effectiveProjectRecall) {
+          const projectDoc = db.getKnowledgeDocByScope(
+            'project',
+            effectiveProjectRecall.project.canonicalId,
+          );
+          if (projectDoc) {
+            backgroundKnowledgeRefresh?.prioritize(`doc:${projectDoc.id}`);
+          }
+        }
+        const personWorkRecall = buildPersonWorkRecall(effectiveQueryText);
+        const personWorkSubject = parsePersonWorkQuery(effectiveQueryText);
+        const personWorkAssignmentRecall =
+          personWorkSubject &&
+          !personWorkRecall &&
+          !/^\s*(?:tell me about|who is)\b/i.test(queryText)
+            ? buildAssigneeActionRecall(
+                `What is assigned to ${personWorkSubject}?`,
+                persistedMeetings,
+              )
+            : null;
+        const inheritedPersonWorkRecall =
+          !personWorkRecall &&
+          shouldKeepActivePersonScope({
+            relation: conversationResolution.relation,
+            hasActivePerson:
+              activeConversationContext?.topic?.kind === 'person',
+            hasExplicitPersonSubject: Boolean(
+              personWorkSubject || extractNamedPersonQuestionSubject(queryText),
+            ),
+            hasExplicitProject: Boolean(effectiveProjectRecall),
+          }) &&
+          activeConversationContext?.topic?.kind === 'person'
+            ? buildPersonWorkRecall(
+                effectiveQueryText,
+                activeConversationContext.topic.label ||
+                  activeConversationContext.topic.id,
+              )
+            : null;
+        const effectivePersonWorkRecall =
+          personWorkRecall ?? inheritedPersonWorkRecall;
+        const answerSelfName =
+          effectivePersonWorkRecall &&
+          effectivePersonWorkRecall.person.id !== selfPersonId
+            ? undefined
+            : confirmedSelfName;
+        if (effectivePersonWorkRecall) {
+          const personDoc = db.getKnowledgeDocByScope(
+            'person_context',
+            effectivePersonWorkRecall.person.id,
+          );
+          if (personDoc) {
+            backgroundKnowledgeRefresh?.prioritize(`doc:${personDoc.id}`);
+          }
+        }
+        const usePreparedWorkspaceRecall = Boolean(
+          isPlanning &&
+            workspaceRecall &&
+            !effectiveProjectRecall &&
+            conversationResolution.relation !== 'follow_up',
         );
         const explicitMeetingScope = resolveExplicitMeetingScope(
           effectiveQueryText,
@@ -6132,27 +6610,47 @@ app.whenReady().then(async () => {
           intent: parsed.intent,
           override: requestedMode,
           task: conversationResolution.task,
+          relation: conversationResolution.relation,
         });
+        recallCompletedAt = Date.now();
+        retrievalStartedAt = recallCompletedAt;
 
-        if (parsed.cannedResponse) {
-          console.log('[Pluto] intelligence:query canned response');
+        if (
+          conversationResolution.turnMode === 'social' ||
+          (conversationResolution.relation === 'new_topic' &&
+            (parsed.intent === 'conversational' || parsed.cannedResponse))
+        ) {
+          console.log('[Pluto] intelligence:query conversational response');
+          turnMode = 'social';
+          retrievalPolicy = 'none';
+          const answer = await answerConversationally();
+          outputCharacters = answer.length;
+          generationCompletedAt = Date.now();
+          finalizationStartedAt = generationCompletedAt;
+          finalizationCompletedAt = generationCompletedAt;
           return {
             status: 'answered' as const,
-            answer: parsed.cannedResponse,
+            answer,
             citations: [],
             currentMeeting: currentMeetingStatus,
+            outcome: 'answered' as const,
           };
         }
 
         const currentMeetingRequested =
           queryReferencesCurrentMeeting(effectiveQueryText);
-        const inheritedScope = parsed.temporal_range
-          ? undefined
-          : inheritConversationScope(
-              queryText,
-              priorTurns,
-              conversationResolution.relation,
-            );
+        const switchesNamedProject =
+          projectRecall?.project.matchKind === 'explicit_label' &&
+          projectRecall.project.canonicalId !==
+            activeConversationContext?.topic?.id;
+        const inheritedScope =
+          parsed.temporal_range || switchesNamedProject
+            ? undefined
+            : inheritConversationScope(
+                queryText,
+                priorTurns,
+                conversationResolution.relation,
+              );
         if (
           isDiagnosticConversationFollowUp(queryText) &&
           previousAssistantTurn
@@ -6251,17 +6749,18 @@ app.whenReady().then(async () => {
             !explicitTemporalRange &&
             inheritedMeetingIds.length > 0
             ? inheritedMeetingIds
-                .map(
-                  (meetingId) =>
-                    db.getMeeting(meetingId) as db.PersistedMeeting | undefined,
-                )
+                .map((meetingId) => db.getAskPlutoMeeting(meetingId))
                 .filter((meeting): meeting is db.PersistedMeeting =>
                   Boolean(meeting),
                 )
-            : (db.getTemporalMeetings({
-                from: temporalRange.fromInclusive,
-                to: temporalRange.toExclusive,
-              }) as db.PersistedMeeting[])
+            : persistedMeetings.filter((meeting) => {
+                const occurredAt =
+                  meeting.started_at || meeting.created_at || '';
+                return (
+                  occurredAt >= temporalRange.fromInclusive &&
+                  occurredAt < temporalRange.toExclusive
+                );
+              })
           : [];
         const temporalMeetingLimit = 24;
         const includedTemporalMeetings = temporalMeetings.slice(
@@ -6387,31 +6886,30 @@ app.whenReady().then(async () => {
         if (
           currentMeetingRequested &&
           currentMeeting.kind === 'active_recording' &&
-          (!activeSnapshot ||
-            (!activeSnapshot.notes.trim() &&
-              !activeSnapshot.interimText.trim() &&
-              activeSnapshot.transcript.length === 0))
+          (!activeSnapshot || !activeSnapshot.notes.trim())
         ) {
           return {
             status: 'unavailable' as const,
             answer:
-              'The current recording has not produced enough transcript or notes to answer that yet.',
+              'The current recording does not have synthesized notes to answer that yet.',
             citations: [],
             currentMeeting: currentMeetingStatus,
           };
         }
+        const currentMeetingEvidenceRow = currentMeeting.meetingId
+          ? db.getAskPlutoMeeting(currentMeeting.meetingId)
+          : undefined;
         if (
           currentMeetingRequested &&
           currentMeeting.kind === 'persisted' &&
-          currentMeetingRow &&
-          !currentMeetingRow.transcript_json &&
-          !currentMeetingRow.analysis_json &&
-          !currentMeetingRow.enhanced_notes &&
-          !currentMeetingRow.user_notes
+          currentMeetingEvidenceRow &&
+          !currentMeetingEvidenceRow.analysis_json &&
+          !currentMeetingEvidenceRow.enhanced_notes &&
+          !currentMeetingEvidenceRow.user_notes
         ) {
           return {
             status: 'unavailable' as const,
-            answer: `${currentMeetingRow.title || 'The latest meeting'} is still being prepared and does not have usable transcript or notes yet.`,
+            answer: `${currentMeetingEvidenceRow.title || 'The latest meeting'} is still being prepared and does not have usable synthesized notes yet.`,
             citations: [],
             currentMeeting: currentMeetingStatus,
           };
@@ -6419,8 +6917,8 @@ app.whenReady().then(async () => {
         const currentPinnedResult = currentMeetingRequested
           ? currentMeeting.kind === 'active_recording' && activeSnapshot
             ? buildLiveMeetingRetrievalResult(activeSnapshot)
-            : currentMeeting.kind === 'persisted' && currentMeetingRow
-              ? buildMeetingRetrievalResult(currentMeetingRow)
+            : currentMeeting.kind === 'persisted' && currentMeetingEvidenceRow
+              ? buildMeetingRetrievalResult(currentMeetingEvidenceRow)
               : undefined
           : undefined;
         const temporalPinnedResults = includedTemporalMeetings.map((meeting) =>
@@ -6441,15 +6939,17 @@ app.whenReady().then(async () => {
         const priorMeetingIds = [
           ...new Set([
             ...(inheritedScope?.meetingIds || []),
+            ...(activeConversationContext?.meetingIds.slice(0, 3) || []),
             ...(conversationResolution.relation !== 'new_topic' ||
             queryReferencesPriorTurn(effectiveQueryText)
               ? priorTurns
+                  .filter((turn) => !containsConfidentialAside(turn.content))
                   .filter((turn) => turn.role === 'assistant')
                   .flatMap((turn) => turn.meetingIds || [])
               : []),
           ]),
         ];
-        const expansionMeetingIds =
+        const expansionMeetingIds = (
           [...priorTurns]
             .reverse()
             .find(
@@ -6462,14 +6962,12 @@ app.whenReady().then(async () => {
             ? previousAssistantTurn.meetingIds
             : undefined) ||
           inheritedScope?.meetingIds ||
-          [];
+          []
+        ).slice(0, 3);
         const priorPinnedResults =
           priorMeetingIds.length > 0
             ? [...priorMeetingIds]
-                .map(
-                  (meetingId) =>
-                    db.getMeeting(meetingId) as db.PersistedMeeting | undefined,
-                )
+                .map((meetingId) => db.getAskPlutoMeeting(meetingId))
                 .filter((meeting): meeting is db.PersistedMeeting =>
                   Boolean(meeting),
                 )
@@ -6501,9 +6999,9 @@ app.whenReady().then(async () => {
           priorPinnedResults,
           overviewContextUsed ? overviewRecall?.context || [] : [],
           workspaceRecall?.context || [],
-          projectRecall?.context || [],
+          effectiveProjectRecall?.context || [],
+          effectivePersonWorkRecall?.context || [],
         );
-        retrievalStartedAt = Date.now();
         const restrictToCurrentMeeting = shouldRestrictToCurrentMeetingEvidence(
           {
             currentMeetingRequested,
@@ -6517,58 +7015,51 @@ app.whenReady().then(async () => {
             intent: parsed.intent,
             priorPinnedCount: priorPinnedResults.length,
             task: conversationResolution.task,
+            relation: conversationResolution.relation,
+            retrievalPolicy: conversationResolution.retrievalPolicy,
           });
         const restrictToPinnedCurrentComparison =
           shouldRestrictToPinnedCurrentComparison({
             currentMeetingRequested,
             historicalCandidateLimit,
           });
-        const isExactWordingRequest =
-          /\b(?:quote|verbatim|word for word|exact(?:ly)?(?: what| how)?|exact words?)\b/i.test(
-            effectiveQueryText,
-          );
-        const synthesizedOnly = !isExactWordingRequest || isPlanning;
         const generalContext = !usePreparedAssigneeRecall
-          ? conversationResolution.relation === 'expansion' &&
-            expansionMeetingIds.length > 0
-            ? await retrieveContext(parsed, {
-                query: retrievalOptionsQuery,
-                meetingIds: expansionMeetingIds,
-                synthesizedOnly,
-              })
-            : explicitResolvedScope
-              ? await retrieveContext(parsed, {
-                  pinnedResults: explicitlyScopedPinnedResults,
-                  query: retrievalOptionsQuery,
-                  meetingIds: explicitResolvedScope.meetingIds,
-                  synthesizedOnly,
-                })
-              : temporalResolvedScope
-                ? await retrieveContext(parsed, {
-                    pinnedResults,
-                    query: retrievalOptionsQuery,
-                    meetingIds: temporalResolvedScope.meetingIds,
-                    synthesizedOnly,
-                  })
-                : restrictToCurrentMeeting && currentPinnedResult
-                  ? [currentPinnedResult]
-                  : restrictToPinnedCurrentComparison
-                    ? pinnedResults
-                    : restrictToPriorConversation
-                      ? priorPinnedResults
-                      : isPlanning && workspaceRecall
-                        ? parsed.keywords.length > 0
-                          ? await retrieveContext(parsed, {
-                              pinnedResults,
-                              query: retrievalOptionsQuery,
-                              synthesizedOnly: true,
-                            })
-                          : workspaceRecall.context
-                        : await retrieveContext(parsed, {
-                            pinnedResults,
-                            query: retrievalOptionsQuery,
-                            synthesizedOnly,
-                          })
+          ? effectiveProjectRecall
+            ? effectiveProjectRecall.context
+            : effectivePersonWorkRecall
+              ? effectivePersonWorkRecall.context
+              : personWorkSubject && personWorkAssignmentRecall
+                ? personWorkAssignmentRecall?.context || []
+                : conversationResolution.relation === 'expansion' &&
+                    expansionMeetingIds.length > 0
+                  ? await retrieveContext(parsed, {
+                      query: retrievalOptionsQuery,
+                      meetingIds: expansionMeetingIds,
+                    })
+                  : explicitResolvedScope
+                    ? await retrieveContext(parsed, {
+                        pinnedResults: explicitlyScopedPinnedResults,
+                        query: retrievalOptionsQuery,
+                        meetingIds: explicitResolvedScope.meetingIds,
+                      })
+                    : temporalResolvedScope
+                      ? await retrieveContext(parsed, {
+                          pinnedResults,
+                          query: retrievalOptionsQuery,
+                          meetingIds: temporalResolvedScope.meetingIds,
+                        })
+                      : restrictToCurrentMeeting && currentPinnedResult
+                        ? [currentPinnedResult]
+                        : restrictToPinnedCurrentComparison
+                          ? pinnedResults
+                          : restrictToPriorConversation
+                            ? priorPinnedResults
+                            : usePreparedWorkspaceRecall && workspaceRecall
+                              ? workspaceRecall.context
+                              : await retrieveContext(parsed, {
+                                  pinnedResults,
+                                  query: retrievalOptionsQuery,
+                                })
           : [];
         const generalContextWithFallback =
           conversationResolution.relation === 'expansion' &&
@@ -6577,6 +7068,39 @@ app.whenReady().then(async () => {
                 expansionMeetingIds.includes(result.meeting_id),
               )
             : generalContext;
+        const namedPersonSubject =
+          extractNamedPersonQuestionSubject(effectiveQueryText) ||
+          effectivePersonWorkRecall?.person.name;
+        const namedPersonEvidenceQuery = namedPersonSubject
+          ? buildNamedPersonEvidenceQuery(
+              effectiveQueryText,
+              namedPersonSubject,
+            )
+          : null;
+        const shouldSupplementNamedPersonContext = Boolean(
+          namedPersonSubject &&
+            conversationResolution.task !== 'draft' &&
+            !/^\s*(?:who|which\s+person)\b/i.test(effectiveQueryText),
+        );
+        const namedPersonCandidates = shouldSupplementNamedPersonContext
+          ? await retrieveContext(
+              await parseQuery(
+                namedPersonEvidenceQuery || namedPersonSubject || '',
+                {
+                  signal: controller.signal,
+                  useModelClassification: false,
+                },
+              ),
+              { query: namedPersonEvidenceQuery || namedPersonSubject || '' },
+            )
+          : [];
+        const namedPersonContext = effectivePersonWorkRecall
+          ? selectRecentPersonNoteContext(
+              namedPersonCandidates,
+              effectivePersonWorkRecall.person.name,
+              effectivePersonWorkRecall.asOf,
+            )
+          : namedPersonCandidates;
         const omissionContexts = omissionReview
           ? await Promise.all(
               omissionReview.claims.slice(0, 6).map(async (claim) => {
@@ -6588,7 +7112,6 @@ app.whenReady().then(async () => {
                 return (
                   await retrieveContext(claimParsed, {
                     query: `${claim}\ngo deeper`,
-                    synthesizedOnly,
                     ...(omissionReview.searchMeetingIds?.length
                       ? { meetingIds: omissionReview.searchMeetingIds }
                       : {}),
@@ -6597,7 +7120,7 @@ app.whenReady().then(async () => {
               }),
             )
           : [];
-        const context = omissionReview
+        const unguardedContext = omissionReview
           ? selectAskPlutoOmissionContext(
               omissionContexts,
               generalContextWithFallback,
@@ -6605,9 +7128,37 @@ app.whenReady().then(async () => {
           : usePreparedAssigneeRecall && assigneeRecall
             ? assigneeRecall.context
             : mergeRetrievalResultsByMeeting(
+                namedPersonContext,
                 assigneeRecall?.context ?? [],
                 generalContextWithFallback,
               );
+        const removedTranscriptPassageCount = unguardedContext.reduce(
+          (total, result) =>
+            total +
+            (result.evidence_kind === 'transcript' ? 1 : 0) +
+            (result.transcript_passages?.length || 0),
+          0,
+        );
+        const subjectFocusedContext =
+          !effectiveProjectRecall && !effectivePersonWorkRecall
+            ? focusContextOnExplicitNamedSubject(
+                effectiveQueryText,
+                unguardedContext,
+              )
+            : unguardedContext;
+        const context = enforceSynthesizedOnlyContext(
+          selectNamedPersonAnswerContext(
+            effectiveQueryText,
+            subjectFocusedContext,
+            personWorkAssignmentRecall?.context,
+          ),
+        );
+        contextCount = context.length;
+        if (removedTranscriptPassageCount > 0) {
+          console.warn(
+            `[Pluto] Ask Pluto removed ${removedTranscriptPassageCount} raw transcript result(s) from synthesized-only context [request_id=${requestId}]`,
+          );
+        }
         const contextMeetings = uniqueAskPlutoEvidenceMeetings(context);
         retrievalCompletedAt = Date.now();
         controller.signal.throwIfAborted();
@@ -6676,9 +7227,12 @@ app.whenReady().then(async () => {
           searchedMeetingCount:
             explicitResolvedScope?.meetingIds.length ??
             temporalResolvedScope?.meetingIds.length ??
-            (assigneeRecall
-              ? assigneeRecall.mentionedMeetingCount
-              : persistedMeetings.length),
+            (effectiveProjectRecall
+              ? context.filter((result) => result.source_type !== 'artifact')
+                  .length
+              : assigneeRecall
+                ? assigneeRecall.mentionedMeetingCount
+                : persistedMeetings.length),
           meetings: contextMeetings.map((result) => ({
             meetingId: result.meeting_id,
             meetingTitle:
@@ -6725,6 +7279,12 @@ app.whenReady().then(async () => {
                       previousAssistantTurn?.unsupportedClaimCount,
                   )
                 : (assigneeRecall?.answer ??
+                  (personWorkSubject
+                    ? buildNamedPersonNoEvidenceReply(
+                        queryText,
+                        personWorkSubject,
+                      )
+                    : null) ??
                   "I couldn't verify an answer from this search."),
             citations: [],
             currentMeeting: currentMeetingStatus,
@@ -6739,71 +7299,107 @@ app.whenReady().then(async () => {
           `[Pluto] Retrieval complete (${Date.now() - startTime}ms), context items: ${context.length}`,
         );
 
-        if (usePreparedAssigneeRecall) {
+        if (usePreparedAssigneeRecall || usePreparedWorkspaceRecall) {
           sendStatus('writing');
         } else {
           sendStatus('waiting');
         }
         let visibleValidatedAnswer = '';
-        const validatedAnswerStream = createValidatedAnswerStream(
-          context,
-          () => {
-            if (controller.signal.aborted || event.sender.isDestroyed()) return;
-            const validated = lastValidatedPresentation;
-            if (!validated) return;
-            const nextAnswer = validated.answer;
-            if (
-              !nextAnswer.startsWith(visibleValidatedAnswer) ||
-              nextAnswer.length === visibleValidatedAnswer.length
-            )
-              return;
-            firstTokenAt ??= Date.now();
-            event.sender.send('intelligence:query:delta', {
-              requestId,
-              delta: nextAnswer.slice(visibleValidatedAnswer.length),
-            });
-            visibleValidatedAnswer = nextAnswer;
-          },
-          conversationResolution.task === 'draft'
-            ? 'draft'
-            : conversationResolution.task === 'analysis'
-              ? 'analysis'
-              : 'grounded',
-          (presentation) => {
-            const distinct =
-              conversationResolution.task === 'draft'
-                ? presentation
-                : {
-                    ...presentation,
-                    ...removeRepeatedAskPlutoClaims(
-                      presentation.answer,
-                      presentation.citations,
-                      previousExpansionAnswer,
-                    ),
-                  };
-            if (distinct.answer)
-              lastValidatedPresentation = {
-                ...distinct,
-                answer: addressConfirmedSelf(
-                  distinct.answer,
-                  confirmedSelfName,
-                ),
-              };
-          },
-          confirmedSelfName,
+        let isPreparedProjectAnswer = false;
+        const onAnswerDelta = () => {
+          if (controller.signal.aborted || event.sender.isDestroyed()) return;
+          const validated = lastValidatedPresentation;
+          if (!validated) return;
+          const nextAnswer = validated.answer;
+          if (
+            !nextAnswer.startsWith(visibleValidatedAnswer) ||
+            nextAnswer.length === visibleValidatedAnswer.length
+          )
+            return;
+          firstTokenAt ??= Date.now();
+          event.sender.send('intelligence:query:delta', {
+            requestId,
+            delta: nextAnswer.slice(visibleValidatedAnswer.length),
+          });
+          visibleValidatedAnswer = nextAnswer;
+        };
+        const onAnswerPresentation = (presentation: SafeAnswerPresentation) => {
+          const distinct =
+            conversationResolution.task === 'draft' || isPreparedProjectAnswer
+              ? presentation
+              : {
+                  ...presentation,
+                  ...removeRepeatedAskPlutoClaims(
+                    presentation.answer,
+                    presentation.citations,
+                    previousExpansionAnswer,
+                  ),
+                };
+          if (distinct.answer)
+            lastValidatedPresentation = {
+              ...distinct,
+              answer: addressConfirmedSelf(distinct.answer, answerSelfName),
+            };
+        };
+        const answerStream =
+          conversationResolution.relation === 'omission_follow_up'
+            ? createValidatedAnswerStream(
+                context,
+                onAnswerDelta,
+                'analysis',
+                onAnswerPresentation,
+                confirmedSelfName,
+              )
+            : createSynthesizedAnswerStream(
+                context,
+                onAnswerDelta,
+                onAnswerPresentation,
+                confirmedSelfName,
+              );
+        const continuesCurrentRead = Boolean(
+          (conversationResolution.relation === 'expansion' ||
+            conversationResolution.turnMode === 'clarify') &&
+            /\b(?:current|right now|status|focus|priorit(?:y|ies))\b/i.test(
+              activeConversationContext?.anchor ||
+                conversationResolution.priorQuestion ||
+                '',
+            ),
         );
+        const preparedProjectAnswer = effectiveProjectRecall
+          ? buildAgedProjectAnswer(
+              queryText,
+              effectiveProjectRecall,
+              new Date(),
+              previousConversationAnswer,
+              continuesCurrentRead,
+              conversationResolution.turnMode === 'challenge'
+                ? 'challenge'
+                : conversationResolution.turnMode === 'clarify'
+                  ? 'clarify'
+                  : conversationResolution.relation === 'expansion'
+                    ? 'expand'
+                    : undefined,
+            )
+          : null;
+        isPreparedProjectAnswer = Boolean(preparedProjectAnswer);
         const extractiveAnswer =
-          conversationResolution.relation === 'omission_follow_up' ||
-          conversationResolution.relation === 'expansion' ||
-          selfReference.refersToSelf
-            ? null
-            : usePreparedAssigneeRecall && assigneeRecall
-              ? assigneeRecall.answer
-              : buildExtractiveTemporalSummary(effectiveQueryText, context);
+          usePreparedWorkspaceRecall && workspaceRecall
+            ? workspaceRecall.answer
+            : preparedProjectAnswer
+              ? preparedProjectAnswer
+              : conversationResolution.relation === 'omission_follow_up' ||
+                  conversationResolution.relation === 'expansion' ||
+                  selfReference.refersToSelf
+                ? null
+                : usePreparedAssigneeRecall && assigneeRecall
+                  ? assigneeRecall.answer
+                  : buildExtractiveTemporalSummary(effectiveQueryText, context);
         let answerRaw: string;
         if (
           extractiveAnswer &&
-          (usePreparedAssigneeRecall ||
+          (usePreparedWorkspaceRecall ||
+            Boolean(preparedProjectAnswer) ||
+            usePreparedAssigneeRecall ||
             shouldUsePreparedExtractiveAnswer({
               mode: reasoningMode,
               contextCount: context.length,
@@ -6811,21 +7407,28 @@ app.whenReady().then(async () => {
         ) {
           answerRaw = extractiveAnswer;
           for (const [index, line] of answerRaw.split('\n').entries()) {
-            validatedAnswerStream.push(`${index > 0 ? '\n' : ''}${line}`);
+            answerStream.push(`${index > 0 ? '\n' : ''}${line}`);
           }
         } else {
-          const settings = await getAllSettings(db);
+          providerAcquisitionStartedAt = Date.now();
           const provider = await getProvider(settings);
+          providerAcquisitionCompletedAt = Date.now();
+          providerName = provider.name;
+          promptStartedAt = Date.now();
           const prompt = getAskPlutoPrompt(
             conversationResolution.answerQuery,
             context,
             parsed.intent,
-            shouldIncludePriorConversation(
-              effectiveQueryText,
-              Boolean(explicitMeetingScope),
-              conversationResolution.relation,
-            )
-              ? priorTurns
+            !switchesNamedProject &&
+              (shouldIncludePriorConversation(
+                effectiveQueryText,
+                Boolean(explicitMeetingScope),
+                conversationResolution.relation,
+              ) ||
+                activeConversationContext)
+              ? priorTurns.filter(
+                  (turn) => !containsConfidentialAside(turn.content),
+                )
               : [],
             formatAskPlutoCorrectionsForPrompt(relevantCorrections),
             conversationResolution.task,
@@ -6835,8 +7438,8 @@ app.whenReady().then(async () => {
                   previousAnswer: omissionReview.visibleAnswer,
                 }
               : undefined,
-            priorConversationContext
-              ? { previousAnswer: priorConversationContext }
+            safePriorConversationContext && !switchesNamedProject
+              ? { previousAnswer: safePriorConversationContext }
               : undefined,
             confirmedSelfName,
             {
@@ -6847,16 +7450,23 @@ app.whenReady().then(async () => {
                   }
                 : null,
               disputedEntity,
-              projectContext: projectRecall
+              projectContext: effectiveProjectRecall
                 ? {
-                    name: projectRecall.project.name,
-                    displayTitle: projectRecall.displayTitle,
+                    name: effectiveProjectRecall.project.name,
+                    displayTitle: effectiveProjectRecall.displayTitle,
+                    asOf: effectiveProjectRecall.asOf,
+                    latestNoteAt: effectiveProjectRecall.latestNoteAt,
                   }
                 : null,
+              activeConversationContext: switchesNamedProject
+                ? null
+                : activeConversationContext || null,
+              conversationMode: conversationResolution.turnMode,
               isPlanningQuery: isPlanning,
-              synthesizedOnly,
             },
           );
+          promptCompletedAt = Date.now();
+          promptCharacters = prompt.length;
           console.log(
             `[Pluto] Generating answer via provider: ${provider.name} ...`,
           );
@@ -6876,17 +7486,20 @@ app.whenReady().then(async () => {
                 rawFirstTokenAt = Date.now();
                 sendStatus('generating');
               }
-              validatedAnswerStream.push(delta);
+              answerStream.push(delta);
             },
           });
         }
         controller.signal.throwIfAborted();
         generationCompletedAt = Date.now();
 
-        let presentation = validatedAnswerStream.finalize(answerRaw);
+        finalizationStartedAt = Date.now();
+        let presentation = answerStream.finalize(answerRaw);
         if (
           presentation.outcome !== 'no_evidence' &&
-          conversationResolution.task !== 'draft'
+          conversationResolution.task !== 'draft' &&
+          !usePreparedWorkspaceRecall &&
+          !isPreparedProjectAnswer
         ) {
           const distinct = removeRepeatedAskPlutoClaims(
             presentation.answer,
@@ -6963,9 +7576,13 @@ app.whenReady().then(async () => {
               };
         }
         const coverageLimited = retrievalSummary.omittedMeetingCount > 0;
-        const addressedAnswer = addressConfirmedSelf(
+        const attributionSafeAnswer = ensureAskPlutoAttributionAnswer(
+          conversationResolution.answerQuery,
           presentation.answer,
-          confirmedSelfName,
+        );
+        const addressedAnswer = addressConfirmedSelf(
+          attributionSafeAnswer,
+          answerSelfName,
         );
         const answer = coverageLimited
           ? `I found ${retrievalSummary.matchedMeetingCount} meetings, but this answer covers ${retrievalSummary.includedMeetingCount}. Narrow the time period for complete coverage.\n\n${addressedAnswer}`
@@ -6984,6 +7601,34 @@ app.whenReady().then(async () => {
                   temporalResolvedScope?.meetingIds,
               })
             : undefined;
+        const conversationMeetingIds = context
+          .filter((result) => result.source_type !== 'artifact')
+          .map((result) => result.meeting_id)
+          .filter((id, index, ids) => ids.indexOf(id) === index)
+          .slice(0, 8);
+        const nextConversationContext = {
+          anchor: conversationAnchor || queryText.trim().slice(0, 700),
+          meetingIds: conversationMeetingIds,
+          topic: effectiveProjectRecall
+            ? {
+                kind: 'project' as const,
+                id: effectiveProjectRecall.project.canonicalId,
+                label: effectiveProjectRecall.displayTitle,
+              }
+            : effectivePersonWorkRecall
+              ? {
+                  kind: 'person' as const,
+                  id: effectivePersonWorkRecall.person.id,
+                  label: effectivePersonWorkRecall.person.name,
+                }
+              : usePreparedWorkspaceRecall
+                ? { kind: 'workspace' as const, label: 'Workspace priorities' }
+                : conversationMeetingIds.length > 0
+                  ? { kind: 'meeting_set' as const }
+                  : { kind: 'general' as const },
+        };
+        outputCharacters = answer.length;
+        finalizationCompletedAt = Date.now();
 
         console.log(
           `[Pluto] Query complete. Total duration: ${Date.now() - startTime}ms`,
@@ -7002,6 +7647,7 @@ app.whenReady().then(async () => {
           retrievalTrace,
           trustStatus: presentation.trustStatus,
           unsupportedClaimCount: presentation.unsupportedClaimCount,
+          conversationContext: nextConversationContext,
           ...(omissionRef ? { omissionRef } : {}),
         };
       })();
@@ -7024,6 +7670,7 @@ app.whenReady().then(async () => {
 
       try {
         const response = await deadlineGeneration;
+        outputCharacters ||= response.answer.length;
         if (response.status === 'answered') {
           sendStatus('citations_ready');
           sendStatus('completed');
@@ -7032,7 +7679,10 @@ app.whenReady().then(async () => {
         }
         return {
           ...response,
+          ...(turnMode ? { turnMode } : {}),
+          ...(retrievalPolicy ? { retrievalPolicy } : {}),
           ...(conversationAnchor ? { conversationAnchor } : {}),
+          performance: buildPerformanceDiagnostics(),
         };
       } catch (error) {
         if (
@@ -7049,6 +7699,7 @@ app.whenReady().then(async () => {
             answer: '',
             citations: [],
             currentMeeting: currentMeetingStatus,
+            performance: buildPerformanceDiagnostics(),
           };
         }
         const failure = classifyAskPlutoFailure(error);
@@ -7058,9 +7709,11 @@ app.whenReady().then(async () => {
         );
         sendStatus(failure.reason === 'timeout' ? 'unavailable' : 'failed');
         if (failure.reason === 'timeout' && lastValidatedPresentation) {
+          const partialAnswer = `${lastValidatedPresentation.answer}\n\n${failure.answer}`;
+          outputCharacters = partialAnswer.length;
           return {
             status: 'unavailable' as const,
-            answer: `${lastValidatedPresentation.answer}\n\n${failure.answer}`,
+            answer: partialAnswer,
             citations: lastValidatedPresentation.citations,
             currentMeeting: currentMeetingStatus,
             failureReason: failure.reason,
@@ -7069,8 +7722,10 @@ app.whenReady().then(async () => {
             unsupportedClaimCount:
               lastValidatedPresentation.unsupportedClaimCount,
             ...(conversationAnchor ? { conversationAnchor } : {}),
+            performance: buildPerformanceDiagnostics(),
           };
         }
+        outputCharacters = failure.answer.length;
         return {
           status: 'unavailable' as const,
           answer: failure.answer,
@@ -7078,30 +7733,16 @@ app.whenReady().then(async () => {
           currentMeeting: currentMeetingStatus,
           failureReason: failure.reason,
           ...(conversationAnchor ? { conversationAnchor } : {}),
+          performance: buildPerformanceDiagnostics(),
         };
       } finally {
         const finishedAt = Date.now();
+        const performance = buildPerformanceDiagnostics(finishedAt);
         console.log(
           '[Pluto] intelligence:query timings',
           JSON.stringify({
             request_id: requestId,
-            queue_ms:
-              providerRequestedAt && providerStartedAt
-                ? providerStartedAt - providerRequestedAt
-                : null,
-            retrieval_ms:
-              retrievalStartedAt && retrievalCompletedAt
-                ? retrievalCompletedAt - retrievalStartedAt
-                : null,
-            first_token_ms: firstTokenAt ? firstTokenAt - startTime : null,
-            raw_first_token_ms: rawFirstTokenAt
-              ? rawFirstTokenAt - startTime
-              : null,
-            generation_ms:
-              providerStartedAt && generationCompletedAt
-                ? generationCompletedAt - providerStartedAt
-                : null,
-            total_ms: finishedAt - startTime,
+            ...performance,
           }),
         );
         if (activeAskPlutoQueries.get(requestId)?.controller === controller) {
@@ -7222,6 +7863,36 @@ app.whenReady().then(async () => {
       });
 
       try {
+        if (conversation.relation === 'social') {
+          const previousAnswer = [...turns]
+            .reverse()
+            .find((turn) => turn.role === 'assistant')?.content;
+          const answer = buildSocialReply({ query, previousAnswer });
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('intelligence:meeting-chat:delta', {
+              requestId,
+              delta: answer,
+            });
+          }
+          return {
+            status: 'answered' as const,
+            answer,
+            scope:
+              request.scope.type === 'live_meeting'
+                ? {
+                    type: 'live_meeting' as const,
+                    meetingId: request.scope.meetingId ?? '',
+                    title: request.scope.title,
+                  }
+                : {
+                    type: 'meeting' as const,
+                    meetingId: request.scope.meetingId,
+                  },
+            trustStatus: 'grounded' as const,
+            claims: [],
+            citations: [],
+          };
+        }
         const baseContext =
           request.scope.type === 'live_meeting'
             ? (() => {
@@ -7606,12 +8277,18 @@ app.whenReady().then(async () => {
       `[Pluto] Released ${interruptedFinalTranscriptions} interrupted final transcription lease(s)`,
     );
   }
-  initializeKnowledgeDocs({ queue: false }).catch((error) => {
-    console.error(
-      '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
-      error,
-    );
-  });
+  initializeKnowledgeDocs({ queue: false })
+    .then((docIds) => {
+      for (const docId of docIds) {
+        backgroundKnowledgeRefresh?.enqueue(`doc:${docId}`);
+      }
+    })
+    .catch((error) => {
+      console.error(
+        '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
+        error,
+      );
+    });
   createWindow();
   await prepareFinalTranscriptionBeforeRecovery({
     shouldPrepare: db.getSetting('setup_complete') === 'true',

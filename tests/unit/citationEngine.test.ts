@@ -5,7 +5,9 @@ import {
   auditCitations,
   buildCitationChain,
   buildSafeAnswerPresentation,
+  buildSynthesizedAnswerPresentation,
   claimIsSupportedByEvidence,
+  createSynthesizedAnswerStream,
   createValidatedAnswerStream,
   isNonFactualResponseText,
   pruneOrphanHeadings,
@@ -345,6 +347,171 @@ describe('Citation Engine', () => {
       expect(presentation.answer).toContain(
         'Suggestion: Reserve time to confirm the final handoff.',
       );
+    });
+  });
+
+  describe('createSynthesizedAnswerStream', () => {
+    const sources = [
+      {
+        meeting_id: 'm1',
+        meeting_title: 'Launch review',
+        evidence_text: 'Sam owns launch signoff. The launch is Friday.',
+        mid: null,
+      },
+    ] as RetrievalResult[];
+
+    it('streams synthesized prose immediately without waiting for a citation', () => {
+      const deltas: string[] = [];
+      const stream = createSynthesizedAnswerStream(sources, (delta) =>
+        deltas.push(delta),
+      );
+
+      stream.push('The launch plan has a clear owner');
+
+      expect(deltas.join('')).toBe('The launch plan has a clear owner');
+      expect(stream.streamedAnswer).toBe('The launch plan has a clear owner');
+    });
+
+    it('keeps the full answer while stripping source markers for display', () => {
+      const deltas: string[] = [];
+      const stream = createSynthesizedAnswerStream(sources, (delta) =>
+        deltas.push(delta),
+      );
+      const answer =
+        'The work is moving toward launch even though this wording is a synthesis. [Source 1]';
+
+      for (const chunk of [
+        'The work is moving toward launch ',
+        'even though this wording is a synthesis. ',
+        '[Sour',
+        'ce 1]',
+      ]) {
+        stream.push(chunk);
+      }
+      const presentation = stream.finalize(answer);
+
+      expect(deltas.join('')).toBe(
+        'The work is moving toward launch even though this wording is a synthesis.',
+      );
+      expect(presentation).toMatchObject({
+        answer:
+          'The work is moving toward launch even though this wording is a synthesis.',
+        outcome: 'answered',
+        unsupportedClaimCount: 0,
+      });
+      expect(presentation.citations).toHaveLength(1);
+    });
+
+    it('does not prune healthy synthesized prose for weak lexical overlap', () => {
+      const presentation = buildSynthesizedAnswerPresentation(
+        'The project is approaching its release phase. [Source 1]',
+        sources,
+      );
+
+      expect(presentation.answer).toBe(
+        'The project is approaching its release phase.',
+      );
+      expect(presentation.outcome).toBe('answered');
+      expect(presentation.unsupportedClaimCount).toBe(0);
+    });
+
+    it('attaches response-level provenance without requiring inline markers', () => {
+      const presentation = buildSynthesizedAnswerPresentation(
+        'The release plan has a clear owner and a Friday target.',
+        [
+          {
+            ...sources[0],
+            retrieved_sections: [
+              {
+                section_id: 'section-1',
+                heading: 'Launch plan',
+                kind: 'overview',
+                summary: 'Sam owns launch signoff. The launch is Friday.',
+                trust_status: 'grounded',
+                source_revision: 'revision-1',
+              },
+            ],
+          },
+          { ...sources[0] },
+        ],
+      );
+
+      expect(presentation.citations).toEqual([
+        expect.objectContaining({
+          claim: 'Launch review',
+          meeting_id: 'm1',
+          evidence_span: 'Sam owns launch signoff. The launch is Friday.',
+          evidence_valid: true,
+          trust_status: 'grounded',
+          evidence_kind: 'section',
+          section_id: 'section-1',
+        }),
+      ]);
+    });
+
+    it('never attaches raw transcript results as synthesized provenance', () => {
+      const presentation = buildSynthesizedAnswerPresentation(
+        'The release is Friday.',
+        [
+          {
+            ...sources[0],
+            evidence_kind: 'transcript',
+            transcript_passages: [
+              {
+                quote: 'The release is Friday.',
+                speaker: 'Sam',
+                start_segment_index: 1,
+                end_segment_index: 1,
+                source_revision: 'revision-1',
+                trust_status: 'grounded',
+              },
+            ],
+          },
+        ],
+      );
+
+      expect(presentation.citations).toEqual([]);
+    });
+
+    it('drops only a trailing sentence fragment when local generation stops mid-thought', () => {
+      const presentation = buildSynthesizedAnswerPresentation(
+        'The first release is ready for an architecture review. AWS certifications are being prioritized as a primary credentialing strategy to',
+        sources,
+      );
+
+      expect(presentation.answer).toBe(
+        'The first release is ready for an architecture review.',
+      );
+    });
+
+    it('removes grouped and incomplete source markers from synthesized prose', () => {
+      expect(
+        buildSynthesizedAnswerPresentation(
+          'The release is ready. [Source 1, Source 2]',
+          sources,
+        ).answer,
+      ).toBe('The release is ready.');
+      expect(
+        buildSynthesizedAnswerPresentation(
+          'The release is ready. [Sources 1-3]',
+          sources,
+        ).answer,
+      ).toBe('The release is ready.');
+      expect(
+        buildSynthesizedAnswerPresentation(
+          'The release is ready. [Source 4',
+          sources,
+        ).answer,
+      ).toBe('The release is ready.');
+    });
+
+    it('drops a trailing partial year without damaging the prior sentence', () => {
+      const presentation = buildSynthesizedAnswerPresentation(
+        'The migration remains unresolved. The last update was in late August 202',
+        sources,
+      );
+
+      expect(presentation.answer).toBe('The migration remains unresolved.');
     });
   });
 
@@ -843,9 +1010,7 @@ describe('Citation Engine', () => {
       expect(audited.every((citation) => citation.evidence_valid)).toBe(true);
     });
 
-    it('passes synthesized-source citations on structural validity alone, skipping token-overlap', () => {
-      // Synthesized notes are already grounded truth; paraphrases should NOT fail
-      // the citation audit just because the wording doesn't have verbatim token overlap.
+    it('accepts supported synthesized-note paraphrases but rejects fabricated claims', () => {
       const synthesizedNote =
         'Standup: Rachel will finalize the data pipeline handoff by end of week. ' +
         'Blocker on schema migration resolved. Next step: deploy to staging environment.';
@@ -872,11 +1037,11 @@ describe('Citation Engine', () => {
         context[0].mid as ReturnType<typeof dbModule.getMeetingMid>,
       );
 
-      // Paraphrase — no verbatim overlap with the synthesized note text
       const audited = auditCitations(
         [
           {
-            claim: 'Schema migration issues are resolved; staging deployment is the next priority.',
+            claim:
+              'Schema migration issues are resolved; staging deployment is the next priority.',
             meeting_id: 'm-synth',
             meeting_title: 'Workspace Intelligence: Working Memory',
             evidence_span: synthesizedNote,
@@ -887,8 +1052,127 @@ describe('Citation Engine', () => {
         context,
       );
 
-      // Should pass: synthesized source → structural validity sufficient
       expect(audited[0].evidence_valid).toBe(true);
+
+      const fabricated = auditCitations(
+        [
+          {
+            claim: 'Alex approved a $50,000 production budget.',
+            meeting_id: 'm-synth',
+            meeting_title: 'Workspace Intelligence: Working Memory',
+            evidence_span: synthesizedNote,
+            evidence_valid: false,
+            trust_status: 'needs_review',
+          },
+        ],
+        context,
+      );
+
+      expect(fabricated[0].evidence_valid).toBe(false);
+    });
+
+    it('validates the deterministic workspace-focus answer against synthesized evidence', () => {
+      const context = [
+        {
+          meeting_id: 'workspace:intelligence',
+          meeting_title: 'Workspace Intelligence',
+          evidence_text: [
+            '[Workspace Current Read]: Platform stabilization is in progress.',
+            '[Workspace refreshed]: 2026-09-25T18:00:00Z',
+            '[Newer synthesized-note overlay]: 1 meeting notes through 2026-09-26T18:00:00.000Z',
+            '[Selection policy]: Older or stale threads are omitted from the main priority list.',
+            '[Omitted older or stale count]: 1',
+            '[Omitted older or stale work]:',
+            '- Stream "Legacy migration" — Historical migration planning (last reinforced 2026-05-01T12:00:00.000Z)',
+            '[Your Commitments & Action Items]:',
+            '- Finalize API token rotation (Due: Sep 30)',
+            '[Active Projects & Focus]:',
+            '- Project "API Gateway v2" [active]',
+            '  * Current Focus: Zero-trust migration',
+          ].join('\n'),
+          evidence_kind: 'overview' as const,
+          mid: null,
+          score: 1,
+          score_breakdown: {
+            fts_rank: 1,
+            graph_proximity: 1,
+            recency_decay: 1,
+            mention_weight: 1,
+          },
+        },
+        {
+          meeting_id: 'release-review',
+          meeting_title: 'Release review',
+          evidence_text:
+            '[Recent meeting context]: Release review\n[Occurred]: 2026-09-26T18:00:00Z\n[Analysis]: The final launch blocker is the signing check.',
+          evidence_kind: 'note' as const,
+          mid: null,
+          score: 1,
+          score_breakdown: {
+            fts_rank: 1,
+            graph_proximity: 0,
+            recency_decay: 1,
+            mention_weight: 0,
+          },
+        },
+      ] as RetrievalResult[];
+      const answer = [
+        'Here’s my read: **Platform stabilization is in progress.** [Source 1]',
+        '',
+        '**Focus now**',
+        '- Finalize API token rotation (due Sep 30) [Source 1]',
+        '- API Gateway v2 — Zero-trust migration [Source 1]',
+        '',
+        'I left older or stale threads out of the main list. The workspace synthesis was refreshed Sep 25. [Source 1]',
+      ].join('\n');
+
+      const presentation = createValidatedAnswerStream(
+        context,
+        () => undefined,
+      ).finalize(answer);
+
+      expect(presentation.answer).toContain('Platform stabilization');
+      expect(presentation.answer).toContain('Finalize API token rotation');
+      expect(presentation.answer).toContain('API Gateway v2');
+      expect(presentation.outcome).toBe('answered');
+      expect(presentation.unsupportedClaimCount).toBe(0);
+
+      const expanded = createValidatedAnswerStream(
+        context,
+        () => undefined,
+      ).finalize(
+        [
+          'Here’s my read: **Platform stabilization is in progress.** [Source 1]',
+          '',
+          '**New since the workspace snapshot**',
+          '- Release review — The final launch blocker is the signing check. [Source 2]',
+          '',
+          'The base workspace synthesis was refreshed Sep 25. [Source 1]',
+          'Newer synthesized meeting notes are included through Sep 26. [Source 1]',
+        ].join('\n'),
+      );
+      expect(expanded.answer).toContain('Release review');
+      expect(expanded.answer).toContain(
+        'The base workspace synthesis was refreshed Sep 25.',
+      );
+      expect(expanded.answer).toContain(
+        'Newer synthesized meeting notes are included through Sep 26.',
+      );
+      expect(expanded.unsupportedClaimCount).toBe(0);
+
+      const omitted = createValidatedAnswerStream(
+        context,
+        () => undefined,
+      ).finalize(
+        [
+          'I left these older or stale signals out of the main priority list. [Source 1]',
+          '',
+          '**Left out as older or stale**',
+          '- Legacy migration — Historical migration planning (last reinforced May 1) [Source 1]',
+        ].join('\n'),
+      );
+      expect(omitted.answer).toContain('Legacy migration');
+      expect(omitted.unsupportedClaimCount).toBe(0);
     });
 
     it('still applies token-overlap check for raw transcript sources', () => {

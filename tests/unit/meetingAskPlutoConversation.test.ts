@@ -15,6 +15,22 @@ const exchange = (
 ];
 
 describe('meeting Ask Pluto conversational context', () => {
+  it('handles a social response without another evidence lookup', () => {
+    const resolution = resolveMeetingAskPlutoConversation({
+      query: 'That is a really useful insight.',
+      turns: exchange(
+        'What is the main risk?',
+        'The release handoff is the main risk.',
+      ),
+    });
+
+    expect(resolution).toMatchObject({
+      relation: 'social',
+      turnMode: 'social',
+      retrievalPolicy: 'none',
+    });
+  });
+
   it('rewrites a referential follow-up with grounded prior context', () => {
     const resolution = resolveMeetingAskPlutoConversation({
       query: 'What should I do about that?',

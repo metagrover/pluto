@@ -11,6 +11,8 @@ const DEEP_REASONING_PATTERN =
   /\b(compare|comparison|changed?|difference|conflict|contradict|trend|pattern|risk|rationale|why|advise|advice|recommend|across meetings)\b/i;
 const MULTI_MEETING_SYNTHESIS_PATTERN =
   /\b(?:summari[sz]e|recap|overview|breakdown|analy[sz]e)\b[\s\S]{0,60}\b(?:meetings|calls)\b/i;
+const BOUNDED_SYNTHESIZED_ANALYSIS_PATTERN =
+  /\bwhat\s+do\s+you\s+think\s+(?:will|would)\s+satisfy\b|\bwhat\s+do\s+you\s+think\s+(?:i|we)\s+should\s+(?:focus|prioritize)(?:\s+on)?\b|\bwhat\s+(?:should|do)\s+(?:i|we)\s+(?:need\s+to\s+)?(?:focus|prioritize)(?:\s+on)?\b|\bwhat\s+(?:are|is)\s+(?:my|our)\s+(?:top\s+)?priorit(?:y|ies)\b/i;
 
 export const queryReferencesPriorTurn = (query: string): boolean =>
   /\b(it|that|those|them|previous|earlier|you said|you suggested|why)\b/i.test(
@@ -52,18 +54,24 @@ export const shouldRestrictToPriorConversationEvidence = ({
   intent,
   priorPinnedCount,
   task = 'lookup',
+  relation = 'new_topic',
+  retrievalPolicy,
 }: {
   currentMeetingRequested: boolean;
   intent: ParsedQuery['intent'];
   priorPinnedCount: number;
   task?: AskPlutoResearchTask;
+  relation?: string;
+  retrievalPolicy?: 'none' | 'reuse' | 'fresh';
 }): boolean =>
   !currentMeetingRequested &&
   priorPinnedCount > 0 &&
-  task !== 'analysis' &&
-  task !== 'comparison' &&
-  intent !== 'comparative' &&
-  intent !== 'exploratory';
+  (retrievalPolicy === 'reuse' ||
+    (retrievalPolicy !== 'fresh' &&
+      (task !== 'analysis' || relation === 'follow_up') &&
+      task !== 'comparison' &&
+      intent !== 'comparative' &&
+      intent !== 'exploratory'));
 
 export const shouldRestrictToPinnedCurrentComparison = ({
   currentMeetingRequested,
@@ -78,14 +86,25 @@ export const resolveAskPlutoReasoningMode = ({
   intent,
   override = 'auto',
   task = 'lookup',
+  relation = 'new_topic',
 }: {
   query: string;
   intent: ParsedQuery['intent'];
   override?: AskPlutoReasoningOverride;
   task?: AskPlutoResearchTask;
+  relation?: AskPlutoConversationRelation;
 }): AskPlutoReasoningMode => {
   if (override !== 'auto') return override;
-  if (task !== 'lookup') return 'deep';
+  if (task === 'comparison') return 'deep';
+  if (task === 'draft') return 'fast';
+  if (task === 'analysis' && BOUNDED_SYNTHESIZED_ANALYSIS_PATTERN.test(query))
+    return 'fast';
+  if (
+    task === 'analysis' &&
+    relation !== 'expansion' &&
+    relation !== 'omission_follow_up'
+  )
+    return 'deep';
   if (intent === 'comparative' || intent === 'exploratory') return 'deep';
   return DEEP_REASONING_PATTERN.test(query) ||
     MULTI_MEETING_SYNTHESIS_PATTERN.test(query)

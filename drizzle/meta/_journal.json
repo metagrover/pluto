@@ -120,6 +120,13 @@
       "when": 1790534000000,
       "tag": "0016_prep_briefing",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1790621098891,
+      "tag": "0017_workspace_chat",
+      "breakpoints": true
     }
   ]
 }

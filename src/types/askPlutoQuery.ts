@@ -110,11 +110,32 @@ export interface AskPlutoQueryRequest {
   activeMeetingSnapshot?: AskPlutoActiveMeetingSnapshot;
   modeOverride?: 'auto' | 'fast' | 'deep';
   priorTurns?: AskPlutoConversationTurn[];
+  conversationMemory?: AskPlutoConversationMemory;
+}
+
+export interface AskPlutoConversationContext {
+  anchor: string;
+  meetingIds: string[];
+  topic?: {
+    kind: 'workspace' | 'project' | 'person' | 'meeting_set' | 'general';
+    id?: string;
+    label?: string;
+  };
+}
+
+export interface AskPlutoConversationMemory {
+  activeTopic?: AskPlutoConversationContext['topic'];
+  currentGoal?: string;
+  lastAnswerSummary?: string;
+  corrections: string[];
+  unresolvedQuestions: string[];
 }
 
 export interface AskPlutoConversationTurn {
   role: 'user' | 'assistant';
   content: string;
+  turnMode?: AskPlutoQueryResponse['turnMode'];
+  retrievalPolicy?: AskPlutoQueryResponse['retrievalPolicy'];
   meetingIds?: string[];
   outcome?: AskPlutoOutcome;
   resolvedScope?: ResolvedAskPlutoScope;
@@ -123,6 +144,7 @@ export interface AskPlutoConversationTurn {
   unsupportedClaimCount?: number;
   omissionRef?: string;
   conversationAnchor?: string;
+  conversationContext?: AskPlutoConversationContext;
 }
 
 export interface AskPlutoActiveMeetingSnapshot {
@@ -156,6 +178,29 @@ export interface AskPlutoAnswerDelta {
   delta: string;
 }
 
+export interface AskPlutoPerformanceDiagnostics {
+  provider: string;
+  model: string;
+  reasoningMode?: 'fast' | 'deep';
+  contextCount: number;
+  promptCharacters: number;
+  outputCharacters: number;
+  settingsMs: number | null;
+  setupMs: number | null;
+  conversationResolutionMs: number | null;
+  recallMs: number | null;
+  retrievalMs: number | null;
+  promptConstructionMs: number | null;
+  providerAcquisitionMs: number | null;
+  providerQueueMs: number | null;
+  providerRequestToFirstTokenMs: number | null;
+  rawFirstTokenMs: number | null;
+  visibleFirstTokenMs: number | null;
+  generationMs: number | null;
+  finalizationMs: number | null;
+  totalMs: number;
+}
+
 export interface AskPlutoQueryResponse<Citation = unknown> {
   status?: 'answered' | 'cancelled' | 'unavailable';
   answer: string;
@@ -170,8 +215,25 @@ export interface AskPlutoQueryResponse<Citation = unknown> {
   unsupportedClaimCount?: number;
   omissionRef?: string;
   conversationAnchor?: string;
+  conversationContext?: AskPlutoConversationContext;
   outcome?: AskPlutoOutcome;
   resolvedScope?: ResolvedAskPlutoScope;
   retrievalSummary?: AskPlutoRetrievalSummary;
   retrievalTrace?: AskPlutoRetrievalTrace;
+  performance?: AskPlutoPerformanceDiagnostics;
+  turnMode?:
+    | 'social'
+    | 'clarify'
+    | 'challenge'
+    | 'expand'
+    | 'draft'
+    | 'act'
+    | 'topic_switch'
+    | 'lookup';
+  retrievalPolicy?: 'none' | 'reuse' | 'fresh';
+  actionProposal?: {
+    kind: 'create_commitment';
+    text: string;
+    label: string;
+  };
 }

@@ -11,11 +11,22 @@ import {
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(
+  HTMLElement.prototype,
+  'scrollIntoView',
+);
+
 describe('Ask Pluto request lifecycle', () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
+  let scrollIntoView: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
@@ -24,6 +35,19 @@ describe('Ask Pluto request lifecycle', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    if (originalScrollIntoView) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        'scrollIntoView',
+        originalScrollIntoView,
+      );
+    } else {
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        writable: true,
+        value: undefined,
+      });
+    }
   });
 
   it('keeps the chat usable when suggested queries are unavailable', async () => {
@@ -257,7 +281,17 @@ describe('Ask Pluto request lifecycle', () => {
     });
     const requestId = queryCall?.[1].requestId as string;
     expect(requestId).toMatch(/^ask-pluto-/);
-    expect(container.textContent).toContain('Searching meeting notes');
+    expect(container.textContent).toContain('Preparing an answer');
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: 'start',
+    });
+    expect(
+      (scrollIntoView.mock.instances[0] as HTMLElement).getAttribute(
+        'aria-label',
+      ),
+    ).toBe('You');
     expect(
       container.querySelector('output[aria-live="polite"]'),
     ).not.toBeNull();
@@ -269,40 +303,36 @@ describe('Ask Pluto request lifecycle', () => {
         { requestId, phase: 'waiting' },
       );
     });
-    expect(container.textContent).toContain('Preparing a grounded answer');
+    expect(container.textContent).toContain('Preparing an answer');
     expect(
       container.querySelector('[data-testid="ask-pluto-loading-lines"]'),
     ).not.toBeNull();
     expect(
       container.querySelector('[data-testid="ask-pluto-loading-shell"]'),
     ).not.toBeNull();
-    const progressDots = container.querySelectorAll<HTMLElement>(
-      '[data-testid="ask-pluto-progress-dot"]',
-    );
-    expect(progressDots).toHaveLength(4);
-    expect([...progressDots].map((dot) => dot.style.animationDelay)).toEqual([
-      '0ms',
-      '150ms',
-      '300ms',
-      '450ms',
-    ]);
+    expect(
+      container.querySelector('[data-testid="ask-pluto-progress-dot"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-testid="ask-pluto-progress-track"]'),
+    ).toBeNull();
     await act(async () => {
       listeners.get('intelligence:query:status')?.(
         {},
         { requestId, phase: 'writing' },
       );
     });
-    expect(container.textContent).toContain('Writing a grounded answer');
+    expect(container.textContent).toContain('Starting the answer');
     expect(
-      container.querySelectorAll('[data-testid="ask-pluto-progress-dot"]'),
-    ).toHaveLength(4);
+      container.querySelector('[data-testid="ask-pluto-loading-shell"]'),
+    ).not.toBeNull();
     await act(async () => {
       listeners.get('intelligence:query:status')?.(
         {},
         { requestId, phase: 'generating' },
       );
     });
-    expect(container.textContent).toContain('Writing a grounded answer');
+    expect(container.textContent).toContain('Starting the answer');
     await act(async () => {
       listeners.get('intelligence:query:delta')?.(
         {},
@@ -312,9 +342,8 @@ describe('Ask Pluto request lifecycle', () => {
     expect(container.textContent).toContain(
       'The current meeting changed direction.',
     );
-    expect(container.textContent).toContain(
-      'Checking each claim against your sources',
-    );
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('Writing');
     expect(
       container.querySelector('[data-testid="ask-pluto-stream-caret"]'),
     ).not.toBeNull();
@@ -327,6 +356,90 @@ describe('Ask Pluto request lifecycle', () => {
     expect(invoke).toHaveBeenCalledWith('intelligence:query:cancel', requestId);
     expect(container.textContent).toContain('Stopped');
     expect(input.disabled).toBe(false);
+  });
+
+  it('keeps streamed and finalized answers in the same typography container', async () => {
+    let resolveQuery!: (response: {
+      status: 'answered';
+      answer: string;
+      citations: never[];
+    }) => void;
+    const queryPromise = new Promise<{
+      status: 'answered';
+      answer: string;
+      citations: never[];
+    }>((resolve) => {
+      resolveQuery = resolve;
+    });
+    const listeners = new Map<string, (...args: unknown[]) => void>();
+    const invoke = vi.fn((channel: string) => {
+      if (channel === 'intelligence:suggested-queries')
+        return Promise.resolve([]);
+      if (channel === 'intelligence:query') return queryPromise;
+      return Promise.resolve(null);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: {
+        invoke,
+        on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => {
+          listeners.set(channel, listener);
+          return () => listeners.delete(channel);
+        }),
+      },
+    });
+
+    await act(async () => {
+      root.render(
+        <AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />,
+      );
+    });
+    const input = container.querySelector('input') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'What changed?');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      container
+        .querySelector('form')
+        ?.dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+    });
+    const queryCall = invoke.mock.calls.find(
+      ([channel]) => channel === 'intelligence:query',
+    );
+    const requestId = queryCall?.[1].requestId as string;
+    const answer = '**Pipeline:** stable now.';
+
+    await act(async () => {
+      listeners.get('intelligence:query:delta')?.(
+        {},
+        { requestId, delta: answer },
+      );
+    });
+    const streamingContent = container.querySelector(
+      '[data-testid="ask-pluto-answer-content"]',
+    );
+    const streamingClassName = streamingContent?.className;
+    expect(streamingContent).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="ask-pluto-loading-shell"]'),
+    ).toBeNull();
+
+    await act(async () => {
+      resolveQuery({ status: 'answered', answer, citations: [] });
+      await queryPromise;
+    });
+    const finalizedContent = container.querySelector(
+      '[data-testid="ask-pluto-answer-content"]',
+    );
+    expect(finalizedContent).toBe(streamingContent);
+    expect(finalizedContent?.className).toBe(streamingClassName);
+    expect(
+      container.querySelector('[data-testid="ask-pluto-stream-caret"]'),
+    ).toBeNull();
   });
 
   it('shows answer-level evidence trust when a claim needs review', async () => {
@@ -446,6 +559,37 @@ describe('Ask Pluto request lifecycle', () => {
             },
           ],
           trustStatus: 'grounded',
+          retrievalTrace: {
+            level: 'section',
+            searchedMeetingCount: 113,
+            meetings: [
+              {
+                meetingId: 'meeting-1',
+                meetingTitle: 'Transcription review',
+              },
+            ],
+            sections: [
+              {
+                meetingId: 'meeting-1',
+                meetingTitle: 'Transcription review',
+                sectionId: 'discussion:live-flow',
+                heading: 'Live transcript flow',
+                kind: 'discussion',
+                sourceRevision: 'revision-1',
+              },
+              {
+                meetingId: 'meeting-1',
+                meetingTitle: 'Transcription review',
+                sectionId: 'decision:validation',
+                heading: 'Validation decision',
+                kind: 'decision',
+                sourceRevision: 'revision-1',
+              },
+            ],
+            transcriptPassages: [],
+            commitmentCount: 0,
+            omittedResultCount: 0,
+          },
         });
       }
       return Promise.resolve(null);
@@ -483,6 +627,9 @@ describe('Ask Pluto request lifecycle', () => {
     );
     expect(container.textContent).not.toContain('Source Log');
     expect(container.textContent).not.toContain('Claim');
+    expect(container.textContent).not.toContain('Grounded answer');
+    expect(container.textContent).toContain('2 synthesized note sections');
+    expect(container.textContent).not.toContain('113 meetings searched');
 
     const sourceButton = disclosure?.querySelector(
       'button[aria-label="Open Transcription review"]',
@@ -634,6 +781,8 @@ describe('Ask Pluto request lifecycle', () => {
                 outcome: 'no_evidence',
                 resolvedScope: scope,
                 retrievalSummary,
+                turnMode: 'lookup',
+                retrievalPolicy: 'fresh',
               }
             : {
                 status: 'answered',
@@ -688,6 +837,8 @@ describe('Ask Pluto request lifecycle', () => {
           outcome: 'no_evidence',
           resolvedScope: scope,
           retrievalSummary,
+          turnMode: 'lookup',
+          retrievalPolicy: 'fresh',
         }),
       ]),
     );
@@ -784,5 +935,127 @@ describe('Ask Pluto request lifecycle', () => {
     );
     expect(container.textContent).toContain('Second query answer');
     if (pendingResolve) pendingResolve(null);
+  });
+
+  it('restores the latest durable workspace conversation', async () => {
+    const invoke = vi.fn((channel: string) => {
+      if (channel === 'intelligence:workspace-chat:list-threads') {
+        return Promise.resolve([
+          {
+            id: 'thread-1',
+            title: 'Release priorities',
+            memory: { corrections: [], unresolvedQuestions: [] },
+            createdAt: '2026-09-28T10:00:00.000Z',
+            updatedAt: '2026-09-28T10:05:00.000Z',
+            archivedAt: null,
+          },
+        ]);
+      }
+      if (channel === 'intelligence:workspace-chat:list-messages') {
+        return Promise.resolve([
+          {
+            id: 'message-1',
+            threadId: 'thread-1',
+            role: 'user',
+            content: 'What deserves attention?',
+            payload: {},
+            createdAt: '2026-09-28T10:00:00.000Z',
+          },
+          {
+            id: 'message-2',
+            threadId: 'thread-1',
+            role: 'assistant',
+            content: 'Start with the production handoff.',
+            payload: { outcome: 'answered' },
+            createdAt: '2026-09-28T10:05:00.000Z',
+          },
+        ]);
+      }
+      if (channel === 'intelligence:suggested-queries')
+        return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+
+    await act(async () => {
+      root.render(
+        <AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />,
+      );
+    });
+
+    expect(container.textContent).toContain('What deserves attention?');
+    expect(container.textContent).toContain(
+      'Start with the production handoff.',
+    );
+    expect(container.textContent).toContain('Release priorities');
+  });
+
+  it('requires confirmation before creating a commitment', async () => {
+    const invoke = vi.fn((channel: string) => {
+      if (channel === 'intelligence:suggested-queries')
+        return Promise.resolve([]);
+      if (channel === 'intelligence:query') {
+        return Promise.resolve({
+          status: 'answered',
+          answer:
+            'I can add “send the release note” as an open commitment. Confirm it below.',
+          citations: [],
+          turnMode: 'act',
+          retrievalPolicy: 'none',
+          actionProposal: {
+            kind: 'create_commitment',
+            text: 'send the release note',
+            label: 'Add commitment',
+          },
+        });
+      }
+      if (channel === 'UPSERT_ENTITY') {
+        return Promise.resolve({ id: 'commitment-1' });
+      }
+      return Promise.resolve(null);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+    await act(async () => {
+      root.render(
+        <AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />,
+      );
+    });
+
+    const input = container.querySelector('input') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'Create a commitment to send the release note');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector('form')
+        ?.dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+    });
+
+    expect(invoke).not.toHaveBeenCalledWith('UPSERT_ENTITY', expect.anything());
+    const confirm = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Add commitment'),
+    );
+    expect(confirm).toBeDefined();
+    await act(async () => confirm?.click());
+    expect(invoke).toHaveBeenCalledWith(
+      'UPSERT_ENTITY',
+      expect.objectContaining({
+        type: 'action_item',
+        name: 'send the release note',
+      }),
+    );
+    expect(container.textContent).toContain('Saved to your commitments');
   });
 });

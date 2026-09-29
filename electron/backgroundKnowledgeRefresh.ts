@@ -120,6 +120,15 @@ export const createBackgroundKnowledgeRefreshCoordinator = (options: {
         quietMs - Math.max(0, now() - lastForegroundActivityAt);
       schedule(Math.max(0, quietRemaining));
     },
+    prioritize(meetingId: string) {
+      if (closed || !pending.has(meetingId)) return;
+      const remaining = [...pending].filter(
+        (pendingId) => pendingId !== meetingId,
+      );
+      pending.clear();
+      pending.add(meetingId);
+      for (const pendingId of remaining) pending.add(pendingId);
+    },
     notifyForegroundActivity() {
       if (closed) return;
       if (options.ignoreForegroundActivity) return;

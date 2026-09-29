@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { removeRepeatedAskPlutoClaims } from '../../electron/intelligence/askPlutoAnswerText';
+import {
+  ensureAskPlutoAttributionAnswer,
+  removeRepeatedAskPlutoClaims,
+} from '../../electron/intelligence/askPlutoAnswerText';
 import type { CitationChain } from '../../electron/intelligence/intelligenceTypes';
 
 const citation = (claim: string, meetingId = 'meeting-1'): CitationChain => ({
@@ -49,5 +52,61 @@ describe('Ask Pluto answer repetition', () => {
       'meeting-1',
       'meeting-2',
     ]);
+  });
+});
+
+describe('Ask Pluto attribution answers', () => {
+  it('does not convert an unattributed requirement into an assignment', () => {
+    expect(
+      ensureAskPlutoAttributionAnswer(
+        'Who said I should present this to Beta Reviewer?',
+        'You were tasked with ensuring the application was deployed before showing it to Beta Reviewer.',
+      ),
+    ).toBe(
+      'I can’t confirm who said it from the synthesized context returned for this question. The note records the requirement, but it does not identify the speaker or assigner.',
+    );
+  });
+
+  it('removes a contradictory assignment claim even when the answer admits the speaker is unknown', () => {
+    expect(
+      ensureAskPlutoAttributionAnswer(
+        'Who said I should present this to Beta Reviewer?',
+        'The meeting notes specifically assign you the task. The notes do not identify a specific person who made that request.',
+      ),
+    ).toBe(
+      'I can’t confirm who said it from the synthesized context returned for this question. The note records the requirement, but it does not identify the speaker or assigner.',
+    );
+  });
+
+  it('keeps the factual portion of a mixed question while removing unsupported ownership', () => {
+    expect(
+      ensureAskPlutoAttributionAnswer(
+        'What is needed for Beta Reviewer, and who said it?',
+        'The application needs to be deployed. You were tasked with presenting it to Beta Reviewer. The note does not identify who made that request.',
+      ),
+    ).toBe(
+      'The application needs to be deployed. The note does not identify who made that request.',
+    );
+  });
+
+  it('preserves a direct attribution when the answer supplies one', () => {
+    const answer =
+      'Alpha Contact requested that you send the revised profiles.';
+    expect(
+      ensureAskPlutoAttributionAnswer(
+        'Who requested the revised profiles?',
+        answer,
+      ),
+    ).toBe(answer);
+  });
+
+  it('leaves answers to non-attribution questions unchanged', () => {
+    const answer = 'The application should be in the cloud before the review.';
+    expect(
+      ensureAskPlutoAttributionAnswer(
+        'What is needed for Beta Reviewer?',
+        answer,
+      ),
+    ).toBe(answer);
   });
 });

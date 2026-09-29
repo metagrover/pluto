@@ -10,6 +10,7 @@ import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useChatTurnAnchor } from '../../hooks/useChatTurnAnchor';
 import type { Meeting } from '../../types';
 import type {
   MeetingAskPlutoAnswerDelta,
@@ -144,6 +145,8 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   >([]);
   const messages = conversation ?? localMessages;
   const setMessages = onConversationChange ?? setLocalMessages;
+  const { anchorTurn, conversationRef: threadRef } =
+    useChatTurnAnchor<HTMLDivElement>(messages.length);
   const [isAsking, setIsAsking] = useState(false);
   const [streamingAnswer, setStreamingAnswer] = useState('');
   const [localIsMinimized, setLocalIsMinimized] = useState(false);
@@ -159,10 +162,6 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   );
   const [error, setError] = useState<string | null>(null);
   const dockRef = useRef<HTMLElement>(null);
-  const threadRef = useRef<HTMLDivElement>(null);
-  const threadContentRef = useRef<HTMLDivElement>(null);
-  const threadEndRef = useRef<HTMLDivElement>(null);
-  const shouldFollowLatestRef = useRef(true);
   const activeRequestIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const scopeKey = meeting
@@ -196,22 +195,6 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     .filter(Boolean)
     .join(' ');
 
-  const scrollToLatest = useCallback((force = false) => {
-    if (force) shouldFollowLatestRef.current = true;
-    if (!shouldFollowLatestRef.current) return;
-    threadEndRef.current?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'end',
-    });
-  }, []);
-
-  const updateFollowMode = () => {
-    const thread = threadRef.current;
-    if (!thread) return;
-    shouldFollowLatestRef.current =
-      thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 48;
-  };
-
   useEffect(() => {
     if (!showsConversation) return;
     const handlePointerDown = (event: PointerEvent) => {
@@ -226,18 +209,6 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     document.addEventListener('pointerdown', handlePointerDown);
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [setIsMinimized, showsConversation]);
-
-  useEffect(() => {
-    if (!showsConversation) return;
-    scrollToLatest();
-  }, [
-    error,
-    isAsking,
-    messages,
-    scrollToLatest,
-    showsConversation,
-    streamingAnswer,
-  ]);
 
   useEffect(
     () =>
@@ -273,19 +244,6 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
       activeRequestIdRef.current = null;
     };
   }, []);
-
-  useEffect(() => {
-    if (
-      !showsConversation ||
-      !threadContentRef.current ||
-      typeof ResizeObserver === 'undefined'
-    ) {
-      return;
-    }
-    const observer = new ResizeObserver(() => scrollToLatest());
-    observer.observe(threadContentRef.current);
-    return () => observer.disconnect();
-  }, [scrollToLatest, showsConversation]);
 
   const stopAnswer = useCallback(() => {
     const activeRequestId = activeRequestIdRef.current;
@@ -329,11 +287,12 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     setStreamingAnswer('');
     setIsAsking(true);
     setIsMinimized(false);
-    shouldFollowLatestRef.current = true;
+    const userMessageId = `user-${Date.now()}`;
+    anchorTurn(userMessageId);
     setMessages((current) => [
       ...current,
       {
-        id: `user-${Date.now()}`,
+        id: userMessageId,
         role: 'user',
         content: trimmed,
       },
@@ -422,7 +381,6 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
           className="meeting-ask-pluto-dock__restore"
           aria-label="Restore Ask Pluto conversation"
           onClick={() => {
-            shouldFollowLatestRef.current = true;
             setIsMinimized(false);
           }}
         >
@@ -456,19 +414,16 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
         <div
           ref={threadRef}
           className="meeting-ask-pluto-dock__thread"
-          onScroll={updateFollowMode}
           role="log"
           aria-live="polite"
           aria-relevant="additions text"
         >
-          <div
-            ref={threadContentRef}
-            className="meeting-ask-pluto-dock__thread-content"
-          >
-            {messages.map((message) =>
+          <div className="meeting-ask-pluto-dock__thread-content">
+            {messages.map((message, index) =>
               message.role === 'user' ? (
                 <div
                   key={message.id}
+                  data-chat-turn-id={message.id}
                   className="meeting-ask-pluto-dock__message meeting-ask-pluto-dock__message--user"
                 >
                   {message.content}
@@ -476,7 +431,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
               ) : (
                 <div
                   key={message.id}
-                  className="meeting-ask-pluto-dock__assistant-turn"
+                  className={`meeting-ask-pluto-dock__assistant-turn ${index === messages.length - 1 ? 'meeting-ask-pluto-dock__assistant-turn--latest' : ''}`}
                 >
                   <span className="meeting-ask-pluto-dock__pluto-mark">
                     <Logo size={18} variant="default" />
@@ -500,7 +455,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
               ),
             )}
             {streamingAnswer ? (
-              <div className="meeting-ask-pluto-dock__assistant-turn">
+              <div className="meeting-ask-pluto-dock__assistant-turn meeting-ask-pluto-dock__assistant-turn--latest">
                 <span className="meeting-ask-pluto-dock__pluto-mark">
                   <Logo size={18} variant="default" />
                 </span>
@@ -526,14 +481,13 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
               </output>
             ) : null}
             {isAsking && !streamingAnswer ? (
-              <output className="meeting-ask-pluto-dock__loading">
+              <output className="meeting-ask-pluto-dock__loading meeting-ask-pluto-dock__loading--latest">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 {liveContext
                   ? 'Reading live transcript'
                   : 'Reading this meeting'}
               </output>
             ) : null}
-            <div ref={threadEndRef} aria-hidden="true" />
           </div>
         </div>
       ) : null}

@@ -158,4 +158,36 @@ describe('background knowledge refresh', () => {
     expect(run).toHaveBeenCalledTimes(1);
     expect(coordinator.snapshot().pendingMeetingIds).toEqual([]);
   });
+
+  it('prioritizes pending document work without bypassing the idle gate', async () => {
+    vi.useFakeTimers();
+    const run = vi.fn().mockResolvedValue(undefined);
+    const coordinator = createBackgroundKnowledgeRefreshCoordinator({
+      quietMs: 1_000,
+      getPolicy: () => ({
+        systemIdleSeconds: 2,
+        onBattery: false,
+        thermalState: 'nominal',
+        paused: false,
+      }),
+      run,
+    });
+
+    coordinator.enqueue('doc:other');
+    coordinator.enqueue('doc:project-atlas');
+    coordinator.prioritize('doc:project-atlas');
+    coordinator.prioritize('doc:missing');
+    expect(coordinator.snapshot().pendingMeetingIds).toEqual([
+      'doc:project-atlas',
+      'doc:other',
+    ]);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(run).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run.mock.calls.map(([id]) => id)).toEqual([
+      'doc:project-atlas',
+      'doc:other',
+    ]);
+  });
 });

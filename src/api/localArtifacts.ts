@@ -1,3 +1,4 @@
+import { assertFeatureEnabled } from '../config/featureFlags';
 import type { TrustStatus } from '../utils/trustStatus';
 
 export type LocalArtifactType = 'markdown' | 'text' | 'pdf' | 'docx' | 'pages';
@@ -23,6 +24,7 @@ export interface LocalArtifact {
 }
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => {
+  assertFeatureEnabled('sources');
   if (!window.ipcRenderer) {
     return Promise.reject(new Error('IPC unavailable'));
   }

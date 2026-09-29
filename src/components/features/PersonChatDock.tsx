@@ -28,6 +28,7 @@ import {
   resumePersonChatThread,
   sendPersonChatMessage,
 } from '../../api/personChat';
+import { useChatTurnAnchor } from '../../hooks/useChatTurnAnchor';
 import type {
   PersonChatCitation,
   PersonChatDelta,
@@ -114,7 +115,9 @@ export const PersonChatDock: React.FC<{
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const activeRequest = useRef<string | null>(null);
-  const endRef = useRef<HTMLDivElement>(null);
+  const { anchorTurn, conversationRef } = useChatTurnAnchor<HTMLDivElement>(
+    messages.length,
+  );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const newlyCreatedThread = useRef<string | null>(null);
 
@@ -199,10 +202,6 @@ export const PersonChatDock: React.FC<{
   }, [personName]);
 
   useEffect(() => {
-    if (expanded) endRef.current?.scrollIntoView({ block: 'end' });
-  }, [expanded, messages, streaming]);
-
-  useEffect(() => {
     if (!sidebarOpen) return undefined;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -282,10 +281,12 @@ export const PersonChatDock: React.FC<{
     setStatus(`Reading what you know about ${personName}…`);
     setStreaming('');
     setQuery('');
+    const userMessageId = `optimistic-${requestId}`;
+    anchorTurn(userMessageId);
     setMessages((current) => [
       ...current,
       {
-        id: `optimistic-${requestId}`,
+        id: userMessageId,
         threadId: targetThread,
         role: 'user',
         content,
@@ -555,6 +556,7 @@ export const PersonChatDock: React.FC<{
 
         <div className="person-chat__main">
           <div
+            ref={conversationRef}
             className="person-chat__conversation"
             role="log"
             aria-live="polite"
@@ -579,16 +581,20 @@ export const PersonChatDock: React.FC<{
                 </div>
               </div>
             ) : null}
-            {messages.map((message) =>
+            {messages.map((message, index) =>
               message.role === 'user' ? (
                 <div
                   key={message.id}
+                  data-chat-turn-id={message.id}
                   className="person-chat__message person-chat__message--user"
                 >
                   {message.content}
                 </div>
               ) : (
-                <div key={message.id} className="person-chat__assistant">
+                <div
+                  key={message.id}
+                  className={`person-chat__assistant ${index === messages.length - 1 ? 'person-chat__assistant--latest' : ''}`}
+                >
                   <div
                     className="person-chat__assistant-mark"
                     aria-hidden="true"
@@ -611,7 +617,7 @@ export const PersonChatDock: React.FC<{
               ),
             )}
             {streaming ? (
-              <div className="person-chat__assistant">
+              <div className="person-chat__assistant person-chat__assistant--latest">
                 <div className="person-chat__assistant-mark" aria-hidden="true">
                   <Logo size={16} variant="default" />
                 </div>
@@ -623,7 +629,7 @@ export const PersonChatDock: React.FC<{
               </div>
             ) : null}
             {asking && !streaming ? (
-              <output className="person-chat__loading">
+              <output className="person-chat__loading person-chat__loading--latest">
                 <Loader2 className="animate-spin" size={15} /> {status}
               </output>
             ) : null}
@@ -632,7 +638,6 @@ export const PersonChatDock: React.FC<{
                 {error}
               </p>
             ) : null}
-            <div ref={endRef} />
           </div>
 
           {selectedThread?.archivedAt ? (

@@ -249,6 +249,45 @@ export const entities = sqliteTable(
   ],
 );
 
+// Migration 0009 created this table. Keeping it in the declarative schema
+// prevents future migrations from treating durable confirmations as removed.
+export const liveSpeakerIdentityConfirmations = sqliteTable(
+  'live_speaker_identity_confirmations',
+  {
+    suggestionId: text('suggestion_id').primaryKey(),
+    meetingId: text('meeting_id')
+      .notNull()
+      .references(() => meetings.id, { onDelete: 'cascade' }),
+    personId: text('person_id')
+      .notNull()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    generation: integer('generation').notNull(),
+    hintRevision: integer('hint_revision').notNull(),
+    rangesJson: text('ranges_json').notNull(),
+    state: text('state').notNull().default('pending'),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (table) => [
+    check(
+      'live_speaker_identity_confirmations_state_check',
+      sql`${table.state} IN ('pending', 'bound', 'needs_review')`,
+    ),
+    check(
+      'live_speaker_identity_confirmations_generation_check',
+      sql`${table.generation} > 0`,
+    ),
+    check(
+      'live_speaker_identity_confirmations_revision_check',
+      sql`${table.hintRevision} > 0`,
+    ),
+    index('idx_live_speaker_identity_confirmations_meeting').on(
+      table.meetingId,
+      table.state,
+    ),
+  ],
+);
+
 export const personChatThreads = sqliteTable(
   'person_chat_threads',
   {
@@ -292,6 +331,45 @@ export const personChatMessages = sqliteTable(
       sql`${table.status} IN ('complete', 'interrupted')`,
     ),
     index('idx_person_chat_messages_thread_created').on(
+      table.threadId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const workspaceChatThreads = sqliteTable(
+  'workspace_chat_threads',
+  {
+    id: text('id').primaryKey(),
+    title: text('title').notNull(),
+    memoryJson: text('memory_json').notNull().default('{}'),
+    createdAt: datetime('created_at').notNull().default(now),
+    updatedAt: datetime('updated_at').notNull().default(now),
+    archivedAt: datetime('archived_at'),
+  },
+  (table) => [
+    index('idx_workspace_chat_threads_updated').on(desc(table.updatedAt)),
+  ],
+);
+
+export const workspaceChatMessages = sqliteTable(
+  'workspace_chat_messages',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => workspaceChatThreads.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    content: text('content').notNull(),
+    payloadJson: text('payload_json').notNull().default('{}'),
+    createdAt: datetime('created_at').notNull().default(now),
+  },
+  (table) => [
+    check(
+      'workspace_chat_messages_role_check',
+      sql`${table.role} IN ('user', 'assistant')`,
+    ),
+    index('idx_workspace_chat_messages_thread_created').on(
       table.threadId,
       table.createdAt,
     ),

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { describe, expect, it } from 'vitest';
 import {
   DatabaseLifecycleError,
@@ -12,6 +13,7 @@ import {
   getPendingMigrationId,
   readAppliedMigrationHistory,
   readPackagedMigrationHistory,
+  reconcileWorkspaceChatMigrationFork,
 } from '../../electron/database/migrationHistory';
 
 const packaged = [
@@ -62,7 +64,7 @@ describe('database migration history', () => {
     const history = readPackagedMigrationHistory(
       path.join(process.cwd(), 'drizzle'),
     );
-    expect(history).toHaveLength(17);
+    expect(history).toHaveLength(18);
     expect(history[0]).toMatchObject({ tag: '0000_pluto_baseline' });
     expect(history[1]).toMatchObject({ tag: '0001_voice_representatives' });
     expect(history[2]).toMatchObject({
@@ -94,9 +96,84 @@ describe('database migration history', () => {
     expect(history[14]).toMatchObject({ tag: '0014_meeting_prep' });
     expect(history[15]).toMatchObject({ tag: '0015_prep_past_meetings' });
     expect(history[16]).toMatchObject({ tag: '0016_prep_briefing' });
+    expect(history[17]).toMatchObject({ tag: '0017_workspace_chat' });
     for (const migration of history) {
       expect(migration.when).toEqual(expect.any(Number));
       expect(migration.hash).toMatch(/^[a-f0-9]{64}$/);
+    }
+  });
+
+  it('reconciles only the exact earlier chat migration fork without losing chat data', () => {
+    const migrationsFolder = path.join(process.cwd(), 'drizzle');
+    const history = readPackagedMigrationHistory(migrationsFolder);
+    const migrations = readMigrationFiles({ migrationsFolder });
+    const sqlite = new Database(':memory:');
+    try {
+      sqlite.pragma('foreign_keys = ON');
+      sqlite.exec(
+        'CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, created_at NUMERIC NOT NULL)',
+      );
+      const insert = sqlite.prepare(
+        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
+      );
+      for (const migration of history.slice(0, 13)) {
+        insert.run(migration.hash, migration.when);
+      }
+      for (const statement of migrations[17].sql) sqlite.exec(statement);
+      insert.run(history[17].hash, history[17].when);
+      sqlite
+        .prepare('INSERT INTO workspace_chat_threads (id, title) VALUES (?, ?)')
+        .run('thread-1', 'Planning');
+
+      expect(
+        reconcileWorkspaceChatMigrationFork(sqlite, migrationsFolder, history),
+      ).toBe(true);
+      expect(readAppliedMigrationHistory(sqlite)).toEqual(
+        history.map(({ hash, when }) => ({ hash, createdAt: when })),
+      );
+      expect(
+        sqlite
+          .prepare('SELECT title FROM workspace_chat_threads WHERE id = ?')
+          .get('thread-1'),
+      ).toEqual({ title: 'Planning' });
+      expect(
+        sqlite
+          .prepare("SELECT 1 FROM sqlite_schema WHERE name = 'meeting_prep'")
+          .get(),
+      ).toBeTruthy();
+      expect(sqlite.pragma('foreign_keys', { simple: true })).toBe(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('does not reconcile an unknown migration fork', () => {
+    const migrationsFolder = path.join(process.cwd(), 'drizzle');
+    const history = readPackagedMigrationHistory(migrationsFolder);
+    const sqlite = new Database(':memory:');
+    try {
+      sqlite.exec(
+        'CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, created_at NUMERIC NOT NULL)',
+      );
+      const insert = sqlite.prepare(
+        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
+      );
+      for (const migration of history.slice(0, 13)) {
+        insert.run(migration.hash, migration.when);
+      }
+      insert.run('unknown-hash', history[17].when);
+
+      expect(
+        reconcileWorkspaceChatMigrationFork(sqlite, migrationsFolder, history),
+      ).toBe(false);
+      expect(
+        sqlite
+          .prepare("SELECT 1 FROM sqlite_schema WHERE name = 'meeting_prep'")
+          .get(),
+      ).toBeUndefined();
+      expect(readAppliedMigrationHistory(sqlite)).toHaveLength(14);
+    } finally {
+      sqlite.close();
     }
   });
 

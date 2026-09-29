@@ -27,7 +27,7 @@ The root cause was identified in `applyTranscriptGrounding()` in `electron/llm/u
     "action_items": [
       {
         "text": "Draft Snowflake pipeline RFC",
-        "assignee": "Deepak",
+        "assignee": "User",
         "due": "Friday",
         "evidence": "write up a doc for the pipeline team"
       }

@@ -171,7 +171,7 @@ The meeting view renders as a single flowing document — like notes a skilled e
 
 ```
 Meeting Title                                      April 9, 2026
-Team Sync · 34 min · Sarah, Mike, You
+Team Sync · 34 min · Colleague A, Colleague B, You
 ─────────────────────────────────────────────────
 
 Overview paragraph — 2-3 sentences on what this meeting
@@ -194,7 +194,7 @@ Q2 Hiring Plan
 
 API Migration Timeline
 
-• Mike walked through the v2→v3 migration plan
+• Colleague B walked through the v2→v3 migration plan
 • Breaking change in auth — clients update by May 15
 • Decision: Deprecation notice goes out Monday
 • ? Mobile SDK impact unclear, needs testing
@@ -205,8 +205,8 @@ Action Items
 
 ☐ Sarah: Draft job description by EOW
 ☐ You: Get final budget sign-off from Finance
-☐ Mike: Send deprecation email to partners
-☐ Mike: Test mobile SDK against v3 auth flow
+☐ Colleague B: Send deprecation email to partners
+☐ Colleague B: Test mobile SDK against v3 auth flow
 ```
 
 ### Visual Conventions

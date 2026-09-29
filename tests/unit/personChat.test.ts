@@ -53,13 +53,23 @@ describe('person chat intelligence', () => {
     );
   });
 
+  it('responds to praise using the prior answer rather than starting a search', () => {
+    expect(
+      getPersonChatQuickReply(
+        'That is a great insight.',
+        'The useful move is to make the next request concrete.',
+      ),
+    ).toContain('make the next request concrete');
+  });
+
   it('only includes synthesized meeting notes, not raw transcript segments', () => {
     // Person chat uses only enhanced_notes/user_notes — raw transcript_json is never read.
     const meetings: Record<string, PersistedMeeting> = {
       confirmed: {
         id: 'confirmed',
         title: 'Weekly sync',
-        enhanced_notes: 'The team reviewed the launch. Maya will send the draft tomorrow.',
+        enhanced_notes:
+          'The team reviewed the launch. Maya will send the draft tomorrow.',
         transcript_json: JSON.stringify({
           segments: [
             { speaker: 'Maya Voice', text: 'I will send the draft tomorrow.' },
@@ -80,7 +90,9 @@ describe('person chat intelligence', () => {
     // Should surface synthesized notes, not raw transcript speaker lines
     expect(context.evidence).toContain('Maya will send the draft tomorrow.');
     // Should NOT surface raw transcript speaker quotes
-    expect(context.evidence).not.toContain('I will send the draft tomorrow.\nSomeone Else');
+    expect(context.evidence).not.toContain(
+      'I will send the draft tomorrow.\nSomeone Else',
+    );
     // Unconfirmed meeting entry should still say Mention only
     expect(context.evidence).toContain('Mention only');
   });

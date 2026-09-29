@@ -695,7 +695,7 @@ describe('UnifiedLLMProvider', () => {
     });
     expect(requestBodies[0].options).toMatchObject({
       num_ctx: 4096,
-      num_predict: 768,
+      num_predict: 384,
     });
     expect(requestBodies[1]).toMatchObject({
       model: 'qwen3.5:9b',
@@ -703,7 +703,7 @@ describe('UnifiedLLMProvider', () => {
     });
     expect(requestBodies[1].options).toMatchObject({
       num_ctx: 4096,
-      num_predict: 1024,
+      num_predict: 512,
       top_k: 40,
       top_p: 1,
     });
@@ -1578,11 +1578,11 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
     });
     expect(calculateOllamaContextBudget('question', 'askPluto')).toEqual({
       num_ctx: 4096,
-      num_predict: 768,
+      num_predict: 384,
     });
     expect(calculateOllamaContextBudget('question', 'askPlutoDeep')).toEqual({
       num_ctx: 4096,
-      num_predict: 1024,
+      num_predict: 512,
     });
   });
 

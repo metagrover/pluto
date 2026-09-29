@@ -45,7 +45,15 @@ export default defineConfig(({ command }) => ({
             allowProductionRecovery:
               process.env.PLUTO_ALLOW_RECOVERY_PROFILE === '1',
           });
-          return startup(['.', `--user-data-dir=${userDataDir}`]);
+          const remoteDebuggingPort =
+            process.env.PLUTO_REMOTE_DEBUGGING_PORT?.trim();
+          return startup([
+            '.',
+            `--user-data-dir=${userDataDir}`,
+            ...(remoteDebuggingPort
+              ? [`--remote-debugging-port=${remoteDebuggingPort}`]
+              : []),
+          ]);
         },
         vite: {
           build: {

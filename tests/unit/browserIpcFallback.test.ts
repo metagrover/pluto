@@ -97,7 +97,10 @@ describe('browser IPC capture journal fallback', () => {
         end: new Date(Date.now() + 86_400_000).toISOString(),
       }),
     ).resolves.toMatchObject([
-      { title: 'Q4 Launch & Customer Pricing', calendarIdentifier: 'preview-work' },
+      {
+        title: 'Q4 Launch & Customer Pricing',
+        calendarIdentifier: 'preview-work',
+      },
       { title: 'Acme Corp Customer Sync', calendarIdentifier: 'preview-work' },
       { title: 'Simple Team Setup Review', calendarIdentifier: 'preview-work' },
     ]);

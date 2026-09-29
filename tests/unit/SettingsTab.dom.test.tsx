@@ -499,8 +499,8 @@ describe('SettingsTab', () => {
       expect(btn).toBeDefined();
     }
 
-    const terracottaBtn = themeButtons.find(
-      (b) => b.textContent?.includes('Terracotta'),
+    const terracottaBtn = themeButtons.find((b) =>
+      b.textContent?.includes('Terracotta'),
     )!;
     await act(async () => terracottaBtn.click());
     expect(setTheme).toHaveBeenCalledWith('terracotta');

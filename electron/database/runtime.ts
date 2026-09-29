@@ -24,6 +24,7 @@ import {
   getPendingMigrationId,
   readAppliedMigrationHistory,
   readPackagedMigrationHistory,
+  reconcileWorkspaceChatMigrationFork,
 } from './migrationHistory';
 
 export interface DatabaseRuntime {
@@ -177,8 +178,26 @@ export const createDatabaseRuntime = (
     connection = null;
   };
 
+  const preflightMigrationHistory = (sqlite: Database.Database) => {
+    const packagedHistory = packaged();
+    reconcileWorkspaceChatMigrationFork(
+      sqlite,
+      options.migrationsFolder,
+      packagedHistory,
+    );
+    assertSupportedMigrationHistory(
+      readAppliedMigrationHistory(sqlite),
+      packagedHistory,
+    );
+  };
+
   const applyPendingMigrations = (sqlite: Database.Database) => {
     const packagedHistory = packaged();
+    reconcileWorkspaceChatMigrationFork(
+      sqlite,
+      options.migrationsFolder,
+      packagedHistory,
+    );
     const applied = readAppliedMigrationHistory(sqlite);
     assertSupportedMigrationHistory(applied, packagedHistory);
     const pendingMigrationId = getPendingMigrationId(applied, packagedHistory);
@@ -310,6 +329,7 @@ export const createDatabaseRuntime = (
 
   const initializeFresh = (keyHex: string | null) => {
     connection = openWithKey(options.databasePath, keyHex);
+    preflightMigrationHistory(connection);
     configureConnection(connection, inMemory);
     applyPendingMigrations(connection);
     verifyHealth(connection);
@@ -445,12 +465,8 @@ export const createDatabaseRuntime = (
             migrationsFolder: options.migrationsFolder,
             packagedHistory: packaged(),
           });
-        } else if (kind === 'managed') {
-          assertSupportedMigrationHistory(
-            readAppliedMigrationHistory(connection),
-            packaged(),
-          );
         }
+        preflightMigrationHistory(connection);
         configureConnection(connection, inMemory);
         applyPendingMigrations(connection);
         verifyHealth(connection);

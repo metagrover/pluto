@@ -1,3 +1,4 @@
+import { asksForExplicitAttribution } from './askPlutoConversation';
 import type { CitationChain } from './intelligenceTypes';
 
 const claimKey = (text: string): string =>
@@ -59,4 +60,47 @@ export const removeRepeatedAskPlutoClaims = (
       return true;
     }),
   };
+};
+
+const EXPLICIT_ATTRIBUTION_ANSWER =
+  /\b(?:[\p{Lu}][\p{L}'-]+(?:\s+[\p{Lu}][\p{L}'-]+)?\s+(?:said|asked|requested|assigned|decided|told|stated)|(?:said|asked|requested|assigned|decided|told|stated)\s+by\s+[\p{Lu}][\p{L}'-]+)\b/u;
+const UNKNOWN_ATTRIBUTION_ANSWER =
+  /\b(?:can(?:not|'t)\s+(?:confirm|determine|tell|verify)|does\s+not\s+(?:say|specify|identify|attribute)|is\s+not\s+(?:specified|identified|attributed)|no\s+(?:speaker|assigner|requester)\s+(?:is\s+)?(?:named|identified))\b/i;
+const IMPLIED_UNATTRIBUTED_ASSIGNMENT =
+  /\b(?:assign(?:ed)?\s+(?:you|to\s+you)|you\s+(?:were|are)\s+(?:tasked|asked|assigned|told)|your\s+(?:task|assignment))\b/i;
+const PRIMARY_ATTRIBUTION_QUESTION = /^\s*(?:who|which\s+person)\b/i;
+const UNKNOWN_ATTRIBUTION_RESPONSE =
+  'I can’t confirm who said it from the synthesized context returned for this question. The note records the requirement, but it does not identify the speaker or assigner.';
+
+export const ensureAskPlutoAttributionAnswer = (
+  query: string,
+  answer: string,
+): string => {
+  if (
+    !asksForExplicitAttribution(query) ||
+    EXPLICIT_ATTRIBUTION_ANSWER.test(answer)
+  ) {
+    return answer;
+  }
+
+  if (PRIMARY_ATTRIBUTION_QUESTION.test(query)) {
+    return UNKNOWN_ATTRIBUTION_RESPONSE;
+  }
+
+  const cleanedAnswer = answer
+    .split(/(?<=[.!?])\s+/u)
+    .filter((sentence) => !IMPLIED_UNATTRIBUTED_ASSIGNMENT.test(sentence))
+    .join(' ')
+    .trim();
+
+  if (
+    cleanedAnswer.length > 0 &&
+    UNKNOWN_ATTRIBUTION_ANSWER.test(cleanedAnswer)
+  ) {
+    return cleanedAnswer;
+  }
+
+  return cleanedAnswer.length > 0
+    ? `${cleanedAnswer}\n\n${UNKNOWN_ATTRIBUTION_RESPONSE}`
+    : UNKNOWN_ATTRIBUTION_RESPONSE;
 };

@@ -179,6 +179,32 @@ describe('MeetingView Navigation and Participants', () => {
     expect(container.querySelector('[data-meeting-prep-document]')).toBeNull();
   });
 
+  it('does not expose source attachment controls while Sources is disabled', async () => {
+    await act(async () => {
+      root.render(
+        <MeetingView
+          selectedMeeting={mockMeeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={mockMeeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={true}
+          setTranscriptVisible={vi.fn()}
+        />,
+      );
+    });
+
+    expect(
+      container.querySelector('[aria-label="Attach reference document"]'),
+    ).toBeNull();
+    expect(container.textContent).not.toContain('Reference material');
+  });
+
   it('renders participant count trigger and opens popover on click', async () => {
     const onOpenPerson = vi.fn();
 

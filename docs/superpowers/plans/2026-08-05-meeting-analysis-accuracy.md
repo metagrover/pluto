@@ -215,7 +215,7 @@ describe('deduplicateExtractedItems', () => {
     const items = [
       { text: 'Deploy the Snowflake integration script on Friday.', assignee: 'Alain' },
       { text: 'Deploy Snowflake integration script on Friday', assignee: 'Alain' },
-      { text: 'Write project timeline documentation.', assignee: 'Deepak' },
+      { text: 'Write project timeline documentation.', assignee: 'User' },
     ];
     const deduped = deduplicateExtractedItems(items, (item) => item.text);
     expect(deduped.length).toBe(2);

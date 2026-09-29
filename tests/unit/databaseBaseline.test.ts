@@ -71,6 +71,8 @@ const expectedTables = [
   'speaker_voice_profile_settings',
   'speaker_voice_rejections',
   'working_memory_snapshots',
+  'workspace_chat_messages',
+  'workspace_chat_threads',
 ];
 
 const temporaryDirectories: string[] = [];

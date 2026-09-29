@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  asksForExplicitAttribution,
+  asksToVerifyProjectAssociation,
+  buildAskPlutoAcknowledgment,
   describePreviousConversationFailure,
   inheritConversationScope,
   isDiagnosticConversationFollowUp,
@@ -38,7 +41,67 @@ const priorTurns: AskPlutoConversationTurn[] = [
   },
 ];
 
+describe('conversational acknowledgments', () => {
+  const turns: AskPlutoConversationTurn[] = [
+    { role: 'user', content: 'What is the main strategic takeaway?' },
+    {
+      role: 'assistant',
+      content:
+        'Treat the pilot as both a delivery milestone and a learning loop.',
+      conversationAnchor: 'What is the main strategic takeaway?',
+    },
+  ];
+
+  it('responds socially instead of launching another retrieval', () => {
+    expect(
+      resolveAskPlutoConversation("That's a great insight.", turns),
+    ).toMatchObject({
+      relation: 'acknowledgment',
+      task: 'lookup',
+      retrievalQuery: 'What is the main strategic takeaway?',
+    });
+    expect(buildAskPlutoAcknowledgment("That's a great insight.")).toBe(
+      "I'm glad it helped.",
+    );
+  });
+
+  it('does not pretend an earlier social turn contained an insight', () => {
+    expect(
+      buildAskPlutoAcknowledgment(
+        "That's a great insight.",
+        "Hi! I'm Pluto, your AI meeting assistant. Ask me anything about your meeting history.",
+        'social',
+      ),
+    ).toBe(
+      "Ha — I'll take the compliment, but we haven't gotten to an insight yet. What do you want to dig into?",
+    );
+  });
+
+  it('does not swallow a compliment that also asks a question', () => {
+    expect(
+      resolveAskPlutoConversation(
+        "That's a great insight, but can you explain why?",
+        turns,
+      ).relation,
+    ).not.toBe('acknowledgment');
+  });
+});
+
 describe('Ask Pluto conversation scope', () => {
+  it('treats a tentative project link as a relationship question', () => {
+    expect(
+      asksToVerifyProjectAssociation(
+        'What is needed for Beta Reviewer? Is it for the Project Atlas project?',
+      ),
+    ).toBe(true);
+    expect(
+      asksToVerifyProjectAssociation('Give me the Project Atlas status.'),
+    ).toBe(false);
+    expect(
+      asksForExplicitAttribution('Who said that we need to present this?'),
+    ).toBe(true);
+  });
+
   it('recognizes diagnostic and referential follow-ups', () => {
     expect(isDiagnosticConversationFollowUp('What went wrong here?')).toBe(
       true,
@@ -111,7 +174,7 @@ describe('Ask Pluto conversation scope', () => {
 
   it('carries the assignee into a request for more results', () => {
     const turns: AskPlutoConversationTurn[] = [
-      { role: 'user', content: "What's assigned to Ayush?" },
+      { role: 'user', content: "What's assigned to Gamma?" },
       {
         role: 'assistant',
         content: 'A partial list of assignments.',
@@ -120,16 +183,16 @@ describe('Ask Pluto conversation scope', () => {
     ];
 
     expect(resolveConversationQuery('there should be more?', turns)).toBe(
-      'What else is assigned to Ayush? Search all meeting notes and distinguish explicit assignments from possible follow-ups.',
+      'What else is assigned to Gamma? Search all meeting notes and distinguish explicit assignments from possible follow-ups.',
     );
     expect(resolveConversationQuery('tell me more?', turns)).toBe(
-      'What else is assigned to Ayush? Search all meeting notes and distinguish explicit assignments from possible follow-ups.',
+      'What else is assigned to Gamma? Search all meeting notes and distinguish explicit assignments from possible follow-ups.',
     );
     expect(resolveAskPlutoConversation('tell me more?', turns)).toMatchObject({
       relation: 'expansion',
       task: 'analysis',
       answerQuery:
-        'Tell me more about what is assigned to Ayush. Add supported context about why it matters, current status, constraints, and related decisions instead of repeating the same list.',
+        'Tell me more about what is assigned to Gamma. Add supported context about why it matters, current status, constraints, and related decisions instead of repeating the same list.',
     });
     expect(resolveConversationQuery('What did Priya decide?', turns)).toBe(
       'What did Priya decide?',
@@ -311,6 +374,78 @@ describe('Ask Pluto conversation scope', () => {
     });
   });
 
+  it('treats underspecified coaching as analysis of the active conversation', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      { role: 'user', content: 'What should I focus on immediately?' },
+      {
+        role: 'assistant',
+        content:
+          'Focus first on pipeline reliability, then the Project Atlas release.',
+        outcome: 'answered',
+        conversationAnchor: 'What should I focus on immediately?',
+      },
+      { role: 'user', content: 'Tell me more, but in detail.' },
+      {
+        role: 'assistant',
+        content: 'Pipeline reliability is blocking production readiness.',
+        outcome: 'answered',
+        conversationAnchor: 'What should I focus on immediately?',
+      },
+    ];
+
+    expect(
+      resolveAskPlutoConversation('Do you have any feedback for me?', turns),
+    ).toMatchObject({
+      relation: 'follow_up',
+      task: 'analysis',
+      priorQuestion: 'What should I focus on immediately?',
+      retrievalQuery:
+        'What should I focus on immediately?\nDo you have any feedback for me?',
+    });
+  });
+
+  it('keeps analytical questions with a named subject independent', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      { role: 'user', content: 'What should I focus on?' },
+      { role: 'assistant', content: 'Focus on release readiness.' },
+    ];
+
+    expect(
+      resolveAskPlutoConversation('Do you have feedback for Jordan?', turns),
+    ).toMatchObject({
+      relation: 'new_topic',
+      task: 'analysis',
+      retrievalQuery: 'Do you have feedback for Jordan?',
+    });
+
+    expect(
+      resolveAskPlutoConversation(
+        'What do you think will satisfy Alpha Contact in terms of their expectations?',
+        [
+          {
+            role: 'user',
+            content: 'What should I focus on?',
+          },
+          {
+            role: 'assistant',
+            content:
+              'The deployment needs to be ready for Beta Reviewer to review.',
+            conversationContext: {
+              anchor: 'What should I focus on?',
+              meetingIds: ['advisor-platform'],
+              topic: { kind: 'workspace', label: 'Workspace priorities' },
+            },
+          },
+        ],
+      ),
+    ).toMatchObject({
+      relation: 'new_topic',
+      task: 'analysis',
+      retrievalQuery:
+        'What do you think will satisfy Alpha Contact in terms of their expectations?',
+    });
+  });
+
   it('classifies comparison and standalone drafting work', () => {
     expect(
       resolveAskPlutoConversation(
@@ -321,6 +456,30 @@ describe('Ask Pluto conversation scope', () => {
     expect(
       resolveAskPlutoConversation('Write a follow-up email to Jordan.', []),
     ).toMatchObject({ relation: 'new_topic', task: 'draft' });
+  });
+
+  it('keeps a comparative follow-up attached to the active conversation', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      { role: 'user', content: 'What is the launch risk for Project Atlas?' },
+      { role: 'assistant', content: 'The launch risk is an untested handoff.' },
+    ];
+
+    expect(
+      resolveAskPlutoConversation(
+        'Compare this with our other projects.',
+        turns,
+      ),
+    ).toMatchObject({
+      relation: 'follow_up',
+      task: 'comparison',
+      retrievalPolicy: 'reuse',
+    });
+    expect(
+      resolveAskPlutoConversation(
+        'Create a summary of this discussion.',
+        turns,
+      ),
+    ).toMatchObject({ relation: 'follow_up', task: 'draft' });
   });
 
   it('keeps a named person topic conversational while focusing retrieval on the new question', () => {
@@ -347,26 +506,90 @@ describe('Ask Pluto conversation scope', () => {
     });
   });
 
+  it('keeps a pronoun coaching question with the active person', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      { role: 'user', content: 'Tell me about Gamma.' },
+      {
+        role: 'assistant',
+        content: 'Gamma is working on the deployment checklist.',
+        outcome: 'answered',
+        conversationContext: {
+          topic: { kind: 'person', id: 'person-c', label: 'Gamma' },
+          meetingIds: [],
+        },
+      },
+    ];
+
+    expect(
+      resolveAskPlutoConversation('How should I coach him?', turns),
+    ).toMatchObject({
+      relation: 'follow_up',
+      task: 'analysis',
+      priorQuestion: 'Tell me about Gamma.',
+    });
+  });
+
+  it('keeps an elliptical recommendation within the prior project', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      {
+        role: 'user',
+        content: 'What is the current state of Project Atlas?',
+      },
+      {
+        role: 'assistant',
+        content:
+          'The last recorded update is dated, so current status needs checking.',
+        outcome: 'answered',
+        conversationAnchor: 'What is the current state of Project Atlas?',
+        conversationContext: {
+          topic: { kind: 'project', id: 'atlas', label: 'Project Atlas' },
+          meetingIds: [],
+        },
+      },
+      { role: 'user', content: 'Tell me more about the pipeline.' },
+      {
+        role: 'assistant',
+        content:
+          'The last note describes pipeline work, but not its current state.',
+        outcome: 'answered',
+        conversationAnchor: 'What is the current state of Project Atlas?',
+        conversationContext: {
+          topic: { kind: 'project', id: 'atlas', label: 'Project Atlas' },
+          meetingIds: [],
+        },
+      },
+    ];
+
+    expect(
+      resolveAskPlutoConversation('What would you do first?', turns),
+    ).toMatchObject({
+      relation: 'follow_up',
+      task: 'analysis',
+      retrievalQuery:
+        'What is the current state of Project Atlas?\nWhat would you do first?',
+    });
+  });
+
   it('isolates the real user question when disputing an attributed entity', () => {
     const turns: AskPlutoConversationTurn[] = [
       { role: 'user', content: 'Generate my quarterly accomplishments' },
       {
         role: 'assistant',
-        content: '• Ayush worked on a pipeline to generate client emails.',
+        content: '• Gamma worked on a pipeline to generate client emails.',
         outcome: 'answered',
       },
     ];
 
     expect(
       resolveAskPlutoConversation(
-        'why are you giving me answers for Ayush? give me my accomplishments',
+        'why are you giving me answers for Gamma? give me my accomplishments',
         turns,
       ),
     ).toMatchObject({
       relation: 'follow_up',
       retrievalQuery: 'give me my accomplishments',
       answerQuery:
-        'why are you giving me answers for Ayush? give me my accomplishments',
+        'why are you giving me answers for Gamma? give me my accomplishments',
       priorQuestion: 'Generate my quarterly accomplishments',
     });
   });
@@ -377,8 +600,8 @@ describe('Ask Pluto conversation scope', () => {
       {
         role: 'assistant',
         content:
-          'Immediate Priorities:\n• Follow up with Rachel to confirm approach for service notification PR.\n• Meeting with Rachel scheduled for Monday regarding client data and database optimization.',
-        meetingIds: ['rachel-monday-meeting'],
+          'Immediate Priorities:\n• Follow up with Alpha Contact to confirm the proposed approach.\n• Meeting with Alpha Contact scheduled for Monday regarding database optimization.',
+        meetingIds: ['person-a-monday-meeting'],
         outcome: 'answered',
       },
     ];
@@ -391,8 +614,36 @@ describe('Ask Pluto conversation scope', () => {
     expect(resolved.relation).toBe('expansion');
     expect(resolved.task).toBe('analysis');
     expect(resolved.retrievalQuery).toContain('monday');
-    expect(resolved.retrievalQuery).toContain('Rachel');
+    expect(resolved.retrievalQuery).toContain('Alpha Contact');
     expect(resolved.retrievalQuery).toContain('database optimization');
     expect(resolved.retrievalQuery).not.toContain('what should i focus on');
+  });
+
+  it('treats a natural request to dive into a named priority as a deep expansion', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      { role: 'user', content: 'What should I focus on?' },
+      {
+        role: 'assistant',
+        content:
+          'Focus now\n\nProject Atlas — Production Release\n\nPipeline & Infrastructure — Resolve the deployment issue.',
+        outcome: 'answered',
+        conversationAnchor: 'What should I focus on?',
+      },
+    ];
+
+    const resolved = resolveAskPlutoConversation(
+      'Can we dive in more details about Project Atlas and the pipeline there?',
+      turns,
+    );
+
+    expect(resolved).toMatchObject({
+      relation: 'expansion',
+      task: 'analysis',
+      priorQuestion: 'What should I focus on?',
+      answerQuery:
+        'Can we dive in more details about Project Atlas and the pipeline there?',
+    });
+    expect(resolved.retrievalQuery).toContain('Project Atlas');
+    expect(resolved.retrievalQuery).toContain('Production Release');
   });
 });

@@ -46,8 +46,8 @@ Expected: PASS.
 
 - [ ] **Step 1: Write failing tests in `tests/unit/meetingTranscriptPresentation.test.ts`**
 Add tests for `extractSpeakerDisplayNames`:
-- Extracts `'Me': 'Deepak'` when `identity.profile.preferredName` is present and no `'Me'` binding exists.
-- Extracts `'Me': 'Deepak'` when `identity.selfPersonId` matches a person in `identity.people` and no `'Me'` binding exists.
+- Extracts `'Me': 'User'` when `identity.profile.preferredName` is present and no `'Me'` binding exists.
+- Extracts `'Me': 'User'` when `identity.selfPersonId` matches a person in `identity.people` and no `'Me'` binding exists.
 - Respects explicit `'Me'` binding over `profile.preferredName` if an explicit binding exists.
 
 - [ ] **Step 2: Run test to verify it fails**

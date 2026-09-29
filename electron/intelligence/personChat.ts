@@ -3,6 +3,10 @@ import type {
   PersonChatMessage,
 } from '../../src/types/personChat';
 import type { PersistedMeeting, PersonBriefingDetail } from '../db';
+import {
+  buildSocialReply,
+  decideConversationTurn,
+} from './conversationController';
 
 const CONTEXT_CHAR_LIMIT = 9_000;
 const EVIDENCE_LIMIT = 6;
@@ -24,7 +28,6 @@ const scoreText = (queryWords: Set<string>, value: string) => {
   return score;
 };
 
-
 const compact = (value: string, limit: number) =>
   value.replace(/\s+/g, ' ').trim().slice(0, limit);
 
@@ -39,8 +42,19 @@ export type PersonChatIntent =
 const POLITE_CLOSE_PATTERN =
   /^(?=.{1,80}$)(?:(?:nice|great|perfect|awesome|got it|okay|ok)[,!\.\s]*)?(?:thanks|thank you)(?:[!,.\s]*(?:pluto|so much|very much|that helps|this helps))?[!.\s]*$/i;
 
-export const getPersonChatQuickReply = (query: string): string | null =>
-  POLITE_CLOSE_PATTERN.test(query.trim()) ? "You're welcome." : null;
+export const getPersonChatQuickReply = (
+  query: string,
+  previousAnswer?: string,
+): string | null => {
+  const decision = decideConversationTurn({
+    query,
+    hasPriorAssistant: Boolean(previousAnswer),
+  });
+  if (decision.mode === 'social') {
+    return buildSocialReply({ query, previousAnswer });
+  }
+  return POLITE_CLOSE_PATTERN.test(query.trim()) ? "You're welcome." : null;
+};
 
 export const routePersonChatIntent = (query: string): PersonChatIntent => {
   const value = query.toLocaleLowerCase();
@@ -154,9 +168,7 @@ export const buildPersonChatContext = (input: {
       );
       body = [
         `Confirmed conversation: ${briefing.title}`,
-        meetingContext
-          ? `Meeting notes: ${meetingContext}`
-          : '',
+        meetingContext ? `Meeting notes: ${meetingContext}` : '',
       ]
         .filter(Boolean)
         .join('\n');

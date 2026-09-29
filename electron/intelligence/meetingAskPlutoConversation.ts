@@ -1,12 +1,20 @@
 import type { MeetingAskPlutoTurn } from '../../src/types/askPluto';
+import {
+  type ConversationRetrievalPolicy,
+  type ConversationTurnMode,
+  decideConversationTurn,
+} from './conversationController';
 
 export type MeetingAskPlutoConversationRelation =
   | 'new_topic'
   | 'follow_up'
-  | 'ambiguous';
+  | 'ambiguous'
+  | 'social';
 
 export interface MeetingAskPlutoConversationResolution {
   relation: MeetingAskPlutoConversationRelation;
+  turnMode: ConversationTurnMode;
+  retrievalPolicy: ConversationRetrievalPolicy;
   retrievalQuery: string;
   routingQuery: string;
   priorQuestion?: string;
@@ -93,6 +101,21 @@ export const resolveMeetingAskPlutoConversation = ({
 }): MeetingAskPlutoConversationResolution => {
   const normalizedQuery = normalize(query);
   const exchange = latestCompletedExchange(turns);
+  const decision = decideConversationTurn({
+    query: normalizedQuery,
+    hasPriorAssistant: Boolean(exchange),
+  });
+  if (exchange && decision.mode === 'social') {
+    return {
+      relation: 'social',
+      turnMode: decision.mode,
+      retrievalPolicy: decision.retrieval,
+      retrievalQuery: bounded(exchange.user.content, 700),
+      routingQuery: normalizedQuery,
+      priorQuestion: bounded(exchange.user.content, 500),
+      priorEvidenceHintCount: 0,
+    };
+  }
   if (
     !exchange ||
     EXPLICIT_TOPIC_SWITCH_PATTERN.test(normalizedQuery) ||
@@ -101,6 +124,8 @@ export const resolveMeetingAskPlutoConversation = ({
   ) {
     return {
       relation: 'new_topic',
+      turnMode: decision.mode,
+      retrievalPolicy: decision.retrieval,
       retrievalQuery: normalizedQuery,
       routingQuery: normalizedQuery,
       priorEvidenceHintCount: 0,
@@ -125,6 +150,8 @@ export const resolveMeetingAskPlutoConversation = ({
 
   return {
     relation,
+    turnMode: decision.mode,
+    retrievalPolicy: decision.retrieval,
     retrievalQuery: [
       `Current follow-up: ${bounded(normalizedQuery, 700)}`,
       `Prior user topic: ${priorQuestion}`,

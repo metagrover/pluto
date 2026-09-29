@@ -111,7 +111,7 @@ describe('meeting local artifacts junction and notes synthesis', () => {
     expect(all.some((a) => a.id === doc.id)).toBe(true);
   });
 
-  it('formats attached artifacts text and ignores excluded or empty artifacts', () => {
+  it('does not include attached artifacts in synthesis while Sources is disabled', () => {
     const meetingId = `test-meet-${Date.now()}-3`;
     saveMeeting({
       id: meetingId,
@@ -137,15 +137,10 @@ describe('meeting local artifacts junction and notes synthesis', () => {
     attachArtifactToMeeting(meetingId, activeDoc.id);
     attachArtifactToMeeting(meetingId, excludedDoc.id);
 
-    const combinedText = getMeetingAttachedArtifactsText(meetingId);
-    expect(combinedText).toContain('[Attached Document: active-doc]');
-    expect(combinedText).toContain(
-      'Product requirements: Must run completely offline.',
-    );
-    expect(combinedText).not.toContain('Outdated requirements');
+    expect(getMeetingAttachedArtifactsText(meetingId)).toBe('');
   });
 
-  it('invalidates userNotesHash in meeting publication revisions when an artifact is attached or detached', () => {
+  it('keeps publication revisions unchanged by attachments while Sources is disabled', () => {
     const meetingId = `test-meet-${Date.now()}-4`;
     saveMeeting({
       id: meetingId,
@@ -172,15 +167,13 @@ describe('meeting local artifacts junction and notes synthesis', () => {
     const revisedWithAttachment =
       getMeetingAnalysisPublicationRevisions(meeting);
     expect(revisedWithAttachment).not.toBeNull();
-    // userNotesHash MUST change because attached document text is now part of the notes synthesis context
-    expect(revisedWithAttachment!.userNotesHash).not.toBe(
+    expect(revisedWithAttachment!.userNotesHash).toBe(
       initialRevisions!.userNotesHash,
     );
 
     // Detach artifact
     detachArtifactFromMeeting(meetingId, doc.id);
     const revisedAfterDetach = getMeetingAnalysisPublicationRevisions(meeting);
-    // userNotesHash reverts back to initial since doc text is no longer present
     expect(revisedAfterDetach!.userNotesHash).toBe(
       initialRevisions!.userNotesHash,
     );

@@ -236,7 +236,7 @@ describe('MeetingAskPlutoDock', () => {
     expect(container.querySelector('strong')?.textContent).toBe('GraphQL');
     expect(container.textContent).toContain('GraphQL was selected');
     expect(container.textContent).toContain('Pluto is responding…');
-    expect(scrollIntoView).toHaveBeenCalled();
+    expect(scrollIntoView).not.toHaveBeenCalled();
     expect(
       container.querySelector('.meeting-ask-pluto-dock__stream-caret'),
     ).toBeNull();
@@ -890,7 +890,7 @@ describe('MeetingAskPlutoDock', () => {
     await act(async () => root.unmount());
   });
 
-  it('follows submitted questions and their answers', async () => {
+  it('anchors each submitted question at the top of the reading area', async () => {
     const root = createRoot(container);
 
     await act(async () => {
@@ -909,12 +909,21 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    expect(scrollIntoView).toHaveBeenCalled();
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: 'start',
+    });
+    expect(
+      (scrollIntoView.mock.instances[0] as HTMLElement).getAttribute(
+        'data-chat-turn-id',
+      ),
+    ).toMatch(/^user-/);
 
     await act(async () => root.unmount());
   });
 
-  it('pauses follow-scroll while reading earlier turns and resumes near the bottom', async () => {
+  it('does not move the viewport when controlled conversation content changes', async () => {
     const root = createRoot(container);
     const firstConversation: MeetingAskPlutoConversationMessage[] = [
       { id: 'user-1', role: 'user', content: 'What happened?' },
@@ -936,21 +945,7 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    const thread = container.querySelector<HTMLElement>(
-      '.meeting-ask-pluto-dock__thread',
-    );
-    expect(thread).not.toBeNull();
-    Object.defineProperties(thread!, {
-      clientHeight: { configurable: true, value: 100 },
-      scrollHeight: { configurable: true, value: 400 },
-      scrollTop: { configurable: true, writable: true, value: 0 },
-    });
-
-    await act(async () => {
-      thread!.dispatchEvent(new Event('scroll', { bubbles: true }));
-      await flushPromises();
-    });
-    const callsWhileReading = scrollIntoView.mock.calls.length;
+    expect(scrollIntoView).not.toHaveBeenCalled();
 
     const secondConversation: MeetingAskPlutoConversationMessage[] = [
       ...firstConversation,
@@ -965,11 +960,9 @@ describe('MeetingAskPlutoDock', () => {
       );
       await flushPromises();
     });
-    expect(scrollIntoView).toHaveBeenCalledTimes(callsWhileReading);
+    expect(scrollIntoView).not.toHaveBeenCalled();
 
-    thread!.scrollTop = 300;
     await act(async () => {
-      thread!.dispatchEvent(new Event('scroll', { bubbles: true }));
       root.render(
         <MeetingAskPlutoDock
           liveContext={liveContext}
@@ -986,7 +979,7 @@ describe('MeetingAskPlutoDock', () => {
       );
       await flushPromises();
     });
-    expect(scrollIntoView.mock.calls.length).toBeGreaterThan(callsWhileReading);
+    expect(scrollIntoView).not.toHaveBeenCalled();
 
     await act(async () => root.unmount());
   });

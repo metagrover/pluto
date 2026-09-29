@@ -56,6 +56,7 @@ describe('Sidebar navigation', () => {
       true,
     );
     expect(buttonTexts.some((text) => text.includes('People'))).toBe(true);
+    expect(buttonTexts.some((text) => text.includes('Sources'))).toBe(false);
     expect(buttonTexts.some((text) => text.includes('All meetings'))).toBe(
       true,
     );

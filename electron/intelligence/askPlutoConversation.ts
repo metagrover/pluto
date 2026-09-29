@@ -2,6 +2,12 @@ import type {
   AskPlutoConversationTurn,
   ResolvedAskPlutoScope,
 } from '../../src/types/askPlutoQuery';
+import {
+  type ConversationRetrievalPolicy,
+  type ConversationTurnMode,
+  buildSocialReply,
+  decideConversationTurn,
+} from './conversationController';
 
 const REFERENTIAL_PATTERN =
   /\b(it|that|those|them|these|here|previous|earlier|you said|you mentioned|you suggested|your answer|that answer|those meetings|analyze them|try again|why|what did you find|which meetings|which sources|tell me more|explain|elaborate|go deeper|can you expand|what do you mean)\b/i;
@@ -12,12 +18,18 @@ export const EXPANSION_FOLLOW_UP_PATTERN =
   /^(?:there (?:should|must) be more|is that all|anything else|what else|show me more|tell me more|more|explain|elaborate|go deeper|can you expand|what do you mean)[?.!]*$/i;
 export const TOPIC_EXPANSION_PATTERN =
   /^(?:there (?:should|must) be more|is that all|anything else|what else|show me more|tell me more|more|explain|elaborate|go deeper|can you expand|what do you mean)\b/i;
+const DEPTH_REQUEST_PATTERN =
+  /\b(?:in (?:more )?detail|more details?|deeper|dive (?:in|into)|expand(?: on)?|elaborate(?: on)?)\b/i;
+const isExpansionRequest = (query: string): boolean =>
+  EXPANSION_FOLLOW_UP_PATTERN.test(query) ||
+  TOPIC_EXPANSION_PATTERN.test(query) ||
+  DEPTH_REQUEST_PATTERN.test(query);
 const OMITTED_DETAIL_FOLLOW_UP_PATTERN =
   /\b(?:left out|omitted|excluded|held back|could(?:n't| not) verify|unverified)\b[\s\S]{0,80}\b(?:details?|statements?|claims?|parts?|items?)\b|\b(?:details?|statements?|claims?|parts?|items?)\b[\s\S]{0,80}\b(?:left out|omitted|excluded|held back|could(?:n't| not) verify|unverified)\b/i;
 const CONTINUATION_PATTERN =
   /^(?:and|but|also|so|then|what about|how about)\b/i;
 const ELLIPTICAL_FOLLOW_UP_PATTERN =
-  /^(?:what(?:'s| is) (?:the )?(?:status|deadline|due date|next step)|when is (?:it|that) due|who owns (?:it|that)|any (?:blockers?|risks?|updates?)|draft (?:a|the) follow-up(?: email| message)?|turn (?:that|this) into (?:an? )?(?:email|message|note))\b/i;
+  /^(?:what(?:'s| is) (?:the )?(?:status|deadline|due date|next step)|when is (?:it|that) due|who owns (?:it|that)|any (?:blockers?|risks?|updates?)|(?:what|which) (?:would|should|could) (?:you|i|we) (?:do|tackle|check) (?:first|next)|what(?:'s| is) (?:the )?(?:first|next) move|draft (?:a|the) follow-up(?: email| message)?|turn (?:that|this) into (?:an? )?(?:email|message|note))\b/i;
 const ASSIGNEE_QUERY_PATTERN =
   /\b(?:what(?:'s| is)|show me (?:what(?:'s| is))?)\s+assigned to\s+(.+?)(?:\?|$)|\bwhat\s+does\s+(.+?)\s+own(?:\?|$)|\bwhat\s+(?:are|were)\s+(.+?)(?:'s|’s)\s+action items?(?:\?|$)/i;
 export const ATTRIBUTION_DISPUTE_PATTERN =
@@ -167,6 +179,48 @@ const QUERY_CONVERSATIONAL_STOPWORDS = new Set([
   'your',
 ]);
 
+const ANALYSIS_INTENT_TOKENS = new Set([
+  ...QUERY_CONVERSATIONAL_STOPWORDS,
+  'advice',
+  'any',
+  'assess',
+  'assessment',
+  'better',
+  'biggest',
+  'challenge',
+  'challenges',
+  'coach',
+  'coaching',
+  'concern',
+  'concerns',
+  'feedback',
+  'for',
+  'focus',
+  'immediately',
+  'improve',
+  'improvement',
+  'important',
+  'most',
+  'priorities',
+  'priority',
+  'reflect',
+  'risk',
+  'risks',
+  'should',
+  'some',
+  'strength',
+  'strengths',
+  'think',
+  'thoughts',
+  'weakness',
+  'weaknesses',
+]);
+
+const hasStandaloneAnalysisSubject = (query: string): boolean =>
+  (query.toLocaleLowerCase().match(/[\p{L}\p{N}'-]+/gu) || []).some(
+    (token) => token.length >= 3 && !ANALYSIS_INTENT_TOKENS.has(token),
+  );
+
 export interface ReferencedPriorContext {
   matchedText: string;
   matchedTerms: string[];
@@ -236,7 +290,8 @@ export type AskPlutoConversationRelation =
   | 'new_topic'
   | 'follow_up'
   | 'expansion'
-  | 'omission_follow_up';
+  | 'omission_follow_up'
+  | 'acknowledgment';
 
 export type AskPlutoResearchTask =
   | 'lookup'
@@ -247,14 +302,28 @@ export type AskPlutoResearchTask =
 export interface AskPlutoConversationResolution {
   relation: AskPlutoConversationRelation;
   task: AskPlutoResearchTask;
+  turnMode: ConversationTurnMode;
+  retrievalPolicy: ConversationRetrievalPolicy;
   retrievalQuery: string;
   answerQuery: string;
   priorQuestion?: string;
 }
 
+export const isConversationalAcknowledgment = (query: string): boolean => {
+  return (
+    decideConversationTurn({ query, hasPriorAssistant: true }).mode === 'social'
+  );
+};
+
+export const buildAskPlutoAcknowledgment = (
+  query: string,
+  previousAnswer?: string,
+  previousTurnMode?: ConversationTurnMode,
+): string => buildSocialReply({ query, previousAnswer, previousTurnMode });
+
 const resolveResearchTask = (query: string): AskPlutoResearchTask => {
   if (
-    /\b(?:draft|write|rewrite|compose)\b[\s\S]{0,60}\b(?:email|message|note|follow-up|follow up)\b|\b(?:email|message)\s+draft\b/i.test(
+    /\b(?:create|draft|write|rewrite|compose)\b[\s\S]{0,60}\b(?:email|message|note|follow-up|follow up|summary)\b|\b(?:email|message)\s+draft\b/i.test(
       query,
     )
   ) {
@@ -268,7 +337,7 @@ const resolveResearchTask = (query: string): AskPlutoResearchTask => {
     return 'comparison';
   }
   if (
-    /\b(?:analy[sz]e|assess|evaluate|reflect|performance|feedback|strengths?|weaknesses?|patterns?|concern(?:ed|s)?|priorit(?:y|ies|ize|ized)|biggest (?:risk|challenge)|most important|could (?:i|we) have|should (?:i|we)|improve|do better|coach(?:ing)?|focus(?: on)?|what(?:'s| is) on my plate|where should (?:i|we) start|what to focus on|next steps? for (?:me|us))\b/i.test(
+    /\b(?:analy[sz]e|assess|evaluate|reflect|performance|feedback|strengths?|weaknesses?|patterns?|concern(?:ed|s)?|priorit(?:y|ies|ize|ized)|biggest (?:risk|challenge)|most important|could (?:i|we) have|should (?:i|we)|improve|do better|coach(?:ing)?|focus(?: on)?|what(?:'s| is) on my plate|where should (?:i|we) start|what to focus on|next steps? for (?:me|us)|what (?:would|should|could) (?:you|i|we) (?:do|tackle|check) (?:first|next)|what do you think (?:will|would) satisfy)\b/i.test(
       query,
     )
   ) {
@@ -279,6 +348,16 @@ const resolveResearchTask = (query: string): AskPlutoResearchTask => {
 
 export const queryReferencesPriorConversation = (query: string): boolean =>
   REFERENTIAL_PATTERN.test(query) || CONTINUATION_PATTERN.test(query.trim());
+
+export const asksToVerifyProjectAssociation = (query: string): boolean =>
+  /\b(?:is|was)\s+(?:it|this|that)\s+(?:for|part of|related to|connected to)\b/i.test(
+    query,
+  );
+
+export const asksForExplicitAttribution = (query: string): boolean =>
+  /\bwho\s+(?:said|asked|requested|assigned|decided|told|stated)\b/i.test(
+    query,
+  );
 
 export const isDiagnosticConversationFollowUp = (query: string): boolean =>
   DIAGNOSTIC_PATTERN.test(query);
@@ -294,25 +373,44 @@ export const resolveAskPlutoConversation = (
 ): AskPlutoConversationResolution => {
   const trimmedQuery = query.trim();
   const dispute = detectAttributionDispute(trimmedQuery);
-  const referencesPriorConversation =
-    queryReferencesPriorConversation(trimmedQuery);
   const task = resolveResearchTask(trimmedQuery);
   const latestUserQuestion = [...turns]
     .reverse()
     .find((turn) => turn.role === 'user')?.content;
   const previousAssistant = latestAssistantTurn(turns);
+  const referencesPriorConversation =
+    queryReferencesPriorConversation(trimmedQuery) ||
+    (previousAssistant?.conversationContext?.topic?.kind === 'person' &&
+      /\b(?:him|her|his|their)\b/i.test(trimmedQuery));
+  const turnDecision = decideConversationTurn({
+    query: trimmedQuery,
+    hasPriorAssistant: Boolean(previousAssistant),
+  });
+  const latestQuestionWasExpansion = Boolean(
+    latestUserQuestion && isExpansionRequest(latestUserQuestion.trim()),
+  );
   const priorQuestion =
-    latestUserQuestion &&
-    EXPANSION_FOLLOW_UP_PATTERN.test(latestUserQuestion.trim())
+    latestUserQuestion && latestQuestionWasExpansion
       ? previousAssistant?.conversationAnchor ||
         [...turns]
           .reverse()
           .find(
             (turn) =>
-              turn.role === 'user' &&
-              !EXPANSION_FOLLOW_UP_PATTERN.test(turn.content.trim()),
+              turn.role === 'user' && !isExpansionRequest(turn.content.trim()),
           )?.content
       : latestUserQuestion;
+  if (previousAssistant && turnDecision.mode === 'social') {
+    return {
+      relation: 'acknowledgment',
+      task: 'lookup',
+      turnMode: turnDecision.mode,
+      retrievalPolicy: turnDecision.retrieval,
+      retrievalQuery:
+        previousAssistant.conversationAnchor || priorQuestion || trimmedQuery,
+      answerQuery: trimmedQuery,
+      priorQuestion,
+    };
+  }
   if (
     priorQuestion &&
     previousAssistant?.outcome === 'partial' &&
@@ -322,6 +420,8 @@ export const resolveAskPlutoConversation = (
     return {
       relation: 'omission_follow_up',
       task: 'analysis',
+      turnMode: turnDecision.mode,
+      retrievalPolicy: turnDecision.retrieval,
       retrievalQuery: priorQuestion.slice(0, 700),
       answerQuery: `Find additional supported details for this earlier request: ${priorQuestion.slice(0, 700)}. Do not repeat details already in the previous answer.`,
       priorQuestion,
@@ -342,6 +442,9 @@ export const resolveAskPlutoConversation = (
   ).some((subject) => priorSubjects.has(subject));
   const contextDependentFollowUp =
     ELLIPTICAL_FOLLOW_UP_PATTERN.test(trimmedQuery) ||
+    (task === 'analysis' &&
+      Boolean(previousAssistant) &&
+      !hasStandaloneAnalysisSubject(trimmedQuery)) ||
     (task === 'draft' &&
       /\b(?:follow-up|follow up|that|this|them|those|above)\b/i.test(
         trimmedQuery,
@@ -355,6 +458,8 @@ export const resolveAskPlutoConversation = (
     return {
       relation: 'follow_up',
       task,
+      turnMode: turnDecision.mode,
+      retrievalPolicy: turnDecision.retrieval,
       retrievalQuery: dispute.cleanedQuery,
       answerQuery: trimmedQuery,
       priorQuestion,
@@ -362,9 +467,9 @@ export const resolveAskPlutoConversation = (
   }
   if (
     !priorQuestion ||
-    (!EXPANSION_FOLLOW_UP_PATTERN.test(trimmedQuery) &&
-      !TOPIC_EXPANSION_PATTERN.test(trimmedQuery) &&
+    (!isExpansionRequest(trimmedQuery) &&
       !referencesPriorConversation &&
+      !turnDecision.usesPriorTurn &&
       !continuesPriorSubject &&
       !referencedPriorContext &&
       !contextDependentFollowUp)
@@ -372,14 +477,18 @@ export const resolveAskPlutoConversation = (
     return {
       relation: 'new_topic',
       task,
+      turnMode: turnDecision.mode,
+      retrievalPolicy: turnDecision.retrieval,
       retrievalQuery: trimmedQuery,
       answerQuery: trimmedQuery,
     };
   }
-  if (assignee && EXPANSION_FOLLOW_UP_PATTERN.test(trimmedQuery)) {
+  if (assignee && isExpansionRequest(trimmedQuery)) {
     return {
       relation: 'expansion',
       task: 'analysis',
+      turnMode: turnDecision.mode,
+      retrievalPolicy: turnDecision.retrieval,
       retrievalQuery: `What else is assigned to ${assignee}? Search all meeting notes and distinguish explicit assignments from possible follow-ups.`,
       answerQuery: `Tell me more about what is assigned to ${assignee}. Add supported context about why it matters, current status, constraints, and related decisions instead of repeating the same list.`,
       priorQuestion,
@@ -389,15 +498,19 @@ export const resolveAskPlutoConversation = (
     return {
       relation: 'expansion',
       task: 'analysis',
+      turnMode: turnDecision.mode,
+      retrievalPolicy: turnDecision.retrieval,
       retrievalQuery: priorQuestion.slice(0, 700),
       answerQuery: `Add supported context for this earlier question: ${priorQuestion.slice(0, 700)}. Explain useful relationships, reasons, or outcomes when the meeting supports them. Avoid repeating the earlier answer.`,
       priorQuestion,
     };
   }
-  if (referencedPriorContext && TOPIC_EXPANSION_PATTERN.test(trimmedQuery)) {
+  if (referencedPriorContext && isExpansionRequest(trimmedQuery)) {
     return {
       relation: 'expansion',
       task: 'analysis',
+      turnMode: turnDecision.mode,
+      retrievalPolicy: turnDecision.retrieval,
       retrievalQuery: `${trimmedQuery}\n${referencedPriorContext.matchedText}`,
       answerQuery: trimmedQuery,
       priorQuestion,
@@ -405,8 +518,10 @@ export const resolveAskPlutoConversation = (
   }
   if (continuesPriorSubject) {
     return {
-      relation: 'follow_up',
-      task,
+      relation: isExpansionRequest(trimmedQuery) ? 'expansion' : 'follow_up',
+      task: isExpansionRequest(trimmedQuery) ? 'analysis' : task,
+      turnMode: turnDecision.mode,
+      retrievalPolicy: turnDecision.retrieval,
       retrievalQuery: trimmedQuery,
       answerQuery: trimmedQuery,
       priorQuestion,
@@ -416,6 +531,8 @@ export const resolveAskPlutoConversation = (
     return {
       relation: 'follow_up',
       task: task === 'lookup' ? resolveResearchTask(trimmedQuery) : task,
+      turnMode: turnDecision.mode,
+      retrievalPolicy: turnDecision.retrieval,
       retrievalQuery: `${trimmedQuery}\n${referencedPriorContext.matchedText}`,
       answerQuery: trimmedQuery,
       priorQuestion,
@@ -423,12 +540,14 @@ export const resolveAskPlutoConversation = (
   }
   const retrievalQuery = `${priorQuestion.slice(0, 700)}\n${trimmedQuery}`;
   return {
-    relation:
-      EXPANSION_FOLLOW_UP_PATTERN.test(trimmedQuery) ||
-      TOPIC_EXPANSION_PATTERN.test(trimmedQuery)
-        ? 'expansion'
-        : 'follow_up',
-    task: task === 'lookup' ? resolveResearchTask(retrievalQuery) : task,
+    relation: isExpansionRequest(trimmedQuery) ? 'expansion' : 'follow_up',
+    task: isExpansionRequest(trimmedQuery)
+      ? 'analysis'
+      : task === 'lookup'
+        ? resolveResearchTask(retrievalQuery)
+        : task,
+    turnMode: turnDecision.mode,
+    retrievalPolicy: turnDecision.retrieval,
     retrievalQuery,
     answerQuery: trimmedQuery,
     priorQuestion,

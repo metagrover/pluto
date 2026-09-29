@@ -72,6 +72,7 @@ import type {
   RecordingFinalizationPreview,
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
+import { isFeatureEnabled } from './config/featureFlags';
 import { useCalendarPromptMonitor } from './hooks/useCalendarPromptMonitor';
 import type {
   CaptureLifecycleSnapshot,
@@ -155,6 +156,7 @@ const dashboardPreviewEnabled = previewParam === 'dashboard';
 const chatPreviewEnabled = previewParam === 'chat';
 const peoplePreviewEnabled = previewParam === 'people';
 const projectsPreviewEnabled = previewParam === 'projects';
+const SOURCES_ENABLED = isFeatureEnabled('sources');
 
 type MeetingRetryRoute =
   | 'final_transcription'
@@ -2353,7 +2355,7 @@ function App() {
                 }
                 handleDeleteMeeting={handleDeleteMeeting}
               />
-            ) : activeTab === 'sources' ? (
+            ) : SOURCES_ENABLED && activeTab === 'sources' ? (
               <LocalSourcesTab selectedSourceId={selectedSourceId} />
             ) : activeTab === 'chat' ? (
               <div className="flex-1 w-full animate-in flex flex-col">
@@ -2367,6 +2369,7 @@ function App() {
                     handleOpenMeeting(meetingId, { label: 'Back to Chat' });
                   }}
                   onOpenArtifact={(artifactId) => {
+                    if (!SOURCES_ENABLED) return;
                     setSelectedSourceId(artifactId);
                     setActiveTab('sources');
                   }}

@@ -683,6 +683,10 @@
   .meeting-ask-pluto-dock__assistant-turn {
     @apply flex max-w-[92%] items-start gap-2.5;
   }
+  .meeting-ask-pluto-dock__assistant-turn--latest,
+  .meeting-ask-pluto-dock__loading--latest {
+    min-height: min(24vh, 220px);
+  }
   .meeting-ask-pluto-dock__pluto-mark {
     @apply mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-pro-hover;
   }
@@ -2816,62 +2820,32 @@
   animation: neural-pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* Pluto Skeleton Line Shimmer */
-@keyframes pluto-progress-pulse {
-  0%,
-  40%,
-  100% {
-    opacity: 0.3;
-    transform: scale(0.8);
+@keyframes ask-pluto-skeleton-flow {
+  from {
+    background-position: 100% 0;
   }
-  20% {
-    opacity: 1;
-    transform: scale(1.25);
-  }
-}
-
-.pluto-progress-dot {
-  animation: pluto-progress-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes pluto-skeleton-sheen {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
+  to {
+    background-position: -100% 0;
   }
 }
 
 .pluto-skeleton-line {
-  position: relative;
-  overflow: hidden;
-  background-color: hsl(var(--pro-text-main) / 0.07);
-}
-
-.pluto-skeleton-line::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(
+  background-image: linear-gradient(
     90deg,
-    transparent 0%,
-    hsl(var(--pro-text-main) / 0.06) 50%,
-    transparent 100%
+    hsl(var(--pro-text-main) / 0.05) 0%,
+    hsl(var(--pro-accent) / 0.08) 35%,
+    hsl(var(--pro-accent) / 0.2) 50%,
+    hsl(var(--pro-accent) / 0.08) 65%,
+    hsl(var(--pro-text-main) / 0.05) 100%
   );
-  animation: pluto-skeleton-sheen 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  background-size: 220% 100%;
+  animation: ask-pluto-skeleton-flow 1.8s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pluto-progress-dot {
+  .pluto-skeleton-line {
     animation: none;
-    opacity: 0.7;
-    transform: none;
-  }
-
-  .pluto-skeleton-line::after {
-    animation: none;
+    background-position: 50% 0;
   }
 }
 
@@ -3496,6 +3470,10 @@
   align-items: start;
   gap: 12px;
   margin-bottom: 20px;
+}
+.person-chat__assistant--latest,
+.person-chat__loading--latest {
+  min-height: min(55vh, 440px);
 }
 .person-chat__assistant-mark {
   display: flex;

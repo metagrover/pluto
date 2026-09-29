@@ -8,12 +8,23 @@ import {
   Square,
 } from 'lucide-react';
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { upsertEntity } from '../../api/knowledgeGraph';
+import {
+  appendWorkspaceChatMessage,
+  createWorkspaceChatThread,
+  listWorkspaceChatMessages,
+  listWorkspaceChatThreads,
+  updateWorkspaceChatMemory,
+  updateWorkspaceChatMessagePayload,
+} from '../../api/workspaceChat';
+import { useChatTurnAnchor } from '../../hooks/useChatTurnAnchor';
 import type {
   AskPlutoActiveMeetingSnapshot,
   AskPlutoAnswerDelta,
+  AskPlutoConversationContext,
   AskPlutoConversationTurn,
   AskPlutoCurrentMeeting,
   AskPlutoOutcome,
@@ -24,6 +35,11 @@ import type {
   AskPlutoRetrievalTrace,
   ResolvedAskPlutoScope,
 } from '../../types/askPlutoQuery';
+import type {
+  WorkspaceChatMemory,
+  WorkspaceChatMessagePayload,
+  WorkspaceChatThread,
+} from '../../types/workspaceChat';
 import { Logo } from '../Brand/Logo';
 import type { CitationChain } from './CitationCard';
 
@@ -50,12 +66,17 @@ export interface AskPlutoMessage {
   unsupportedClaimCount?: number;
   omissionRef?: string;
   conversationAnchor?: string;
+  conversationContext?: AskPlutoConversationContext;
   retryQuery?: string;
   evidenceState?: 'provisional' | 'processing' | 'failed' | 'completed';
   outcome?: AskPlutoOutcome;
   resolvedScope?: ResolvedAskPlutoScope;
   retrievalSummary?: AskPlutoRetrievalSummary;
   retrievalTrace?: AskPlutoRetrievalTrace;
+  turnMode?: AskPlutoQueryResponse['turnMode'];
+  retrievalPolicy?: AskPlutoQueryResponse['retrievalPolicy'];
+  actionProposal?: AskPlutoQueryResponse['actionProposal'];
+  actionState?: 'saving' | 'completed' | 'failed';
 }
 
 const groupCitationsByMeeting = (citations: CitationChain[]) => {
@@ -85,6 +106,43 @@ const groupCitationsByMeeting = (citations: CitationChain[]) => {
 
   return [...groups.values()];
 };
+
+const ASSISTANT_MARKDOWN_CLASS_NAME =
+  'prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:text-pro-text-main [&_h3]:mt-3 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-bold [&_h3]:text-pro-text-main';
+
+const toWorkspacePayload = (
+  message: AskPlutoMessage,
+): WorkspaceChatMessagePayload => ({
+  ...(message.citations ? { citations: message.citations } : {}),
+  ...(message.trustStatus ? { trustStatus: message.trustStatus } : {}),
+  ...(message.unsupportedClaimCount
+    ? { unsupportedClaimCount: message.unsupportedClaimCount }
+    : {}),
+  ...(message.omissionRef ? { omissionRef: message.omissionRef } : {}),
+  ...(message.conversationAnchor
+    ? { conversationAnchor: message.conversationAnchor }
+    : {}),
+  ...(message.conversationContext
+    ? { conversationContext: message.conversationContext }
+    : {}),
+  ...(message.retryQuery ? { retryQuery: message.retryQuery } : {}),
+  ...(message.evidenceState ? { evidenceState: message.evidenceState } : {}),
+  ...(message.outcome ? { outcome: message.outcome } : {}),
+  ...(message.resolvedScope ? { resolvedScope: message.resolvedScope } : {}),
+  ...(message.retrievalSummary
+    ? { retrievalSummary: message.retrievalSummary }
+    : {}),
+  ...(message.retrievalTrace ? { retrievalTrace: message.retrievalTrace } : {}),
+  ...(message.turnMode ? { turnMode: message.turnMode } : {}),
+  ...(message.retrievalPolicy
+    ? { retrievalPolicy: message.retrievalPolicy }
+    : {}),
+  ...(message.actionProposal ? { actionProposal: message.actionProposal } : {}),
+  ...(message.actionState ? { actionState: message.actionState } : {}),
+});
+
+const summarizeAnswer = (content: string): string =>
+  content.replace(/\s+/g, ' ').trim().slice(0, 600);
 
 export const AskPluto: React.FC<AskPlutoProps> = ({
   onOpenMeeting,
@@ -122,17 +180,97 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   const [modeOverride, setModeOverride] = useState<'auto' | 'deep'>('auto');
   const [dynamicQueries, setDynamicQueries] = useState<string[]>([]);
   const [isLoadingQueries, setIsLoadingQueries] = useState(false);
+  const [workspaceThreads, setWorkspaceThreads] = useState<
+    WorkspaceChatThread[]
+  >([]);
+  const [workspaceThreadId, setWorkspaceThreadId] = useState<string | null>(
+    null,
+  );
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const queryCacheRef = useRef<{ queries: string[]; fetchedAt: number } | null>(
     null,
   );
   const messageCounterRef = useRef(0);
   const activeRequestIdRef = useRef<string | null>(null);
+  const workspaceThreadIdRef = useRef<string | null>(null);
+  const workspaceThreadPromiseRef = useRef<Promise<string> | null>(null);
+  const workspaceHydratedRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const { anchorTurn, conversationRef } = useChatTurnAnchor<HTMLDivElement>(
+    messages.length,
+  );
 
   const nextMessageId = () =>
     `msg-${Date.now()}-${messageCounterRef.current++}`;
+
+  const refreshWorkspaceThreads = useCallback(async () => {
+    if (!window.ipcRenderer) return [];
+    const result = await listWorkspaceChatThreads();
+    const threads = Array.isArray(result) ? result : [];
+    setWorkspaceThreads(threads);
+    return threads;
+  }, []);
+
+  const loadWorkspaceThread = useCallback(
+    async (threadId: string) => {
+      const result = await listWorkspaceChatMessages(threadId);
+      const persisted = Array.isArray(result) ? result : [];
+      const restored: AskPlutoMessage[] = persisted.map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        ...(message.payload as WorkspaceChatMessagePayload),
+        citations: message.payload.citations as CitationChain[] | undefined,
+      }));
+      workspaceThreadIdRef.current = threadId;
+      setWorkspaceThreadId(threadId);
+      setMessages(restored);
+      setHistoryOpen(false);
+    },
+    [setMessages],
+  );
+
+  const ensureWorkspaceThread = useCallback(async (): Promise<string> => {
+    if (workspaceThreadIdRef.current) return workspaceThreadIdRef.current;
+    if (workspaceThreadPromiseRef.current)
+      return workspaceThreadPromiseRef.current;
+    workspaceThreadPromiseRef.current = createWorkspaceChatThread()
+      .then((thread) => {
+        workspaceThreadIdRef.current = thread.id;
+        setWorkspaceThreadId(thread.id);
+        setWorkspaceThreads((current) => [
+          thread,
+          ...current.filter((candidate) => candidate.id !== thread.id),
+        ]);
+        return thread.id;
+      })
+      .finally(() => {
+        workspaceThreadPromiseRef.current = null;
+      });
+    return workspaceThreadPromiseRef.current;
+  }, []);
+
+  useEffect(() => {
+    if (
+      !visible ||
+      !window.ipcRenderer ||
+      workspaceHydratedRef.current ||
+      messages.length > 0
+    ) {
+      return;
+    }
+    workspaceHydratedRef.current = true;
+    void refreshWorkspaceThreads()
+      .then(async (threads) => {
+        const latest = threads[0];
+        if (latest) await loadWorkspaceThread(latest.id);
+      })
+      .catch(() => {
+        // Persistence is additive. Chat remains available if an older preview
+        // runtime does not expose the workspace-thread channels yet.
+      });
+  }, [loadWorkspaceThread, messages.length, refreshWorkspaceThreads, visible]);
 
   useEffect(() => {
     if (!window.ipcRenderer) return;
@@ -147,10 +285,6 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       }
     };
   }, [visible]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  });
 
   useEffect(() => {
     if (!window.ipcRenderer) return;
@@ -245,7 +379,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
     setQuery('');
     setIsProcessing(true);
-    setRequestPhase('retrieving');
+    setRequestPhase('waiting');
     setCurrentMeeting(null);
     setComparisonMeetingCount(0);
     setScopeLabel(null);
@@ -255,6 +389,12 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         submitQuery,
       ),
     );
+    const userMessageId = nextMessageId();
+    const assistantMessageId = nextMessageId();
+    const workspaceThreadPromise = window.ipcRenderer
+      ? ensureWorkspaceThread().catch(() => null)
+      : Promise.resolve(null);
+    anchorTurn(userMessageId);
     setMessages((prev) => {
       const cleaned = prev.map((m) =>
         m.isLoading
@@ -267,9 +407,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       );
       return [
         ...cleaned,
-        { id: nextMessageId(), role: 'user', content: submitQuery.trim() },
+        { id: userMessageId, role: 'user', content: submitQuery.trim() },
         {
-          id: nextMessageId(),
+          id: assistantMessageId,
           role: 'assistant',
           content: '',
           isLoading: true,
@@ -284,18 +424,32 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
     try {
       if (window.ipcRenderer && requestId) {
+        const targetWorkspaceThreadId = await workspaceThreadPromise;
+        if (targetWorkspaceThreadId) {
+          await appendWorkspaceChatMessage({
+            id: userMessageId,
+            threadId: targetWorkspaceThreadId,
+            role: 'user',
+            content: submitQuery.trim(),
+          }).catch(() => undefined);
+        }
         const priorTurns: AskPlutoConversationTurn[] = messages
           .slice(-6)
           .map((message) => ({
             role: message.role,
             content: message.content.slice(0, 1200),
-            ...(message.citations?.length
+            ...(message.conversationContext?.meetingIds.length ||
+            message.citations?.length
               ? {
-                  meetingIds: [
-                    ...new Set(
-                      message.citations.map((citation) => citation.meeting_id),
-                    ),
-                  ].slice(0, 8),
+                  meetingIds: message.conversationContext?.meetingIds.length
+                    ? message.conversationContext.meetingIds.slice(0, 8)
+                    : [
+                        ...new Set(
+                          message.citations?.map(
+                            (citation) => citation.meeting_id,
+                          ) || [],
+                        ),
+                      ].slice(0, 8),
                 }
               : {}),
             ...(message.outcome ? { outcome: message.outcome } : {}),
@@ -308,6 +462,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             ...(message.conversationAnchor
               ? { conversationAnchor: message.conversationAnchor }
               : {}),
+            ...(message.conversationContext
+              ? { conversationContext: message.conversationContext }
+              : {}),
             ...(message.resolvedScope
               ? { resolvedScope: message.resolvedScope }
               : {}),
@@ -317,6 +474,10 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             ...(message.retrievalTrace
               ? { retrievalTrace: message.retrievalTrace }
               : {}),
+            ...(message.turnMode ? { turnMode: message.turnMode } : {}),
+            ...(message.retrievalPolicy
+              ? { retrievalPolicy: message.retrievalPolicy }
+              : {}),
           }));
         const response = await window.ipcRenderer.invoke<
           string | AskPlutoQueryResponse<CitationChain>
@@ -325,66 +486,144 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           query: submitQuery.trim(),
           modeOverride,
           priorTurns,
+          ...(workspaceThreads.find(
+            (thread) => thread.id === targetWorkspaceThreadId,
+          )?.memory
+            ? {
+                conversationMemory: workspaceThreads.find(
+                  (thread) => thread.id === targetWorkspaceThreadId,
+                )?.memory,
+              }
+            : {}),
           ...(activeMeetingSnapshot ? { activeMeetingSnapshot } : {}),
         });
 
         if (activeRequestIdRef.current !== requestId) return;
+        const assistantMessage: AskPlutoMessage =
+          typeof response !== 'string' && response.status === 'cancelled'
+            ? {
+                id: nextMessageId(),
+                role: 'assistant',
+                content: 'Stopped.',
+              }
+            : {
+                id: nextMessageId(),
+                role: 'assistant',
+                content:
+                  typeof response === 'string'
+                    ? response
+                    : (response.answer ?? ''),
+                citations:
+                  typeof response === 'string' ? undefined : response.citations,
+                trustStatus:
+                  typeof response === 'string'
+                    ? undefined
+                    : response.trustStatus,
+                unsupportedClaimCount:
+                  typeof response === 'string'
+                    ? undefined
+                    : response.unsupportedClaimCount,
+                omissionRef:
+                  typeof response === 'string'
+                    ? undefined
+                    : response.omissionRef,
+                conversationAnchor:
+                  typeof response === 'string'
+                    ? undefined
+                    : response.conversationAnchor,
+                conversationContext:
+                  typeof response === 'string'
+                    ? undefined
+                    : response.conversationContext,
+                retryQuery:
+                  typeof response !== 'string' &&
+                  response.status === 'unavailable'
+                    ? submitQuery.trim()
+                    : undefined,
+                evidenceState:
+                  typeof response === 'string' || !response.currentMeeting
+                    ? undefined
+                    : 'evidenceState' in response.currentMeeting
+                      ? response.currentMeeting.evidenceState
+                      : undefined,
+                outcome:
+                  typeof response === 'string' ? undefined : response.outcome,
+                resolvedScope:
+                  typeof response === 'string'
+                    ? undefined
+                    : response.resolvedScope,
+                retrievalSummary:
+                  typeof response === 'string'
+                    ? undefined
+                    : response.retrievalSummary,
+                retrievalTrace:
+                  typeof response === 'string'
+                    ? undefined
+                    : response.retrievalTrace,
+                turnMode:
+                  typeof response === 'string' ? undefined : response.turnMode,
+                retrievalPolicy:
+                  typeof response === 'string'
+                    ? undefined
+                    : response.retrievalPolicy,
+                actionProposal:
+                  typeof response === 'string'
+                    ? undefined
+                    : response.actionProposal,
+              };
         setMessages((prev) => {
           const newMsg = [...prev];
           newMsg.pop();
-          if (typeof response !== 'string' && response.status === 'cancelled') {
-            newMsg.push({
-              id: nextMessageId(),
-              role: 'assistant',
-              content: 'Stopped.',
-            });
-            return newMsg;
-          }
-          const content =
-            typeof response === 'string' ? response : (response.answer ?? '');
-          newMsg.push({
-            id: nextMessageId(),
-            role: 'assistant',
-            content,
-            citations:
-              typeof response === 'string' ? undefined : response.citations,
-            trustStatus:
-              typeof response === 'string' ? undefined : response.trustStatus,
-            unsupportedClaimCount:
-              typeof response === 'string'
-                ? undefined
-                : response.unsupportedClaimCount,
-            omissionRef:
-              typeof response === 'string' ? undefined : response.omissionRef,
-            conversationAnchor:
-              typeof response === 'string'
-                ? undefined
-                : response.conversationAnchor,
-            retryQuery:
-              typeof response !== 'string' && response.status === 'unavailable'
-                ? submitQuery.trim()
-                : undefined,
-            evidenceState:
-              typeof response === 'string' || !response.currentMeeting
-                ? undefined
-                : 'evidenceState' in response.currentMeeting
-                  ? response.currentMeeting.evidenceState
-                  : undefined,
-            outcome:
-              typeof response === 'string' ? undefined : response.outcome,
-            resolvedScope:
-              typeof response === 'string' ? undefined : response.resolvedScope,
-            retrievalSummary:
-              typeof response === 'string'
-                ? undefined
-                : response.retrievalSummary,
-            retrievalTrace:
-              typeof response === 'string'
-                ? undefined
-                : response.retrievalTrace,
-          });
+          newMsg.push(assistantMessage);
           return newMsg;
         });
+        if (targetWorkspaceThreadId) {
+          await appendWorkspaceChatMessage({
+            id: assistantMessage.id,
+            threadId: targetWorkspaceThreadId,
+            role: 'assistant',
+            content: assistantMessage.content,
+            payload: toWorkspacePayload(assistantMessage),
+          }).catch(() => undefined);
+          const currentThread = workspaceThreads.find(
+            (thread) => thread.id === targetWorkspaceThreadId,
+          );
+          const previousMemory: WorkspaceChatMemory = currentThread?.memory ?? {
+            corrections: [],
+            unresolvedQuestions: [],
+          };
+          await updateWorkspaceChatMemory({
+            threadId: targetWorkspaceThreadId,
+            memory: {
+              ...previousMemory,
+              activeTopic:
+                assistantMessage.conversationContext?.topic ??
+                previousMemory.activeTopic,
+              currentGoal:
+                assistantMessage.retrievalPolicy === 'fresh'
+                  ? submitQuery.trim().slice(0, 500)
+                  : previousMemory.currentGoal ||
+                    submitQuery.trim().slice(0, 500),
+              lastAnswerSummary: summarizeAnswer(assistantMessage.content),
+              corrections:
+                assistantMessage.turnMode === 'challenge'
+                  ? [
+                      ...previousMemory.corrections.slice(-4),
+                      submitQuery.trim().slice(0, 500),
+                    ]
+                  : previousMemory.corrections,
+              unresolvedQuestions:
+                assistantMessage.retryQuery &&
+                !previousMemory.unresolvedQuestions.includes(submitQuery.trim())
+                  ? [
+                      ...previousMemory.unresolvedQuestions.slice(-4),
+                      submitQuery.trim(),
+                    ]
+                  : previousMemory.unresolvedQuestions,
+            },
+          }).catch(() => undefined);
+          void refreshWorkspaceThreads().catch(() => undefined);
+        }
       } else {
         setMessages((prev) => {
           const newMsg = [...prev];
@@ -445,11 +684,67 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     await window.ipcRenderer.invoke('intelligence:query:cancel', requestId);
   };
 
+  const confirmAction = async (message: AskPlutoMessage) => {
+    const proposal = message.actionProposal;
+    if (!proposal || message.actionState === 'saving') return;
+    setMessages((current) =>
+      current.map((candidate) =>
+        candidate.id === message.id
+          ? { ...candidate, actionState: 'saving' }
+          : candidate,
+      ),
+    );
+    try {
+      await upsertEntity({
+        type: 'action_item',
+        name: proposal.text,
+        status: 'active',
+        due_date: null,
+        dedupe_by_name: true,
+        metadata: {
+          commitment_state: 'confirmed',
+          origin: 'user',
+          created_from: 'ask_pluto',
+          created_at: new Date().toISOString(),
+        },
+      });
+      setMessages((current) =>
+        current.map((candidate) =>
+          candidate.id === message.id
+            ? { ...candidate, actionState: 'completed' }
+            : candidate,
+        ),
+      );
+      const threadId = workspaceThreadIdRef.current;
+      if (threadId) {
+        await updateWorkspaceChatMessagePayload({
+          threadId,
+          messageId: message.id,
+          payload: toWorkspacePayload({
+            ...message,
+            actionState: 'completed',
+          }),
+        }).catch(() => undefined);
+      }
+    } catch {
+      setMessages((current) =>
+        current.map((candidate) =>
+          candidate.id === message.id
+            ? { ...candidate, actionState: 'failed' }
+            : candidate,
+        ),
+      );
+    }
+  };
+
   const handleNewConversation = () => {
     if (isProcessing) return;
     void window.ipcRenderer
       ?.invoke('intelligence:query:new-conversation')
       .catch(() => undefined);
+    workspaceThreadIdRef.current = null;
+    setWorkspaceThreadId(null);
+    setHistoryOpen(false);
     setMessages([]);
     setQuery('');
     setCurrentMeeting(null);
@@ -457,6 +752,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     setComparisonMeetingCount(0);
     setScopeLabel(null);
     setScopeMeetingCount(0);
+    if (window.ipcRenderer) {
+      void ensureWorkspaceThread().catch(() => undefined);
+    }
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
@@ -475,16 +773,14 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   const requestPhaseLabel = (hasVisibleAnswer: boolean) => {
     if (requestPhase === 'cancelling') return 'Stopping';
     if (requestPhase === 'writing' || requestPhase === 'generating') {
-      return hasVisibleAnswer
-        ? 'Checking each claim against your sources'
-        : 'Writing a grounded answer';
+      return hasVisibleAnswer ? 'Writing' : 'Starting the answer';
     }
     if (requestPhase === 'waiting') {
       return scopeLabel && scopeMeetingCount > 0
         ? `Preparing an answer from ${scopeMeetingCount} ${scopeMeetingCount === 1 ? 'meeting' : 'meetings'}`
         : comparisonMeetingCount > 0
           ? `Preparing a comparison across ${comparisonMeetingCount + 1} meetings`
-          : 'Preparing a grounded answer';
+          : 'Preparing an answer';
     }
     if (scopeLabel && scopeMeetingCount > 0) {
       return `Searching ${scopeMeetingCount} ${scopeMeetingCount === 1 ? 'meeting' : 'meetings'} from ${scopeLabel}`;
@@ -494,10 +790,50 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
   if (!visible) return null;
 
+  const activeWorkspaceThread = workspaceThreads.find(
+    (thread) => thread.id === workspaceThreadId,
+  );
+
   return (
     <div className="flex flex-col flex-1 w-full relative animate-in fade-in duration-300 motion-reduce:animate-none bg-pro-bg">
-      {messages.length > 0 ? (
-        <div className="sticky top-0 z-20 flex min-h-14 shrink-0 items-center justify-end bg-pro-bg/95 px-4 backdrop-blur-sm sm:px-8">
+      {messages.length > 0 || workspaceThreads.length > 1 ? (
+        <div className="sticky top-0 z-20 flex min-h-14 shrink-0 items-center justify-between bg-pro-bg/95 px-4 backdrop-blur-sm sm:px-8">
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setHistoryOpen((open) => !open)}
+              aria-expanded={historyOpen}
+              aria-haspopup="menu"
+              className="inline-flex h-8 max-w-[18rem] items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40"
+            >
+              <span className="truncate">
+                {activeWorkspaceThread?.title || 'Conversation history'}
+              </span>
+              <ChevronDown
+                aria-hidden="true"
+                className={`h-3.5 w-3.5 shrink-0 transition-transform ${historyOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {historyOpen ? (
+              <div
+                role="menu"
+                aria-label="Conversation history"
+                className="absolute left-0 top-10 z-40 w-72 rounded-xl border border-pro-border/60 bg-pro-bg p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.12)]"
+              >
+                {workspaceThreads.slice(0, 8).map((thread) => (
+                  <button
+                    key={thread.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => void loadWorkspaceThread(thread.id)}
+                    className={`flex min-h-10 w-full items-center rounded-lg px-3 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 ${thread.id === workspaceThreadId ? 'bg-pro-surface text-pro-text-main' : 'text-pro-text-muted hover:bg-pro-surface/70 hover:text-pro-text-main'}`}
+                  >
+                    <span className="truncate">{thread.title}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={handleNewConversation}
@@ -512,6 +848,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       {/* Scrollable message area — same width as the input */}
       <div className="flex-1 relative flex flex-col w-full max-w-3xl mx-auto px-4 sm:px-8">
         <div
+          ref={conversationRef}
           role="log"
           aria-label="Conversation with Pluto"
           aria-live="polite"
@@ -556,16 +893,19 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               </div>
             </div>
           ) : (
-            messages.map((msg) => {
+            messages.map((msg, index) => {
               const citationGroups = groupCitationsByMeeting(
                 msg.citations ?? [],
               );
+              const isLatestAssistant =
+                msg.role === 'assistant' && index === messages.length - 1;
               return (
                 <div
                   key={msg.id}
+                  data-chat-turn-id={msg.id}
                   role="article"
                   aria-label={msg.role === 'user' ? 'You' : 'Pluto'}
-                  className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  className={`scroll-mt-20 flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'} ${isLatestAssistant ? 'min-h-[calc(100dvh-13rem)]' : ''}`}
                 >
                   {msg.role === 'assistant' && (
                     <div
@@ -589,72 +929,61 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                           : 'px-1 py-1 leading-7 text-pro-text-main'
                       }`}
                     >
-                      {msg.isLoading ? (
+                      {msg.isLoading && !msg.content ? (
                         <div
                           data-testid="ask-pluto-loading-shell"
-                          className="w-full max-w-[34rem] space-y-2.5 py-0.5 animate-in fade-in duration-300"
+                          className="w-full max-w-[34rem] py-0.5 animate-in fade-in duration-300"
                         >
                           <output aria-live="polite" className="block">
                             <div className="flex min-h-7 items-center gap-2">
-                              <Sparkles className="h-3.5 w-3.5 text-pro-accent/75 shrink-0 animate-pulse [animation-duration:2.4s]" />
+                              <Sparkles className="h-3.5 w-3.5 shrink-0 text-pro-accent/75" />
                               <span className="truncate text-[13px] font-medium text-pro-text-main/80">
                                 {requestPhaseLabel(Boolean(msg.content))}
                               </span>
-                              <div
-                                aria-hidden="true"
-                                className="flex items-center gap-1.5 ml-1 shrink-0"
-                              >
-                                {[0, 1, 2, 3].map((step) => (
-                                  <span
-                                    key={step}
-                                    data-testid="ask-pluto-progress-dot"
-                                    className="pluto-progress-dot h-1.5 w-1.5 rounded-full bg-pro-accent"
-                                    style={{
-                                      animationDelay: `${step * 150}ms`,
-                                    }}
-                                  />
-                                ))}
-                              </div>
                             </div>
                           </output>
 
-                          {/* Streaming Content */}
-                          {msg.content ? (
-                            <div className="prose prose-invert prose-sm mt-2 max-w-none [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {msg.content.replace(/\[Source\s+\d+\]/gi, '')}
-                              </ReactMarkdown>
-                              <span
-                                data-testid="ask-pluto-stream-caret"
-                                aria-hidden="true"
-                                className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[0.15em] rounded-full bg-pro-accent/80 animate-pulse motion-reduce:animate-none"
-                              />
-                            </div>
-                          ) : (
-                            <div
-                              data-testid="ask-pluto-loading-lines"
-                              aria-hidden="true"
-                              className="space-y-2 pt-1 max-w-sm"
-                            >
-                              <div className="pluto-skeleton-line h-2 w-[72%] rounded-full opacity-35" />
-                              <div className="pluto-skeleton-line h-2 w-[46%] rounded-full opacity-20" />
-                            </div>
-                          )}
+                          <div
+                            data-testid="ask-pluto-loading-lines"
+                            aria-hidden="true"
+                            className="mt-2.5 max-w-sm space-y-2"
+                          >
+                            <div className="pluto-skeleton-line h-1.5 w-[72%] rounded-full" />
+                            <div className="pluto-skeleton-line h-1.5 w-[46%] rounded-full" />
+                          </div>
                         </div>
                       ) : (
-                        <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:text-pro-text-main [&_h3]:text-sm [&_h3]:font-bold [&_h3]:text-pro-text-main [&_h3]:mt-3 [&_h3]:mb-1">
+                        <div
+                          data-testid="ask-pluto-answer-content"
+                          className={ASSISTANT_MARKDOWN_CLASS_NAME}
+                        >
+                          {msg.isLoading ? (
+                            <output aria-live="polite" className="sr-only">
+                              {requestPhaseLabel(true)}
+                            </output>
+                          ) : null}
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {msg.content}
+                            {msg.isLoading
+                              ? msg.content.replace(/\[Source\s+\d+\]/gi, '')
+                              : msg.content}
                           </ReactMarkdown>
+                          {msg.isLoading ? (
+                            <span
+                              data-testid="ask-pluto-stream-caret"
+                              aria-hidden="true"
+                              className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[0.15em] rounded-full bg-pro-accent/80 animate-pulse motion-reduce:animate-none"
+                            />
+                          ) : null}
                         </div>
                       )}
                     </div>
 
                     {msg.role === 'assistant' &&
                       !msg.isLoading &&
-                      (msg.trustStatus ||
-                        msg.outcome === 'no_evidence' ||
-                        msg.outcome === 'partial') && (
+                      (msg.outcome === 'no_evidence' ||
+                        msg.outcome === 'partial' ||
+                        msg.evidenceState === 'provisional' ||
+                        msg.trustStatus === 'needs_review') && (
                         <div
                           className={`px-1 text-[11px] font-medium ${
                             msg.outcome === 'no_evidence'
@@ -675,32 +1004,65 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                                 ? 'Provisional live answer'
                                 : msg.trustStatus === 'needs_review'
                                   ? `Needs review${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} ${msg.unsupportedClaimCount === 1 ? 'detail could' : 'details could'} not be verified` : ''}`
-                                  : msg.trustStatus === 'inferred'
-                                    ? 'Supported synthesis'
-                                    : 'Grounded answer'}
+                                  : ''}
+                        </div>
+                      )}
+
+                    {msg.role === 'assistant' &&
+                      !msg.isLoading &&
+                      msg.actionProposal && (
+                        <div className="ml-1 flex w-full max-w-md items-center justify-between gap-4 rounded-xl border border-pro-border/60 bg-pro-surface/55 px-3.5 py-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-[13px] font-medium text-pro-text-main">
+                              {msg.actionProposal.text}
+                            </p>
+                            <p className="mt-0.5 text-[11px] text-pro-text-muted">
+                              {msg.actionState === 'completed'
+                                ? 'Saved to your commitments'
+                                : msg.actionState === 'failed'
+                                  ? 'Could not save it. Try again.'
+                                  : 'Nothing changes until you confirm'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void confirmAction(msg)}
+                            disabled={
+                              msg.actionState === 'saving' ||
+                              msg.actionState === 'completed'
+                            }
+                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-pro-accent px-3 text-[12px] font-semibold text-white transition-colors hover:bg-pro-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 disabled:cursor-default disabled:opacity-60"
+                          >
+                            {msg.actionState === 'saving'
+                              ? 'Saving…'
+                              : msg.actionState === 'completed'
+                                ? 'Saved'
+                                : msg.actionProposal.label}
+                            {msg.actionState !== 'completed' ? (
+                              <ArrowRight
+                                aria-hidden="true"
+                                className="h-3.5 w-3.5"
+                              />
+                            ) : null}
+                          </button>
                         </div>
                       )}
 
                     {msg.role === 'assistant' &&
                       !msg.isLoading &&
                       msg.retrievalTrace &&
-                      (msg.retrievalTrace.searchedMeetingCount > 0 ||
+                      ((msg.retrievalTrace.meetings?.length || 0) > 0 ||
                         msg.retrievalTrace.sections.length > 0 ||
-                        msg.retrievalTrace.transcriptPassages.length > 0 ||
                         msg.retrievalTrace.commitmentCount > 0) && (
                         <div className="px-1 text-[11px] text-pro-text-muted/75">
                           {[
-                            msg.retrievalTrace.searchedMeetingCount > 0
-                              ? `${msg.retrievalTrace.searchedMeetingCount} ${msg.retrievalTrace.searchedMeetingCount === 1 ? 'meeting' : 'meetings'} searched`
-                              : '',
                             msg.retrievalTrace.sections.length > 0
-                              ? `${msg.retrievalTrace.sections.length} ${msg.retrievalTrace.sections.length === 1 ? 'section' : 'sections'} matched`
-                              : '',
+                              ? `${msg.retrievalTrace.sections.length} synthesized note ${msg.retrievalTrace.sections.length === 1 ? 'section' : 'sections'}`
+                              : (msg.retrievalTrace.meetings?.length || 0) > 0
+                                ? `${msg.retrievalTrace.meetings?.length} synthesized ${msg.retrievalTrace.meetings?.length === 1 ? 'note' : 'notes'}`
+                                : '',
                             msg.retrievalTrace.commitmentCount > 0
                               ? `${msg.retrievalTrace.commitmentCount} ${msg.retrievalTrace.commitmentCount === 1 ? 'commitment' : 'commitments'}`
-                              : '',
-                            msg.retrievalTrace.transcriptPassages.length > 0
-                              ? `${msg.retrievalTrace.transcriptPassages.length} transcript ${msg.retrievalTrace.transcriptPassages.length === 1 ? 'passage' : 'passages'} used`
                               : '',
                           ]
                             .filter(Boolean)
@@ -851,7 +1213,6 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               );
             })
           )}
-          <div ref={bottomRef} className="h-4 shrink-0" />
         </div>
 
         {/* Input bar — sticky at the bottom */}

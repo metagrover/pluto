@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import { isFeatureEnabled } from '../src/config/featureFlags';
 import {
   type DownstreamProcessingLease,
   buildDownstreamProcessingLease,
@@ -981,6 +982,7 @@ export const listMeetingsForArtifact = (
 export const getMeetingAttachedArtifactsText = (
   meetingId: string | number,
 ): string => {
+  if (!isFeatureEnabled('sources')) return '';
   const artifacts = listArtifactsForMeeting(meetingId);
   const activeArtifacts = artifacts.filter(
     (a) =>
@@ -2717,6 +2719,41 @@ export const getMeetings = () => {
     )
     .all();
 };
+
+// Ask Pluto reads published synthesis, never the recording or transcript columns.
+// Keep this projection separate from the general meeting API so a new raw column
+// cannot silently enter chat context through SELECT *.
+const askPlutoMeetingColumns = `id, title, meeting_type, started_at, ended_at,
+  duration_seconds, user_notes, enhanced_notes, analysis_json,
+  analysis_schema_version, analysis_format_pass, analysis_generated_at,
+  value_signals_json, follow_up_drafts_json, folder_id, is_favorite,
+  end_reason, mid_json, user_edits_json, analysis_edit_conflicts_json,
+  transcript_status, transcript_validated_at, finalization_status,
+  downstream_processing_json, created_at`;
+
+export const getAskPlutoMeetings = (): PersistedMeeting[] =>
+  db
+    .prepare(
+      `SELECT ${askPlutoMeetingColumns} FROM meetings
+       ORDER BY COALESCE(started_at, created_at) DESC`,
+    )
+    .all() as PersistedMeeting[];
+
+export const getAskPlutoMeetingHeaders = (): PersistedMeeting[] =>
+  db
+    .prepare(
+      `SELECT id, title, started_at, created_at, finalization_status,
+              downstream_processing_json FROM meetings
+       ORDER BY COALESCE(started_at, created_at) DESC`,
+    )
+    .all() as PersistedMeeting[];
+
+export const getAskPlutoMeeting = (
+  id: string | number,
+): PersistedMeeting | undefined =>
+  db
+    .prepare(`SELECT ${askPlutoMeetingColumns} FROM meetings WHERE id = ?`)
+    .get(String(id)) as PersistedMeeting | undefined;
 
 export const getMeetingSummaries = (
   meetingId?: string | number,
@@ -9867,7 +9904,10 @@ export const searchMeetingNotesFts = (
   return db
     .prepare(`
     SELECT
-      m.*,
+      ${askPlutoMeetingColumns
+        .split(',')
+        .map((column) => `m.${column.trim()}`)
+        .join(', ')},
       snippet(meeting_notes_fts, -1, '', '', '...', 64) as snippet
     FROM meeting_notes_fts f
     JOIN meetings m ON f.meeting_id = m.id
@@ -9904,7 +9944,7 @@ export const searchMeetingContextSectionsFts = (
     MeetingContextSectionRow & { snippet: string }
   >;
   return rows.flatMap((row) => {
-    const meeting = getMeeting(row.meeting_id) as PersistedMeeting | undefined;
+    const meeting = getAskPlutoMeeting(row.meeting_id);
     if (!meeting) return [];
     const { snippet, ...section } = row;
     return [{ section, meeting, snippet }];

@@ -16,6 +16,7 @@ import {
   Sun,
   Users,
 } from 'lucide-react';
+import { isFeatureEnabled } from '../../config/featureFlags';
 import {
   type CaptureLifecycleState,
   resolveCaptureAction,
@@ -152,7 +153,9 @@ export const Sidebar = ({
         <div className="space-y-0.5">
           <button
             type="button"
-            data-active={activeTab === 'hub' && !selectedMeetingId ? 'true' : undefined}
+            data-active={
+              activeTab === 'hub' && !selectedMeetingId ? 'true' : undefined
+            }
             onClick={() => {
               setActiveTab('hub');
               setSelectedMeetingId(null);
@@ -178,7 +181,11 @@ export const Sidebar = ({
           </h3>
           <button
             type="button"
-            data-active={activeTab === 'projects' && !selectedMeetingId ? 'true' : undefined}
+            data-active={
+              activeTab === 'projects' && !selectedMeetingId
+                ? 'true'
+                : undefined
+            }
             onClick={() => {
               setActiveTab('projects');
               setSelectedMeetingId(null);
@@ -204,7 +211,9 @@ export const Sidebar = ({
           </h3>
           <button
             type="button"
-            data-active={activeTab === 'chat' && !selectedMeetingId ? 'true' : undefined}
+            data-active={
+              activeTab === 'chat' && !selectedMeetingId ? 'true' : undefined
+            }
             onClick={() => {
               setActiveTab('chat');
               setSelectedMeetingId(null);
@@ -228,7 +237,9 @@ export const Sidebar = ({
           </button>
           <button
             type="button"
-            data-active={activeTab === 'people' && !selectedMeetingId ? 'true' : undefined}
+            data-active={
+              activeTab === 'people' && !selectedMeetingId ? 'true' : undefined
+            }
             onClick={onOpenPeopleHome}
             className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'people' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
@@ -242,25 +253,31 @@ export const Sidebar = ({
             />
             <span className="text-[14px]">People</span>
           </button>
-          <button
-            type="button"
-            data-active={activeTab === 'sources' && !selectedMeetingId ? 'true' : undefined}
-            onClick={() => {
-              setActiveTab('sources');
-              setSelectedMeetingId(null);
-            }}
-            className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'sources' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
-          >
-            <Files
-              size={16}
-              className={
+          {isFeatureEnabled('sources') ? (
+            <button
+              type="button"
+              data-active={
                 activeTab === 'sources' && !selectedMeetingId
-                  ? 'text-pro-text-main'
-                  : ''
+                  ? 'true'
+                  : undefined
               }
-            />
-            <span className="text-[14px]">Sources</span>
-          </button>
+              onClick={() => {
+                setActiveTab('sources');
+                setSelectedMeetingId(null);
+              }}
+              className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'sources' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
+            >
+              <Files
+                size={16}
+                className={
+                  activeTab === 'sources' && !selectedMeetingId
+                    ? 'text-pro-text-main'
+                    : ''
+                }
+              />
+              <span className="text-[14px]">Sources</span>
+            </button>
+          ) : null}
         </div>
 
         {/* All Meetings Section */}
@@ -270,7 +287,11 @@ export const Sidebar = ({
           </h3>
           <button
             type="button"
-            data-active={activeTab === 'meetings' && !selectedMeetingId ? 'true' : undefined}
+            data-active={
+              activeTab === 'meetings' && !selectedMeetingId
+                ? 'true'
+                : undefined
+            }
             onClick={() => {
               setActiveTab('meetings');
               setSelectedMeetingId(null);
@@ -339,7 +360,9 @@ export const Sidebar = ({
                   <div key={m.id}>
                     <button
                       type="button"
-                      data-active={selectedMeetingId === m.id ? 'true' : undefined}
+                      data-active={
+                        selectedMeetingId === m.id ? 'true' : undefined
+                      }
                       onClick={() => {
                         setSelectedMeetingId(m.id);
                         setActiveTab('hub');
@@ -376,7 +399,9 @@ export const Sidebar = ({
       <div className="px-3 py-3 border-t border-pro-border flex items-center justify-between gap-2">
         <button
           type="button"
-          data-active={activeTab === 'settings' && !selectedMeetingId ? 'true' : undefined}
+          data-active={
+            activeTab === 'settings' && !selectedMeetingId ? 'true' : undefined
+          }
           onClick={() => {
             setActiveTab('settings');
             setSelectedMeetingId(null);
