@@ -157,13 +157,13 @@ describe('knowledge V2 utilities', () => {
             ...doc.evidence_index[0],
             id: 'second',
             meeting_id: 'm2',
-            quote: 'Avery worked on the handoff.',
+            quote: 'Avery worked on the launch review handoff.',
           },
         ],
       },
       new Map([
         ['m1', 'avery reviewed the launch.'],
-        ['m2', 'avery worked on the handoff.'],
+        ['m2', 'avery worked on the launch review handoff.'],
       ]),
     );
     expect(recurring.current_read.headline).toBe(

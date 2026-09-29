@@ -15,6 +15,38 @@ const citationId =
   /\s*\([^)]*[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}[^)]*\)/gi;
 const observedWork =
   /\b(?:working|worked|building|built|developing|developed|implementing|implemented|leading|led|managing|managed|optimizing|optimized|reviewing|reviewed|investigating|addressing|running|advising|advised|responsible for|owns|owned)\b/i;
+const genericTitleWords = new Set([
+  'and',
+  'work',
+  'strategy',
+  'planning',
+  'preparation',
+  'coordination',
+  'optimization',
+  'development',
+  'management',
+  'support',
+]);
+
+const topicWords = (text: string): Set<string> =>
+  new Set(
+    (text.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map((word) =>
+      word.length > 4 ? word.replace(/s$/u, '') : word,
+    ),
+  );
+
+const sharesRecurringTopic = (
+  title: string,
+  sources: PersonReadEvidence[],
+): boolean => {
+  const anchors = [...topicWords(title)].filter(
+    (word) => word.length >= 3 && !genericTitleWords.has(word),
+  );
+  const sourceTopics = sources.map((source) => topicWords(source.quote));
+  return anchors.some(
+    (anchor) => sourceTopics.filter((topics) => topics.has(anchor)).length >= 2,
+  );
+};
 
 export const cleanPersonReadText = (text: string): string =>
   text
@@ -52,6 +84,7 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
       (stream) =>
         stream.sources.length >= 2 &&
         stream.title &&
+        sharesRecurringTopic(stream.title, stream.sources) &&
         stream.sources.some((source) => observedWork.test(source.quote)),
     )
     .sort((a, b) => b.sources.length - a.sources.length)
