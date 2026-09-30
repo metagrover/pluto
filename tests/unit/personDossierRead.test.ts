@@ -10,8 +10,9 @@ describe('person dossier read', () => {
     expect(isCurrentPersonDossier('up_to_date', 8)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 9)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 10)).toBe(false);
-    expect(isCurrentPersonDossier('synthesizing', 11)).toBe(false);
-    expect(isCurrentPersonDossier('up_to_date', 11)).toBe(true);
+    expect(isCurrentPersonDossier('up_to_date', 11)).toBe(false);
+    expect(isCurrentPersonDossier('synthesizing', 12)).toBe(false);
+    expect(isCurrentPersonDossier('up_to_date', 12)).toBe(true);
   });
 
   it('leads with recurring work and shows an attributable example', () => {
