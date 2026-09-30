@@ -90,6 +90,7 @@ import {
   withSavedUserProjectMilestone,
   withoutProjectMilestone,
 } from '../src/utils/projectMilestones';
+import { isProjectStarred } from '../src/utils/projectPortfolio';
 import type { ProjectPortfolioEntry } from '../src/utils/projectPortfolio';
 import {
   type ProjectPortfolioDisposition,
@@ -162,6 +163,7 @@ import type { PrepMeetingOption } from './meetingPrep';
 import { createMeetingPrepStore, findCalendarInviteeName } from './meetingPrep';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
 import { createPrepAttendeeStore } from './prepAttendees';
+import type { ProjectRoutingMembership } from './projectRouting';
 import type { SynthesizedProjectTheme } from './projectThemeSynthesis';
 import { createSecureSettingsManager } from './secureSettings';
 import { saveMeetingSpeakerCandidates } from './speakerVoiceStore';
@@ -7487,6 +7489,161 @@ const PROJECT_FAMILY_CTE = `WITH RECURSIVE family(id) AS (
     WHERE e.type = 'project' AND json_extract(CASE WHEN json_valid(e.metadata) THEN e.metadata ELSE '{}' END, '$.projectQualification.state') = 'subordinate'
 )`;
 
+const applyProjectMembership = (
+  canonicalId: string,
+  membership: SynthesizedProjectTheme['memberships'][number] &
+    Partial<
+      Pick<
+        ProjectRoutingMembership,
+        'parentSourceMeetingId' | 'parentEvidenceQuote'
+      >
+    >,
+): boolean => {
+  const member = getEntity(membership.projectId);
+  const memberQ = readProjectQualification(member?.metadata || null);
+  if (
+    !member ||
+    member.type !== 'project' ||
+    member.id === canonicalId ||
+    member.metadata !== membership.expectedMetadata ||
+    memberQ?.source === 'user' ||
+    isProjectStarred(member.metadata) ||
+    (() => {
+      try {
+        return (
+          JSON.parse(member.metadata || '{}').projectAutoGroupingOptOut === true
+        );
+      } catch {
+        return false;
+      }
+    })() ||
+    member.status === 'completed' ||
+    readProjectPortfolioDisposition(member.metadata) === 'dismissed' ||
+    (memberQ?.parentProjectId && memberQ.parentProjectId !== canonicalId) ||
+    resolveProjectIdentityId(member.id) !== member.id
+  )
+    return false;
+  const source = getMeeting(membership.sourceMeetingId) as
+    | PersistedMeeting
+    | undefined;
+  if (
+    !source ||
+    !getMeetingEntities(String(source.id)).some(
+      (entity) => entity.id === member.id,
+    )
+  )
+    return false;
+  const evidence = buildMeetingNotesEvidenceDocument(
+    source,
+    getMeetingNotesIdentityProjection(source.id).speakerDisplayNames,
+  );
+  const notes = [
+    evidence.notesText,
+    evidence.decisionsText && `Decisions:\n${evidence.decisionsText}`,
+    evidence.actionItemsText && `Actions:\n${evidence.actionItemsText}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const quote = membership.evidenceQuote.replace(/\s+/g, ' ').trim();
+  if (quote.length < 12 || !notes.includes(quote)) return false;
+  let memberMetadata: Record<string, unknown> = {};
+  try {
+    memberMetadata = JSON.parse(member.metadata || '{}');
+  } catch {
+    /* Legacy metadata. */
+  }
+  if (membership.parentSourceMeetingId)
+    memberMetadata.projectRoutingEvidence = {
+      parentProjectId: canonicalId,
+      relationship: membership.relationship,
+      sourceMeetingId: membership.sourceMeetingId,
+      evidenceQuote: membership.evidenceQuote,
+      parentSourceMeetingId: membership.parentSourceMeetingId,
+      parentEvidenceQuote: membership.parentEvidenceQuote,
+    };
+  if (membership.relationship === 'alias') {
+    if (membership.parentSourceMeetingId)
+      upsertEntity({ ...member, metadata: memberMetadata });
+    mergeProject(member.id, canonicalId);
+  } else {
+    // Never create a parent cycle or replace a manually corrected classification.
+    const ancestors = new Set<string>([member.id]);
+    let parent: Entity | undefined = getEntity(canonicalId);
+    while (parent) {
+      if (ancestors.has(parent.id)) throw new Error('project_parent_cycle');
+      ancestors.add(parent.id);
+      const parentId = readProjectQualification(
+        parent.metadata,
+      )?.parentProjectId;
+      parent = parentId ? getEntity(parentId) : undefined;
+    }
+    upsertEntity({
+      ...member,
+      metadata: {
+        ...memberMetadata,
+        projectQualification: {
+          ...memberQ,
+          version: 1,
+          state: 'subordinate',
+          source: 'review',
+          parentProjectId: canonicalId,
+          parentEvidenceQuote: membership.evidenceQuote,
+          sourceMeetingId: membership.sourceMeetingId,
+          assessedAt: new Date().toISOString(),
+          reason: 'Evidence places this work within the parent project.',
+        },
+      },
+    });
+  }
+  return true;
+};
+
+export const saveProjectRoutingMembership = (
+  membership: ProjectRoutingMembership,
+): boolean =>
+  db.transaction(() => {
+    const parent = getEntity(membership.parentProjectId);
+    if (
+      !parent ||
+      parent.type !== 'project' ||
+      parent.status === 'completed' ||
+      parent.metadata !== membership.expectedParentMetadata ||
+      resolveProjectIdentityId(parent.id) !== parent.id ||
+      readProjectQualification(parent.metadata)?.state !== 'qualified' ||
+      readProjectQualification(parent.metadata)?.parentProjectId ||
+      readProjectPortfolioDisposition(parent.metadata) === 'dismissed'
+    )
+      return false;
+    const source = getMeeting(membership.parentSourceMeetingId) as
+      | PersistedMeeting
+      | undefined;
+    if (
+      !source ||
+      !getMeetingEntities(String(source.id)).some(
+        (entity) => entity.id === parent.id,
+      )
+    )
+      return false;
+    const evidence = buildMeetingNotesEvidenceDocument(
+      source,
+      getMeetingNotesIdentityProjection(source.id).speakerDisplayNames,
+    );
+    const notes = [
+      evidence.notesText,
+      evidence.decisionsText && `Decisions:\n${evidence.decisionsText}`,
+      evidence.actionItemsText && `Actions:\n${evidence.actionItemsText}`,
+    ]
+      .filter(Boolean)
+      .join('\n')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const quote = membership.parentEvidenceQuote.replace(/\s+/g, ' ').trim();
+    if (quote.length < 12 || !notes.includes(quote)) return false;
+    return applyProjectMembership(parent.id, membership);
+  })();
+
 export const saveSynthesizedProjectTheme = (
   theme: SynthesizedProjectTheme,
 ): void => {
@@ -7531,93 +7688,7 @@ export const saveSynthesizedProjectTheme = (
       });
     }
     for (const membership of theme.memberships || []) {
-      const member = getEntity(membership.projectId);
-      const memberQ = readProjectQualification(member?.metadata || null);
-      if (
-        !member ||
-        member.type !== 'project' ||
-        member.id === canonicalId ||
-        member.metadata !== membership.expectedMetadata ||
-        memberQ?.source === 'user' ||
-        (() => {
-          try {
-            return (
-              JSON.parse(member.metadata || '{}').projectAutoGroupingOptOut ===
-              true
-            );
-          } catch {
-            return false;
-          }
-        })() ||
-        member.status === 'completed' ||
-        readProjectPortfolioDisposition(member.metadata) === 'dismissed' ||
-        (memberQ?.parentProjectId && memberQ.parentProjectId !== canonicalId) ||
-        resolveProjectIdentityId(member.id) !== member.id
-      )
-        continue;
-      const source = getMeeting(membership.sourceMeetingId) as
-        | PersistedMeeting
-        | undefined;
-      if (
-        !source ||
-        !getMeetingEntities(String(source.id)).some(
-          (entity) => entity.id === member.id,
-        )
-      )
-        continue;
-      const evidence = buildMeetingNotesEvidenceDocument(
-        source,
-        getMeetingNotesIdentityProjection(source.id).speakerDisplayNames,
-      );
-      const notes = [
-        evidence.notesText,
-        evidence.decisionsText && `Decisions:\n${evidence.decisionsText}`,
-        evidence.actionItemsText && `Actions:\n${evidence.actionItemsText}`,
-      ]
-        .filter(Boolean)
-        .join('\n')
-        .replace(/\s+/g, ' ')
-        .trim();
-      const quote = membership.evidenceQuote.replace(/\s+/g, ' ').trim();
-      if (quote.length < 12 || !notes.includes(quote)) continue;
-      if (membership.relationship === 'alias') {
-        mergeProject(member.id, canonicalId);
-      } else {
-        // Never create a parent cycle or replace a manually corrected classification.
-        const ancestors = new Set<string>([member.id]);
-        let parent: Entity | undefined = getEntity(canonicalId);
-        while (parent) {
-          if (ancestors.has(parent.id)) throw new Error('project_parent_cycle');
-          ancestors.add(parent.id);
-          const parentId = readProjectQualification(
-            parent.metadata,
-          )?.parentProjectId;
-          parent = parentId ? getEntity(parentId) : undefined;
-        }
-        let memberMetadata: Record<string, unknown> = {};
-        try {
-          memberMetadata = JSON.parse(member.metadata || '{}');
-        } catch {
-          /* Legacy metadata. */
-        }
-        upsertEntity({
-          ...member,
-          metadata: {
-            ...memberMetadata,
-            projectQualification: {
-              ...memberQ,
-              version: 1,
-              state: 'subordinate',
-              source: 'review',
-              parentProjectId: canonicalId,
-              parentEvidenceQuote: membership.evidenceQuote,
-              sourceMeetingId: membership.sourceMeetingId,
-              assessedAt: new Date().toISOString(),
-              reason: 'Evidence places this work within the parent project.',
-            },
-          },
-        });
-      }
+      applyProjectMembership(canonicalId, membership);
     }
   })();
 };

@@ -6,6 +6,27 @@ Internal recovery tools, including the voice candidate backfill, are documented
 in [scripts/README.md](../scripts/README.md). These are developer maintenance
 commands, not user-facing settings or routine setup requirements.
 
+## Source startup and local profiles
+
+`pnpm start` and `pnpm dev` both prepare the native runtimes and launch source
+Pluto with hot reload. On macOS both use `~/Library/Application Support/pluto` by
+default, so changing commands does not change the visible meetings. No installed
+app, signing certificate, or exported recovery key is required. A fresh profile
+creates its own local key through Electron safeStorage; an existing profile
+reuses its original envelope. macOS may request Keychain access.
+
+For an isolated profile, set `PLUTO_USER_DATA_DIR` to a separate absolute directory
+before either command. Previously isolated meetings at
+`/tmp/pluto-development-profile` stay there; use that explicit override to reopen
+them. Startup does not move, merge, or delete existing profiles.
+
+If unlocking fails, resolve Keychain access with the original runtime; do not
+delete the database or key envelope. Encrypted databases with missing or rejected
+keys stop startup without being reset. Envelopes bound to a signed distribution
+identity still require that signed app; source startup cannot silently unwrap
+those keys. Existing explicit recovery files remain supported but are never
+created or removed automatically. Keys are local and must not be committed to Git.
+
 ## 1) Parakeet transcription is unavailable
 
 **Symptoms**

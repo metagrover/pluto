@@ -476,4 +476,50 @@ describe('stable project identities and grounded grouping', () => {
       decisions: [],
     });
   });
+  it('reconsiders cached evidence when an existing project is pinned', async () => {
+    const { deps } = makeDeps();
+    let anchor = { ...established, metadata: established.metadata };
+    const original = deps.getProject;
+    const registry = {
+      ...deps,
+      listProjects: () => [anchor],
+      getProject: (id: string) => (id === anchor.id ? anchor : original(id)),
+    };
+    await synthesizeProjectThemes(registry);
+    await synthesizeProjectThemes(registry);
+    expect(deps.generate).toHaveBeenCalledTimes(1);
+    anchor = {
+      ...anchor,
+      metadata: JSON.stringify({
+        ...JSON.parse(anchor.metadata),
+        projectStarred: true,
+      }),
+    };
+    await synthesizeProjectThemes(registry);
+    expect(deps.generate).toHaveBeenCalledTimes(2);
+    expect(deps.generate.mock.calls[1][0]).toContain('"pinned":true');
+  });
+  it('keeps pinned targets in the registry ahead of eighty unpinned projects', async () => {
+    const { deps } = makeDeps();
+    const pinned = {
+      ...established,
+      id: 'pinned-root',
+      metadata: JSON.stringify({
+        ...JSON.parse(established.metadata),
+        projectStarred: true,
+      }),
+    };
+    const registry = Array.from({ length: 80 }, (_, index) => ({
+      ...established,
+      id: `older-${index}`,
+    })).concat(pinned);
+    const original = deps.getProject;
+    await synthesizeProjectThemes({
+      ...deps,
+      listProjects: () => registry,
+      getProject: (id: string) =>
+        registry.find((project) => project.id === id) || original(id),
+    });
+    expect(deps.generate.mock.calls[0][0]).toContain('"id":"pinned-root"');
+  });
 });

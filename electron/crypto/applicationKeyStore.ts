@@ -46,6 +46,7 @@ export interface ApplicationKeyStoreOptions {
   envelopeFileName?: string;
   recoveryFileName?: string;
   expectedStorageBinding?: ApplicationKeyStorageBinding;
+  sourceRuntime?: boolean;
 }
 
 export class ApplicationKeyStore {
@@ -54,6 +55,7 @@ export class ApplicationKeyStore {
   private readonly envelopePath: string;
   private readonly recoveryFileName: string;
   private readonly expectedStorageBinding?: ApplicationKeyStorageBinding;
+  private readonly sourceRuntime: boolean;
 
   constructor(options: ApplicationKeyStoreOptions = {}) {
     const defaultStorageDir =
@@ -100,6 +102,7 @@ export class ApplicationKeyStore {
     );
     this.recoveryFileName = options.recoveryFileName ?? RECOVERY_KEY_FILE_NAME;
     this.expectedStorageBinding = options.expectedStorageBinding;
+    this.sourceRuntime = options.sourceRuntime ?? false;
   }
 
   hasMasterKey(): boolean {
@@ -133,6 +136,12 @@ export class ApplicationKeyStore {
     }
 
     const envelope = parsed as Partial<ApplicationKeyEnvelope>;
+    if (
+      this.sourceRuntime &&
+      (envelope.version === 2 || envelope.storageBinding)
+    ) {
+      throw new ApplicationKeyBindingMismatchError();
+    }
     if (
       (envelope.version !== 1 && envelope.version !== 2) ||
       !envelope.keyId ||

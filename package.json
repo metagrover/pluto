@@ -10,7 +10,7 @@
     "predev": "pnpm run ensure:dev-runtime",
     "dev": "vite",
     "prestart": "pnpm run ensure:dev-runtime",
-    "start": "node scripts/start_production_profile.mjs",
+    "start": "vite",
     "prebuild": "node scripts/clean_generated_electron_output.mjs",
     "build-native": "pnpm run ensure:media-tools && pnpm run build:audio-cap && pnpm run build:calendar-helper && pnpm run build:parakeet",
     "build": "tsc && vite build && pnpm run build-native && electron-builder",

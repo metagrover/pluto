@@ -3,34 +3,18 @@ import path from 'node:path';
 export const PLUTO_PRODUCT_NAME = 'Pluto';
 export const PLUTO_BUNDLE_IDENTIFIER = 'com.pluto.app';
 
-export const shouldAcquireProductionInstanceLock = (
-  isPackaged: boolean,
-): boolean => isPackaged;
-
 export const resolveDevelopmentUserDataDir = ({
   explicit,
   tempDir,
   productionDir,
-  allowProductionRecovery = false,
 }: {
   explicit?: string;
   tempDir: string;
   productionDir?: string;
-  allowProductionRecovery?: boolean;
-}): string => {
-  const resolved =
-    explicit?.trim() || path.join(tempDir, 'pluto-development-profile');
-  if (
-    !allowProductionRecovery &&
-    productionDir &&
-    path.resolve(resolved) === path.resolve(productionDir)
-  ) {
-    throw new Error(
-      'Development Electron cannot open the Pluto production profile. Launch the signed Pluto app instead.',
-    );
-  }
-  return resolved;
-};
+}): string =>
+  explicit?.trim() ||
+  productionDir ||
+  path.join(tempDir, 'pluto-development-profile');
 
 export const resolveProductionUserDataDir = (input: {
   platform: string;
@@ -43,13 +27,11 @@ export const resolveProductionUserDataDir = (input: {
 export const canOpenProductionDatabase = (input: {
   isPackaged: boolean;
   signedBuildValid: boolean;
-  targetsProductionProfile?: boolean;
-  recoveryKeyAvailable?: boolean;
   allowUnsignedPackaged?: boolean;
 }): boolean =>
-  input.isPackaged
-    ? input.signedBuildValid || Boolean(input.allowUnsignedPackaged)
-    : !input.targetsProductionProfile || Boolean(input.recoveryKeyAvailable);
+  !input.isPackaged ||
+  input.signedBuildValid ||
+  Boolean(input.allowUnsignedPackaged);
 
 export const resolveUserDataArgument = (argv: string[]): string | null => {
   const prefix = '--user-data-dir=';

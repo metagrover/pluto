@@ -42,8 +42,6 @@ export default defineConfig(({ command }) => ({
                 platform: process.platform,
                 homeDir: os.homedir(),
               }) ?? undefined,
-            allowProductionRecovery:
-              process.env.PLUTO_ALLOW_RECOVERY_PROFILE === '1',
           });
           const remoteDebuggingPort =
             process.env.PLUTO_REMOTE_DEBUGGING_PORT?.trim();

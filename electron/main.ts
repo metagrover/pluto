@@ -125,6 +125,10 @@ import { validatePreMeetingBriefRequest } from './preMeetingBrief';
 import { buildPreMeetingBrief } from './preMeetingBrief';
 import { synthesizePreMeetingBrief } from './preMeetingBriefSynthesis';
 import {
+  type ProjectRoutingState,
+  routeProjectCandidate,
+} from './projectRouting';
+import {
   isProjectScopeReviewBusy,
   reviewProjectScopeBatch,
 } from './projectScopeReview';
@@ -4388,54 +4392,102 @@ app.whenReady().then(async () => {
           .map((entity) => ({ id: entity.id, name: entity.name })),
       };
     };
-    projectThemeSynthesis = synthesizeProjectThemes(
-      {
-        listSources: () =>
-          (db.getMeetings() as db.PersistedMeeting[]).flatMap((meeting) => {
-            const source = sourceFromMeeting(meeting);
-            return source ? [source] : [];
-          }),
-        getSource: (id) => {
-          const meeting = db.getMeeting(id) as db.PersistedMeeting | undefined;
-          return meeting ? sourceFromMeeting(meeting) : null;
-        },
-        getState: readProjectThemeSynthesisState,
-        saveState: (state) =>
-          db.setSetting(projectThemeSynthesisStateKey, JSON.stringify(state)),
-        getProject: db.getEntity,
-        listProjects: () => db.getProjectPortfolio(),
-        saveTheme: db.saveSynthesizedProjectTheme,
-        generate: async (prompt, responseSchema) => {
-          const provider = await getProvider(await getAllSettings(db));
-          return provider.synthesizeKnowledgeDocument(prompt, {
-            purpose: 'projectScope',
-            responseSchema,
-            budget: { contextTokens: 32768, outputTokens: 8192 },
-            workClass: options?.background ? 'background' : 'project_review',
-            signal: AbortSignal.timeout(300_000),
-          });
-        },
-        isBusy: () =>
-          isProjectScopeReviewBusy(knowledgeSynthesisPause.snapshot()),
+    const publishProjects = () => {
+      queueAllKnowledgeDocsRefresh();
+      if (dreamingEntityQueue)
+        invalidateDreamingWork(dreamingEntityQueue, () =>
+          scheduleDreamingRun?.(),
+        );
+      BrowserWindow.getAllWindows().forEach((win) =>
+        win.webContents.send('MEETING_NOTES_UPDATED'),
+      );
+    };
+    const synthesisDependencies = {
+      listSources: () =>
+        (db.getMeetings() as db.PersistedMeeting[]).flatMap((meeting) => {
+          const source = sourceFromMeeting(meeting);
+          return source ? [source] : [];
+        }),
+      getSource: (id: string) => {
+        const meeting = db.getMeeting(id) as db.PersistedMeeting | undefined;
+        return meeting ? sourceFromMeeting(meeting) : null;
       },
-      { retryFailed: options?.retryFailed === true },
-    )
-      .then((result) => {
-        if (result.discovered > 0) {
-          queueAllKnowledgeDocsRefresh();
-          if (dreamingEntityQueue)
-            invalidateDreamingWork(dreamingEntityQueue, () =>
-              scheduleDreamingRun?.(),
-            );
-          BrowserWindow.getAllWindows().forEach((win) =>
-            win.webContents.send('MEETING_NOTES_UPDATED'),
-          );
-        }
-        return result;
-      })
-      .finally(() => {
-        projectThemeSynthesis = null;
+      getState: readProjectThemeSynthesisState,
+      saveState: (
+        state: import('./projectThemeSynthesis').ProjectThemeSynthesisState,
+      ) => db.setSetting(projectThemeSynthesisStateKey, JSON.stringify(state)),
+      getProject: db.getEntity,
+      listProjects: () => db.getProjectPortfolio(),
+      saveTheme: db.saveSynthesizedProjectTheme,
+      generate: async (
+        prompt: string,
+        responseSchema: Record<string, unknown>,
+      ) => {
+        const provider = await getProvider(await getAllSettings(db));
+        return provider.synthesizeKnowledgeDocument(prompt, {
+          purpose: 'projectScope',
+          responseSchema,
+          budget: { contextTokens: 32768, outputTokens: 8192 },
+          workClass: options?.background ? 'background' : 'project_review',
+          signal: AbortSignal.timeout(300_000),
+        });
+      },
+      isBusy: () =>
+        isProjectScopeReviewBusy(knowledgeSynthesisPause.snapshot()),
+    };
+    projectThemeSynthesis = (async () => {
+      const routing = await routeProjectCandidate(
+        {
+          ...synthesisDependencies,
+          generate: async (
+            prompt: string,
+            responseSchema: Record<string, unknown>,
+          ) => {
+            const provider = await getProvider(await getAllSettings(db));
+            return provider.synthesizeKnowledgeDocument(prompt, {
+              purpose: 'projectScope',
+              responseSchema,
+              budget: { contextTokens: 32768, outputTokens: 1500 },
+              workClass: options?.background ? 'background' : 'project_review',
+              signal: AbortSignal.timeout(300_000),
+            });
+          },
+          getState: (): ProjectRoutingState | null => {
+            try {
+              return JSON.parse(
+                db.getSetting('project_routing_state_v1') || 'null',
+              );
+            } catch {
+              return null;
+            }
+          },
+          saveState: (state: ProjectRoutingState) =>
+            db.setSetting('project_routing_state_v1', JSON.stringify(state)),
+          saveMembership: db.saveProjectRoutingMembership,
+        },
+        { retryFailed: options?.retryFailed === true },
+      );
+      if (routing.grouped > 0) publishProjects();
+      if (routing.deferred)
+        return {
+          discovered: 0,
+          remaining: routing.remaining,
+          failed: 0,
+          deferred: true,
+        };
+      const themes = await synthesizeProjectThemes(synthesisDependencies, {
+        retryFailed: options?.retryFailed === true,
       });
+      if (themes.discovered > 0) publishProjects();
+      return {
+        ...themes,
+        discovered: themes.discovered + routing.grouped,
+        remaining: themes.remaining + routing.remaining,
+        routingRemaining: routing.remaining,
+      };
+    })().finally(() => {
+      projectThemeSynthesis = null;
+    });
     return projectThemeSynthesis;
   };
   ipcMain.handle('DISCOVER_PROJECT_INITIATIVE', (_event, options) =>
@@ -4448,7 +4500,13 @@ app.whenReady().then(async () => {
       projectSynthesisTimer = null;
       try {
         const result = await runProjectThemeSynthesis({ background: true });
-        if (result.deferred || (result.remaining > 0 && result.failed === 0))
+        if (
+          result.deferred ||
+          (result.remaining > 0 &&
+            (result.failed === 0 ||
+              ('routingRemaining' in result &&
+                Number(result.routingRemaining) > 0)))
+        )
           scheduleProjectSynthesis?.();
       } catch {
         console.error(

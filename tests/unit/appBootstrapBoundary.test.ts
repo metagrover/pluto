@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const root = path.resolve(import.meta.dirname, '../..');
 
 describe('Electron bootstrap boundary', () => {
-  it('locks the packaged profile before importing database-owning main code', () => {
+  it('locks every selected profile before importing database-owning main code', () => {
     const source = fs.readFileSync(
       path.join(root, 'electron/bootstrap.ts'),
       'utf8',
@@ -13,8 +13,7 @@ describe('Electron bootstrap boundary', () => {
 
     expect(source).not.toContain("from './db'");
     expect(source).toContain("app.setPath('userData'");
-    expect(source).toContain('developmentTargetsProduction');
-    expect(source).toContain('hasValidRecoveryKeyFile');
+    expect(source).toContain('sourceRuntime: !app.isPackaged');
     expect(source).toContain('database_key_identity_mismatch');
     expect(source.indexOf('requestSingleInstanceLock')).toBeGreaterThan(-1);
     expect(source.indexOf('initializeApplicationDatabase({')).toBeGreaterThan(
@@ -26,16 +25,18 @@ describe('Electron bootstrap boundary', () => {
     expect(source).toContain('describeDatabaseStartupError');
   });
 
-  it('builds Electron from the bootstrap and always isolates development data', () => {
+  it('builds both source commands from the same bootstrap and profile selection', () => {
     const source = fs.readFileSync(path.join(root, 'vite.config.ts'), 'utf8');
     const packageJson = JSON.parse(
       fs.readFileSync(path.join(root, 'package.json'), 'utf8'),
-    ) as { main?: string };
+    ) as { main?: string; scripts: Record<string, string> };
 
     expect(source).toContain("bootstrap: 'electron/bootstrap.ts'");
     expect(source).toContain('resolveDevelopmentUserDataDir');
     expect(source).toContain('`--user-data-dir=${userDataDir}`');
     expect(packageJson.main).toBe('dist-electron/bootstrap.js');
+    expect(packageJson.scripts.start).toBe(packageJson.scripts.dev);
+    expect(packageJson.scripts.prestart).toBe(packageJson.scripts.predev);
   });
 
   it('closes the database after main-process consumers stop', () => {

@@ -48,6 +48,107 @@ afterEach(() => {
 });
 
 describe('database runtime', () => {
+  it('creates a source profile, reopens its meetings, and preserves files if its key cannot be unlocked', () => {
+    const root = makeRoot();
+    const databasePath = path.join(root, 'pluto.db');
+    const migrationsFolder = writeMigrations(root, [
+      {
+        tag: '0000_meetings',
+        when: 100,
+        sql: 'CREATE TABLE meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL);',
+      },
+    ]);
+    const backend = {
+      isEncryptionAvailable: () => true,
+      encryptString: (value: string) => Buffer.from(value),
+      decryptString: (value: Buffer) => value.toString(),
+    };
+    const original = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      keyStore: new ApplicationKeyStore({
+        storageDir: root,
+        backend,
+        sourceRuntime: true,
+      }),
+    });
+    original
+      .initialize()
+      .prepare('INSERT INTO meetings VALUES (?, ?)')
+      .run('fictional-meeting', 'Planning discussion');
+    original.close();
+    const envelopePath = path.join(root, 'app-key-envelope.json');
+    const envelopeBefore = fs.readFileSync(envelopePath);
+    const reopen = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      keyStore: new ApplicationKeyStore({
+        storageDir: root,
+        backend,
+        sourceRuntime: true,
+      }),
+    });
+    expect(reopen.initialize().prepare('SELECT * FROM meetings').all()).toEqual(
+      [{ id: 'fictional-meeting', title: 'Planning discussion' }],
+    );
+    reopen.close();
+    expect(fs.readFileSync(envelopePath)).toEqual(envelopeBefore);
+    const databaseBefore = fs.readFileSync(databasePath);
+    const filesBefore = fs.readdirSync(root);
+    const locked = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      keyStore: new ApplicationKeyStore({
+        storageDir: root,
+        sourceRuntime: true,
+        backend: {
+          ...backend,
+          decryptString: () => {
+            throw new Error('Keychain locked');
+          },
+        },
+      }),
+    });
+    expect(() => locked.initialize()).toThrowError(
+      expect.objectContaining({ code: 'database_key_unavailable' }),
+    );
+    expect(fs.readFileSync(databasePath)).toEqual(databaseBefore);
+    expect(fs.readFileSync(envelopePath)).toEqual(envelopeBefore);
+    expect(fs.readdirSync(root)).toEqual(filesBefore);
+    const wrongKey = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      keyStore: new ApplicationKeyStore({
+        storageDir: root,
+        sourceRuntime: true,
+        backend: {
+          ...backend,
+          decryptString: () => Buffer.alloc(32, 0xff).toString('base64'),
+        },
+      }),
+    });
+    expect(() => wrongKey.initialize()).toThrowError(
+      expect.objectContaining({ code: 'database_key_rejected' }),
+    );
+    expect(fs.readFileSync(databasePath)).toEqual(databaseBefore);
+    expect(fs.readFileSync(envelopePath)).toEqual(envelopeBefore);
+    fs.unlinkSync(envelopePath);
+    const missing = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      keyStore: new ApplicationKeyStore({
+        storageDir: root,
+        backend,
+        sourceRuntime: true,
+      }),
+    });
+    expect(() => missing.initialize()).toThrowError(
+      expect.objectContaining({ code: 'database_key_unavailable' }),
+    );
+    expect(fs.existsSync(envelopePath)).toBe(false);
+    expect(fs.readFileSync(databasePath)).toEqual(databaseBefore);
+  });
+
   it('initializes one configured file connection and closes idempotently', () => {
     const root = makeRoot();
     const runtime = createDatabaseRuntime({

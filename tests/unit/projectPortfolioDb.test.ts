@@ -6,6 +6,113 @@ const fixture = vi.hoisted(() => ({
 vi.mock('electron', () => ({ app: { getPath: () => fixture.directory } }));
 import * as db from '../../electron/db';
 afterAll(() => fs.rmSync(fixture.directory, { recursive: true, force: true }));
+describe('evidence-backed routing to an existing pinned project', () => {
+  function routingFixture(suffix: string) {
+    const qualification = {
+      version: 1,
+      state: 'qualified',
+      source: 'extraction',
+      reason: 'Established outcome',
+      assessedAt: '2026-09-01',
+    };
+    const parent = db.upsertEntity({
+      type: 'project',
+      name: `Archive program ${suffix}`,
+      metadata: { projectStarred: true, projectQualification: qualification },
+    });
+    const candidate = db.upsertEntity({
+      type: 'project',
+      name: `Permission validation ${suffix}`,
+      metadata: { projectQualification: qualification, custom: 'preserve' },
+    });
+    const parentQuote =
+      'The archive pilot needs access rules and permission validation for partner collections.';
+    const quote =
+      'Permission validation will check access rules before the searchable archive pilot launches.';
+    for (const [id, text, entity] of [
+      [`routing-parent-${suffix}`, parentQuote, parent],
+      [`routing-new-${suffix}`, quote, candidate],
+    ] as const) {
+      db.saveMeeting({ id, title: 'Archive discussion', user_notes: text });
+      db.addMeetingEntity({
+        meeting_id: id,
+        entity_id: entity.id,
+        context: text,
+      });
+    }
+    return {
+      parent,
+      candidate,
+      membership: {
+        projectId: candidate.id,
+        parentProjectId: parent.id,
+        relationship: 'workstream' as const,
+        sourceMeetingId: `routing-new-${suffix}`,
+        evidenceQuote: quote,
+        parentSourceMeetingId: `routing-parent-${suffix}`,
+        parentEvidenceQuote: parentQuote,
+        expectedMetadata: candidate.metadata,
+        expectedParentMetadata: parent.metadata,
+      },
+    };
+  }
+  it('files work, refreshes parent history, and preserves its name and pin', () => {
+    const { parent, candidate, membership } = routingFixture('file');
+    expect(db.saveProjectRoutingMembership(membership)).toBe(true);
+    expect(JSON.parse(db.getEntity(candidate.id)!.metadata!)).toMatchObject({
+      custom: 'preserve',
+      projectQualification: {
+        state: 'subordinate',
+        parentProjectId: parent.id,
+      },
+    });
+    expect(
+      db.getProjectBrief(parent.id)?.meetings.map((meeting) => meeting.id),
+    ).toContain(membership.sourceMeetingId);
+    expect(db.getEntity(parent.id)).toMatchObject({
+      name: parent.name,
+      metadata: parent.metadata,
+    });
+  });
+  it('rejects a source quote changed after inference without adding parent history', () => {
+    const { parent, candidate, membership } = routingFixture('stale');
+    db.saveMeeting({
+      id: membership.sourceMeetingId,
+      title: 'Corrected discussion',
+      user_notes: 'This is separate unrelated work.',
+    });
+    expect(db.saveProjectRoutingMembership(membership)).toBe(false);
+    expect(db.getEntity(candidate.id)?.metadata).toBe(candidate.metadata);
+    expect(
+      db.getProjectBrief(parent.id)?.meetings.map((meeting) => meeting.id),
+    ).not.toContain(membership.sourceMeetingId);
+  });
+  it('rejects a parent correction that arrives while inference runs', () => {
+    const { parent, membership } = routingFixture('parent-correction');
+    db.upsertEntity({
+      ...parent,
+      metadata: { projectPortfolioDisposition: 'dismissed' },
+    });
+    expect(db.saveProjectRoutingMembership(membership)).toBe(false);
+  });
+  it('uses reversible aliases and respects undo on future routing', () => {
+    const { parent, candidate, membership } = routingFixture('alias');
+    expect(
+      db.saveProjectRoutingMembership({ ...membership, relationship: 'alias' }),
+    ).toBe(true);
+    expect(db.resolveProjectIdentityId(candidate.id)).toBe(parent.id);
+    db.restoreProjectMerge(candidate.id);
+    const restored = db.getEntity(candidate.id)!;
+    expect(db.resolveProjectIdentityId(candidate.id)).toBe(candidate.id);
+    expect(
+      db.saveProjectRoutingMembership({
+        ...membership,
+        relationship: 'alias',
+        expectedMetadata: restored.metadata,
+      }),
+    ).toBe(false);
+  });
+});
 describe('project portfolio source summaries', () => {
   it('returns source activity without requiring tasks and keeps unsourced entries', () => {
     const project = db.upsertEntity({ type: 'project', name: 'Aurora' });

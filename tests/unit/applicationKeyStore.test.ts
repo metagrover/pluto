@@ -125,6 +125,54 @@ describe('ApplicationKeyStore', () => {
     });
   });
 
+  it('creates and reuses a source profile key without exporting a recovery key', () => {
+    const store = new ApplicationKeyStore({
+      storageDir: tmpDir,
+      backend: mockBackend,
+      sourceRuntime: true,
+    });
+    const first = store.getOrCreateMasterKey();
+    const envelopePath = path.join(tmpDir, 'app-key-envelope.json');
+    const original = fs.readFileSync(envelopePath);
+    const reopened = new ApplicationKeyStore({
+      storageDir: tmpDir,
+      backend: mockBackend,
+      sourceRuntime: true,
+    });
+    expect(reopened.getOrCreateMasterKey()).toEqual(first);
+    expect(fs.readFileSync(envelopePath)).toEqual(original);
+    expect(JSON.parse(original.toString()).version).toBe(1);
+    expect(fs.existsSync(path.join(tmpDir, 'app-recovery-key.json'))).toBe(
+      false,
+    );
+  });
+
+  it('rejects signed envelopes in source before decryption without changing them', () => {
+    const signed = new ApplicationKeyStore({
+      storageDir: tmpDir,
+      backend: mockBackend,
+      expectedStorageBinding: {
+        provider: 'electron_safe_storage',
+        bundleIdentifier: 'com.pluto.app',
+        teamIdentifier: 'PLUTOTEAM1',
+      },
+    });
+    signed.getOrCreateMasterKey();
+    const envelopePath = path.join(tmpDir, 'app-key-envelope.json');
+    const original = fs.readFileSync(envelopePath);
+    const decryptString = vi.fn(mockBackend.decryptString);
+    const source = new ApplicationKeyStore({
+      storageDir: tmpDir,
+      backend: { ...mockBackend, decryptString },
+      sourceRuntime: true,
+    });
+    expect(() => source.getOrCreateMasterKey()).toThrow(
+      'not bound to this signed Pluto identity',
+    );
+    expect(decryptString).not.toHaveBeenCalled();
+    expect(fs.readFileSync(envelopePath)).toEqual(original);
+  });
+
   it('rejects a legacy or mismatched binding before Keychain decryption', () => {
     const decryptString = vi.fn(() => {
       throw new Error('must not reach Keychain');

@@ -1,17 +1,12 @@
-import os from 'node:os';
-import path from 'node:path';
 import { app, dialog, shell } from 'electron';
 
 import {
   PLUTO_BUNDLE_IDENTIFIER,
   PLUTO_PRODUCT_NAME,
   canOpenProductionDatabase,
-  resolveProductionUserDataDir,
   resolveUserDataArgument,
-  shouldAcquireProductionInstanceLock,
 } from './appRuntimePolicy';
 import { ApplicationKeyStore } from './crypto/applicationKeyStore';
-import { hasValidRecoveryKeyFile } from './crypto/recoveryKeyFile';
 import { initializeApplicationDatabase } from './database/applicationDatabase';
 import {
   DatabaseLifecycleError,
@@ -33,20 +28,6 @@ const log = createLogger('Bootstrap');
 
 let focusPrimaryWindow: (() => void) | null = null;
 const developmentUserDataDir = resolveUserDataArgument(process.argv);
-const productionUserDataDir = resolveProductionUserDataDir({
-  platform: process.platform,
-  homeDir: os.homedir(),
-});
-const developmentTargetsProduction = Boolean(
-  !app.isPackaged &&
-    developmentUserDataDir &&
-    productionUserDataDir &&
-    path.resolve(developmentUserDataDir) ===
-      path.resolve(productionUserDataDir),
-);
-const recoveryKeyAvailable = Boolean(
-  productionUserDataDir && hasValidRecoveryKeyFile(productionUserDataDir),
-);
 if (!app.isPackaged && developmentUserDataDir) {
   app.setPath('userData', developmentUserDataDir);
 }
@@ -60,8 +41,6 @@ const allowUnsignedPackaged = process.env.PLUTO_STRICT_SIGNATURE !== '1';
 const canOpenDatabase = canOpenProductionDatabase({
   isPackaged: app.isPackaged,
   signedBuildValid: productionSignature.valid,
-  targetsProductionProfile: developmentTargetsProduction,
-  recoveryKeyAvailable,
   allowUnsignedPackaged,
 });
 const productionKeyStore =
@@ -76,9 +55,9 @@ const productionKeyStore =
           teamIdentifier: productionSignature.teamIdentifier,
         },
       })
-    : undefined;
-const requiresLock = shouldAcquireProductionInstanceLock(app.isPackaged);
-const hasLock = !requiresLock || app.requestSingleInstanceLock();
+    : new ApplicationKeyStore({ sourceRuntime: !app.isPackaged });
+// Every profile has one writer, including source checkouts and explicit overrides.
+const hasLock = app.requestSingleInstanceLock();
 
 if (!canOpenDatabase) {
   void app.whenReady().then(() => {

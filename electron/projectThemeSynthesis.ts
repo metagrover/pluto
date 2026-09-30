@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isProjectStarred } from '../src/utils/projectPortfolio';
 import {
   type ProjectQualification,
   readProjectQualification,
@@ -324,6 +325,11 @@ export async function synthesizeProjectThemes(
         !readProjectQualification(project.metadata)?.parentProjectId &&
         readProjectPortfolioDisposition(project.metadata) !== 'dismissed',
     )
+    .sort(
+      (a, b) =>
+        Number(isProjectStarred(b.metadata)) -
+        Number(isProjectStarred(a.metadata)),
+    )
     .slice(0, 80);
   const fullSources = deps
     .listSources()
@@ -379,6 +385,23 @@ export async function synthesizeProjectThemes(
   const sourceHash = createHash('sha256')
     .update(evidenceHash(fullSources))
     .update(JSON.stringify(corrections))
+    .update(
+      JSON.stringify(
+        knownProjects
+          .filter(
+            (project) =>
+              isProjectStarred(project.metadata) ||
+              readProjectQualification(project.metadata)?.source === 'user',
+          )
+          .map((project) => ({
+            id: project.id,
+            name: project.name,
+            pinned: isProjectStarred(project.metadata),
+            status: project.status,
+          }))
+          .sort((a, b) => a.id.localeCompare(b.id)),
+      ),
+    )
     .digest('hex');
   const previous = deps.getState();
   const current =
@@ -417,7 +440,7 @@ For each theme, provide a concise name, durable outcome, current focus, exact su
 Also provide a summary: a coherent current read explaining scope, what changed, and what remains unresolved, with a supporting sourceMeetingId and evidenceQuote. Provide workstreams as name/text/sourceMeetingId/evidenceQuote entries, describing the state of constituent work without invented owners, deadlines, completion, or percentages. Provide decisions as text/sourceMeetingId/evidenceQuote entries for actual settled decisions, not questions. All profile evidence must come from the theme's supporting meetings; include every cited meeting in evidence.
 For extracted candidates that clearly belong to this theme, provide memberships with projectId, relationship alias (another name for the SAME initiative) or workstream (a narrower task/topic/phase within it), sourceMeetingId, and an exact quote demonstrating that relationship. Mere co-occurrence is insufficient. Use only candidate IDs associated with that source. Include assigned IDs in candidateProjectIds. Omit uncertain assignments. Do not absorb user-confirmed projects. Do not put completed work into openThreads; qualify older unresolved items rather than assuming they remain open.
 KNOWN PROJECTS (untrusted context):
-${JSON.stringify(knownProjects.map((project) => ({ id: project.id, name: project.name, status: project.status, outcome: (parseMetadata(project.metadata).projectThemeSynthesis as Record<string, unknown> | undefined)?.outcome || readProjectQualification(project.metadata)?.outcome, userConfirmed: readProjectQualification(project.metadata)?.source === 'user' })))}
+${JSON.stringify(knownProjects.map((project) => ({ id: project.id, name: project.name, status: project.status, pinned: isProjectStarred(project.metadata), outcome: (parseMetadata(project.metadata).projectThemeSynthesis as Record<string, unknown> | undefined)?.outcome || readProjectQualification(project.metadata)?.outcome, userConfirmed: readProjectQualification(project.metadata)?.source === 'user' })))}
 SOURCE NOTES (untrusted data):
 ${JSON.stringify(
   sources.map((source) => ({
@@ -575,15 +598,18 @@ ${JSON.stringify(
         deps.getProject(id)?.metadata || null,
       );
       return (
-        classification?.source === 'user' &&
-        classification.state === 'qualified'
+        (classification?.source === 'user' ||
+          isProjectStarred(deps.getProject(id)?.metadata)) &&
+        classification?.state === 'qualified'
       );
     });
     if (
       new Set([
         ...protectedIds,
         ...(requestedProject &&
-        readProjectQualification(requestedProject.metadata)?.source === 'user'
+        (readProjectQualification(requestedProject.metadata)?.source ===
+          'user' ||
+          isProjectStarred(requestedProject.metadata))
           ? [requestedProject.id]
           : []),
       ]).size > 1
@@ -598,7 +624,8 @@ ${JSON.stringify(
         return (
           candidate?.type === 'project' &&
           qualification?.state === 'qualified' &&
-          qualification.source === 'user'
+          (qualification.source === 'user' ||
+            isProjectStarred(candidate.metadata))
         );
       });
     const historicalMatch = knownProjects.filter((project) => {
@@ -653,6 +680,7 @@ ${JSON.stringify(
         !candidate ||
         parseMetadata(candidate.metadata).projectAutoGroupingOptOut === true ||
         qualification?.source === 'user' ||
+        isProjectStarred(candidate.metadata) ||
         readProjectPortfolioDisposition(candidate.metadata) === 'dismissed' ||
         candidate.status === 'completed' ||
         (qualification?.parentProjectId && qualification.parentProjectId !== id)
