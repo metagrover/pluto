@@ -78,7 +78,9 @@ describe('compact person knowledge synthesis', () => {
     expect(chunk.active_streams).toHaveLength(1);
     expect(chunk.evidence_index).toHaveLength(2);
     expect(grounded.current_read.source_count).toBe(2);
-    expect(grounded.current_read.headline).toContain('tenure field');
+    expect(grounded.current_read.headline).toBe(
+      'Avery has worked on tenure-related changes.',
+    );
     expect(grounded.evidence_index).toHaveLength(2);
   });
 });

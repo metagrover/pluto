@@ -167,7 +167,7 @@ describe('knowledge V2 utilities', () => {
       ]),
     );
     expect(recurring.current_read.headline).toBe(
-      'Avery Chen has worked on launch reviews across multiple conversations.',
+      'Avery Chen has worked on launch reviews.',
     );
     expect(recurring.current_read.source_count).toBe(2);
     expect(recurring.active_streams[0].current_read).not.toContain('208a5a10');
