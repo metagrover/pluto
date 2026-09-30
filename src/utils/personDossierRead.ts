@@ -25,7 +25,7 @@ interface PersonReadEvidence {
 const citationId =
   /\s*\([^)]*[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}[^)]*\)/gi;
 const observedWork =
-  /\b(?:working|worked|building|built|developing|developed|implementing|implemented|leading|led|managing|managed|optimizing|optimized|review|reviewing|reviewed|investigating|addressing|running|advising|advised|adding|added|identifying|identified|responsible for|owns|owned)\b/i;
+  /\b(?:working|worked|building|built|developing|developed|implementing|implemented|leading|led|managing|managed|optimizing|optimized|preparing|prepared|review|reviewing|reviewed|investigating|addressing|running|advising|advised|adding|added|identifying|identified|responsible for|owns|owned)\b/i;
 const genericTitleWords = new Set([
   'and',
   'work',
@@ -73,6 +73,12 @@ const genericEvidenceWords = new Set([
   'project',
   'review',
   'reviewed',
+  'recent',
+  'share',
+  'shared',
+  'specific',
+  'today',
+  'tomorrow',
   'team',
   'worked',
   'working',
@@ -137,6 +143,50 @@ const recurringDirectSources = <T extends PersonReadEvidence>(
   );
 };
 
+const recurringActivityRead = <T extends PersonReadEvidence>(
+  name: string,
+  evidence: T[],
+) => {
+  const nameWords = topicWords(name);
+  const sources = evidence.filter((item) => observedWork.test(item.quote));
+  const anchors = sources.flatMap((source) =>
+    (source.quote.match(/\b[a-z][a-z]+\b/g) ?? [])
+      .map((word) => ({ word, topic: [...topicWords(word)][0] }))
+      .filter(
+        ({ topic }) =>
+          topic.length >= 5 &&
+          !nameWords.has(topic) &&
+          !genericEvidenceWords.has(topic),
+      ),
+  );
+  for (const { word, topic } of anchors) {
+    const matches = sources.filter((source) =>
+      topicWords(source.quote).has(topic),
+    );
+    if (new Set(matches.map((source) => source.meeting_id)).size < 2) continue;
+    const distinct = Array.from(
+      new Map(matches.map((source) => [source.meeting_id, source])).values(),
+    ).sort(
+      (a, b) =>
+        (Date.parse(b.captured_at ?? '') || 0) -
+        (Date.parse(a.captured_at ?? '') || 0),
+    );
+    return {
+      headline: `Recent conversations show ${name} working on ${word}.`,
+      workstreams: [
+        {
+          id: `recent-${topic}`,
+          title: word,
+          read: null,
+          detail: distinct[0].quote,
+          sources: distinct,
+        },
+      ],
+    };
+  }
+  return null;
+};
+
 export const cleanPersonReadText = (text: string): string =>
   text
     .replace(citationId, '')
@@ -167,6 +217,7 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
   name: string,
   streams: PersonReadStream[],
   evidence: T[],
+  recentActivity: PersonReadEvidence[] = [],
 ) => {
   const recurring = streams
     .map((stream) => {
@@ -208,6 +259,10 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
     )
     .sort((a, b) => b.sources.length - a.sources.length)
     .slice(0, 3);
+  if (recurring.length === 0) {
+    const activityRead = recurringActivityRead(name, recentActivity);
+    if (activityRead) return activityRead;
+  }
   const topic = recurring[0]?.title.replace(/\b[A-Z][a-z]+\b/g, (word) =>
     word.toLocaleLowerCase(),
   );
