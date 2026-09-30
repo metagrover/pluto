@@ -32,6 +32,30 @@ const rows: PersonBriefingRow[] = [
 ];
 
 describe('PeopleBriefing', () => {
+  it('does not show the owner in the dossier list', () => {
+    const markup = renderToStaticMarkup(
+      <PeopleBriefing
+        rows={[
+          rows[0],
+          { ...rows[0], id: 'self', name: 'Jordan', isSelf: true },
+        ]}
+        onSelectPerson={() => {}}
+      />,
+    );
+    expect(markup).toContain('Avery Chen');
+    expect(markup).not.toContain('Jordan');
+    expect(markup).not.toContain('data-person-id="self"');
+
+    const onlyOwner = renderToStaticMarkup(
+      <PeopleBriefing
+        rows={[{ ...rows[0], id: 'self', name: 'Jordan', isSelf: true }]}
+        onSelectPerson={() => {}}
+      />,
+    );
+    expect(onlyOwner).toContain('No relationship context yet');
+    expect(onlyOwner).not.toContain('Search people');
+  });
+
   it('presents people as compact meeting-style rows', () => {
     const markup = renderToStaticMarkup(
       <PeopleBriefing rows={rows} onSelectPerson={() => {}} />,

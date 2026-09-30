@@ -17,6 +17,7 @@ import {
 } from './knowledgeChunking';
 import {
   getKnowledgeSynthesisInputConfig,
+  isOwnPersonContextDoc,
   knowledgeDocNeedsSynthesis,
   knowledgeDocSatisfiesMeetingRefresh,
   parseKnowledgeDocConfig,
@@ -2052,6 +2053,10 @@ const synthesizeKnowledgeDocNowInternal = async (
 
 const runQueuedSynthesis = (docId: string): void => {
   const state = getState(docId);
+  if (isAutoSkippedKnowledgeDoc(db.getKnowledgeDoc(docId))) {
+    state.pending = false;
+    return;
+  }
   if (queuedSynthesisPaused) {
     state.pending = true;
     return;
@@ -2087,6 +2092,7 @@ export const queueKnowledgeDocRefresh = (
   docId: string,
   delayMs = SYNTHESIS_DEBOUNCE_MS,
 ): void => {
+  if (isAutoSkippedKnowledgeDoc(db.getKnowledgeDoc(docId))) return;
   const state = getState(docId);
   state.pending = true;
 
@@ -2130,6 +2136,9 @@ export const refreshKnowledgeDocNow = async (
   docId: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<db.KnowledgeDoc | undefined> => {
+  if (isAutoSkippedKnowledgeDoc(db.getKnowledgeDoc(docId))) {
+    return db.getKnowledgeDoc(docId);
+  }
   if (queuedSynthesisPaused) {
     const state = getState(docId);
     state.pending = true;
@@ -2219,6 +2228,17 @@ export const synthesizeEntitySummary = async (
   );
 };
 
+const isAutoSkippedKnowledgeDoc = (
+  doc: db.KnowledgeDoc | undefined,
+): boolean => {
+  if (!doc || doc.scope_type !== 'person_context') return false;
+  const selfId = db.identityStore.getSelfPersonId();
+  return isOwnPersonContextDoc(
+    { ...doc, scope_key: db.resolvePersonIdentityId(doc.scope_key) },
+    selfId ? db.resolvePersonIdentityId(selfId) : null,
+  );
+};
+
 const ensureDocsAndCollectActive = (): db.KnowledgeDoc[] => {
   const globalDoc = db.ensureGlobalKnowledgeDoc();
   db.syncKnowledgeProjectLifecycle({
@@ -2233,7 +2253,9 @@ const ensureDocsAndCollectActive = (): db.KnowledgeDoc[] => {
     minMentions: 3,
     inactiveDays: 90,
   });
-  const docs = db.getKnowledgeDocs({ includeInactive: false });
+  const docs = db
+    .getKnowledgeDocs({ includeInactive: false })
+    .filter((doc) => !isAutoSkippedKnowledgeDoc(doc));
   if (!docs.some((doc) => doc.id === globalDoc.id)) {
     return [globalDoc, ...docs];
   }
@@ -2297,7 +2319,11 @@ const getKnowledgeDocIdsForMeeting = (meetingId: string): Set<string> => {
   const personIds = db.getPersonEntityIdsForMeeting(meetingId);
   for (const personId of personIds) {
     const personDoc = db.getKnowledgeDocByScope('person_context', personId);
-    if (personDoc && personDoc.status !== 'inactive') {
+    if (
+      personDoc &&
+      personDoc.status !== 'inactive' &&
+      !isAutoSkippedKnowledgeDoc(personDoc)
+    ) {
       docIds.add(personDoc.id);
     }
   }
