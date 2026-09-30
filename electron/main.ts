@@ -579,10 +579,11 @@ import {
   resolveCurrentMeeting,
   resolvePersistedMeetingEvidenceState,
 } from './intelligence/currentMeetingResolver';
+import { completeLiveMeetingChatAnswer } from './intelligence/liveMeetingChatAnswer';
 import { createLiveMeetingContextCoordinator } from './intelligence/liveMeetingContextCoordinator';
 import {
+  buildAmbiguousMeetingAskPlutoResponse,
   buildLiveMeetingAskPlutoContext,
-  buildLiveMeetingFallbackResponse,
   buildMeetingAskPlutoContext,
   buildMeetingAskPlutoPrompt,
   buildMeetingAskPlutoProviderUnavailableResponse,
@@ -8068,6 +8069,8 @@ app.whenReady().then(async () => {
                 const selection = liveMeetingContextIndex.select(
                   activeMeeting.meetingId,
                   conversation.retrievalQuery,
+                  undefined,
+                  conversation.routingQuery,
                 );
                 console.info('[Pluto][Live context] selected', {
                   meetingId: activeMeeting.meetingId,
@@ -8086,7 +8089,7 @@ app.whenReady().then(async () => {
                       )
                       .join('\n')}`
                   : undefined;
-                return buildLiveMeetingAskPlutoContext({
+                const selectedContext = buildLiveMeetingAskPlutoContext({
                   ...request.scope,
                   meetingId: activeMeeting.meetingId,
                   notes: [request.scope.notes, rollingContext, speakerContext]
@@ -8098,6 +8101,10 @@ app.whenReady().then(async () => {
                       ? selection.segments
                       : request.scope.transcript,
                 });
+                return {
+                  ...selectedContext,
+                  statusNote: `${selectedContext.statusNote} ${selection.segments.length < selection.totalConfirmedSegments ? 'These are selected transcript excerpts, not the complete meeting. Do not claim an exhaustive list.' : 'All retained confirmed transcript turns are supplied.'}`,
+                };
               })()
             : (() => {
                 const meetingId = request.scope.meetingId.trim();
@@ -8145,6 +8152,12 @@ app.whenReady().then(async () => {
           elapsedMs: Date.now() - startTime,
         });
 
+        const clarificationResponse = buildAmbiguousMeetingAskPlutoResponse(
+          conversation,
+          context,
+        );
+        if (clarificationResponse) return clarificationResponse;
+
         if (context.status === 'unavailable') {
           return buildUnavailableMeetingAskPlutoResponse(
             {
@@ -8155,10 +8168,10 @@ app.whenReady().then(async () => {
           );
         }
 
-        const preparedResponse = buildPreparedMeetingAskPlutoResponse(
-          query,
-          context,
-        );
+        const preparedResponse =
+          conversation.relation === 'new_topic'
+            ? buildPreparedMeetingAskPlutoResponse(query, context)
+            : null;
         if (preparedResponse) {
           if (!event.sender.isDestroyed()) {
             event.sender.send('intelligence:meeting-chat:delta', {
@@ -8203,6 +8216,11 @@ app.whenReady().then(async () => {
           promptChars: prompt.length,
           elapsedMs: Date.now() - startTime,
         });
+        const structuredLiveAnswer = context.scope.type === 'live_meeting';
+        const bufferFactualAnswer =
+          structuredLiveAnswer ||
+          (assistanceRoute.mode === 'recall' &&
+            assistanceRoute.recallKind === 'fact');
         let answerRaw = '';
         let firstTokenAt: number | undefined;
         const visibleStream = createMeetingAskPlutoVisibleStream((delta) => {
@@ -8215,11 +8233,12 @@ app.whenReady().then(async () => {
         try {
           answerRaw = await provider.answerAskPluto(prompt, {
             signal: controller.signal,
-            live: context.scope.type === 'live_meeting',
+            live: structuredLiveAnswer,
+            jsonMode: structuredLiveAnswer,
             onToken: (delta) => {
               if (delta && firstTokenAt === undefined)
                 firstTokenAt = Date.now();
-              visibleStream.push(delta);
+              if (!bufferFactualAnswer) visibleStream.push(delta);
             },
           });
         } catch (providerError) {
@@ -8228,15 +8247,6 @@ app.whenReady().then(async () => {
             `[Pluto][Ask Pluto][main] provider unavailable (${requestId}) after ${Date.now() - startTime}ms:`,
             providerError,
           );
-          const liveFallback = buildLiveMeetingFallbackResponse({ context });
-          if (liveFallback) {
-            console.info('[Pluto][Ask Pluto][main] live-snapshot-fallback', {
-              requestId,
-              citationCount: liveFallback.citations.length,
-              elapsedMs: Date.now() - startTime,
-            });
-            return liveFallback;
-          }
           return buildMeetingAskPlutoProviderUnavailableResponse({
             scope: context.scope,
             query,
@@ -8253,10 +8263,33 @@ app.whenReady().then(async () => {
           elapsedMs: Date.now() - startTime,
         });
 
-        return buildMeetingAskPlutoResponseFromAnswer({
-          answerRaw,
-          context,
-        });
+        const response = structuredLiveAnswer
+          ? await completeLiveMeetingChatAnswer({
+              raw: answerRaw,
+              context,
+              route: assistanceRoute,
+              query: conversation.priorQuestion
+                ? `${conversation.priorQuestion}\nCurrent request: ${query}`
+                : query,
+              generate: (prompt) =>
+                provider.answerAskPluto(prompt, {
+                  signal: controller.signal,
+                  live: true,
+                  jsonMode: true,
+                }),
+            })
+          : buildMeetingAskPlutoResponseFromAnswer({
+              answerRaw,
+              context,
+              assistanceRoute,
+            });
+        if (bufferFactualAnswer && !event.sender.isDestroyed()) {
+          event.sender.send('intelligence:meeting-chat:delta', {
+            requestId,
+            delta: response.answer,
+          });
+        }
+        return response;
       } catch (e) {
         if (controller.signal.aborted) {
           return {

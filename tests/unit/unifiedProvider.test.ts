@@ -758,7 +758,7 @@ describe('UnifiedLLMProvider', () => {
     let requestBody: Record<string, unknown> = {};
     installFetchMock((_url, init) => {
       requestBody = parseRequestBody(init);
-      return jsonResponse({ response: 'Live answer' });
+      return jsonResponse({ message: { content: 'Live answer' } });
     });
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'qwen3.5:9b',
@@ -768,7 +768,7 @@ describe('UnifiedLLMProvider', () => {
 
     expect(requestBody.think).toBe(false);
     expect(requestBody.options).toMatchObject({
-      num_ctx: 8192,
+      num_ctx: 4096,
       num_predict: 768,
     });
   });
@@ -783,7 +783,7 @@ describe('UnifiedLLMProvider', () => {
             start(controller) {
               controller.enqueue(
                 encoder.encode(
-                  `${JSON.stringify({ response: 'Complete answer.', done: true })}\n`,
+                  `${JSON.stringify({ message: { content: 'Complete answer.' }, done: true })}\n`,
                 ),
               );
             },
@@ -1066,10 +1066,13 @@ describe('UnifiedLLMProvider', () => {
             ],
           });
         }
-        if (url.endsWith('/api/generate')) {
+        if (url.endsWith('/api/generate') || url.endsWith('/api/chat')) {
           const body = parseRequestBody(init);
           selectedModels.push(String(body.model));
-          return jsonResponse({ response: 'Grounded answer' });
+          return jsonResponse({
+            response: 'Grounded answer',
+            message: { content: 'Grounded answer' },
+          });
         }
         throw new Error(`Unexpected URL: ${url}`);
       },
@@ -1591,7 +1594,7 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
     expect(
       calculateOllamaContextBudget('a'.repeat(1_000), 'askPlutoLive'),
     ).toEqual({
-      num_ctx: 8192,
+      num_ctx: 4096,
       num_predict: 768,
     });
   });

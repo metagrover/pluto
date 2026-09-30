@@ -4,7 +4,7 @@ export interface MeetingAskPlutoVisibleStream {
 }
 
 const EVIDENCE_PREFIX = '[evidence';
-const COMPLETE_EVIDENCE_REFERENCE = /^\[Evidence\s+\d+\]/i;
+const COMPLETE_EVIDENCE_REFERENCE = /^\[Evidence\s+\d+(?:\s*,\s*\d+)*\]/i;
 const MEETING_EVIDENCE_PREAMBLES = [
   'based on the meeting evidence provided',
   'based on the meeting evidence',
@@ -69,7 +69,7 @@ export const stripMeetingAskPlutoTimestampNarration = (
   cleaned = cleaned
     .replace(/\s+([.,;:!?])/g, '$1')
     .replace(/([.,;:!?])\s*\1+/g, '$1')
-    .replace(/\s{2,}/g, ' ')
+    .replace(/[^\S\r\n]{2,}/g, ' ')
     .replace(/^\s*[,;:—-]\s*/, '')
     .trim();
   if (/^[.,;:!?\s-]*$/.test(cleaned)) {
@@ -82,7 +82,7 @@ const couldBecomeEvidenceReference = (value: string) => {
   const normalized = value.toLowerCase();
   if (EVIDENCE_PREFIX.startsWith(normalized)) return true;
   if (!normalized.startsWith(EVIDENCE_PREFIX)) return false;
-  return /^\s+\d*$/.test(value.slice(EVIDENCE_PREFIX.length));
+  return /^\s+\d*(?:\s*,\s*\d*)*$/.test(value.slice(EVIDENCE_PREFIX.length));
 };
 
 export const createMeetingAskPlutoVisibleStream = (

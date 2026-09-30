@@ -52,6 +52,16 @@ describe('meeting Ask Pluto visible stream', () => {
     }
   });
 
+  it('removes grouped references at every chunk boundary', () => {
+    const answer = 'Testing is incomplete [Evidence 1, 3].';
+    for (let index = 1; index < answer.length; index += 1) {
+      expect(streamChunks([answer.slice(0, index), answer.slice(index)])).toBe(
+        'Testing is incomplete .',
+      );
+    }
+    expect(streamChunks(answer.split(''))).toBe('Testing is incomplete .');
+  });
+
   it('preserves brackets that are not evidence references', () => {
     expect(streamChunks(['Use [draft] and ', '[Evidence-based notes].'])).toBe(
       'Use [draft] and [Evidence-based notes].',
@@ -60,6 +70,14 @@ describe('meeting Ask Pluto visible stream', () => {
 
   it('does not expose an unfinished evidence reference on flush', () => {
     expect(streamChunks(['Isha [Evidence 2'])).toBe('Isha ');
+  });
+
+  it('preserves paragraphs and bullet boundaries when cleaning prose', () => {
+    expect(
+      stripMeetingAskPlutoTimestampNarration(
+        'Decisions:\n\n- Delay launch.\n\nActions:\n- Prepare tests.',
+      ),
+    ).toBe('Decisions:\n\n- Delay launch.\n\nActions:\n- Prepare tests.');
   });
 
   it('strips awkward raw timestamp narration clauses from prose', () => {

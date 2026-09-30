@@ -42,16 +42,79 @@ describe('meeting Ask Pluto conversational context', () => {
     });
 
     expect(resolution.relation).toBe('follow_up');
-    expect(resolution.retrievalQuery).toContain(
-      'Current follow-up: What should I do about that?',
-    );
-    expect(resolution.retrievalQuery).toContain(
-      'Prior user topic: What is the main risk?',
-    );
-    expect(resolution.retrievalQuery).toContain(
-      'Previously cited meeting evidence: Chris said',
-    );
+    expect(resolution.retrievalQuery).toContain('What should I do about that?');
+    expect(resolution.retrievalQuery).toContain('What is the main risk?');
+    expect(resolution.retrievalQuery).toContain('Chris said');
     expect(resolution.priorEvidenceHintCount).toBe(1);
+  });
+
+  it.each(["No, that's incorrect.", 'Are you sure?', 'You missed something.'])(
+    'rechecks the original subject without the disputed answer: %s',
+    (query) => {
+      const index = createLiveMeetingContextIndex();
+      index.ingest('meeting-1', [
+        {
+          id: 'author',
+          speaker: 'Call audio',
+          text: 'Morgan actually built the five phase plan.',
+          timestampMs: 1_000,
+          confirmed: true,
+        },
+        ...Array.from({ length: 30 }, (_, index) => ({
+          id: `action-${index}`,
+          speaker: 'Me',
+          text: 'I will send the follow-up tomorrow.',
+          timestampMs: (index + 2) * 1_000,
+          confirmed: true,
+        })),
+      ]);
+      const resolution = resolveMeetingAskPlutoConversation({
+        query,
+        turns: exchange('Who created this plan?', 'Alex created the plan.', [
+          'Alex will send a follow-up.',
+        ]),
+      });
+      expect(resolution).toMatchObject({
+        relation: 'follow_up',
+        turnMode: 'challenge',
+        retrievalPolicy: 'fresh',
+        retrievalQuery: 'Who created this plan?',
+        priorEvidenceHintCount: 0,
+      });
+      const selection = index.select(
+        'meeting-1',
+        resolution.retrievalQuery,
+        undefined,
+        resolution.routingQuery,
+      );
+      expect(selection.intent).toBe('fact');
+      expect(selection.segments.map(({ id }) => id)).toContain('author');
+    },
+  );
+
+  it('retains the original subject across repeated challenges', () => {
+    const resolution = resolveMeetingAskPlutoConversation({
+      query: 'Are you sure?',
+      turns: [
+        ...exchange('Who created this plan?', 'Alex created the plan.'),
+        ...exchange("No, that's incorrect.", 'Alex created the plan.'),
+      ],
+    });
+    expect(resolution.retrievalQuery).toBe('Who created this plan?');
+    expect(resolution.priorQuestion).toBe('Who created this plan?');
+  });
+
+  it('does not search for an uncited assistant answer on ordinary follow-ups', () => {
+    const resolution = resolveMeetingAskPlutoConversation({
+      query: 'Tell me more about that.',
+      turns: exchange(
+        'What is the launch risk?',
+        'Invented person owns an unrelated project.',
+      ),
+    });
+    expect(resolution.retrievalQuery).toContain('What is the launch risk?');
+    expect(resolution.retrievalQuery).not.toContain('Invented person');
+    expect(resolution.retrievalQuery).not.toContain('Current follow-up:');
   });
 
   it('keeps a self-contained question independent from the prior answer', () => {
@@ -203,10 +266,10 @@ describe('meeting Ask Pluto conversational context', () => {
     });
     expect(salesFollowUp.relation).toBe('follow_up');
     expect(salesFollowUp.retrievalQuery).toContain(
-      'Current follow-up: What is she concerned about?',
+      'What is she concerned about?',
     );
     expect(salesFollowUp.retrievalQuery).toContain(
-      'Prior user topic: What did the prospect say about pricing?',
+      'What did the prospect say about pricing?',
     );
 
     // Recruiting domain: pronoun follow-up
@@ -228,5 +291,26 @@ describe('meeting Ask Pluto conversational context', () => {
       ),
     });
     expect(participantFollowUp.relation).toBe('follow_up');
+  });
+  it('starts a new subject for a named explanation but retains a referential explanation', () => {
+    const turns = exchange('Who created the plan?', 'Morgan created it.');
+    expect(
+      resolveMeetingAskPlutoConversation({ query: 'Explain pricing', turns }),
+    ).toMatchObject({
+      relation: 'new_topic',
+      retrievalQuery: 'Explain pricing',
+    });
+    expect(
+      resolveMeetingAskPlutoConversation({ query: 'Explain that', turns }),
+    ).toMatchObject({
+      relation: 'follow_up',
+      priorQuestion: 'Who created the plan?',
+    });
+    expect(routeMeetingAskPlutoAssistance('Explain that')).toEqual({
+      mode: 'explanation',
+    });
+    expect(
+      routeMeetingAskPlutoAssistance('Draft a message about that'),
+    ).toEqual({ mode: 'draft' });
   });
 });

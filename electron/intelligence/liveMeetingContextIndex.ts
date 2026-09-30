@@ -43,7 +43,7 @@ interface MeetingIndexState {
 const DEFAULT_SEGMENT_LIMIT = 2_000;
 const DEFAULT_CHARACTER_LIMIT = 1_500_000;
 const DEFAULT_SELECTION_LIMIT = 24;
-const ASK_PLUTO_SEGMENT_CHARACTER_LIMIT = 500;
+const SELECTION_CHARACTER_LIMIT = 12_000;
 const DEFAULT_CHECKPOINT_CHARACTER_LIMIT = 200_000;
 
 const STOP_WORDS = new Set([
@@ -77,6 +77,16 @@ const STOP_WORDS = new Set([
   'who',
   'why',
   'with',
+  'meeting',
+  'summarize',
+  'summarise',
+  'summary',
+  'recap',
+  'give',
+  'brief',
+  'conversation',
+  'discussion',
+  'please',
 ]);
 
 const normalize = (value: string) => value.trim().toLocaleLowerCase();
@@ -279,7 +289,7 @@ export const createLiveMeetingContextIndex = (
           id: segment.id,
           speaker: resolveMeetingSpeakerLabel(segment),
           ...(segment.source ? { source: segment.source } : {}),
-          text: segment.text.trim().slice(0, ASK_PLUTO_SEGMENT_CHARACTER_LIMIT),
+          text: segment.text.trim(),
           timestampMs: segment.timestampMs,
           confirmed: true,
         };
@@ -304,6 +314,7 @@ export const createLiveMeetingContextIndex = (
       meetingId: string,
       query: string,
       limit = DEFAULT_SELECTION_LIMIT,
+      intentQuery = query,
     ): LiveMeetingContextSelection {
       const state = states.get(meetingId.trim());
       const ordered = state?.orderedSegments ?? [];
@@ -312,13 +323,27 @@ export const createLiveMeetingContextIndex = (
         Math.min(DEFAULT_SELECTION_LIMIT, limit),
       );
       const speakers = [...new Set(ordered.map((segment) => segment.speaker))];
-      const intent = classifyLiveMeetingQuery(query, speakers);
+      const intent = classifyLiveMeetingQuery(intentQuery, speakers);
       if (ordered.length === 0) {
         return { intent, segments: [], totalConfirmedSegments: 0 };
       }
 
+      const fitSelection = (
+        segments: MeetingAskPlutoLiveTranscriptSegment[],
+      ) => {
+        let characters = 0;
+        return segments.filter((segment, index) => {
+          if (
+            index > 0 &&
+            characters + segment.text.length > SELECTION_CHARACTER_LIMIT
+          )
+            return false;
+          characters += segment.text.length;
+          return true;
+        });
+      };
       const latestTimestampMs = ordered.at(-1)?.timestampMs ?? 0;
-      const durationMs = recentDurationMs(query);
+      const durationMs = recentDurationMs(intentQuery);
       if (intent === 'recent_range') {
         const startMs = Math.max(
           0,
@@ -329,13 +354,13 @@ export const createLiveMeetingContextIndex = (
         );
         return {
           intent,
-          segments: evenlySample(candidates, boundedLimit),
+          segments: fitSelection(evenlySample(candidates, boundedLimit)),
           totalConfirmedSegments: ordered.length,
           temporalRange: { startMs, endMs: latestTimestampMs },
         };
       }
 
-      const normalizedQuery = normalize(query);
+      const normalizedQuery = normalize(intentQuery);
       const queryTokens = new Set(tokensFor(query));
       const namedSpeakers = speakers.filter((speaker) =>
         normalizedQuery.includes(normalize(speaker)),
@@ -347,10 +372,15 @@ export const createLiveMeetingContextIndex = (
           normalizedSpeakers.has(normalize(segment.speaker)),
         );
       }
-      if (intent === 'meeting_summary') {
+      if (
+        intent === 'meeting_summary' &&
+        !candidates.some((segment) =>
+          tokensFor(segment.text).some((token) => queryTokens.has(token)),
+        )
+      ) {
         return {
           intent,
-          segments: evenlySample(candidates, boundedLimit),
+          segments: fitSelection(evenlySample(candidates, boundedLimit)),
           totalConfirmedSegments: ordered.length,
         };
       }
@@ -371,21 +401,37 @@ export const createLiveMeetingContextIndex = (
             right.segment.timestampMs - left.segment.timestampMs,
         );
       const continuityCount = Math.min(
-        4,
+        2,
         Math.max(1, Math.floor(boundedLimit / 4)),
       );
-      const relevant = scored
-        .filter((candidate) => candidate.score >= 1)
-        .slice(0, Math.max(1, boundedLimit - continuityCount))
-        .map((candidate) => candidate.segment);
-      const continuity = ordered.slice(-continuityCount);
       const selected = new Map<string, MeetingAskPlutoLiveTranscriptSegment>();
-      for (const segment of [...relevant, ...continuity]) {
+      let selectedCharacters = 0;
+      const add = (segment: MeetingAskPlutoLiveTranscriptSegment) => {
+        if (selected.has(segment.id) || selected.size >= boundedLimit) return;
+        if (
+          selectedCharacters + segment.text.length >
+            SELECTION_CHARACTER_LIMIT &&
+          selected.size > 0
+        )
+          return;
         selected.set(segment.id, segment);
+        selectedCharacters += segment.text.length;
+      };
+      // Keep the explanation/correction next to a matching turn, even when it
+      // uses a pronoun instead of repeating the search terms.
+      for (const { segment, score } of scored) {
+        if (score < 1 || selected.size >= boundedLimit - continuityCount) break;
+        add(segment);
+        const position = ordered.findIndex((item) => item.id === segment.id);
+        if (intent !== 'speaker_recall') {
+          if (position > 0) add(ordered[position - 1]);
+          if (position + 1 < ordered.length) add(ordered[position + 1]);
+        }
       }
+      for (const segment of ordered.slice(-continuityCount)) add(segment);
       return {
         intent,
-        segments: chronological([...selected.values()]).slice(-boundedLimit),
+        segments: chronological([...selected.values()]),
         totalConfirmedSegments: ordered.length,
         ...(intent === 'coaching'
           ? { speakerStats: speakerStatsFor(ordered) }

@@ -75,9 +75,14 @@ export const createLiveMeetingContextCoordinator = (dependencies: {
       return accepted;
     },
 
-    select(meetingId: string, query: string, limit?: number) {
+    select(
+      meetingId: string,
+      query: string,
+      limit?: number,
+      intentQuery?: string,
+    ) {
       hydrate(meetingId);
-      return index.select(meetingId, query, limit);
+      return index.select(meetingId, query, limit, intentQuery);
     },
 
     flush(meetingId: string) {

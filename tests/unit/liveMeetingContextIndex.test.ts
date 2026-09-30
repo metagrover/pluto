@@ -41,6 +41,51 @@ describe('live meeting context index', () => {
     });
   });
 
+  it('retains a fact after 500 characters and its neighboring explanation', () => {
+    const index = createLiveMeetingContextIndex();
+    const longTurn = `${'Background detail. '.repeat(40)}Morgan created the migration plan.`;
+    index.ingest('meeting-1', [
+      segment('long', 1000, longTurn),
+      segment(
+        'reason',
+        2000,
+        'Because testing found a serious gap, we postponed it.',
+      ),
+      ...Array.from({ length: 30 }, (_, i) =>
+        segment(`noise-${i}`, 3000 + i, 'An unrelated design discussion.'),
+      ),
+    ]);
+    const selection = index.select(
+      'meeting-1',
+      'Who created the migration plan?',
+    );
+    expect(selection.segments.find((s) => s.id === 'long')?.text).toBe(
+      longTurn,
+    );
+    expect(selection.segments.map((s) => s.id)).toContain('reason');
+    expect(
+      index.createCheckpoint('meeting-1')?.segments.find((s) => s.id === 'long')
+        ?.text,
+    ).toBe(longTurn);
+  });
+  it('retrieves a focused summary instead of sampling unrelated topics', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest('meeting-1', [
+      ...Array.from({ length: 100 }, (_, i) =>
+        segment(`noise-${i}`, i * 1000, 'We discussed colors and spacing.'),
+      ),
+      segment('pricing', 4500, 'Pricing will stay unchanged.'),
+      segment(
+        'pricing-reason',
+        4501,
+        'This avoids surprising existing customers.',
+      ),
+    ]);
+    const selection = index.select('meeting-1', 'Summarize pricing');
+    expect(selection.segments.map((s) => s.id)).toContain('pricing');
+    expect(selection.segments.map((s) => s.id)).toContain('pricing-reason');
+  });
+
   it('retrieves and samples the requested recent time range', () => {
     const index = createLiveMeetingContextIndex();
     index.ingest(
@@ -88,6 +133,22 @@ describe('live meeting context index', () => {
       'three',
       'five',
     ]);
+  });
+
+  it('classifies the user question independently from cited retrieval hints', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest('meeting-1', [
+      segment('author', 1_000, 'Morgan built the plan.'),
+      segment('later', 2_000, 'We will send a follow-up.'),
+    ]);
+    const selected = index.select(
+      'meeting-1',
+      'Who built the plan? A follow-up was promised.',
+      2,
+      'Who built the plan?',
+    );
+    expect(selected.intent).toBe('fact');
+    expect(selected.segments.map(({ id }) => id)).toContain('author');
   });
 
   it('bounds retained memory by evicting the oldest evidence', () => {
@@ -191,6 +252,7 @@ describe('live meeting context index', () => {
         ?.segments.map(({ speaker }) => speaker),
     ).toEqual(['Me', 'Call audio', 'Me', 'Call audio']);
     expect(selected.segments.map(({ speaker }) => speaker)).toEqual([
+      'Call audio',
       'Me',
       'Call audio',
     ]);

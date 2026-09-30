@@ -1432,3 +1432,29 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Decision:** `pnpm start` and `pnpm dev` both run Vite/Electron, prepare native dependencies, and default to the same persistent macOS Pluto profile. An explicit `PLUTO_USER_DATA_DIR` selects an isolated profile. Source startup has no installed-app, certificate, or recovery-key prerequisite. Every selected profile acquires a single-instance lock before database initialization.
 - **Key custody and preservation:** Fresh profiles create their own local Electron safeStorage envelope. Existing source profiles reuse their envelope; source runtime rejects signed v2 bindings before decryption. Missing or rejected encrypted-database keys stop startup without resetting the database or generating a replacement key. Existing recovery files are neither created nor removed automatically. Previously isolated profile data is not moved or merged.
 - **Consequences:** Open-source contributors and source users share one documented startup path, including first use and existing meetings. macOS may request access to the original Electron Keychain entry. This does not establish distribution-signature protection for source-created keys, nor does it bypass signed-envelope identity requirements.
+
+
+## 2026-09-30 - Recheck challenged meeting answers against fresh evidence
+
+- **Status:** Accepted and implemented.
+- **Supersedes:** The deferred conversational-correction behavior and answer-only dock presentation in “2026-08-18 - Scope note chat to the current meeting evidence.” Its bounded, ephemeral meeting scope, capture isolation, and fast local model remain in force.
+- **Decision:** A challenged answer retrieves the original user subject without using the disputed answer or its citations as search anchors. Live retrieval intent comes from user questions, separately from evidence hints. Simple factual questions use a compact prompt that distinguishes explicit attribution from nearby name mentions; uncited factual claims are withheld before display. Native collapsed evidence disclosures expose selected source excerpts without treating citation syntax as semantic validation. Corrections do not edit recordings, transcripts, notes, or identities.
+
+## 2026-09-30 - Match meeting chat answers to the requested task
+
+- **Status:** Accepted
+- **Supersedes:** Generic live prompting and broad structured-answer shortcuts in “2026-08-18 - Scope note chat to the current meeting evidence.” The current-meeting evidence boundary and fast local model remain in force.
+- **Decision:** Use compact live guidance for summaries, explanations, advice, drafts, and factual recall. Explicit follow-up requests select their own answer style. Clarify ambiguous references after multi-point answers. Only plain requests for complete saved decision or action lists bypass synthesis; explanations and focused summaries use the model.
+- **Rationale:** A small model needs the actual task and relevant evidence, without inheriting a prior fact question's answer format or receiving a generic list in place of an explanation.
+- **Consequences:** Advice remains distinct from agreed actions; drafts never imply sending or changing data. Citations support grouped numeric tags but remain reviewable excerpts, not automatic proof that every generated claim is correct. Real meeting acceptance remains necessary.
+
+
+## 2026-09-30 - Ground live chat in checked transcript wording on the fast model
+
+- **Status:** Accepted
+- **Supersedes:** The free-form live answer generation in “2026-09-30 - Match meeting chat answers to the requested task” and citation-only factual validation in “2026-09-30 - Recheck challenged meeting answers against fresh evidence.” Saved meeting behavior and the current-meeting boundary remain in force.
+- **Decision:** Keep the configured fast local model, including Phi 3.8B. Live inference selects numbered transcript sentences; the runtime copies canonical wording, groups adjacent supporting sentences, and produces exact source disclosures. Preserve complete indexed turns instead of clipping each at 500 characters. Retrieve neighboring explanation and correction turns within a bounded context, and disclose when the selection cannot cover the whole meeting.
+- **Completeness:** Actions, decisions and drafts receive a short relevance/completeness review that can recover missed sentences from the supplied context. Focused questions review their supporting utterances. Challenges independently revisit the original question rather than trusting disputed assistant claims.
+- **Suggestions and drafts:** Use checked transcript wording in a usable follow-up message or explicitly proposed next steps. Generated prose and small-model self-approval cannot authorize new owners, dates or promises. This deliberately limits stylistic rewriting and open-ended coaching; factual correctness takes priority over fluency.
+- **Provider:** Use Ollama chat with system/user separation, JSON output, zero temperature, and bounded context expansion. Buffer structured responses until source validation completes. Malformed output or provider failure produces an unavailable response rather than unrelated snapshot content.
+- **Limits:** Exact-source validation proves wording exists, not perfect relevance, completeness, speaker identity or transcription accuracy. Live evidence remains provisional; focused tests and fictional provider replays do not replace fresh real-meeting acceptance.

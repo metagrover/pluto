@@ -445,6 +445,22 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                     >
                       {message.content}
                     </ReactMarkdown>
+                    {message.packet?.citations.length ? (
+                      <details className="meeting-ask-pluto-dock__evidence">
+                        <summary>View evidence</summary>
+                        <div>Check these excerpts against the answer.</div>
+                        {message.packet.citations.map((citation) => (
+                          <blockquote key={citation.id}>
+                            {citation.evidence_span || citation.claim}
+                          </blockquote>
+                        ))}
+                      </details>
+                    ) : message.packet?.claims.length &&
+                      message.packet.trustStatus === 'needs_review' ? (
+                      <span className="meeting-ask-pluto-dock__evidence-note">
+                        No supporting evidence cited.
+                      </span>
+                    ) : null}
                     {message.interrupted ? (
                       <span className="meeting-ask-pluto-dock__interrupted">
                         Stopped

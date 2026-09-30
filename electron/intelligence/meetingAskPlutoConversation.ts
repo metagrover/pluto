@@ -24,14 +24,14 @@ export interface MeetingAskPlutoConversationResolution {
 const EXPLICIT_TOPIC_SWITCH_PATTERN =
   /^(?:new question|separately|unrelated(?: question)?|switching topics?|on another (?:topic|note)|different question)\b/i;
 const SELF_CONTAINED_TOPIC_PATTERN =
-  /^(?:what|how) about (?!that\b|this\b|it\b|those\b|these\b|the (?:first|second|third|fourth|last|former|latter)\b)/i;
+  /^(?:(?:what|how) about|tell me more about) (?!that\b|this\b|it\b|those\b|these\b|the (?:first|second|third|fourth|last|former|latter)\b)/i;
 const REFERENTIAL_FOLLOW_UP_PATTERN =
   /\b(?:it|that|this|those|these|she|he|they|her|him|the (?:participant|speaker|other person|client|prospect|candidate|lead)|the (?:first|second|third|fourth|last|former|latter) (?:point|item|one)|your (?:answer|point|concern|recommendation|suggestion)|you (?:said|mentioned|suggested|recommended)|the (?:concern|risk|recommendation|suggestion|reason) you (?:raised|mentioned|gave))\b/i;
 
 const CONTINUATION_PATTERN =
-  /^(?:and|but|also|so|then|what about|how about|tell me more|explain|elaborate|go deeper|can you expand|what do you mean)\b/i;
+  /^(?:and|but|also|so|then|what about|how about|tell me more|go deeper|can you expand|what do you mean)\b/i;
 const SHORT_FOLLOW_UP_PATTERN =
-  /^(?:why|how so|is that all|anything else|what else|more)[?.!]*$/i;
+  /^(?:why|how so|is that all|anything else|what else|more|explain(?: more)?|elaborate)[?.!]*$/i;
 const IMPLIED_PRIOR_ANSWER_PATTERN =
   /\b(?:instead|else|again|further|more deeply)\b/i;
 const GENERIC_SINGULAR_REFERENCE_PATTERN = /\b(?:it|that|this)\b/i;
@@ -120,7 +120,7 @@ export const resolveMeetingAskPlutoConversation = ({
     !exchange ||
     EXPLICIT_TOPIC_SWITCH_PATTERN.test(normalizedQuery) ||
     SELF_CONTAINED_TOPIC_PATTERN.test(normalizedQuery) ||
-    !isFollowUp(normalizedQuery)
+    (!isFollowUp(normalizedQuery) && decision.mode !== 'challenge')
   ) {
     return {
       relation: 'new_topic',
@@ -132,16 +132,25 @@ export const resolveMeetingAskPlutoConversation = ({
     };
   }
 
-  const priorQuestion = bounded(exchange.user.content, 500);
-  const evidenceHints = (exchange.assistant.evidenceHints ?? [])
+  const priorResolution = resolveMeetingAskPlutoConversation({
+    query: exchange.user.content,
+    turns: turns.slice(0, turns.indexOf(exchange.user)),
+  });
+  const priorQuestion = bounded(
+    priorResolution.priorQuestion || exchange.user.content,
+    500,
+  );
+  // A challenged answer and its citations must not anchor the next search.
+  const evidenceHints = (
+    decision.mode === 'challenge'
+      ? []
+      : (exchange.assistant.evidenceHints ?? [])
+  )
     .map((hint) => bounded(hint, 500))
     .filter(Boolean)
     .slice(0, 4);
-  const answerAnchor = bounded(exchange.assistant.content, 900);
-  const priorAnchor = evidenceHints.length
-    ? `Previously cited meeting evidence: ${evidenceHints.join(' | ')}`
-    : `Previous assistant answer (context only; verify it against meeting evidence): ${answerAnchor}`;
   const relation: MeetingAskPlutoConversationRelation =
+    decision.mode !== 'challenge' &&
     GENERIC_SINGULAR_REFERENCE_PATTERN.test(normalizedQuery) &&
     !SPECIFIC_REFERENCE_PATTERN.test(normalizedQuery) &&
     hasMultipleStructuredTopics(exchange.assistant.content)
@@ -152,11 +161,12 @@ export const resolveMeetingAskPlutoConversation = ({
     relation,
     turnMode: decision.mode,
     retrievalPolicy: decision.retrieval,
-    retrievalQuery: [
-      `Current follow-up: ${bounded(normalizedQuery, 700)}`,
-      `Prior user topic: ${priorQuestion}`,
-      priorAnchor,
-    ].join('\n'),
+    retrievalQuery:
+      decision.mode === 'challenge'
+        ? priorQuestion
+        : [priorQuestion, bounded(normalizedQuery, 700), ...evidenceHints].join(
+            '\n',
+          ),
     routingQuery: `${priorQuestion}\n${bounded(normalizedQuery, 700)}`,
     priorQuestion,
     priorEvidenceHintCount: evidenceHints.length,

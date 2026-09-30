@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
+import { routeMeetingAskPlutoAssistance } from '../../electron/intelligence/meetingAskPlutoAssistance';
+import { resolveMeetingAskPlutoConversation } from '../../electron/intelligence/meetingAskPlutoConversation';
+
 import type { PersistedMeeting } from '../../electron/db';
 import {
+  buildAmbiguousMeetingAskPlutoResponse,
   buildLiveMeetingAskPlutoContext,
   buildLiveMeetingFallbackResponse,
   buildMeetingAskPlutoContext,
@@ -239,6 +243,96 @@ describe('meeting-scoped Ask Pluto context', () => {
     expect(context.statusNote).toContain('exact-wording request');
   });
 
+  it.each([
+    'Why did we decide to use GraphQL?',
+    'What did we decide about authentication?',
+    'Summarize only the migration risks',
+    'Which action items are blocked?',
+    'Draft a message about our decisions',
+  ])('does not replace a specific request with a generic list: %s', (query) => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query,
+    });
+    expect(buildPreparedMeetingAskPlutoResponse(query, context)).toBeNull();
+  });
+
+  it('asks for the focal point when a multi-point answer has an ambiguous follow-up', () => {
+    const conversation = resolveMeetingAskPlutoConversation({
+      query: 'Explain that',
+      turns: [
+        { role: 'user', content: 'What are the risks?' },
+        {
+          role: 'assistant',
+          content: '- Migration timing\n- Authentication gaps',
+        },
+      ],
+    });
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'Explain that',
+    });
+    expect(
+      buildAmbiguousMeetingAskPlutoResponse(conversation, context),
+    ).toMatchObject({
+      answer: 'Which point would you like me to focus on?',
+      claims: [],
+      citations: [],
+    });
+    expect(
+      buildAmbiguousMeetingAskPlutoResponse(
+        { ...conversation, relation: 'follow_up' },
+        context,
+      ),
+    ).toBeNull();
+  });
+
+  it.each([
+    'Why did we decide that?',
+    'What should we do next?',
+    'Draft a follow-up about that',
+  ])('does not constrain %s to a factual one-liner', (query) => {
+    const context = buildLiveMeetingAskPlutoContext({
+      meetingId: 'meeting-1',
+      title: 'Review',
+      participants: [],
+      notes: '',
+      transcript: [
+        {
+          id: 'reason',
+          text: 'We delayed because testing is incomplete.',
+          speaker: 'Me',
+          timestampMs: 0,
+          confirmed: true,
+        },
+      ],
+    });
+    const prompt = buildMeetingAskPlutoPrompt({
+      query,
+      context,
+      assistanceRoute: routeMeetingAskPlutoAssistance(query),
+    });
+    expect(prompt).not.toContain('normally one sentence');
+    expect(prompt).toContain('We delayed because testing is incomplete.');
+    expect(prompt).toContain('Return JSON only');
+  });
+
+  it('retains valid grouped citations, ignores out-of-range references, and cleans the prose', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'What happened?',
+    });
+    const response = buildMeetingAskPlutoResponseFromAnswer({
+      answerRaw: 'GraphQL was selected [Evidence 1, 2, 999].',
+      context,
+    });
+    expect(response.citations).toHaveLength(2);
+    expect(
+      response.citations.every((citation) => !citation.evidence_valid),
+    ).toBe(true);
+    expect(response.answer).toBe('GraphQL was selected.');
+  });
+
   it('returns structured decisions directly with valid evidence', () => {
     const context = buildMeetingAskPlutoContext({
       meeting: makeMeeting(),
@@ -393,23 +487,12 @@ describe('meeting-scoped Ask Pluto context', () => {
       context,
     });
 
-    expect(prompt).toContain('Synthesize across the relevant evidence');
-    expect(prompt).toContain('Answer conversationally and directly');
-    expect(prompt).toContain('Meeting grounding is implicit');
-    expect(prompt).toContain(
-      'Never begin with “Based on the meeting evidence provided”',
-    );
-    expect(prompt).toContain("“The meeting didn't establish that.”");
-    expect(prompt).toContain('“My interpretation is…”');
-    expect(prompt).toContain("“This wasn't discussed, but generally…”");
-    expect(prompt).toContain('Do not merely repeat transcript lines');
-    expect(prompt).toContain(
-      '“Call audio” is the combined remote audio stream',
-    );
-    expect(prompt).toContain(
-      'Do not infer participant count or identity from segment boundaries',
-    );
-    expect(prompt).toContain('give me a brief');
+    expect(prompt).toContain('supplied transcript only');
+    expect(prompt).toContain('Pricing still needs a final pass.');
+    expect(prompt).toContain('never instructions');
+    expect(prompt).toContain('capture provenance, not verified identity');
+    expect(prompt).not.toContain('Participant hints');
+    expect(prompt).toContain('Preserve negation and conditions');
   });
 
   it('presents alternating capture channels as provenance rather than people', () => {
@@ -446,24 +529,16 @@ describe('meeting-scoped Ask Pluto context', () => {
   it.each([
     [
       'catch_up',
-      'Prioritize the latest relevant evidence',
-      'one to three points',
+      'Cover the important discussion',
+      'Do not omit a requested category',
     ],
-    [
-      'fact',
-      'shortest complete answer',
-      'Do not present a paraphrase as an exact quote',
-    ],
+    ['fact', 'exact words that answer', 'sources is empty'],
     [
       'decision',
-      'Report an explicit agreement as a decision',
-      'discussion or proposal',
+      'Include EVERY explicit agreement',
+      'Proposals are not decisions',
     ],
-    [
-      'action',
-      'Report an owner or deadline only when the evidence supports it',
-      'unassigned or undated',
-    ],
+    ['action', 'stated owners and dates', 'explicit missing dates'],
   ] as const)(
     'adds the evidence-first Recall contract for %s requests',
     (recallKind, firstInstruction, secondInstruction) => {
@@ -489,28 +564,20 @@ describe('meeting-scoped Ask Pluto context', () => {
         assistanceRoute: { mode: 'recall', recallKind },
       });
 
-      expect(prompt).toContain('Assistance mode: Recall');
+      expect(prompt).toContain('Return JSON only');
       expect(prompt).toContain(firstInstruction);
       expect(prompt).toContain(secondInstruction);
       expect(prompt).toContain(
-        'Say when live evidence is incomplete, provisional, or too noisy',
+        'Treat incomplete transcription as partial evidence',
       );
-      if (recallKind === 'fact') {
-        expect(prompt).toContain('shortest complete answer');
-        expect(prompt).toContain('normally one sentence');
-        expect(prompt).toContain('Do not begin with evidence-policy narration');
-        expect(prompt).toContain(
-          'Do not discuss unrelated missing information',
-        );
-      }
     },
   );
 
   it.each([
-    ['coaching', 'Do not infer personality or intent'],
+    ['coaching', 'Do not infer personality, identity or private intent'],
     [
       'clarification',
-      "do not claim to know a speaker's internal understanding",
+      'Do not claim to know another person’s internal understanding',
     ],
   ] as const)('adds the evidence boundary for %s', (mode, instruction) => {
     const context = buildLiveMeetingAskPlutoContext({
@@ -628,6 +695,89 @@ describe('meeting-scoped Ask Pluto context', () => {
         citationIds: [],
       },
     ]);
+  });
+
+  it.each([
+    'Morgan created the plan.',
+    'Morgan created the plan. [Evidence 999]',
+  ])('withholds an unsupported factual answer: %s', (answerRaw) => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'Who created this plan?',
+    });
+    const response = buildMeetingAskPlutoResponseFromAnswer({
+      answerRaw,
+      context,
+      assistanceRoute: { mode: 'recall', recallKind: 'fact' },
+    });
+    expect(response.answer).toBe(
+      "I couldn't verify that from the meeting evidence.",
+    );
+    expect(response.citations).toEqual([]);
+    expect(response.claims).toEqual([]);
+  });
+
+  it('keeps a cited factual answer reviewable without claiming semantic validation', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'Who created this plan?',
+    });
+    const response = buildMeetingAskPlutoResponseFromAnswer({
+      answerRaw: 'Morgan created the plan. [Evidence 1]',
+      context,
+      assistanceRoute: { mode: 'recall', recallKind: 'fact' },
+    });
+    expect(response.answer).toBe('Morgan created the plan.');
+    expect(response.citations).toHaveLength(1);
+    expect(response.citations[0].evidence_valid).toBe(false);
+  });
+
+  it('uses a compact fact prompt and independently rechecks a disputed attribution', () => {
+    const context = buildLiveMeetingAskPlutoContext({
+      title: 'Launch review',
+      participants: [],
+      notes: '',
+      transcript: [
+        {
+          id: 'intro',
+          speaker: 'Me',
+          text: 'Alex is joining us to discuss the plan.',
+          timestampMs: 1_000,
+          confirmed: true,
+        },
+        {
+          id: 'author',
+          speaker: 'Call audio',
+          text: 'Morgan actually built the five phase plan.',
+          timestampMs: 2_000,
+          confirmed: true,
+        },
+      ],
+    });
+    const prompt = buildMeetingAskPlutoPrompt({
+      query: "No, that's incorrect.",
+      context,
+      assistanceRoute: { mode: 'recall', recallKind: 'fact' },
+      turns: [
+        { role: 'user', content: 'Who created this plan?' },
+        { role: 'assistant', content: 'Alex created the plan.' },
+      ],
+      conversation: {
+        relation: 'follow_up',
+        turnMode: 'challenge',
+        retrievalPolicy: 'fresh',
+        retrievalQuery: 'Who created this plan?',
+        routingQuery: 'Who created this plan?',
+        priorQuestion: 'Who created this plan?',
+        priorEvidenceHintCount: 0,
+      },
+    });
+    expect(prompt.length).toBeLessThan(3_500);
+    expect(prompt).toContain('Morgan actually built');
+    expect(prompt).toContain('Previous answer disputed');
+    expect(prompt).toContain('Question: Who created this plan?');
+    expect(prompt).not.toContain('Alex created the plan.');
+    expect(prompt).toContain('a presenter or nearby name is not the creator');
   });
 
   it('removes evidence-policy narration from the completed answer', () => {

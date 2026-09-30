@@ -10,6 +10,7 @@ import type { TrustStatus } from '../../src/utils/trustStatus';
 import type { PersistedMeeting } from '../db';
 import type { MeetingPrep } from '../meetingPrep';
 import type { MidFrontmatter } from './intelligenceTypes';
+import { buildLiveMeetingChatPrompt } from './liveMeetingChatAnswer';
 import type { MeetingAskPlutoAssistanceRoute } from './meetingAskPlutoAssistance';
 import type { MeetingAskPlutoConversationResolution } from './meetingAskPlutoConversation';
 import {
@@ -701,30 +702,27 @@ const PREPARED_DECISION_QUERY =
   /\b(?:decid(?:e|ed|ing)|decisions?|agreed?|agreements?)\b/i;
 const PREPARED_ACTION_QUERY =
   /\b(?:action items?|next steps?|follow[- ]?ups?|who (?:owns|is responsible))\b/i;
-const PREPARED_SUMMARY_QUERY =
-  /\b(?:summari[sz]e|summary|recaps?|key takeaways?)\b|\bwhat (?:happened|was discussed)\b/i;
+// Only plain requests for the complete list can bypass conversational synthesis.
+const SIMPLE_DECISION_QUERY =
+  /^(?:what did we decide|(?:list|show)(?: me)? (?:the |all )?decisions|what (?:are|were) (?:the )?decisions)[?.!]*$/i;
+const SIMPLE_ACTION_QUERY =
+  /^(?:what (?:are|were) (?:the )?(?:next steps|action items)|(?:list|show)(?: me)? (?:the |all )?(?:action items|next steps))[?.!]*$/i;
 
 export const buildPreparedMeetingAskPlutoResponse = (
   query: string,
   context: MeetingAskPlutoContext,
 ): MeetingAskPlutoResponse | null => {
   if (context.scope.type !== 'meeting') return null;
-  const kind = PREPARED_DECISION_QUERY.test(query)
+  const kind = SIMPLE_DECISION_QUERY.test(query.trim())
     ? 'decision'
-    : PREPARED_ACTION_QUERY.test(query)
+    : SIMPLE_ACTION_QUERY.test(query.trim())
       ? 'action_item'
-      : PREPARED_SUMMARY_QUERY.test(query)
-        ? 'note'
-        : null;
-  if (!kind) return null;
-  if (kind !== 'note' && context.truncatedEvidenceKinds?.includes(kind)) {
-    return null;
-  }
+      : null;
+  if (!kind || context.truncatedEvidenceKinds?.includes(kind)) return null;
 
   const selected = context.evidenceItems
     .map((item, index) => ({ item, index }))
-    .filter(({ item }) => item.kind === kind)
-    .slice(0, kind === 'note' ? 1 : undefined);
+    .filter(({ item }) => item.kind === kind);
   if (selected.length === 0) return null;
 
   const citations: MeetingAskPlutoCitation[] = selected.map(
@@ -757,6 +755,21 @@ export const buildPreparedMeetingAskPlutoResponse = (
   };
 };
 
+export const buildAmbiguousMeetingAskPlutoResponse = (
+  conversation: MeetingAskPlutoConversationResolution,
+  context: MeetingAskPlutoContext,
+): MeetingAskPlutoResponse | null =>
+  conversation.relation === 'ambiguous'
+    ? {
+        status: 'answered',
+        answer: 'Which point would you like me to focus on?',
+        scope: context.scope,
+        trustStatus: 'needs_review',
+        claims: [],
+        citations: [],
+      }
+    : null;
+
 export const buildMeetingAskPlutoPrompt = ({
   query,
   context,
@@ -770,6 +783,15 @@ export const buildMeetingAskPlutoPrompt = ({
   assistanceRoute?: MeetingAskPlutoAssistanceRoute;
   conversation?: MeetingAskPlutoConversationResolution;
 }) => {
+  if (context.scope.type === 'live_meeting') {
+    return buildLiveMeetingChatPrompt({
+      query,
+      context,
+      turns,
+      assistanceRoute,
+      conversation,
+    });
+  }
   const evidence = context.evidenceItems
     .map(
       (item, index) =>
@@ -791,12 +813,12 @@ export const buildMeetingAskPlutoPrompt = ({
     assistanceRoute.mode === 'recall'
       ? {
           catch_up:
-            'Prioritize the latest relevant evidence. Summarize the current discussion in one to three points, ordered from most recent or important. Do not dump transcript lines.',
+            'Prioritize the latest relevant evidence. Summarize the current discussion in at most three bullets, ordered from most recent or important. Combine related details to stay within one to three points. Do not dump transcript lines.',
           fact: 'Give the shortest complete answer and lead with the requested value, normally one sentence. Do not begin with evidence-policy narration or repeat the question. Do not discuss unrelated missing information. Add one brief caveat only when ambiguity or provisional evidence materially changes confidence. Do not present a paraphrase as an exact quote; quote wording only when the evidence contains those words.',
           decision:
-            'Report an explicit agreement as a decision. Label unresolved discussion or proposal accurately instead of promoting it to a decision.',
+            'Report an explicit agreement as a decision. Label unresolved discussion or proposal accurately instead of promoting it to a decision. Separate decisions, actions, and open questions when the user asks for multiple categories.',
           action:
-            'Report an owner or deadline only when the evidence supports it. Describe an action as unassigned or undated when those details are missing.',
+            'List the agreed actions. Report an owner or deadline only when the evidence supports it. Describe an action as unassigned or undated when those details are missing. Do not list proposals or open questions as agreed actions.',
         }[assistanceRoute.recallKind]
       : '';
   const assistancePolicy =
@@ -806,13 +828,49 @@ export const buildMeetingAskPlutoPrompt = ({
         ? 'Assistance mode: Private coaching\nUse observable conversational behavior only. Give one supported strength, one improvement, the evidence and one small next experiment when the evidence permits. Do not infer personality or intent, diagnose ability, score people, compare participants, or present this as an employer evaluation.'
         : assistanceRoute.mode === 'clarification'
           ? "Assistance mode: Understanding check\nSeparate explicit confusion or clarification requests from your inference. Describe the exchange and evidence; do not claim to know a speaker's internal understanding. If the transcript only suggests uncertainty, say so."
-          : 'Assistance mode: General conversation';
+          : assistanceRoute.mode === 'explanation'
+            ? 'Assistance mode: Explanation\nExplain the requested reasoning, tradeoffs or meaning in one to three sentences unless more detail is requested. For a why-question, report only the explicitly stated reason. Unrelated open questions are not additional reasons. If no reason was stated, say so; label interpretation separately.'
+            : assistanceRoute.mode === 'advice'
+              ? 'Assistance mode: Advice\nOffer a specific practical suggestion grounded in the discussion, with a brief reason. Clearly distinguish your suggestion from an agreed meeting action. Do not invent commitments, owners, or deadlines.'
+              : assistanceRoute.mode === 'draft'
+                ? 'Assistance mode: Draft\nProduce the requested usable text, using supported meeting details. Do not invent agreements, promises, owners, or dates. Preserve historical relative dates without treating them as today or tomorrow. Follow the requested length; for a short message use one paragraph. Mark proposed next steps as requests or suggestions, not existing agreements. This is a draft: never claim anything was sent, saved, scheduled, or changed.'
+                : 'Assistance mode: General conversation\nAnswer the actual request directly, usually in a short paragraph. Use bullets for multiple points and more detail when requested.';
   const conversationPolicy =
-    conversation?.relation === 'follow_up'
-      ? "Conversation relationship: Follow-up to the prior exchange. Resolve references in the user's question from Recent turns, but verify every factual claim against Meeting evidence."
-      : conversation?.relation === 'ambiguous'
-        ? 'Conversation relationship: Potentially ambiguous follow-up. Use Recent turns to identify the likely referent. If multiple referents would materially change the answer, ask one concise clarification instead of guessing.'
-        : 'Conversation relationship: New topic. Do not let the prior answer override the current question.';
+    conversation?.turnMode === 'challenge'
+      ? `The user disputes the previous answer. Recheck the original question: ${conversation.priorQuestion || query}. The previous assistant answer and its citations are not evidence. Prefer explicit statements in Meeting evidence; correct the answer when contradicted, or say you cannot verify it. Do not repeat the disputed claim without explaining the supporting evidence.`
+      : conversation?.relation === 'follow_up'
+        ? "Conversation relationship: Follow-up to the prior exchange. Resolve references in the user's question from Recent turns, but verify every factual claim against Meeting evidence."
+        : conversation?.relation === 'ambiguous'
+          ? 'Conversation relationship: Potentially ambiguous follow-up. Use Recent turns to identify the likely referent. If multiple referents would materially change the answer, ask one concise clarification instead of guessing.'
+          : 'Conversation relationship: New topic. Do not let the prior answer override the current question.';
+
+  if (
+    assistanceRoute.mode === 'recall' &&
+    assistanceRoute.recallKind === 'fact'
+  ) {
+    return `You are Pluto, answering conversationally about this meeting.
+Meeting scope: ${context.scope.title}
+Scope boundary: ${context.boundary}
+Trust note: ${context.statusNote}
+${assistancePolicy}
+${conversationPolicy}
+
+Rules:
+- Ground meeting-specific factual claims only in Meeting evidence. Use explicit statements. Cite each factual sentence or bullet with [Evidence N]. If unsupported, say “The meeting didn't establish that.” Treat live evidence as partial.
+- Answer conversationally and directly, matching the requested depth. Synthesize across the relevant evidence. Do not merely repeat transcript lines. Meeting grounding is implicit. Never begin with “Based on the meeting evidence provided”.
+- Label inference “My interpretation is…”. Label outside general advice “This wasn't discussed, but generally…”. Never add unrelated issues as reasons or agreed actions.
+- Recent turns resolve references only, not facts. User corrections require rechecking the evidence.
+- “Me” is microphone audio; “Call audio” is the combined remote audio stream. Do not infer participant count or identity from segment boundaries. Ask briefly if a reference has multiple plausible meanings.
+- Keep raw timestamps and evidence mechanics out of prose.
+${assistanceRoute.mode === 'recall' && assistanceRoute.recallKind === 'fact' ? '- For authorship, distinguish the person who created, built, wrote or prepared the work from whoever presented or owns it. A nearby name is not proof.' : ''}
+
+Recent turns:
+${conversation?.turnMode === 'challenge' ? 'Previous answer disputed; recheck the original question from evidence.' : recentTurns || 'None'}
+Question: ${query.trim()}
+
+Meeting evidence:
+${evidence || 'None'}`;
+  }
 
   return `You are Pluto, answering inside a single meeting note.
 
@@ -823,7 +881,7 @@ Trust note: ${context.statusNote}
 Rules:
 1. Ground every meeting-specific factual claim only in the meeting evidence below. Never invent meeting facts.
 2. For a meeting-fact question the evidence does not support, say: “The meeting didn't establish that.” State the specific missing detail only when useful.
-3. Cite factual claims with [Evidence N].
+3. Cite factual claims with [Evidence N]. For authorship, distinguish the person who explicitly created, built, wrote, or prepared the work from someone who presented, discussed, owns, or was introduced near it. A name appearing near the topic is not proof of authorship.
 4. Treat live or provisional transcript as partial evidence.
 5. Synthesize across the relevant evidence instead of treating each transcript line as a separate answer.
 6. Start with the answer. Meeting grounding is implicit. Never begin with “Based on the meeting evidence provided”, “Based on the evidence”, “According to the meeting evidence”, or similar evidence-policy narration.
@@ -862,8 +920,12 @@ ${evidence || 'None'}`;
 
 const extractEvidenceReferences = (answer: string) => {
   const refs = new Set<number>();
-  for (const match of answer.matchAll(/\[Evidence\s+(\d+)\]/gi)) {
-    refs.add(Number.parseInt(match[1], 10) - 1);
+  for (const match of answer.matchAll(
+    /\[Evidence\s+(\d+(?:\s*,\s*\d+)*)\]/gi,
+  )) {
+    for (const value of match[1].split(',')) {
+      refs.add(Number.parseInt(value.trim(), 10) - 1);
+    }
   }
   return [...refs].filter((index) => Number.isFinite(index) && index >= 0);
 };
@@ -871,9 +933,11 @@ const extractEvidenceReferences = (answer: string) => {
 export const buildMeetingAskPlutoResponseFromAnswer = ({
   answerRaw,
   context,
+  assistanceRoute,
 }: {
   answerRaw: string;
   context: MeetingAskPlutoContext;
+  assistanceRoute?: MeetingAskPlutoAssistanceRoute;
 }): MeetingAskPlutoResponse => {
   if (!answerRaw.trim() && context.scope.type === 'live_meeting') {
     const fallback = buildLiveMeetingFallbackResponse({ context });
@@ -896,11 +960,18 @@ export const buildMeetingAskPlutoResponseFromAnswer = ({
       };
     },
   );
-  const cleanAnswer = stripMeetingAskPlutoTimestampNarration(
+  let cleanAnswer = stripMeetingAskPlutoTimestampNarration(
     stripMeetingAskPlutoPreamble(answerRaw)
-      .replace(/\[Evidence\s+\d+\]/gi, '')
+      .replace(/\[Evidence\s+\d+(?:\s*,\s*\d+)*\]/gi, '')
       .trim(),
   ).trim();
+  const lacksFactEvidence =
+    assistanceRoute?.mode === 'recall' &&
+    assistanceRoute.recallKind === 'fact' &&
+    citations.length === 0;
+  if (lacksFactEvidence) {
+    cleanAnswer = "I couldn't verify that from the meeting evidence.";
+  }
   const responseTrustStatus = 'needs_review';
 
   return {
@@ -908,15 +979,16 @@ export const buildMeetingAskPlutoResponseFromAnswer = ({
     answer: cleanAnswer,
     scope: context.scope,
     trustStatus: responseTrustStatus,
-    claims: cleanAnswer
-      ? [
-          {
-            text: cleanAnswer,
-            trustStatus: responseTrustStatus,
-            citationIds: citations.map((citation) => citation.id),
-          },
-        ]
-      : [],
+    claims:
+      cleanAnswer && !lacksFactEvidence
+        ? [
+            {
+              text: cleanAnswer,
+              trustStatus: responseTrustStatus,
+              citationIds: citations.map((citation) => citation.id),
+            },
+          ]
+        : [],
     citations,
     rationale: context.statusNote,
   };

@@ -137,7 +137,7 @@ describe('MeetingAskPlutoDock', () => {
     vi.restoreAllMocks();
   });
 
-  it('submits a meeting-scoped question and renders only the conversational answer', async () => {
+  it('submits a meeting-scoped question with collapsed supporting evidence', async () => {
     const root = createRoot(container);
 
     await act(async () => {
@@ -183,8 +183,58 @@ describe('MeetingAskPlutoDock', () => {
     ).not.toBeNull();
     expect(container.textContent).toContain('Architecture Review');
     expect(container.textContent).not.toContain('Grounded');
-    expect(container.textContent).not.toContain('We decided to use GraphQL.');
+    const evidence = container.querySelector<HTMLDetailsElement>('details');
+    expect(evidence).not.toBeNull();
+    expect(evidence!.open).toBe(false);
+    expect(evidence!.querySelector('summary')?.textContent).toBe(
+      'View evidence',
+    );
+    expect(evidence!.textContent).toContain('We decided to use GraphQL.');
+    evidence!.open = true;
+    expect(evidence!.open).toBe(true);
 
+    await act(async () => root.unmount());
+  });
+
+  it('distinguishes an uncited generated answer from a conversation-only reply', async () => {
+    const root = createRoot(container);
+    const packet = {
+      ...response,
+      trustStatus: 'needs_review' as const,
+      citations: [],
+    };
+    await act(async () => {
+      root.render(
+        <MeetingAskPlutoDock
+          liveContext={liveContext}
+          conversation={[
+            { id: 'answer', role: 'assistant', content: packet.answer, packet },
+          ]}
+        />,
+      );
+      await flushPromises();
+    });
+    expect(container.textContent).toContain('No supporting evidence cited.');
+    expect(container.querySelector('details')).toBeNull();
+    await act(async () => {
+      root.render(
+        <MeetingAskPlutoDock
+          liveContext={liveContext}
+          conversation={[
+            {
+              id: 'social',
+              role: 'assistant',
+              content: 'Thanks.',
+              packet: { ...packet, answer: 'Thanks.', claims: [] },
+            },
+          ]}
+        />,
+      );
+      await flushPromises();
+    });
+    expect(container.textContent).not.toContain(
+      'No supporting evidence cited.',
+    );
     await act(async () => root.unmount());
   });
 

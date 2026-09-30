@@ -62,6 +62,22 @@ describe('live meeting context coordinator', () => {
     expect(loadCheckpoint).toHaveBeenCalledOnce();
   });
 
+  it('forwards the user intent separately from retrieval hints after hydration', () => {
+    const coordinator = createLiveMeetingContextCoordinator({
+      loadCheckpoint: checkpoint,
+      saveCheckpoint: vi.fn(),
+      deleteCheckpoint: vi.fn(),
+    });
+    const selected = coordinator.select(
+      'meeting-1',
+      'What did Avery say about pricing? A follow-up was promised.',
+      2,
+      'What did Avery say about pricing?',
+    );
+    expect(selected.intent).toBe('speaker_recall');
+    expect(selected.segments.map(({ id }) => id)).toContain('old');
+  });
+
   it('contains persistence failures and keeps the hot index usable', () => {
     const onError = vi.fn();
     const coordinator = createLiveMeetingContextCoordinator({

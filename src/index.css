@@ -805,6 +805,16 @@
   .meeting-ask-pluto-dock__message--assistant pre code {
     @apply bg-transparent p-0;
   }
+  .meeting-ask-pluto-dock__evidence {
+    @apply mt-2 text-sm leading-5 text-pro-text-muted;
+    overflow-wrap: anywhere;
+  }
+  .meeting-ask-pluto-dock__evidence summary {
+    @apply w-fit cursor-pointer rounded-sm hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent;
+  }
+  .meeting-ask-pluto-dock__evidence-note {
+    @apply mt-2 block text-xs leading-5 text-pro-text-muted;
+  }
   .meeting-ask-pluto-dock__interrupted {
     @apply mt-1 block text-[10px] font-medium text-pro-text-muted;
   }

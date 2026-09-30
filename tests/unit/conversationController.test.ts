@@ -126,11 +126,15 @@ describe('conversation controller', () => {
     ['Thanks, that was helpful.', 'social', 'none'],
     ['What do you mean by that?', 'clarify', 'reuse'],
     ["I'm not convinced that is right.", 'challenge', 'fresh'],
+    ["No, that's incorrect.", 'challenge', 'fresh'],
+    ['No, that’s wrong.', 'challenge', 'fresh'],
+    ["That's not correct.", 'challenge', 'fresh'],
     ['Tell me more in detail.', 'expand', 'fresh'],
     ['Draft a follow-up email from that.', 'draft', 'reuse'],
     ['Save that as a note.', 'act', 'reuse'],
     ['Separately, what changed on Project Atlas?', 'topic_switch', 'fresh'],
     ['What changed on Project Atlas?', 'lookup', 'fresh'],
+    ['What is wrong with the design?', 'lookup', 'fresh'],
   ] as const)('routes %s as %s with %s retrieval', (query, mode, retrieval) => {
     expect(
       decideConversationTurn({ query, hasPriorAssistant: true }),
