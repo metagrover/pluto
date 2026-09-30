@@ -81,6 +81,8 @@ export const resolveEncryptionRolloutPolicy = (input: {
   retentionEnforcementRequested?: string;
   signedBuild: SignedBuildProbe;
 }): EncryptionRolloutPolicy => {
+  // Audio budget cleanup is independent of the encrypted-capture rollout.
+  const retentionEnforcement = input.retentionEnforcementRequested !== '0';
   const signedCanaryRequested = input.requestedMode === 'signed_canary';
   if (!signedCanaryRequested) {
     return {
@@ -88,7 +90,7 @@ export const resolveEncryptionRolloutPolicy = (input: {
       encryptedCaptureWrites: false,
       encryptedNativeReads: true,
       historicalAudioMigration: false,
-      retentionEnforcement: false,
+      retentionEnforcement,
       reason: 'rollout_not_requested',
     };
   }
@@ -98,7 +100,7 @@ export const resolveEncryptionRolloutPolicy = (input: {
       encryptedCaptureWrites: false,
       encryptedNativeReads: true,
       historicalAudioMigration: false,
-      retentionEnforcement: false,
+      retentionEnforcement,
       reason: 'packaged_build_required',
     };
   }
@@ -108,7 +110,7 @@ export const resolveEncryptionRolloutPolicy = (input: {
       encryptedCaptureWrites: false,
       encryptedNativeReads: true,
       historicalAudioMigration: false,
-      retentionEnforcement: false,
+      retentionEnforcement,
       reason: input.signedBuild.reason,
     };
   }
@@ -117,7 +119,7 @@ export const resolveEncryptionRolloutPolicy = (input: {
     encryptedCaptureWrites: true,
     encryptedNativeReads: true,
     historicalAudioMigration: input.historicalMigrationRequested === '1',
-    retentionEnforcement: input.retentionEnforcementRequested === '1',
+    retentionEnforcement,
     reason: 'signed_canary_enabled',
   };
 };

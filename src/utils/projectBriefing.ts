@@ -104,7 +104,7 @@ export interface ProjectMilestone {
 }
 
 export interface ProjectThemeSynthesisRead {
-  version: 1;
+  version: 1 | 2 | 3;
   sourceMeetingIds: string[];
   candidateProjectIds: string[];
   outcome: string;
@@ -121,9 +121,24 @@ export interface ProjectThemeSynthesisRead {
     evidenceQuote: string;
   }>;
   synthesizedAt: string;
+  evidence?: ProjectProfileEvidence[];
+  summary?: ProjectProfileStatement;
+  workstreams?: Array<ProjectProfileStatement & { name: string }>;
+  decisions?: ProjectProfileStatement[];
+}
+
+export interface ProjectProfileEvidence {
+  sourceMeetingId: string;
+  evidenceQuote: string;
+}
+
+export interface ProjectProfileStatement extends ProjectProfileEvidence {
+  text: string;
 }
 
 export interface ProjectBrief {
+  selfPersonId?: string | null;
+  themeSourceOutdated?: boolean;
   project: {
     id: string;
     displayTitle: string;
@@ -167,7 +182,7 @@ export const readProjectThemeSynthesis = (
   if (!theme || typeof theme !== 'object' || Array.isArray(theme)) return null;
   const value = theme as Record<string, unknown>;
   if (
-    value.version !== 1 ||
+    ![1, 2, 3].includes(Number(value.version)) ||
     !Array.isArray(value.sourceMeetingIds) ||
     !value.sourceMeetingIds.every((id) => typeof id === 'string') ||
     !Array.isArray(value.candidateProjectIds) ||
@@ -179,7 +194,55 @@ export const readProjectThemeSynthesis = (
     typeof value.synthesizedAt !== 'string'
   )
     return null;
-  return value as unknown as ProjectThemeSynthesisRead;
+  const evidence = (item: unknown): boolean => {
+    if (!item || typeof item !== 'object') return false;
+    const entry = item as Record<string, unknown>;
+    return (
+      typeof entry.sourceMeetingId === 'string' &&
+      Array.isArray(value.sourceMeetingIds) &&
+      value.sourceMeetingIds.includes(entry.sourceMeetingId) &&
+      typeof entry.evidenceQuote === 'string' &&
+      entry.evidenceQuote.trim().length >= 12
+    );
+  };
+  const statement = (item: unknown): item is ProjectProfileStatement =>
+    evidence(item) &&
+    typeof (item as ProjectProfileStatement).text === 'string' &&
+    Boolean((item as ProjectProfileStatement).text.trim());
+  return {
+    ...(value as unknown as ProjectThemeSynthesisRead),
+    recentChanges: value.recentChanges.filter(
+      (item) =>
+        evidence(item) &&
+        typeof (item as { summary: unknown }).summary === 'string' &&
+        (item as { summary: string }).summary.trim(),
+    ),
+    openThreads: value.openThreads.filter(
+      (item) =>
+        evidence(item) &&
+        ['decision', 'action', 'question', 'risk'].includes(
+          (item as { kind: string }).kind,
+        ) &&
+        typeof (item as { text: unknown }).text === 'string' &&
+        (item as { text: string }).text.trim(),
+    ),
+    evidence: Array.isArray(value.evidence)
+      ? value.evidence.filter(evidence)
+      : [],
+    summary: statement(value.summary) ? value.summary : undefined,
+    workstreams: Array.isArray(value.workstreams)
+      ? value.workstreams.filter(
+          (item) =>
+            statement(item) &&
+            typeof (item as ProjectProfileStatement & { name: unknown })
+              .name === 'string' &&
+            (item as ProjectProfileStatement & { name: string }).name.trim(),
+        )
+      : [],
+    decisions: Array.isArray(value.decisions)
+      ? value.decisions.filter(statement)
+      : [],
+  };
 };
 
 export const readProjectDisplayTitle = (

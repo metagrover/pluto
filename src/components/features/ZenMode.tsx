@@ -46,9 +46,6 @@ interface ZenModeProps {
   >;
   askPlutoMinimized?: boolean;
   setAskPlutoMinimized?: (isMinimized: boolean) => void;
-  onOpenSettings?: (
-    tab?: 'personal' | 'meetings' | 'intelligence' | 'advanced',
-  ) => void;
 }
 
 export const ZenMode = ({
@@ -56,7 +53,6 @@ export const ZenMode = ({
   isProcessing,
   onEndMeeting,
   onBackHome,
-  onOpenSettings,
   meetingTitle,
   setMeetingTitle,
   meetingParticipants,
@@ -160,7 +156,6 @@ export const ZenMode = ({
           interimText={model.interimText}
           integrity={liveTranscriptIntegrity}
           conversation={model.liveConversation}
-          onOpenSettings={onOpenSettings}
         />
         <MeetingAskPlutoDock
           conversation={askPlutoConversation}

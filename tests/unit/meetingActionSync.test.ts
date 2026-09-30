@@ -21,11 +21,14 @@ import {
   db,
   ensureMeetingEntity,
   getEntity,
+  getMeeting,
   saveMeeting,
   updateActionCommitmentState,
+  updateEntityStatus,
   upsertEntity,
 } from '../../electron/db';
 import { parseActionMetadata } from '../../src/utils/actionCommitment';
+import { applyMeetingNotesUserEdit } from '../../src/utils/meetingNotesEditRebase';
 
 afterAll(() => {
   fs.rmSync(testDatabase.directory, { recursive: true, force: true });
@@ -403,4 +406,120 @@ describe('meeting action entity and user edit synchronization', () => {
     expect(getEntity(entityA.id)?.name).toBe('Updated task A');
     expect(getEntity(entityB.id)?.name).toBe('Updated task B');
   });
+});
+
+it('round trips a peer completion between the entity and both meeting-note formats', () => {
+  const meetingId = 'meeting-peer-completion';
+  saveMeeting({
+    id: meetingId,
+    title: 'Launch handoff',
+    analysis_json: JSON.stringify({
+      all_action_items: [{ text: 'Send launch checklist', assignee: 'Avery' }],
+    }),
+    user_edits_json: JSON.stringify({
+      unrelated: { original: 'old', edited: 'kept', edited_at: '2026-09-30' },
+    }),
+  });
+  upsertEntity({
+    id: 'action-peer-completion',
+    type: 'action_item',
+    name: 'Send launch checklist',
+    status: 'active',
+    metadata: {
+      origin: 'extraction',
+      commitment_state: 'confirmed',
+      source_meeting_id: meetingId,
+      source_path: 'all_action_items:0',
+      source_index: 0,
+      assignee_name: 'Avery',
+    },
+  });
+  updateEntityStatus('action-peer-completion', 'completed');
+  const meeting = getMeeting(meetingId)!;
+  const edits = JSON.parse(meeting.user_edits_json!);
+  expect(edits['completion:all_action_items:0'].edited).toBe('true');
+  expect(edits['completion:v2:action:0'].edited).toBe('true');
+  expect(edits.unrelated.edited).toBe('kept');
+  expect(getEntity('action-peer-completion')?.status).toBe('completed');
+  const reopened = applyMeetingNotesUserEdit(
+    edits,
+    'completion:v2:action:0',
+    'false',
+    'false',
+    '2026-09-30',
+  );
+  saveMeeting({ ...meeting, user_edits_json: JSON.stringify(reopened.edits) });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  expect(getEntity('action-peer-completion')?.status).toBe('active');
+  expect(
+    parseActionMetadata(getEntity('action-peer-completion')!.metadata)
+      .commitment_state,
+  ).toBe('confirmed');
+  updateEntityStatus('action-peer-completion', 'completed');
+  updateEntityStatus('action-peer-completion', 'active');
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  expect(getEntity('action-peer-completion')?.status).toBe('active');
+});
+
+it('round trips native continuation completion without losing sibling notes', () => {
+  const meetingId = 'meeting-continuation-roundtrip';
+  const path = 'continuation:all_action_items';
+  saveMeeting({
+    id: meetingId,
+    title: 'Checklist review',
+    user_edits_json: JSON.stringify({
+      [path]: {
+        original: '',
+        edited: JSON.stringify([
+          { id: 'first', text: 'Send checklist' },
+          { id: 'second', text: 'Review launch', completed: false },
+        ]),
+        edited_at: '2026-09-30',
+      },
+    }),
+  });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  const id = `action-continuation-${meetingId}-first`;
+  updateEntityStatus(id, 'completed');
+  const items = JSON.parse(
+    JSON.parse(getMeeting(meetingId)!.user_edits_json!)[path].edited,
+  );
+  expect(items[0].completed).toBe(true);
+  expect(items[1]).toEqual({
+    id: 'second',
+    text: 'Review launch',
+    completed: false,
+  });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  expect(getEntity(id)?.status).toBe('completed');
+  updateEntityStatus(id, 'active');
+  expect(
+    JSON.parse(
+      JSON.parse(getMeeting(meetingId)!.user_edits_json!)[path].edited,
+    )[0].completed,
+  ).toBe(false);
+});
+
+it('rolls back completion if source edits cannot be safely read', () => {
+  const meetingId = 'meeting-corrupt-completion';
+  saveMeeting({
+    id: meetingId,
+    title: 'Checklist review',
+    user_edits_json: '{broken',
+  });
+  upsertEntity({
+    id: 'action-corrupt-completion',
+    type: 'action_item',
+    name: 'Send checklist',
+    status: 'active',
+    metadata: {
+      source_meeting_id: meetingId,
+      source_path: 'all_action_items:0',
+    },
+  });
+  expect(() =>
+    updateEntityStatus('action-corrupt-completion', 'completed'),
+  ).toThrow();
+  expect(getEntity('action-corrupt-completion')?.status).toBe('active');
+  expect(getMeeting(meetingId)?.user_edits_json).toBe('{broken');
 });

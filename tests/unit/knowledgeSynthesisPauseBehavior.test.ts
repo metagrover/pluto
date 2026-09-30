@@ -11,7 +11,11 @@ vi.mock('electron', () => ({
   app: { getPath: () => testDatabase.directory },
 }));
 
-import { ensureGlobalKnowledgeDoc } from '../../electron/db';
+import {
+  ensureGlobalKnowledgeDoc,
+  getKnowledgeDoc,
+  upsertKnowledgeDoc,
+} from '../../electron/db';
 import {
   configureKnowledgeDocBackgroundScheduler,
   initializeKnowledgeDocs,
@@ -41,6 +45,33 @@ describe('knowledge synthesis pause behavior during capture', () => {
 
     expect(result).toBeDefined();
     expect(result?.id).toBe(globalDoc.id);
+  });
+
+  it('resumes a user-requested refresh without waiting for the idle background scheduler', async () => {
+    vi.useFakeTimers();
+    const scheduleInBackground = vi.fn();
+    configureKnowledgeDocBackgroundScheduler(scheduleInBackground);
+    const doc = upsertKnowledgeDoc({
+      scope_type: 'person_context',
+      scope_key: 'user-requested-person',
+      title: 'Avery Chen',
+      status: 'up_to_date',
+    });
+    try {
+      setKnowledgeDocSynthesisPaused(true);
+      const deferred = await refreshKnowledgeDocNow(doc.id, {
+        userRequested: true,
+      });
+      expect(deferred?.status).toBe('stale');
+      setKnowledgeDocSynthesisPaused(false);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(scheduleInBackground).not.toHaveBeenCalledWith(doc.id);
+      expect(getKnowledgeDoc(doc.id)?.status).toBe('up_to_date');
+    } finally {
+      configureKnowledgeDocBackgroundScheduler(null);
+      setKnowledgeDocSynthesisPaused(false);
+      vi.useRealTimers();
+    }
   });
 
   it('defers refreshKnowledgeDocsForMeetingNow when synthesis is paused', async () => {

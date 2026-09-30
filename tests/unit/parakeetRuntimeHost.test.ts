@@ -19,6 +19,21 @@ const paths = {
 };
 
 describe('ParakeetRuntimeHost', () => {
+  it('removes cancelled live acquisitions so a stopped recovery cannot steal a later lease', async () => {
+    const host = makeRuntimeHost({ paths, spawn: () => new FakeChild() });
+    const active = await host.acquire('live');
+    const controller = new AbortController();
+    const pending = host.acquire('live', controller.signal);
+    const rejected = expect(pending).rejects.toThrow('parakeet_cancelled');
+    controller.abort();
+    await rejected;
+    expect(host.diagnostics().queuedLeaseCount).toBe(0);
+    await active.release();
+    await expect(host.acquire('final')).resolves.toMatchObject({
+      kind: 'final',
+    });
+    host.shutdown();
+  });
   it('passes an explicitly selected live configuration to the native runtime', async () => {
     const child = new FakeChild();
     const spawn = vi.fn(() => child);

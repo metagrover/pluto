@@ -68,6 +68,7 @@ import {
   parsePersonRoleSourceMeetingId,
   selectPersonActivity,
   selectPersonCommitments,
+  selectVerifiedPersonCommitments,
 } from '../src/utils/personBriefing';
 import {
   type ProjectBrief,
@@ -92,6 +93,7 @@ import {
 import type { ProjectPortfolioEntry } from '../src/utils/projectPortfolio';
 import {
   type ProjectPortfolioDisposition,
+  readProjectPortfolioDisposition,
   readProjectQualification,
   withProjectPortfolioDisposition,
 } from '../src/utils/projectQualification';
@@ -110,6 +112,7 @@ import type { TrustStatus } from '../src/utils/trustStatus';
 import { createCalendarStore } from './calendar/store';
 import type { CalendarEvent } from './calendar/types';
 import { getApplicationDatabase } from './database/applicationDatabase';
+import { syncActionCompletionToMeetingNotes } from './database/meetingActionSync';
 import {
   type MeetingContextSectionIntegrity,
   type MeetingContextSectionRow,
@@ -159,6 +162,7 @@ import type { PrepMeetingOption } from './meetingPrep';
 import { createMeetingPrepStore, findCalendarInviteeName } from './meetingPrep';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
 import { createPrepAttendeeStore } from './prepAttendees';
+import type { SynthesizedProjectTheme } from './projectThemeSynthesis';
 import { createSecureSettingsManager } from './secureSettings';
 import { saveMeetingSpeakerCandidates } from './speakerVoiceStore';
 
@@ -1568,9 +1572,12 @@ export function repairMeetingContextSectionIndex(
   return repairMeetingContextSectionSearchIndex(db, options);
 }
 
+const deletedMeetingIds = new Set<string>();
+
 const saveMeetingRecord = (incomingMeeting: PersistedMeeting) => {
   // Ensure ID is a string
   const id = String(incomingMeeting.id);
+  if (deletedMeetingIds.has(id)) return false;
   const current = db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as
     | PersistedMeeting
     | undefined;
@@ -3951,6 +3958,7 @@ export const deleteMeeting = (id: string | number) => {
   const result = db.prepare('DELETE FROM meetings WHERE id = ?').run(safeId);
 
   if (result.changes === 1) {
+    deletedMeetingIds.add(safeId);
     // Keep the occurrence's preparation, but do not leave its Start/Open
     // action pointing at a recording that no longer exists.
     db.prepare(
@@ -5299,10 +5307,7 @@ export const getKnowledgeDocSourceMeetings = (
   if (doc.scope_type === 'project') {
     return db
       .prepare(`
-        WITH family(id) AS (
-          SELECT ? UNION SELECT project_id FROM project_aliases
-          WHERE canonical_id = ? AND active = 1
-        )
+        ${PROJECT_FAMILY_CTE}
         SELECT
           m.*,
           COALESCE(SUM(me.mention_count), 0) AS mention_count,
@@ -7415,6 +7420,19 @@ export const restoreProjectMerge = (projectId: string): void => {
       `UPDATE project_aliases SET active = 0, restored_at = CURRENT_TIMESTAMP
        WHERE project_id = ? AND active = 1`,
     ).run(projectId);
+    const restored = getEntity(projectId);
+    if (restored) {
+      let metadata: Record<string, unknown> = {};
+      try {
+        metadata = JSON.parse(restored.metadata || '{}');
+      } catch {
+        /* Legacy metadata. */
+      }
+      upsertEntity({
+        ...restored,
+        metadata: { ...metadata, projectAutoGroupingOptOut: true },
+      });
+    }
   })();
 };
 
@@ -7459,16 +7477,158 @@ const parseMeetingParticipants = (
   }
 };
 
+// Both identity aliases and explicitly filed work contribute evidence to their parent.
+// UNION de-duplicates meetings reached through several branches and terminates cycles.
+const PROJECT_FAMILY_CTE = `WITH RECURSIVE family(id) AS (
+  SELECT ? UNION SELECT project_id FROM project_aliases WHERE canonical_id = ? AND active = 1
+  UNION SELECT a.project_id FROM project_aliases a JOIN family f ON a.canonical_id = f.id WHERE a.active = 1
+  UNION SELECT e.id FROM entities e JOIN family f
+    ON json_extract(CASE WHEN json_valid(e.metadata) THEN e.metadata ELSE '{}' END, '$.projectQualification.parentProjectId') = f.id
+    WHERE e.type = 'project' AND json_extract(CASE WHEN json_valid(e.metadata) THEN e.metadata ELSE '{}' END, '$.projectQualification.state') = 'subordinate'
+)`;
+
+export const saveSynthesizedProjectTheme = (
+  theme: SynthesizedProjectTheme,
+): void => {
+  db.transaction(() => {
+    const canonicalId = resolveProjectIdentityId(theme.id);
+    const existing = getEntity(canonicalId);
+    if (
+      existing &&
+      readProjectPortfolioDisposition(existing.metadata) === 'dismissed'
+    )
+      return;
+    let metadata: Record<string, unknown> = {};
+    try {
+      metadata = JSON.parse(existing?.metadata || '{}');
+    } catch {
+      /* Legacy metadata. */
+    }
+    const qualification = readProjectQualification(existing?.metadata || null);
+    upsertEntity({
+      ...(existing || {}),
+      id: canonicalId,
+      type: 'project',
+      name: existing?.name || theme.name,
+      status: existing?.status || 'active',
+      dedupe_by_name: false,
+      metadata: {
+        ...metadata,
+        projectThemeSynthesis: theme.metadata.projectThemeSynthesis,
+        projectQualification:
+          qualification?.source === 'user'
+            ? qualification
+            : theme.metadata.projectQualification,
+      },
+    });
+    for (const meetingId of theme.sourceMeetingIds) {
+      if (!getMeeting(meetingId))
+        throw new Error('project_theme_source_missing');
+      ensureMeetingEntity({
+        meeting_id: meetingId,
+        entity_id: canonicalId,
+        context: theme.sourceContexts[meetingId] || theme.context,
+      });
+    }
+    for (const membership of theme.memberships || []) {
+      const member = getEntity(membership.projectId);
+      const memberQ = readProjectQualification(member?.metadata || null);
+      if (
+        !member ||
+        member.type !== 'project' ||
+        member.id === canonicalId ||
+        member.metadata !== membership.expectedMetadata ||
+        memberQ?.source === 'user' ||
+        (() => {
+          try {
+            return (
+              JSON.parse(member.metadata || '{}').projectAutoGroupingOptOut ===
+              true
+            );
+          } catch {
+            return false;
+          }
+        })() ||
+        member.status === 'completed' ||
+        readProjectPortfolioDisposition(member.metadata) === 'dismissed' ||
+        (memberQ?.parentProjectId && memberQ.parentProjectId !== canonicalId) ||
+        resolveProjectIdentityId(member.id) !== member.id
+      )
+        continue;
+      const source = getMeeting(membership.sourceMeetingId) as
+        | PersistedMeeting
+        | undefined;
+      if (
+        !source ||
+        !getMeetingEntities(String(source.id)).some(
+          (entity) => entity.id === member.id,
+        )
+      )
+        continue;
+      const evidence = buildMeetingNotesEvidenceDocument(
+        source,
+        getMeetingNotesIdentityProjection(source.id).speakerDisplayNames,
+      );
+      const notes = [
+        evidence.notesText,
+        evidence.decisionsText && `Decisions:\n${evidence.decisionsText}`,
+        evidence.actionItemsText && `Actions:\n${evidence.actionItemsText}`,
+      ]
+        .filter(Boolean)
+        .join('\n')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const quote = membership.evidenceQuote.replace(/\s+/g, ' ').trim();
+      if (quote.length < 12 || !notes.includes(quote)) continue;
+      if (membership.relationship === 'alias') {
+        mergeProject(member.id, canonicalId);
+      } else {
+        // Never create a parent cycle or replace a manually corrected classification.
+        const ancestors = new Set<string>([member.id]);
+        let parent: Entity | undefined = getEntity(canonicalId);
+        while (parent) {
+          if (ancestors.has(parent.id)) throw new Error('project_parent_cycle');
+          ancestors.add(parent.id);
+          const parentId = readProjectQualification(
+            parent.metadata,
+          )?.parentProjectId;
+          parent = parentId ? getEntity(parentId) : undefined;
+        }
+        let memberMetadata: Record<string, unknown> = {};
+        try {
+          memberMetadata = JSON.parse(member.metadata || '{}');
+        } catch {
+          /* Legacy metadata. */
+        }
+        upsertEntity({
+          ...member,
+          metadata: {
+            ...memberMetadata,
+            projectQualification: {
+              ...memberQ,
+              version: 1,
+              state: 'subordinate',
+              source: 'review',
+              parentProjectId: canonicalId,
+              parentEvidenceQuote: membership.evidenceQuote,
+              sourceMeetingId: membership.sourceMeetingId,
+              assessedAt: new Date().toISOString(),
+              reason: 'Evidence places this work within the parent project.',
+            },
+          },
+        });
+      }
+    }
+  })();
+};
+
 export const getProjectBrief = (projectId: string): ProjectBrief | null => {
   const canonicalId = resolveProjectIdentityId(projectId);
   const project = getEntity(canonicalId);
   if (!project || project.type !== 'project') return null;
   const meetings = db
     .prepare(
-      `WITH family(id) AS (
-         SELECT ? UNION SELECT project_id FROM project_aliases
-         WHERE canonical_id = ? AND active = 1
-       )
+      `${PROJECT_FAMILY_CTE}
        SELECT m.*, SUM(me.mention_count) AS mention_count,
          GROUP_CONCAT(DISTINCT me.context) AS context
        FROM meetings m
@@ -7493,10 +7653,7 @@ export const getProjectBrief = (projectId: string): ProjectBrief | null => {
   }));
   const tasks = db
     .prepare(
-      `WITH family(id) AS (
-         SELECT ? UNION SELECT project_id FROM project_aliases
-         WHERE canonical_id = ? AND active = 1
-       )
+      `${PROJECT_FAMILY_CTE}
        SELECT DISTINCT e.* FROM entities e
        JOIN entity_links l ON l.source_entity_id = e.id
        WHERE e.type = 'action_item'
@@ -7510,6 +7667,9 @@ export const getProjectBrief = (projectId: string): ProjectBrief | null => {
     )
     .all(canonicalId, canonicalId) as Entity[];
   const snapshot = getWorkingMemorySnapshot('project', canonicalId);
+  const confirmedTasks = tasks.filter(
+    (task) => getCommitmentState(task.metadata) === 'confirmed',
+  );
   const mergedProjects = db
     .prepare(
       `SELECT e.id, e.name, pa.created_at AS mergedAt
@@ -7522,6 +7682,47 @@ export const getProjectBrief = (projectId: string): ProjectBrief | null => {
     name: string;
     mergedAt: string;
   }>;
+  const theme = readProjectThemeSynthesis(project.metadata);
+  let themeSourceOutdated = false;
+  if (theme?.version === 3) {
+    const sourceNotes = new Map(
+      meetings.map((meeting) => {
+        const document = buildMeetingNotesEvidenceDocument(
+          meeting,
+          getMeetingNotesIdentityProjection(meeting.id).speakerDisplayNames,
+        );
+        return [
+          String(meeting.id),
+          [document.notesText, document.decisionsText, document.actionItemsText]
+            .filter(Boolean)
+            .join('\n')
+            .replace(/\s+/g, ' ')
+            .trim(),
+        ];
+      }),
+    );
+    const supported = (item: {
+      sourceMeetingId: string;
+      evidenceQuote: string;
+    }) => {
+      const valid =
+        sourceNotes
+          .get(item.sourceMeetingId)
+          ?.includes(item.evidenceQuote.replace(/\s+/g, ' ').trim()) === true;
+      if (!valid) themeSourceOutdated = true;
+      return valid;
+    };
+    theme.evidence = theme.evidence?.filter(supported);
+    if (theme.summary && !supported(theme.summary)) theme.summary = undefined;
+    theme.workstreams = theme.workstreams?.filter(supported);
+    theme.decisions = theme.decisions?.filter(supported);
+    theme.recentChanges = theme.recentChanges.filter(supported);
+    theme.openThreads = theme.openThreads.filter(supported);
+    if (themeSourceOutdated) {
+      theme.currentFocus = '';
+      theme.outcome = '';
+    }
+  }
   return {
     project: {
       id: project.id,
@@ -7530,13 +7731,15 @@ export const getProjectBrief = (projectId: string): ProjectBrief | null => {
       metadata: project.metadata,
       status: project.status,
     },
-    theme: readProjectThemeSynthesis(project.metadata),
+    selfPersonId: identityStore.getSelfPersonId(),
+    theme,
+    themeSourceOutdated,
     meetingStats: buildProjectMeetingStats(briefingMeetings),
-    momentum: buildProjectMomentum(briefingMeetings, tasks),
-    health: buildProjectHealth(tasks, snapshot),
+    momentum: buildProjectMomentum(briefingMeetings, confirmedTasks),
+    health: buildProjectHealth(confirmedTasks, snapshot),
     milestones: sortProjectMilestones([
       ...buildUserProjectMilestones(project.metadata),
-      ...buildProjectMilestones(tasks),
+      ...buildProjectMilestones(confirmedTasks),
     ]),
     meetings: briefingMeetings,
     tasks,
@@ -7588,6 +7791,11 @@ export const getProjectPortfolio = (): ProjectPortfolioEntry[] => {
       ? {
           ...row,
           display_title: brief.project.displayTitle,
+          meeting_count: brief.meetings.length,
+          last_mentioned_at:
+            brief.meetings[0]?.started_at ||
+            brief.meetings[0]?.created_at ||
+            null,
           health_state: brief.health.state,
           health_headline: brief.health.headline,
           health_summary: brief.health.summary,
@@ -7727,9 +7935,14 @@ export const findEntity = (
  * Update entity status (for action items)
  */
 export const updateEntityStatus = (id: string, status: EntityStatus): void => {
-  db.prepare(`
+  db.transaction(() => {
+    if (status === 'completed' || status === 'active') {
+      syncActionCompletionToMeetingNotes(db, id, status === 'completed');
+    }
+    db.prepare(`
     UPDATE entities SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-  `).run(status, id);
+    `).run(status, id);
+  })();
 };
 
 /**
@@ -8400,10 +8613,14 @@ const dreamingEntityNotesQuery = (
   aliasTable: 'person_aliases' | 'project_aliases',
   aliasIdColumn: 'person_id' | 'project_id',
 ): string => `
-  WITH family(id) AS (
+  ${
+    aliasTable === 'project_aliases'
+      ? PROJECT_FAMILY_CTE
+      : `WITH family(id) AS (
     SELECT ? UNION SELECT a.${aliasIdColumn} FROM ${aliasTable} a
     WHERE a.canonical_id = ? AND a.active = 1
-  )
+  )`
+  }
   SELECT
     m.id,
     m.title,
@@ -8750,10 +8967,7 @@ export const getDreamingEntityBaseline = (
     canonical.type === 'project'
       ? (db
           .prepare(`
-            WITH family(id) AS (
-              SELECT ? UNION SELECT project_id FROM project_aliases
-              WHERE canonical_id = ? AND active = 1
-            )
+            ${PROJECT_FAMILY_CTE}
             SELECT DISTINCT action.id, action.name, action.status, action.due_date
             FROM entities action
             JOIN entity_links link ON link.source_entity_id = action.id
@@ -9168,6 +9382,10 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
 };
 
 export interface PersonBriefingDetail {
+  sharedCommitments?: {
+    open: PersonBriefingCommitment[];
+    delivered: PersonBriefingCommitment[];
+  };
   person: Entity;
   meetings: PersonBriefingMeeting[];
   recentActivity?: PersonActivityItem[];
@@ -9221,6 +9439,7 @@ const getPersonMeetingRecord = (
  */
 export const getPersonBriefing = (
   personId: string,
+  options: { ensureKnowledgeDoc?: boolean } = {},
 ): PersonBriefingDetail | undefined => {
   const canonicalId = resolvePersonIdentityId(personId);
   const person = getEntity(canonicalId);
@@ -9486,18 +9705,34 @@ export const getPersonBriefing = (
   }>;
   const selfPersonId = identityStore.getSelfPersonId();
   const acceptedClaims = getAcceptedDreamingPersonClaims(canonicalId);
+  const isSelf =
+    selfPersonId !== null &&
+    resolvePersonIdentityId(selfPersonId) === canonicalId;
+  let storedKnowledgeDoc = getKnowledgeDocByScope(
+    'person_context',
+    canonicalId,
+  );
+  if (
+    options.ensureKnowledgeDoc &&
+    !storedKnowledgeDoc &&
+    !isSelf &&
+    (confirmed.length > 0 || mentionedMeetings.length > 0)
+  ) {
+    storedKnowledgeDoc = upsertKnowledgeDoc({
+      scope_type: 'person_context',
+      scope_key: canonicalId,
+      title: `Conversations with ${person.name}`,
+      status: 'stale',
+    });
+  }
   const knowledgeDoc = overlayAcceptedClaimsOnKnowledgeDoc(
-    getKnowledgeDocByScope('person_context', canonicalId) ?? null,
+    storedKnowledgeDoc ?? null,
     acceptedClaims,
   );
   const workingMemorySnapshot = overlayAcceptedClaimsOnSnapshot(
     getWorkingMemorySnapshot('person_context', canonicalId) ?? null,
     acceptedClaims,
   );
-
-  const isSelf =
-    selfPersonId !== null &&
-    resolvePersonIdentityId(selfPersonId) === canonicalId;
 
   const meetings = mergePersonMeetingEvidence({
     confirmed,
@@ -9515,8 +9750,54 @@ export const getPersonBriefing = (
     if (analysis) analyses.set(meeting.id, analysis);
   }
 
+  const sharedMeetingIds = new Set(
+    meetings
+      .filter((meeting) => meeting.evidence === 'confirmed')
+      .map((meeting) => meeting.id),
+  );
+  const canonicalSelfId = selfPersonId
+    ? resolvePersonIdentityId(selfPersonId)
+    : null;
+  const sharedActions =
+    canonicalSelfId && !isSelf && sharedMeetingIds.size
+      ? (db
+          .prepare(`
+        SELECT action.id, action.name, action.status, action.due_date,
+          action.assigned_to, action.metadata, action.updated_at,
+          source.title AS sourceMeetingTitle
+        FROM entities action
+        JOIN meetings source ON source.id = json_extract(
+          CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+          '$.source_meeting_id'
+        )
+        WHERE action.type = 'action_item'
+          AND action.assigned_to IN (
+            SELECT ? UNION SELECT person_id FROM person_aliases WHERE canonical_id = ? AND active = 1
+          )
+          AND json_type(CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.meeting_regeneration_retired_at') IS NULL
+      `)
+          .all(canonicalSelfId, canonicalSelfId) as PersonCommitmentCandidate[])
+      : [];
+  const sharedCommitments = canonicalSelfId
+    ? selectVerifiedPersonCommitments({
+        personId: canonicalSelfId,
+        actions: sharedActions.map((action) => ({
+          ...action,
+          assigned_to: canonicalSelfId,
+        })),
+      })
+    : { open: [], delivered: [] };
+  sharedCommitments.open = sharedCommitments.open.filter((item) =>
+    sharedMeetingIds.has(item.sourceMeetingId),
+  );
+  sharedCommitments.delivered = sharedCommitments.delivered.filter((item) =>
+    sharedMeetingIds.has(item.sourceMeetingId),
+  );
+
   return {
     person,
+    sharedCommitments,
     meetings,
     recentActivity: selectPersonActivity(
       meetings.filter((item) => item.evidence !== 'scheduled'),

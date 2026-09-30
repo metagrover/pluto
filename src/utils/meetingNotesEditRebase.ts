@@ -29,6 +29,21 @@ export const applyMeetingNotesUserEdit = (
   edited: string,
   editedAt: string,
 ): { edits: UserEditsMap; changed: boolean } => {
+  const completion = path.match(
+    /^completion:(?:all_action_items|v2:action):(\d+)$/,
+  );
+  if (completion && (edited === 'true' || edited === 'false')) {
+    const next = { ...edits };
+    for (const prefix of ['all_action_items', 'v2:action']) {
+      const key = `completion:${prefix}:${completion[1]}`;
+      if (edited === 'false') delete next[key];
+      else next[key] = { original: 'false', edited, edited_at: editedAt };
+    }
+    return {
+      edits: next,
+      changed: JSON.stringify(next) !== JSON.stringify(edits),
+    };
+  }
   if (isNoOpMeetingNotesEdit(original, edited)) {
     if (!Object.hasOwn(edits, path)) return { edits, changed: false };
     const next = { ...edits };

@@ -62,6 +62,58 @@ it('returns an empty deterministic briefing without automatically finding unrela
   ).toEqual([]);
 });
 
+it('passes calendar invitees through the manual prep brief as unverified hints', () => {
+  const result = buildMeetingPrepBrief(
+    {
+      ...prep,
+      event: {
+        ...prep.event,
+        attendees: [
+          { name: 'Morgan', email: 'morgan@example.test' },
+          { name: null, email: 'lee@example.test' },
+          { name: 'You', email: 'you@example.test', isCurrentUser: true },
+        ],
+        organizer: { name: 'Morgan', email: 'morgan@example.test' },
+      },
+    },
+    { entities: () => [], blockers: () => [] },
+  );
+  expect(result.calendarInvitees).toEqual(['Morgan', 'lee@example.test']);
+  expect(
+    refreshMeetingPrepBrief(result, {
+      ...result,
+      calendarInvitees: ['Taylor'],
+    }).calendarInvitees,
+  ).toEqual(['Taylor']);
+});
+
+it('removes suggestions grounded in a calendar agenda after that agenda changes', () => {
+  const baseline = buildMeetingPrepBrief(prep, {
+    entities: () => [],
+    blockers: () => [],
+  });
+  const calendarSuggestion = {
+    id: 'next:calendar:agenda:0',
+    text: 'Review the pilot timeline',
+    sourceMeetingId: null,
+    sourceLabel: 'Calendar agenda',
+    sourceDate: baseline.startsAt,
+    trustStatus: 'inferred' as const,
+  };
+  const saved = {
+    ...baseline,
+    agenda: 'Review the pilot timeline',
+    possibleNextSteps: [calendarSuggestion],
+    watchouts: [calendarSuggestion],
+  };
+  const refreshed = refreshMeetingPrepBrief(saved, {
+    ...baseline,
+    agenda: 'Discuss the release plan',
+  });
+  expect(refreshed.possibleNextSteps).toEqual([]);
+  expect(refreshed.watchouts).toEqual([]);
+});
+
 it('balances overview and synthesis context across selected meetings instead of taking everything from the first', () => {
   const first = {
     ...prep.meetings![0],

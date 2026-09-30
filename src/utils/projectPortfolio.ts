@@ -285,7 +285,6 @@ export function buildProjectPortfolio(
     const legacySingleSource =
       qualification?.state === 'qualified' &&
       qualification.source !== 'user' &&
-      Boolean(metadata.projectInitiativeDiscovery) &&
       !metadata.projectThemeSynthesis &&
       entry.meeting_count < 2;
 
@@ -296,7 +295,7 @@ export function buildProjectPortfolio(
       radarTopics.push(enrichedEntry);
     } else if (qualification?.state !== 'qualified') {
       other.push(enrichedEntry);
-      radarTopics.push(enrichedEntry);
+      if (entry.meeting_count > 0) radarTopics.push(enrichedEntry);
     } else if (entry.status === 'completed') {
       completed.push(enrichedEntry);
     } else {

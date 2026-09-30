@@ -564,6 +564,61 @@ describe('PersonDossier', () => {
     expect(markup).not.toContain('Earlier context');
   });
 
+  it('renders the complete sourced dossier without duplicating the excerpt-based summary', () => {
+    const doc = JSON.parse(briefingDetail.knowledgeDoc!.structured_json!);
+    const citation = {
+      meeting_id: doc.evidence_index[0].meeting_id,
+      quote: doc.evidence_index[0].quote,
+    };
+    doc.person_profile = [
+      {
+        section: 'overview',
+        summary: 'Avery contributed to the launch handoff across two reviews.',
+        citations: [citation],
+      },
+      {
+        section: 'collaboration',
+        title: 'Written handoff',
+        summary: 'Avery reviewed the written handoff.',
+        citations: [citation],
+      },
+      {
+        section: 'unknowns',
+        summary: 'Unsupported claim should stay hidden.',
+        citations: [
+          { meeting_id: 'missing', quote: 'Avery has an unresolved approval.' },
+        ],
+      },
+    ];
+    const markup = renderToStaticMarkup(
+      <PersonDossier
+        detail={{
+          ...briefingDetail,
+          knowledgeDoc: {
+            ...briefingDetail.knowledgeDoc!,
+            config: JSON.stringify({ synthesis_version: 15 }),
+            structured_json: JSON.stringify(doc),
+          },
+          sharedCommitments: {
+            open: [briefingDetail.commitments.open[0]],
+            delivered: [],
+          },
+        }}
+        onBack={() => {}}
+        onOpenMeeting={() => {}}
+      />,
+    );
+    expect(markup).toContain(
+      'Avery contributed to the launch handoff across two reviews.',
+    );
+    expect(markup).toContain('How they collaborate');
+    expect(markup).toContain('View source');
+    expect(markup).toContain('Your commitments in shared conversations');
+    expect(markup).not.toContain('Unsupported claim');
+    expect(markup).not.toContain('What they work on');
+    expect(markup).not.toContain('Recent developments');
+  });
+
   it('keeps the prior cited summary visible while a refresh is compiling', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier

@@ -88,3 +88,51 @@ it('supports prep-only questions without treating prep as transcript evidence', 
   expect(result.trustStatus).toBe('inferred');
   expect(result.evidenceItems.every((item) => item.kind === 'prep')).toBe(true);
 });
+it('passes richer prep suggestions to Ask Pluto as historical background', () => {
+  const item = {
+    id: 'history',
+    text: 'The earlier review was delayed.',
+    summary: 'The earlier review was delayed while the draft was unfinished.',
+    trustStatus: 'inferred' as const,
+    sourceMeetingId: 'past-meeting',
+    sourceLabel: 'Launch review',
+    sourceDate: '2026-09-20',
+  };
+  const result = withMeetingPrepContext(context, {
+    ...prep,
+    briefing: {
+      title: 'Launch',
+      startsAt: null,
+      agenda: null,
+      relationship: 'manual',
+      priorMeeting: null,
+      lastTime: [],
+      stillOpen: [],
+      relevantContext: [],
+      emptyMessage: null,
+      overview: [item],
+      possibleNextSteps: [
+        {
+          ...item,
+          id: 'next',
+          summary: 'Consider checking the revised draft.',
+        },
+      ],
+      watchouts: [
+        {
+          ...item,
+          id: 'watch',
+          summary: 'The unfinished draft may delay review again.',
+        },
+      ],
+    },
+  });
+  const briefing = result.evidenceItems.find(
+    (item) => item.id === 'prep-briefing',
+  );
+  expect(briefing?.kind).toBe('prep');
+  expect(briefing?.text).toContain('Consider checking the revised draft.');
+  expect(briefing?.text).toContain(
+    'The unfinished draft may delay review again.',
+  );
+});

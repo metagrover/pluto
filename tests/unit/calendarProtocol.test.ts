@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildCalendarRequest,
+  normalizeEvent,
   parseCalendarMessage,
 } from '../../electron/calendar/protocol';
 
@@ -124,6 +125,23 @@ describe('calendar helper protocol', () => {
         ],
       },
     });
+  });
+
+  it('retains a supplied agenda when event notes are absent', () => {
+    expect(
+      normalizeEvent({
+        occurrenceKey: 'event-a',
+        eventIdentifier: 'event-a',
+        calendarIdentifier: 'calendar-a',
+        title: 'Fictional review',
+        start: '2026-09-30T18:30:00Z',
+        end: '2026-09-30T19:00:00Z',
+        isAllDay: false,
+        isCancelled: false,
+        attendees: [],
+        agenda: 'Review the pilot risks and timeline.',
+      }),
+    ).toMatchObject({ agenda: 'Review the pilot risks and timeline.' });
   });
 
   it.each([

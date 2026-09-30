@@ -362,6 +362,18 @@ describe('EOU renderer session', () => {
     session.append('system', new Float32Array(2_560));
 
     expect(onUnavailable).toHaveBeenCalledWith('parakeet_backpressure');
+    expect(transport.invoke).toHaveBeenCalledWith(
+      'PARAKEET_EOU_CANCEL',
+      expect.objectContaining({
+        code: 'parakeet_backpressure',
+        backpressure: expect.objectContaining({
+          source: 'mic',
+          retainedSeconds: 0,
+          incomingSeconds: 1.6,
+          inFlight: false,
+        }),
+      }),
+    );
     expect(transport.invoke).not.toHaveBeenCalledWith(
       'STOP_RECORDING',
       expect.anything(),

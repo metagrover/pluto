@@ -146,6 +146,7 @@ import {
 } from './speakerSample';
 import { stitchTimedWavSegments } from './timedWavStitch';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
+import { readLiveJournalAudio } from './transcription/liveJournalAudio';
 import { ParakeetEouClient } from './transcription/parakeetEouClient';
 import { ParakeetEouMeetingCoordinator } from './transcription/parakeetEouMeetingCoordinator';
 import { ParakeetFinalClient } from './transcription/parakeetFinalClient';
@@ -714,6 +715,7 @@ let idleDreamingCoordinator: ReturnType<
 > | null = null;
 let dreamingEntityQueue: DirtyEntityQueue | null = null;
 let lastRendererActivityAt = Date.now();
+let scheduleProjectSynthesis: (() => void) | null = null;
 let scheduleDreamingRun: ((delayMs?: number) => void) | null = null;
 let backgroundVoiceCandidateActive = false;
 let voiceWorkQueue: ReturnType<typeof createVoiceWorkQueue> | null = null;
@@ -730,6 +732,7 @@ const notifyRendererActivity = () => {
 };
 
 const invalidateDreamingCatalog = () => {
+  scheduleProjectSynthesis?.();
   if (!dreamingEntityQueue) return;
   invalidateDreamingWork(dreamingEntityQueue, () => scheduleDreamingRun?.());
 };
@@ -1845,7 +1848,11 @@ app.whenReady().then(async () => {
       const generated = await synthesizePreMeetingBrief(
         brief,
         (prompt, signal) =>
-          provider.answerAskPluto(prompt, { signal, mode: 'deep' }),
+          provider.answerAskPluto(prompt, {
+            signal,
+            mode: 'deep',
+            jsonMode: true,
+          }),
       );
       if (
         generated.synthesisStatus === 'ready' &&
@@ -1934,7 +1941,11 @@ app.whenReady().then(async () => {
       const settings = await getAllSettings(db);
       const provider = await getProvider(settings);
       return synthesizePreMeetingBrief(brief, (prompt, signal) =>
-        provider.answerAskPluto(prompt, { signal, mode: 'deep' }),
+        provider.answerAskPluto(prompt, {
+          signal,
+          mode: 'deep',
+          jsonMode: true,
+        }),
       );
     },
   );
@@ -2361,21 +2372,27 @@ app.whenReady().then(async () => {
   );
 
   const eouCoordinator = new ParakeetEouMeetingCoordinator({
-    createClient: async () => {
+    createClient: async (signal) => {
       if (!parakeetRuntimeHost) throw new Error('parakeet_runtime_unavailable');
       const before = parakeetRuntimeHost.diagnostics();
       console.warn(
         `[ParakeetEOU] requesting live lease state=${before.state} queued=${before.queuedLeaseCount}`,
       );
-      const lease = await parakeetRuntimeHost.startRecordingLive();
+      const lease = await parakeetRuntimeHost.startRecordingLive(signal);
+      const abortPreparation = () => {
+        void lease.invalidateWorker('parakeet_live_start_cancelled');
+      };
+      signal.addEventListener('abort', abortPreparation, { once: true });
       const after = parakeetRuntimeHost.diagnostics();
       console.warn(
         `[ParakeetEOU] acquired live lease state=${after.state} queued=${after.queuedLeaseCount}`,
       );
       try {
+        signal.throwIfAborted();
         if (!parakeetFinalClient)
           throw new Error('parakeet_runtime_unavailable');
         await parakeetFinalClient.prepareForLive(lease);
+        signal.throwIfAborted();
         console.warn('[ParakeetEOU] live model prepared');
         return new ParakeetEouClient({
           runtimeHost: parakeetRuntimeHost,
@@ -2385,6 +2402,8 @@ app.whenReady().then(async () => {
       } catch (error) {
         await lease.release();
         throw error;
+      } finally {
+        signal.removeEventListener('abort', abortPreparation);
       }
     },
     onUpdate: ({ meetingId, owner: ownerId, event }) => {
@@ -2472,6 +2491,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('PARAKEET_EOU_APPEND', async (event, request = {}) => {
     const meetingId = String(request.meetingId || '');
     requireParakeetEouOwner(event.sender, meetingId);
+    if (request.generation !== parakeetEouGeneration)
+      throw new Error('parakeet_session_invalid');
     if (!(request.samples instanceof Float32Array)) {
       throw new Error('parakeet_request_invalid');
     }
@@ -2505,6 +2526,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('PARAKEET_EOU_FINISH', async (event, request = {}) => {
     const meetingId = String(request.meetingId || '');
     requireParakeetEouOwner(event.sender, meetingId);
+    if (request.generation !== parakeetEouGeneration)
+      throw new Error('parakeet_session_invalid');
     const generation = parakeetEouGeneration;
     await eouCoordinator.finish(meetingId);
     if (
@@ -2524,6 +2547,25 @@ app.whenReady().then(async () => {
     // cancel, so repeated cleanup is intentionally idempotent.
     if (!parakeetEouOwner) return { cancelled: false };
     requireParakeetEouOwner(event.sender, meetingId);
+    if (request.generation !== parakeetEouGeneration)
+      return { cancelled: false };
+    const backpressure = request.backpressure;
+    if (
+      request.code === 'parakeet_backpressure' &&
+      (backpressure?.source === 'mic' || backpressure?.source === 'system') &&
+      Number.isFinite(backpressure.retainedSeconds) &&
+      Number.isFinite(backpressure.incomingSeconds) &&
+      Number.isSafeInteger(backpressure.retainedBytes) &&
+      typeof backpressure.inFlight === 'boolean'
+    ) {
+      console.warn('[ParakeetEOU] renderer audio backlog', {
+        source: backpressure.source,
+        retainedSeconds: backpressure.retainedSeconds,
+        incomingSeconds: backpressure.incomingSeconds,
+        retainedBytes: backpressure.retainedBytes,
+        inFlight: backpressure.inFlight,
+      });
+    }
     const generation = parakeetEouGeneration;
     const code =
       typeof request.code === 'string' && request.code.trim()
@@ -2665,6 +2707,16 @@ app.whenReady().then(async () => {
         String(meetingId || ''),
       ),
   );
+
+  ipcMain.handle('PARAKEET_EOU_READ_AUDIO', async (event, request = {}) => {
+    const meetingId = String(request.meetingId || '');
+    captureSessionLease.requireRecordingOwner(meetingId, event.sender.id);
+    return readLiveJournalAudio(getMeetingArtifactsRootDir(), {
+      meetingId,
+      source: request.source,
+      fromSeconds: request.fromSeconds,
+    });
+  });
 
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_SOURCE_FAILED',
@@ -4021,6 +4073,13 @@ app.whenReady().then(async () => {
         }
       }
       delete editsMap[path];
+      const completion =
+        typeof path === 'string' &&
+        path.match(/^completion:(?:all_action_items|v2:action):(\d+)$/);
+      if (completion) {
+        delete editsMap[`completion:all_action_items:${completion[1]}`];
+        delete editsMap[`completion:v2:action:${completion[1]}`];
+      }
       db.saveMeeting({
         ...meeting,
         user_edits_json: JSON.stringify(editsMap),
@@ -4284,7 +4343,7 @@ app.whenReady().then(async () => {
     notifyMeetingIdentityUpdated();
     scheduleMeetingIdentityProjectionRefresh([String(personId)]);
   });
-  const projectThemeSynthesisStateKey = 'project_theme_synthesis_state_v2';
+  const projectThemeSynthesisStateKey = 'project_theme_synthesis_state_v3';
   const readProjectThemeSynthesisState =
     (): ProjectThemeSynthesisState | null => {
       try {
@@ -4301,86 +4360,109 @@ app.whenReady().then(async () => {
   let projectThemeSynthesis: Promise<
     Awaited<ReturnType<typeof synthesizeProjectThemes>>
   > | null = null;
-  ipcMain.handle(
-    'DISCOVER_PROJECT_INITIATIVE',
-    (_event, options?: { retryFailed?: unknown }) => {
-      if (projectThemeSynthesis) return projectThemeSynthesis;
-      const sourceFromMeeting = (meeting: db.PersistedMeeting) => {
-        const evidence = buildMeetingNotesEvidenceDocument(
-          meeting,
-          db.getMeetingNotesIdentityProjection(meeting.id).speakerDisplayNames,
-        );
-        if (!evidence.hasUsableNotes) return null;
-        return {
-          id: String(meeting.id),
-          title: meeting.title,
-          notes: [
-            evidence.notesText,
-            evidence.decisionsText && `Decisions:\n${evidence.decisionsText}`,
-            evidence.actionItemsText && `Actions:\n${evidence.actionItemsText}`,
-          ]
-            .filter(Boolean)
-            .join('\n'),
-          startedAt: meeting.started_at || meeting.created_at,
-          candidateProjects: db
-            .getMeetingEntities(String(meeting.id))
-            .filter((entity) => entity.type === 'project')
-            .map((entity) => ({ id: entity.id, name: entity.name })),
-        };
+  const runProjectThemeSynthesis = (options?: {
+    retryFailed?: unknown;
+    background?: boolean;
+  }) => {
+    if (projectThemeSynthesis) return projectThemeSynthesis;
+    const sourceFromMeeting = (meeting: db.PersistedMeeting) => {
+      const evidence = buildMeetingNotesEvidenceDocument(
+        meeting,
+        db.getMeetingNotesIdentityProjection(meeting.id).speakerDisplayNames,
+      );
+      if (!evidence.hasUsableNotes) return null;
+      return {
+        id: String(meeting.id),
+        title: meeting.title,
+        notes: [
+          evidence.notesText,
+          evidence.decisionsText && `Decisions:\n${evidence.decisionsText}`,
+          evidence.actionItemsText && `Actions:\n${evidence.actionItemsText}`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        startedAt: meeting.started_at || meeting.created_at,
+        candidateProjects: db
+          .getMeetingEntities(String(meeting.id))
+          .filter((entity) => entity.type === 'project')
+          .map((entity) => ({ id: entity.id, name: entity.name })),
       };
-      projectThemeSynthesis = synthesizeProjectThemes(
-        {
-          listSources: () =>
-            (db.getMeetings() as db.PersistedMeeting[]).flatMap((meeting) => {
-              const source = sourceFromMeeting(meeting);
-              return source ? [source] : [];
-            }),
-          getSource: (id) => {
-            const meeting = db.getMeeting(id) as
-              | db.PersistedMeeting
-              | undefined;
-            return meeting ? sourceFromMeeting(meeting) : null;
-          },
-          getState: readProjectThemeSynthesisState,
-          saveState: (state) =>
-            db.setSetting(projectThemeSynthesisStateKey, JSON.stringify(state)),
-          getProject: db.getEntity,
-          saveTheme: (theme) => {
-            const existing = db.getEntity(theme.id);
-            db.upsertEntity({
-              ...(existing || {}),
-              id: theme.id,
-              type: 'project',
-              name: theme.name,
-              status: 'active',
-              metadata: theme.metadata,
-              dedupe_by_name: false,
-            });
-            for (const meetingId of theme.sourceMeetingIds)
-              db.ensureMeetingEntity({
-                meeting_id: meetingId,
-                entity_id: theme.id,
-                context: theme.sourceContexts[meetingId] || theme.context,
-              });
-          },
-          generate: async (prompt, responseSchema) => {
-            const provider = await getProvider(await getAllSettings(db));
-            return provider.synthesizeKnowledgeDocument(prompt, {
-              purpose: 'projectScope',
-              responseSchema,
-              signal: AbortSignal.timeout(300_000),
-            });
-          },
-          isBusy: () =>
-            isProjectScopeReviewBusy(knowledgeSynthesisPause.snapshot()),
+    };
+    projectThemeSynthesis = synthesizeProjectThemes(
+      {
+        listSources: () =>
+          (db.getMeetings() as db.PersistedMeeting[]).flatMap((meeting) => {
+            const source = sourceFromMeeting(meeting);
+            return source ? [source] : [];
+          }),
+        getSource: (id) => {
+          const meeting = db.getMeeting(id) as db.PersistedMeeting | undefined;
+          return meeting ? sourceFromMeeting(meeting) : null;
         },
-        { retryFailed: options?.retryFailed === true },
-      ).finally(() => {
+        getState: readProjectThemeSynthesisState,
+        saveState: (state) =>
+          db.setSetting(projectThemeSynthesisStateKey, JSON.stringify(state)),
+        getProject: db.getEntity,
+        listProjects: () => db.getProjectPortfolio(),
+        saveTheme: db.saveSynthesizedProjectTheme,
+        generate: async (prompt, responseSchema) => {
+          const provider = await getProvider(await getAllSettings(db));
+          return provider.synthesizeKnowledgeDocument(prompt, {
+            purpose: 'projectScope',
+            responseSchema,
+            budget: { contextTokens: 32768, outputTokens: 8192 },
+            workClass: options?.background ? 'background' : 'project_review',
+            signal: AbortSignal.timeout(300_000),
+          });
+        },
+        isBusy: () =>
+          isProjectScopeReviewBusy(knowledgeSynthesisPause.snapshot()),
+      },
+      { retryFailed: options?.retryFailed === true },
+    )
+      .then((result) => {
+        if (result.discovered > 0) {
+          queueAllKnowledgeDocsRefresh();
+          if (dreamingEntityQueue)
+            invalidateDreamingWork(dreamingEntityQueue, () =>
+              scheduleDreamingRun?.(),
+            );
+          BrowserWindow.getAllWindows().forEach((win) =>
+            win.webContents.send('MEETING_NOTES_UPDATED'),
+          );
+        }
+        return result;
+      })
+      .finally(() => {
         projectThemeSynthesis = null;
       });
-      return projectThemeSynthesis;
-    },
+    return projectThemeSynthesis;
+  };
+  ipcMain.handle('DISCOVER_PROJECT_INITIATIVE', (_event, options) =>
+    runProjectThemeSynthesis(options),
   );
+  let projectSynthesisTimer: ReturnType<typeof setTimeout> | null = null;
+  scheduleProjectSynthesis = () => {
+    if (projectSynthesisTimer) return;
+    projectSynthesisTimer = setTimeout(async () => {
+      projectSynthesisTimer = null;
+      try {
+        const result = await runProjectThemeSynthesis({ background: true });
+        if (result.deferred || (result.remaining > 0 && result.failed === 0))
+          scheduleProjectSynthesis?.();
+      } catch {
+        console.error(
+          '[Projects] Background project synthesis failed; retry is available in Projects.',
+        );
+      }
+    }, 60_000);
+    projectSynthesisTimer.unref?.();
+  };
+  app.once('before-quit', () => {
+    scheduleProjectSynthesis = null;
+    if (projectSynthesisTimer) clearTimeout(projectSynthesisTimer);
+  });
+  scheduleProjectSynthesis();
   let projectScopeReview: Promise<
     Awaited<ReturnType<typeof reviewProjectScopeBatch>>
   > | null = null;
@@ -4561,7 +4643,7 @@ app.whenReady().then(async () => {
     db.getPeopleBriefingSummaries(),
   );
   ipcMain.handle('GET_PERSON_BRIEFING', (_event, personId) =>
-    db.getPersonBriefing(String(personId)),
+    db.getPersonBriefing(String(personId), { ensureKnowledgeDoc: true }),
   );
   const personChatEnabled = process.env.PERSON_CHAT_V1 !== 'false';
   const readPersonChatMeeting = getApplicationDatabase().prepare(`
@@ -5253,7 +5335,7 @@ app.whenReady().then(async () => {
     db.saveKnowledgeDocUserEdit(docId, content),
   );
   ipcMain.handle('REFRESH_KNOWLEDGE_DOC', async (_event, docId) => {
-    return refreshKnowledgeDocNow(docId);
+    return refreshKnowledgeDocNow(docId, { userRequested: true });
   });
   ipcMain.handle('GET_ENTITY_SUMMARY', async (_event, entityId) => {
     return synthesizeEntitySummary(entityId);

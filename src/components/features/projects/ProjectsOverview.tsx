@@ -246,7 +246,7 @@ export function ProjectsOverview({
         if (cancelled) return;
         if (result.discovered > 0) await refresh();
         if (result.failed > 0) setSynthesisState('incomplete');
-        else if (result.deferred) {
+        else if (result.deferred || result.remaining > 0) {
           setSynthesisState('paused');
           timer = setTimeout(synthesize, 5000);
         } else setSynthesisState('idle');
@@ -269,6 +269,16 @@ export function ProjectsOverview({
       if (timer) clearTimeout(timer);
     };
   }, [activeId, attempt]);
+
+  useEffect(
+    () =>
+      window.ipcRenderer?.on('MEETING_NOTES_UPDATED', () => {
+        void getProjectPortfolio()
+          .then(setEntries)
+          .catch(() => setLoadError(true));
+      }),
+    [],
+  );
 
   // Auto-dismiss undo toast after 10s
   useEffect(() => {

@@ -87,6 +87,7 @@ export function createEouRendererSession(options: {
   let currentStatus: SessionStatus = 'idle';
   let accepting = false;
   let startPromise: Promise<void> | null = null;
+  let cancelWork: Promise<unknown> = Promise.resolve();
   let detachListeners: () => void = () => undefined;
 
   type PerSourceQueue = {
@@ -127,7 +128,11 @@ export function createEouRendererSession(options: {
       (acc, f) => acc + f.samples.length,
       0,
     );
-    const inFlightSamples = q.inFlight ? q.inFlight.samples.length : 0;
+    // The in-flight frame remains at frames[0] until acknowledged.
+    const inFlightSamples =
+      q.inFlight && !q.frames.includes(q.inFlight)
+        ? q.inFlight.samples.length
+        : 0;
     const chunker = chunkers[source];
     const unframedSamples = chunker ? chunker.bufferedSamples() : 0;
     return queuedSamples + inFlightSamples + unframedSamples;
@@ -144,7 +149,16 @@ export function createEouRendererSession(options: {
     return (micSamples + systemSamples) * Float32Array.BYTES_PER_ELEMENT;
   };
 
-  const fail = (code: string): void => {
+  const fail = (
+    code: string,
+    backpressure?: {
+      source: LiveSource;
+      retainedSeconds: number;
+      incomingSeconds: number;
+      retainedBytes: number;
+      inFlight: boolean;
+    },
+  ): void => {
     if (currentStatus === 'unavailable' || currentStatus === 'finished') return;
     currentStatus = 'unavailable';
     accepting = false;
@@ -160,14 +174,15 @@ export function createEouRendererSession(options: {
     echoEvidence.reset();
     lastProjectedSegments = [];
     detachListeners();
-    options.onUnavailable(code);
-    void options.transport
+    cancelWork = options.transport
       .invoke('PARAKEET_EOU_CANCEL', {
         meetingId: options.meetingId,
         generation: options.generation,
         code,
+        ...(backpressure ? { backpressure } : {}),
       })
       .catch(() => undefined);
+    options.onUnavailable(code);
   };
 
   const wakePump = (source: LiveSource): void => {
@@ -418,16 +433,19 @@ export function createEouRendererSession(options: {
             maxRetainedAudioSecondsPerSource ||
           currentTotalBytes + incomingBytes > maxRetainedPcmBytes
         ) {
-          console.warn('[ParakeetEOU] renderer audio backlog', {
-            at: new Date().toISOString(),
+          const backpressure = {
             source,
-            status: currentStatus,
             retainedSeconds: Number(currentSourceDuration.toFixed(2)),
             incomingSeconds: Number(incomingDurationSeconds.toFixed(2)),
             retainedBytes: currentTotalBytes,
             inFlight: queues[source].inFlight !== null,
+          };
+          console.warn('[ParakeetEOU] renderer audio backlog', {
+            at: new Date().toISOString(),
+            status: currentStatus,
+            ...backpressure,
           });
-          fail('parakeet_backpressure');
+          fail('parakeet_backpressure', backpressure);
           return;
         }
 
@@ -497,8 +515,9 @@ export function createEouRendererSession(options: {
         if (timer) clearTimeout(timer);
       }
     },
-    cancel(): void {
+    async cancel(): Promise<void> {
       fail('parakeet_cancelled');
+      await cancelWork;
     },
     status(): SessionStatus {
       return currentStatus;

@@ -88,6 +88,17 @@ export function buildMeetingPrepBrief(
     title: prep.event.title,
     startsAt: prep.event.start,
     agenda: prep.event.agenda || null,
+    calendarInvitees: [
+      ...new Set(
+        [
+          ...(prep.event.attendees || []),
+          ...(prep.event.organizer ? [prep.event.organizer] : []),
+        ]
+          .filter((person) => !person.isCurrentUser)
+          .map((person) => person.name || person.email)
+          .filter((name): name is string => !!name),
+      ),
+    ].slice(0, 12),
     relationship: references.length ? 'manual' : 'none',
     priorMeeting: null,
     lastTime,
@@ -133,14 +144,21 @@ export function refreshMeetingPrepBrief(
           : active,
       ];
     });
+  const refreshSuggestions = (items: PreMeetingBriefItem[] | undefined) =>
+    saved.agenda === current.agenda
+      ? items
+      : items?.filter((item) => item.sourceMeetingId !== null);
   return {
     ...saved,
     title: current.title,
     startsAt: current.startsAt,
     agenda: current.agenda,
+    calendarInvitees: current.calendarInvitees,
     stillOpen: current.stillOpen,
     overview: refreshItems(saved.overview),
     evidenceItems: refreshItems(saved.evidenceItems),
     talkingPoints: refreshItems(saved.talkingPoints),
+    possibleNextSteps: refreshSuggestions(saved.possibleNextSteps),
+    watchouts: refreshSuggestions(saved.watchouts),
   };
 }

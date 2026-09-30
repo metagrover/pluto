@@ -14,7 +14,8 @@ describe('person dossier read', () => {
     expect(isCurrentPersonDossier('synthesizing', 12)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 12)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 13)).toBe(false);
-    expect(isCurrentPersonDossier('up_to_date', 14)).toBe(true);
+    expect(isCurrentPersonDossier('up_to_date', 14)).toBe(false);
+    expect(isCurrentPersonDossier('up_to_date', 15)).toBe(true);
   });
 
   it('leads with recurring work and shows an attributable example', () => {

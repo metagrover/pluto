@@ -5,6 +5,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ProjectBrief } from '../../src/utils/projectBriefing';
 
 const api = vi.hoisted(() => ({
+  discoverProjectInitiative: vi.fn().mockResolvedValue({
+    discovered: 0,
+    remaining: 0,
+    failed: 0,
+    deferred: false,
+  }),
   getProjectBrief: vi.fn(),
   updateProjectDisplayTitle: vi.fn(),
   saveProjectMilestone: vi.fn(),
@@ -163,7 +169,7 @@ const brief = (overrides: Partial<ProjectBrief> = {}): ProjectBrief => ({
       due_date: '2026-09-05T10:00:00Z',
       assigned_to: 'person-alex',
       updated_at: '2026-08-28T12:00:00Z',
-      metadata: null,
+      metadata: JSON.stringify({ commitment_state: 'confirmed' }),
     },
   ],
   mergedProjects: [],
@@ -249,58 +255,27 @@ const setValue = async (
   });
 };
 
-it('leads with the project brief, people, timeline, health, and meeting rhythm', async () => {
+it('leads with supported synthesis and keeps prep and history in separate tabs', async () => {
   await render();
+  const panel = host.querySelector('[role="tabpanel"]:not([hidden])')!;
   expect(host.textContent).toContain('Archive modernization');
-  expect(host.textContent).toContain('Project brief');
-  expect(host.textContent).toContain('Make historical records searchable');
-  expect(host.textContent).toContain('7 meetings');
-  expect(host.textContent).toContain('Current focus');
-  expect(host.textContent).toContain('Validate access rules before launch');
-  expect(host.textContent).toContain(
-    'Alex Rivera is responsible for Complete migration review',
+  expect(panel.textContent).toContain('Validate access rules before launch');
+  expect(panel.textContent).toContain('The first collection is now indexed.');
+  expect(panel.textContent).toContain('Confirmed commitments');
+  expect(panel.textContent).not.toContain('Meeting history');
+  expect(host.querySelector('aside')?.textContent).toContain('People involved');
+  expect(host.querySelector('aside')?.textContent).toContain('Weekly rhythm');
+  expect(host.querySelector('aside')?.textContent).toContain(
+    'One confirmed milestone is due within two weeks.',
   );
-  expect(host.textContent).toContain('Coming up');
-  expect(host.textContent).toContain('Project health');
-  expect(host.textContent).toContain('Needs attention');
-  expect(host.textContent).toContain(
-    '1 milestone or commitment is due in the next two weeks.',
-  );
+  await click('History');
   expect(
-    host.textContent?.match(
-      /1 milestone or commitment is due in the next two weeks\./g,
-    ),
-  ).toHaveLength(1);
-  expect(host.textContent).toContain('People involved');
-  expect(host.textContent).toContain('Alex Rivera');
-  expect(host.textContent).toContain('Sam');
-  const alexCard = host.querySelector('[data-person-card="Alex Rivera"]');
-  const samCard = host.querySelector('[data-person-card="Sam"]');
-  const laurenCard = host.querySelector('[data-person-card="Lauren Kessler"]');
-  expect(alexCard?.parentElement?.classList.contains('h-24')).toBe(true);
-  expect(samCard?.parentElement?.classList.contains('h-24')).toBe(true);
-  expect(alexCard?.textContent).toContain('AR');
-  expect(alexCard?.textContent).toContain('Engineering lead');
-  expect(alexCard?.textContent).toContain('Engineering');
-  expect(samCard?.textContent).toContain('Project manager');
-  expect(samCard?.textContent).toContain('Project management');
-  expect(laurenCard?.textContent).toContain('Executive sponsor');
-  expect(host.textContent).toContain('Usually 4 people');
-  expect(host.textContent).toContain('Regular meetings');
-  expect(host.textContent).toContain('Weekly pattern');
-  expect(host.textContent).toContain('4 meetings');
-  expect(host.textContent).toContain('Timeline and milestones');
-  expect(host.textContent).toContain('Open questions and actions');
-  expect(host.textContent).toContain('Complete migration review');
-  expect(host.textContent).toContain('From meeting notes');
-  expect(host.textContent).toContain('Meeting history');
-  expect(host.textContent!.indexOf('Timeline and milestones')).toBeLessThan(
-    host.textContent!.indexOf('Open questions and actions'),
-  );
-  expect(host.textContent).not.toContain('More details');
-  expect(host.textContent).not.toContain('Since last time');
-  expect(host.textContent).not.toContain('Project details');
-  expect(host.textContent).not.toContain('Momentum');
+    host.querySelector('[role="tabpanel"]:not([hidden])')?.textContent,
+  ).toContain('Meeting history');
+  expect(
+    host.querySelector('[role="tabpanel"]:not([hidden])')?.textContent,
+  ).toContain('Weekly pattern');
+  expect(host.textContent).not.toContain('Intermediate progress');
 });
 
 it('opens the matching person profile from a person card', async () => {
@@ -344,8 +319,12 @@ it('uses known roles in the summary when no ownership is established', async () 
 
   await render();
 
+  expect(
+    host.querySelector('[data-person-card="Alex Rivera"]')?.parentElement
+      ?.textContent,
+  ).toContain('Engineering lead');
   expect(host.textContent).toContain(
-    'Alex Rivera (Engineering lead), Lauren Kessler (Exec sponsor from Frames Direct), and Sam (Project manager) are involved in this project.',
+    'Participation does not establish project ownership.',
   );
 });
 
@@ -359,7 +338,9 @@ it('does not repeat the project outcome when it matches the current focus', asyn
 
   expect(host.textContent).not.toContain('Current focus');
   expect(
-    host.textContent?.match(/Make historical records searchable/g),
+    host
+      .querySelector('[role="tabpanel"]:not([hidden])')
+      ?.textContent?.match(/Make historical records searchable/g),
   ).toHaveLength(1);
 });
 
@@ -633,8 +614,10 @@ it('teaches honest empty states when evidence is sparse', async () => {
   await render();
   expect(host.textContent).toContain('Pluto found this in one meeting');
   expect(host.textContent).toContain('Review suggestion');
-  expect(host.textContent).toContain('Status not clear yet');
-  expect(host.textContent).toContain('No people yet');
+  expect(host.textContent).toContain('A project brief is still taking shape');
+  expect(host.textContent).toContain(
+    'No named participants are established yet.',
+  );
   expect(host.textContent).toContain('No regular schedule');
   expect(host.textContent).toContain('No dates or milestones yet');
   expect(host.querySelector('#project-people')).toBeNull();
@@ -869,13 +852,16 @@ it('renders Topics & Discussion Streams and allows detaching a topic', async () 
     onPortfolioChanged,
   });
 
-  expect(host.textContent).toContain('Topics & Discussion Streams');
+  expect(host.textContent).toContain('Work within this project');
   expect(host.textContent).toContain('Search indexing pipeline');
-  expect(host.textContent).toContain('Discussion about index compression');
-  expect(host.textContent).toContain('2 conversations');
+  expect(host.textContent).not.toContain('Discussion about index compression');
 
-  const detachBtn = host.querySelector<HTMLButtonElement>(
-    '[aria-label="Detach Search indexing pipeline from this initiative"]',
+  const grouped = Array.from(host.querySelectorAll('summary')).find(
+    (item) => item.textContent === 'Grouped work and topics',
+  )!;
+  await act(async () => grouped.click());
+  const detachBtn = Array.from(host.querySelectorAll('button')).find(
+    (item) => item.textContent === 'Keep separate',
   );
   expect(detachBtn).not.toBeNull();
 
@@ -891,19 +877,16 @@ it('renders executive at a glance panel with detected meeting rhythm and no manu
   api.getProjectBrief.mockResolvedValue(brief());
   await render();
 
-  const atAGlanceSection = host.querySelector(
-    '[aria-labelledby="project-at-a-glance"]',
-  );
+  const atAGlanceSection = host.querySelector('aside');
   expect(atAGlanceSection).not.toBeNull();
-  expect(atAGlanceSection?.textContent).toContain('At a glance');
+
   expect(atAGlanceSection?.textContent).toContain('Meeting rhythm');
   expect(atAGlanceSection?.textContent).toContain('Weekly rhythm');
-  expect(atAGlanceSection?.textContent).toContain('Rhythm slipping');
+
   expect(atAGlanceSection?.textContent).toContain(
     'Detected from recurring “Archive weekly review” (4 meetings)',
   );
-  expect(atAGlanceSection?.textContent).toContain('7 meetings over 8 weeks');
-  expect(atAGlanceSection?.textContent).toContain('3 open · 4 completed');
+
   expect(atAGlanceSection?.textContent).toContain('Complete migration review');
 
   // Verify there is NO <select> asking the user for cadence
@@ -954,9 +937,7 @@ it('automatically detects rhythm from meeting intervals when no recurring series
   );
 
   await render();
-  const atAGlanceSection = host.querySelector(
-    '[aria-labelledby="project-at-a-glance"]',
-  );
+  const atAGlanceSection = host.querySelector('aside');
   expect(atAGlanceSection?.textContent).toContain('Weekly rhythm');
   expect(atAGlanceSection?.textContent).toContain(
     'Detected from meeting intervals (averages ~7d between sessions)',
@@ -993,7 +974,7 @@ it('synthesizes latest updates from moving pieces without raw speaker quotes', a
   );
 
   await render();
-  const aboutSection = host.querySelector('[aria-labelledby="project-about"]');
+  const aboutSection = host.querySelector('[role="tabpanel"]:not([hidden])');
   expect(aboutSection?.textContent).not.toContain('Deepak: But I made');
   expect(aboutSection?.textContent).toContain(
     'UI changes completed and merged into main branch.',
@@ -1017,10 +998,10 @@ it('sanitizes undefined roles and accurately deduplicates regulars across meetin
         started_at: '2026-09-16T10:00:00Z',
         created_at: null,
         participants: [
-          { entity_id: `hema-${i}`, name: 'Hema', role: 'Colleague' },
-          { entity_id: `adam-${i}`, name: 'Adam', role: 'undefined' },
+          { entity_id: 'person-hema', name: 'Hema', role: 'Colleague' },
+          { entity_id: 'person-adam', name: 'Adam', role: 'undefined' },
           {
-            entity_id: `rachel-${i}`,
+            entity_id: 'person-rachel',
             name: 'Rachel Owen',
             role: 'Client Advisor',
           },
@@ -1033,14 +1014,14 @@ it('sanitizes undefined roles and accurately deduplicates regulars across meetin
   await render();
   expect(host.textContent).not.toContain('(undefined)');
   expect(host.textContent).toContain('Adam');
-  expect(host.textContent).toContain('Hema (Colleague)');
-  expect(host.textContent).toContain('Rachel Owen (Client Advisor)');
+  expect(host.textContent).toContain('HemaColleague');
+  expect(host.textContent).toContain('Rachel OwenClient Advisor');
   // Ensure we don't see "+ 25 others" or duplicate counts
   expect(host.textContent).not.toContain('+ 25 others');
   expect(host.textContent).not.toContain('+25 others');
 });
 
-it('displays in-flight deliverables under Coming up when no hard milestone dates exist', async () => {
+it('keeps undated commitments explicit without inventing future dates', async () => {
   api.getProjectBrief.mockResolvedValue(
     brief({
       milestones: [],
@@ -1051,128 +1032,89 @@ it('displays in-flight deliverables under Coming up when no hard milestone dates
           status: 'active',
           due_date: null,
           updated_at: '2026-09-16T10:00:00Z',
-          metadata: null,
+          metadata: JSON.stringify({ commitment_state: 'confirmed' }),
         },
       ],
     }),
   );
 
   await render();
-  expect(host.textContent).toContain('1 deliverable in motion');
+  expect(host.textContent).toContain('No date agreed');
   expect(host.textContent).toContain('Advisor outreach engagement process');
-  expect(host.textContent).toContain('+ Add milestone');
+  expect(host.textContent).toContain('Add milestone');
 });
 
-it('synthesizes raw conversational context into executive bullet points and analyzes timeline when theme and tasks are empty', async () => {
-  api.getProjectBrief.mockResolvedValue(
-    brief({
-      project: {
-        id: 'nct-project',
-        displayTitle: 'NCT Outreach',
-        detectedTitle: 'NCT Outreach',
-        metadata: JSON.stringify({
-          projectQualification: {
-            version: 1,
-            state: 'qualified',
-            source: 'review',
-            reason: 'Grounded scope',
-            assessedAt: '2026-09-16T12:00:00Z',
-            outcome:
-              'Establish a validated outreach process for advisors to engage with clients.',
-          },
-        }),
-        status: 'active',
-      },
-      theme: null,
-      tasks: [],
-      milestones: [],
-      meetingStats: {
-        meetingCount: 13,
-        activeWeeks: 6,
-        participantCoverage: 13,
-        typicalParticipantCount: 3,
-        frequentParticipants: ['Hema', 'Adam', 'Rachel Owen'],
-        recurringSeries: [
-          {
-            key: 'nct outreach sync',
-            title: 'NCT Outreach Sync',
-            meetingCount: 13,
-            cadence: 'Weekly pattern',
-            typicalParticipantCount: 3,
-            lastMetAt: '2026-09-16T10:00:00Z',
-            meetingIds: Array.from({ length: 13 }, (_, i) => `m${i}`),
-          },
-        ],
-      },
-      meetings: Array.from({ length: 13 }, (_, i) => ({
-        id: `m${i}`,
-        title: 'NCT Outreach Sync',
-        started_at: '2026-09-16T10:00:00Z',
-        created_at: null,
-        participants: [
-          { entity_id: `hema-${i}`, name: 'Hema', role: 'Colleague' },
-          { entity_id: `adam-${i}`, name: 'Adam', role: 'undefined' },
-          {
-            entity_id: `rachel-${i}`,
-            name: 'Rachel Owen',
-            role: 'Client Advisor',
-          },
-        ],
-        context:
-          i === 0
-            ? "Deepak: But I made the UI changes we discussed yesterday and that's now sitting in the br main branch."
-            : null,
-      })),
-    }),
-  );
-
+it('keeps a sparse profile honest instead of paraphrasing raw conversation or inventing progress', async () => {
+  const sparse = brief({ theme: null, tasks: [], milestones: [] });
+  sparse.meetings[0].context =
+    'Alex: I think the interface might be ready tomorrow.';
+  api.getProjectBrief.mockResolvedValue(sparse);
   await render();
+  expect(host.textContent).toContain('A project brief is still taking shape');
+  expect(host.textContent).not.toContain('Alex:');
+  expect(host.textContent).not.toContain('Intermediate progress');
+  expect(host.textContent).not.toContain('Next review cycle');
+  expect(host.textContent).toContain('No dates or milestones yet');
+});
 
-  const aboutSection = host.querySelector('[aria-labelledby="project-about"]');
-  // 1. Never dump raw quotes or speaker tags
-  expect(aboutSection?.textContent).not.toContain('Deepak:');
-  expect(aboutSection?.textContent).not.toContain('br main branch');
-  expect(aboutSection?.textContent).not.toContain('sitting in');
-
-  // 2. Synthesized into an executive update
-  expect(aboutSection?.textContent).toContain(
-    'UI changes implemented and integrated into main branch for review.',
+it('keeps keyboard tab navigation and source disclosures usable', async () => {
+  const onOpenMeeting = vi.fn();
+  await render({ onOpenMeeting });
+  const tabs = host.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+  await act(async () =>
+    tabs[0].dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
+    ),
   );
-  expect(aboutSection?.textContent).toContain('Latest updates');
-
-  // 3. Sanitizes invalid roles
-  expect(host.textContent).not.toContain('(undefined)');
-  expect(host.textContent).toContain('Adam');
-  expect(host.textContent).toContain('Hema (Colleague)');
-  expect(host.textContent).toContain('Rachel Owen (Client Advisor)');
-
-  // 4. No inflated participant count or "+ 25 others"
-  expect(host.textContent).not.toContain('+ 25 others');
-  expect(host.textContent).not.toContain('+25 others');
-
-  // 5. Timeline analyzed under Coming up with + Add milestone
-  expect(aboutSection?.textContent).toContain(
-    'Next review cycle aligns with weekly sync pattern',
+  expect(tabs[1].getAttribute('aria-selected')).toBe('true');
+  expect(document.activeElement).toBe(tabs[1]);
+  expect(
+    host.querySelector('[role="tabpanel"]:not([hidden])')?.textContent,
+  ).toContain('My commitments');
+  await click('History');
+  const panel = host.querySelector('[role="tabpanel"]:not([hidden])')!;
+  const source = panel.querySelector('summary')!;
+  await act(async () => source.click());
+  expect(source.parentElement?.hasAttribute('open')).toBe(true);
+  expect(source.parentElement?.textContent).toContain(
+    'The first collection is now indexed.',
   );
-  expect(aboutSection?.textContent).toContain('+ Add milestone');
-  expect(aboutSection?.textContent).not.toContain(
-    'No upcoming dates or commitments yet.',
+});
+
+it('shows personal commitments only for the established self identity', async () => {
+  api.getProjectBrief.mockResolvedValueOnce(
+    brief({ selfPersonId: 'person-alex' }),
   );
+  await render();
+  await click('Next discussion');
+  const panel = host.querySelector('[role="tabpanel"]:not([hidden])')!;
+  expect(panel.textContent).toContain('Complete migration review');
+  expect(panel.textContent).toContain('You');
+  expect(panel.textContent).not.toContain('identity is not established');
+});
 
-  // 6. No badge tags (IN MOTION, PRIMARY FOCUS, CADENCE)
-  expect(aboutSection?.textContent).not.toContain('IN MOTION');
-  expect(aboutSection?.textContent).not.toContain('In motion');
-  expect(aboutSection?.textContent).not.toContain('PRIMARY FOCUS');
-  expect(aboutSection?.textContent).not.toContain('Primary focus');
-  expect(aboutSection?.textContent).not.toContain('CADENCE');
-  expect(aboutSection?.textContent).not.toContain('Cadence');
+it('explains outdated source evidence without presenting it as the current project read', async () => {
+  api.getProjectBrief.mockResolvedValueOnce(
+    brief({ themeSourceOutdated: true }),
+  );
+  await render();
+  const panel = host.querySelector('[role="tabpanel"]:not([hidden])')!;
+  expect(panel.textContent).toContain('A project brief is still taking shape');
+  expect(host.querySelector('aside')?.textContent).toContain(
+    'Source notes have changed.',
+  );
+});
 
-  // 7. No outcome duplication in bullet points
-  const listItems = Array.from(aboutSection?.querySelectorAll('li') ?? []);
-  expect(listItems.length).toBeGreaterThan(0);
-  for (const li of listItems) {
-    expect(li.textContent).not.toContain(
-      'Establish a validated outreach process for advisors to engage with clients.',
-    );
-  }
+it('does not label possible extracted work as personal or confirmed commitments', async () => {
+  const data = brief({ selfPersonId: 'person-alex' });
+  data.tasks[0].metadata = JSON.stringify({ commitment_state: 'possible' });
+  api.getProjectBrief.mockResolvedValueOnce(data);
+  await render();
+  expect(
+    host.querySelector('[role="tabpanel"]:not([hidden])')?.textContent,
+  ).toContain('1 possible follow-up');
+  await click('Next discussion');
+  expect(
+    host.querySelector('[role="tabpanel"]:not([hidden])')?.textContent,
+  ).not.toContain('Complete migration review');
 });

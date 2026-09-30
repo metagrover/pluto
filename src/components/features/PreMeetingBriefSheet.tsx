@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronDown, Loader2, Play } from 'lucide-react';
+import { ArrowLeft, Loader2, Play } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -110,7 +110,7 @@ export const PreMeetingBriefSheet = ({
       aria-labelledby="pre-meeting-brief-title"
       className="no-drag relative mx-auto flex w-full max-w-3xl flex-col"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-2 pt-3 sm:px-6">
         <button
           type="button"
           aria-label="Back from meeting prep"
@@ -167,17 +167,17 @@ export const PreMeetingBriefSheet = ({
           {prep?.meetingId ? 'Open meeting' : 'Start meeting'}
         </button>
       </div>
-      <header className="border-b border-pro-border px-6 pb-4 pt-3">
+      <header className="border-b border-pro-border/70 px-2 pb-7 pt-8 sm:px-6">
         <div className="min-w-0">
           <h2
             id="pre-meeting-brief-title"
             title={calendar?.title}
-            className="break-words font-serif text-2xl text-pro-text-main"
+            className="break-words font-serif text-[34px] font-medium leading-[1.18] tracking-[-0.02em] text-pro-text-main sm:text-[38px]"
           >
             {calendar?.title || 'Prepare a meeting'}
           </h2>
           {calendar && (
-            <p className="mt-1 text-xs text-pro-text-muted">
+            <p className="mt-3 text-[13px] leading-5 text-pro-text-muted">
               {formatPrepDate(calendar.start)} ·{' '}
               {new Date(calendar.start).toLocaleTimeString([], {
                 hour: 'numeric',
@@ -192,14 +192,14 @@ export const PreMeetingBriefSheet = ({
           )}
         </div>
       </header>
-      <div className="min-h-0 p-6">
+      <div className="min-h-0 space-y-8 px-2 py-7 sm:px-6">
         {error && (
           <p role="alert" className="mb-4 text-sm text-pro-text-muted">
             {error}
           </p>
         )}
         {loading && (
-          <div className="mb-5 rounded-2xl border border-pro-border p-6">
+          <div className="border-y border-pro-border/70 py-6">
             <MeetingPrepBriefSkeleton />
           </div>
         )}
@@ -209,8 +209,8 @@ export const PreMeetingBriefSheet = ({
           </p>
         )}
         {!!roster.length && (
-          <div className="mb-4 flex flex-wrap items-center gap-3">
-            <h3 className="text-[10px] uppercase tracking-wider text-pro-text-muted">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+            <h3 className="text-[13px] font-medium text-pro-text-muted">
               Invited people
             </h3>
             <div className="flex flex-wrap gap-2">
@@ -220,7 +220,7 @@ export const PreMeetingBriefSheet = ({
                   title={[person.name, person.email]
                     .filter(Boolean)
                     .join(' · ')}
-                  className="max-w-full truncate rounded-full border border-pro-border px-3 py-1.5 text-xs text-pro-text-main"
+                  className="max-w-full truncate rounded-full border border-pro-border/70 bg-pro-surface/40 px-2.5 py-1 text-xs text-pro-text-main"
                 >
                   {person.isCurrentUser
                     ? 'You'
@@ -230,39 +230,37 @@ export const PreMeetingBriefSheet = ({
             </div>
           </div>
         )}
-        {(calendar?.notes || calendar?.agenda) && (
-          <details
-            aria-label="Calendar agenda"
-            className="group/agenda mb-5 rounded-xl border border-pro-border bg-pro-surface/15 p-4"
-          >
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 min-h-6 rounded-sm text-sm font-medium text-pro-text-muted hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
+        {calendar && (
+          <section aria-label="Calendar agenda" className="max-w-[68ch]">
+            <h3 className="text-sm font-medium text-pro-text-main">
               Calendar agenda
-              <ChevronDown
-                size={16}
-                aria-hidden="true"
-                className="shrink-0 transition-transform group-open/agenda:rotate-180"
-              />
-            </summary>
-            <div className="mt-2 whitespace-pre-wrap break-words text-sm text-pro-text-main">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  a: ({ href, children }) => (
-                    <a
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-pro-accent underline underline-offset-2"
-                    >
-                      {children}
-                    </a>
-                  ),
-                }}
-              >
-                {agendaMarkdown(calendar?.notes || calendar?.agenda || '')}
-              </ReactMarkdown>
-            </div>
-          </details>
+            </h3>
+            {calendar.agenda || calendar.notes ? (
+              <div className="mt-3 max-w-[68ch] whitespace-pre-wrap break-words text-sm leading-6 text-pro-text-main">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ href, children }) => (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-pro-accent underline underline-offset-2"
+                      >
+                        {children}
+                      </a>
+                    ),
+                  }}
+                >
+                  {agendaMarkdown(calendar.agenda || calendar.notes || '')}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-pro-text-muted">
+                No calendar agenda was available to Pluto for this event.
+              </p>
+            )}
+          </section>
         )}
         {prep && (
           <MeetingPrepEditor

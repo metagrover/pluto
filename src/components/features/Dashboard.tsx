@@ -84,7 +84,6 @@ interface DashboardProps {
   onCalendarRefresh?: () => Promise<void>;
   onCalendarOpenSettings?: () => void;
   onPrepareMeeting?: (event: CalendarEvent) => void;
-  onPrepareAnother?: () => void;
 }
 
 const getActionInsightStatusTone = (item: DashboardActionInsightItem) => {
@@ -500,7 +499,6 @@ export const Dashboard = ({
   onCalendarRefresh = async () => {},
   onCalendarOpenSettings = () => {},
   onPrepareMeeting = () => {},
-  onPrepareAnother = () => {},
 }: DashboardProps) => {
   const [editingCommitmentId, setEditingCommitmentId] = useState<string | null>(
     null,
@@ -836,7 +834,7 @@ export const Dashboard = ({
 
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-pro-border/70 pb-7">
         <div>
-          <p className="text-[11px] font-medium tracking-[0.02em] text-pro-accent/80">
+          <p className="text-[11px] font-medium tracking-[0.02em] text-pro-accent">
             Daily briefing
           </p>
           <h1 className="mt-2 text-[34px] font-serif font-medium leading-tight text-pro-text-main sm:text-[38px]">
@@ -849,20 +847,20 @@ export const Dashboard = ({
           </span>
         ) : null}
       </header>
-      <div className="grid gap-6 pt-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(330px,0.9fr)] lg:gap-8">
+      <div className="grid gap-6 pt-8 lg:grid-cols-[minmax(0,1.3fr)_minmax(330px,0.9fr)] lg:gap-8">
         <section
           id="todays-focus"
           aria-labelledby="commitments-title"
           className="min-w-0"
         >
-          <div className="flex items-end justify-between gap-4 pb-3">
+          <div className="flex items-end justify-between gap-4">
             <div>
-              <p className="text-[10px] font-medium text-pro-text-muted/60">
+              <p className="text-[11px] font-normal tracking-[0.02em] text-pro-text-muted">
                 Pluto proposes, you decide
               </p>
               <h2
                 id="commitments-title"
-                className="mt-1 text-[23px] font-serif font-medium text-pro-text-main"
+                className="mt-1.5 text-[20px] font-serif font-medium leading-tight text-pro-text-main"
               >
                 Today&apos;s focus
               </h2>
@@ -956,7 +954,7 @@ export const Dashboard = ({
           ) : null}
 
           {commitmentItems.length ? (
-            <div className="divide-y divide-pro-border/60">
+            <div>
               {commitmentItems.map((item) => {
                 const isUpdating =
                   updatingTaskIds.has(item.id) ||
@@ -1019,7 +1017,7 @@ export const Dashboard = ({
                           event.dataTransfer.getData('text/plain'),
                       );
                     }}
-                    className={`group no-drag py-4 transition-opacity ${draggedCommitmentId === item.id ? 'opacity-45' : ''}`}
+                    className={`group no-drag py-2 first:pt-4 transition-opacity ${draggedCommitmentId === item.id ? 'opacity-45' : ''}`}
                   >
                     <div className="flex items-start gap-3">
                       <span
@@ -1148,7 +1146,7 @@ export const Dashboard = ({
                               ) : null}
                             </form>
                           ) : (
-                            <h3 className="min-w-0 flex-1 text-[14px] font-normal leading-5 text-pro-text-main">
+                            <h3 className="min-w-0 flex-1 text-[15px] font-normal leading-6 text-pro-text-main">
                               {handleEditCommitment ? (
                                 <button
                                   type="button"
@@ -1184,7 +1182,7 @@ export const Dashboard = ({
                                   priorityIndex === 0
                                 }
                                 onClick={() => moveCommitment(item.id, -1)}
-                                className="flex h-7 w-7 items-center justify-center rounded-md text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-25"
+                                className="flex h-6 w-6 items-center justify-center rounded-md text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-25"
                               >
                                 <ArrowUp
                                   className="h-3.5 w-3.5"
@@ -1201,7 +1199,7 @@ export const Dashboard = ({
                                     orderedCommitmentIds.length - 1
                                 }
                                 onClick={() => moveCommitment(item.id, 1)}
-                                className="flex h-7 w-7 items-center justify-center rounded-md text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-25"
+                                className="flex h-6 w-6 items-center justify-center rounded-md text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-25"
                               >
                                 <ArrowDown
                                   className="h-3.5 w-3.5"
@@ -1245,7 +1243,7 @@ export const Dashboard = ({
                                       current === item.id ? null : item.id,
                                     )
                                   }
-                                  className="flex h-7 w-7 items-center justify-center rounded-md text-pro-text-muted/55 transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:opacity-50"
+                                  className="flex h-6 w-6 items-center justify-center rounded-md text-pro-text-muted/55 transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:opacity-50"
                                 >
                                   <MoreHorizontal
                                     className="h-4 w-4"
@@ -1309,12 +1307,12 @@ export const Dashboard = ({
                             onClick={() =>
                               setSelectedMeetingId(item.sourceMeetingId)
                             }
-                            className="mt-1 block max-w-full truncate text-left text-[11px] font-medium leading-5 text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                            className="block max-w-full truncate text-left text-[11px] font-normal leading-5 text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
                           >
                             {basisLabel}
                           </button>
                         ) : basisLabel ? (
-                          <p className="mt-1 truncate text-[11px] font-medium leading-5 text-pro-text-muted">
+                          <p className="truncate text-[11px] font-normal leading-5 text-pro-text-muted">
                             {basisLabel}
                           </p>
                         ) : null}
@@ -1437,24 +1435,23 @@ export const Dashboard = ({
             onRefreshCalendar={onCalendarRefresh}
             onOpenSettings={onCalendarOpenSettings}
             onPrepare={onPrepareMeeting}
-            onPrepareAnother={onPrepareAnother}
           />
           <section
             aria-labelledby="recent-win-title"
             className="border-t border-pro-border/70 pt-6"
           >
-            <p className="text-[10px] font-medium text-pro-text-muted/60">
+            <p className="text-[11px] font-normal tracking-[0.02em] text-pro-text-muted">
               {recentWin.state === 'populated'
                 ? `This week · ${recentWin.total} ${recentWin.total === 1 ? 'win' : 'wins'}`
                 : 'Momentum'}
             </p>
             <h2
               id="recent-win-title"
-              className="mt-1 text-[20px] font-serif font-medium text-pro-text-main"
+              className="mt-1.5 text-[18px] font-serif font-medium leading-tight text-pro-text-main"
             >
               Recent win
             </h2>
-            <div className="mt-4 pt-4">
+            <div className="mt-4">
               {recentWin.state === 'populated' ? (
                 <>
                   <div className="space-y-4">
@@ -1464,7 +1461,7 @@ export const Dashboard = ({
                         data-testid="dashboard-recent-win-item"
                         className="border-b border-pro-border/55 pb-4 last:border-b-0 last:pb-0"
                       >
-                        <p className="text-[10px] font-semibold text-pro-text-muted/65">
+                        <p className="text-[11px] font-medium text-pro-text-muted">
                           {win.kind === 'evidence'
                             ? 'Evidence-backed'
                             : 'Milestone'}{' '}
@@ -1476,7 +1473,7 @@ export const Dashboard = ({
                         <p className="mt-1.5 text-[13px] font-normal leading-[1.55] text-pro-text-muted">
                           {win.whyItCounts}
                         </p>
-                        <p className="mt-2 text-[10px] font-medium text-pro-text-muted/65">
+                        <p className="mt-2 text-[11px] font-normal text-pro-text-muted">
                           Source: {win.sourceLabel}
                         </p>
                         <button
@@ -1522,15 +1519,15 @@ export const Dashboard = ({
                     type="button"
                     onClick={startCelebration}
                     aria-label="Celebrate with confetti"
-                    className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pro-warning/10 text-pro-warning transition-colors hover:bg-pro-warning/20 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                    className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pro-surface text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
                   >
                     <PartyPopper className="h-4 w-4" aria-hidden="true" />
                   </button>
                   <div>
-                    <h3 className="text-[14px] font-normal leading-5 text-pro-text-muted">
+                    <h3 className="text-[15px] font-normal leading-5 text-pro-text-muted">
                       {recentWin.title}
                     </h3>
-                    <p className="mt-1 text-[12px] font-medium leading-5 text-pro-text-muted">
+                    <p className="mt-1 text-[12px] font-normal leading-5 text-pro-text-muted">
                       {recentWin.detail}
                     </p>
                   </div>

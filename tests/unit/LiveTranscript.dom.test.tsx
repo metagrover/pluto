@@ -1074,6 +1074,54 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
+  it.each(['catching_up', 'reconnecting'] as const)(
+    'explains %s without settings advice',
+    (status) => {
+      const projector = createLiveConversationProjection({ generation: 1 });
+      const root = createRoot(container);
+      act(() =>
+        root.render(
+          <LiveTranscript
+            segments={[]}
+            interimText=""
+            conversation={projector.recovering(1, status)}
+          />,
+        ),
+      );
+      const warning = container.querySelector('.live-conversation-warning');
+      expect(warning?.textContent).toContain('Audio is still recording');
+      expect(warning?.textContent).toContain('saved audio');
+      expect(warning?.textContent).not.toContain('Settings');
+      expect(
+        container.querySelector('.live-transcript-heading span')?.textContent,
+      ).toBe(status === 'catching_up' ? 'Catching up' : 'Reconnecting');
+      act(() => root.unmount());
+    },
+  );
+
+  it('explains unavailable live wording without blaming a notes setting', () => {
+    const projector = createLiveConversationProjection({ generation: 1 });
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={projector.unavailable(1)}
+        />,
+      ),
+    );
+
+    const warning = container.querySelector('.live-conversation-warning');
+    expect(warning?.textContent).toContain('Audio is still recording');
+    expect(warning?.textContent).toContain('saved audio');
+    expect(warning?.textContent).not.toContain(
+      'Generate notes during meetings',
+    );
+    expect(warning?.querySelector('button')).toBeNull();
+    act(() => root.unmount());
+  });
+
   it('renders consecutive same-speaker segments as one stable reading turn', () => {
     const root = createRoot(container);
     act(() => root.render(<LiveTranscript segments={[]} interimText="" />));
@@ -1724,31 +1772,24 @@ describe('LiveTranscript reading experience', () => {
   it('shows a degraded warning even before the first live row arrives', () => {
     const projector = createLiveConversationProjection({ generation: 1 });
     const root = createRoot(container);
-    const onOpenSettings = vi.fn();
     act(() =>
       root.render(
         <LiveTranscript
           segments={[]}
           interimText=""
           conversation={projector.degraded(1)}
-          onOpenSettings={onOpenSettings}
         />,
       ),
     );
     expect(container.textContent).toContain(
-      'Audio is recording safely · Live wording paused',
+      'Live wording paused · Audio is still recording',
     );
     expect(container.textContent).toContain(
-      'turn off Generate notes during meetings in Settings → Meetings',
+      'Pluto will use the saved audio to complete the transcript after the meeting.',
     );
-    const button = container.querySelector<HTMLButtonElement>(
-      '.live-conversation-warning__action',
-    );
-    expect(button).not.toBeNull();
-    act(() => {
-      button?.click();
-    });
-    expect(onOpenSettings).toHaveBeenCalledWith('meetings');
+    expect(
+      container.querySelector('.live-conversation-warning__action'),
+    ).toBeNull();
     act(() => root.unmount());
   });
 });

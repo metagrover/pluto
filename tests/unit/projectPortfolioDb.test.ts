@@ -56,6 +56,7 @@ describe('project portfolio source summaries', () => {
       type: 'action_item',
       name: 'Complete migration review',
       status: 'active',
+      metadata: { commitment_state: 'confirmed' },
       due_date: '2026-09-05T10:00:00Z',
       dedupe_by_name: false,
     });
@@ -264,4 +265,236 @@ describe('project portfolio source summaries', () => {
       expect.objectContaining({ id: child.id }),
     );
   });
+});
+
+describe('automatic project grouping persistence', () => {
+  const evidenceQuote =
+    'The export pipeline is a workstream within the Beacon release.';
+  const setup = (suffix: string) => {
+    const parent = db.upsertEntity({
+      id: `beacon-${suffix}`,
+      type: 'project',
+      name: `Beacon ${suffix}`,
+      dedupe_by_name: false,
+    });
+    const member = db.upsertEntity({
+      id: `export-${suffix}`,
+      type: 'project',
+      name: `Export ${suffix}`,
+      dedupe_by_name: false,
+    });
+    const meetingId = `group-source-${suffix}`;
+    db.saveMeeting({
+      id: meetingId,
+      title: 'Beacon planning',
+      user_notes: evidenceQuote,
+    });
+    db.addMeetingEntity({ meeting_id: meetingId, entity_id: member.id });
+    const theme = {
+      id: parent.id,
+      name: parent.name,
+      sourceMeetingIds: [meetingId],
+      context: evidenceQuote,
+      sourceContexts: { [meetingId]: evidenceQuote },
+      metadata: {
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'review',
+        },
+      },
+      memberships: [
+        {
+          projectId: member.id,
+          relationship: 'workstream' as 'workstream' | 'alias',
+          sourceMeetingId: meetingId,
+          evidenceQuote,
+          expectedMetadata: member.metadata,
+        },
+      ],
+    };
+    return { parent, member, meetingId, theme };
+  };
+
+  it('files supported work and includes later child evidence and commitments in the parent', () => {
+    const { parent, member, theme } = setup('workstream');
+    db.saveSynthesizedProjectTheme(theme);
+    expect(JSON.parse(db.getEntity(member.id)!.metadata!)).toMatchObject({
+      projectQualification: {
+        state: 'subordinate',
+        parentProjectId: parent.id,
+      },
+    });
+    db.saveMeeting({
+      id: 'later-beacon-work',
+      title: 'Export review',
+      duration_seconds: 300,
+      user_notes:
+        'The export pipeline review confirmed release readiness, documented quality checks, and agreed a follow-up review of the export implementation with the team.',
+    });
+    db.addMeetingEntity({
+      meeting_id: 'later-beacon-work',
+      entity_id: member.id,
+    });
+    const task = db.upsertEntity({
+      type: 'action_item',
+      name: 'Review export',
+      dedupe_by_name: false,
+    });
+    db.linkEntities({
+      source_entity_id: task.id,
+      target_entity_id: member.id,
+      relationship: 'belongs_to',
+      state: 'confirmed',
+      source: 'user',
+    });
+    expect(
+      db.getProjectBrief(parent.id)?.meetings.map((meeting) => meeting.id),
+    ).toContain('later-beacon-work');
+    expect(
+      db.getProjectBrief(parent.id)?.tasks.map((item) => item.id),
+    ).toContain(task.id);
+    const doc = db.upsertKnowledgeDoc({
+      scope_type: 'project',
+      scope_key: parent.id,
+      title: 'Beacon context',
+    });
+    expect(
+      db.getKnowledgeDocSourceMeetings(doc.id).map((meeting) => meeting.id),
+    ).toContain('later-beacon-work');
+    expect(db.getEntity(member.id)).toBeDefined();
+  });
+
+  it('restores aliases without losing evidence and preserves the keep-separate correction', () => {
+    const { parent, member, theme } = setup('alias');
+    theme.memberships[0].relationship = 'alias';
+    db.saveSynthesizedProjectTheme(theme);
+    expect(
+      db
+        .getProjectBrief(parent.id)
+        ?.mergedProjects.some((item) => item.id === member.id),
+    ).toBe(true);
+    db.restoreProjectMerge(member.id);
+    expect(JSON.parse(db.getEntity(member.id)!.metadata!)).toMatchObject({
+      projectAutoGroupingOptOut: true,
+    });
+    theme.memberships[0].expectedMetadata = db.getEntity(member.id)!.metadata;
+    db.saveSynthesizedProjectTheme(theme);
+    expect(
+      db
+        .getProjectBrief(parent.id)
+        ?.mergedProjects.some((item) => item.id === member.id),
+    ).toBe(false);
+    expect(db.getProjectBrief(member.id)?.meetings).toHaveLength(1);
+  });
+
+  it('rolls back the entire save if a source disappeared, and skips a concurrent user correction', () => {
+    const { parent, member, theme } = setup('rollback');
+    theme.sourceMeetingIds.push('missing-source');
+    expect(() => db.saveSynthesizedProjectTheme(theme)).toThrow(
+      'project_theme_source_missing',
+    );
+    expect(db.getEntity(parent.id)?.metadata).toBe(parent.metadata);
+    expect(db.getEntity(member.id)?.metadata).toBe(member.metadata);
+    theme.sourceMeetingIds.pop();
+    db.upsertEntity({
+      ...member,
+      metadata: {
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'user',
+        },
+      },
+    });
+    db.saveSynthesizedProjectTheme(theme);
+    expect(JSON.parse(db.getEntity(member.id)!.metadata!)).toMatchObject({
+      projectQualification: { state: 'qualified', source: 'user' },
+    });
+  });
+});
+
+it('hides claims whose exact evidence was removed from current source notes', () => {
+  const quote = 'The Beacon pilot is ready for the partner review.';
+  db.saveMeeting({
+    id: 'freshness-source',
+    title: 'Beacon pilot review',
+    user_notes: quote,
+  });
+  const project = db.upsertEntity({
+    type: 'project',
+    name: 'Beacon freshness',
+    dedupe_by_name: false,
+    metadata: {
+      projectThemeSynthesis: {
+        version: 3,
+        sourceMeetingIds: ['freshness-source'],
+        candidateProjectIds: [],
+        outcome: 'Launch the Beacon pilot.',
+        currentFocus: 'Review partner readiness.',
+        summary: {
+          text: 'The pilot is ready.',
+          sourceMeetingId: 'freshness-source',
+          evidenceQuote: quote,
+        },
+        evidence: [
+          { sourceMeetingId: 'freshness-source', evidenceQuote: quote },
+        ],
+        workstreams: [],
+        decisions: [],
+        recentChanges: [],
+        openThreads: [],
+        synthesizedAt: '2026-09-30T10:00:00Z',
+      },
+    },
+  });
+  db.addMeetingEntity({
+    meeting_id: 'freshness-source',
+    entity_id: project.id,
+  });
+  expect(db.getProjectBrief(project.id)?.theme?.summary?.text).toBe(
+    'The pilot is ready.',
+  );
+  db.saveMeeting({
+    id: 'freshness-source',
+    title: 'Beacon pilot review',
+    user_notes: 'The pilot review was postponed while readiness is verified.',
+  });
+  expect(db.getProjectBrief(project.id)).toMatchObject({
+    themeSourceOutdated: true,
+    theme: { currentFocus: '', outcome: '' },
+  });
+  expect(db.getProjectBrief(project.id)?.theme?.summary).toBeUndefined();
+  expect(
+    JSON.parse(db.getEntity(project.id)!.metadata!).projectThemeSynthesis
+      .summary.text,
+  ).toBe('The pilot is ready.');
+});
+
+it('does not turn possible dated follow-ups into confirmed milestones or health warnings', () => {
+  const project = db.upsertEntity({
+    type: 'project',
+    name: 'Beacon possible work',
+    dedupe_by_name: false,
+  });
+  const task = db.upsertEntity({
+    type: 'action_item',
+    name: 'Explore an optional pilot',
+    status: 'overdue',
+    due_date: '2026-01-01',
+    metadata: { commitment_state: 'possible' },
+    dedupe_by_name: false,
+  });
+  db.linkEntities({
+    source_entity_id: task.id,
+    target_entity_id: project.id,
+    relationship: 'belongs_to',
+    state: 'confirmed',
+    source: 'user',
+  });
+  const detail = db.getProjectBrief(project.id)!;
+  expect(detail.tasks.map((item) => item.id)).toContain(task.id);
+  expect(detail.milestones.some((item) => item.id === task.id)).toBe(false);
+  expect(detail.health.evidenceTaskIds).not.toContain(task.id);
+  expect(detail.momentum.openCommitmentCount).toBe(0);
 });

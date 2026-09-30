@@ -2,6 +2,10 @@ import {
   buildPersonDossierRead,
   cleanPersonReadText,
 } from '../src/utils/personDossierRead';
+import {
+  type PersonProfileClaim,
+  parsePersonProfile,
+} from '../src/utils/personProfile';
 
 export const KNOWLEDGE_V2_SCHEMA_VERSION = 2;
 export const KNOWLEDGE_V2_SYNTHESIS_VERSION = 4;
@@ -113,6 +117,7 @@ export interface KnowledgeV2ChangeSummary {
 }
 
 export interface KnowledgeV2Document {
+  person_profile?: PersonProfileClaim[];
   schema_version: 2;
   scope: KnowledgeV2Scope;
   current_read: {
@@ -183,6 +188,14 @@ export const groundPersonKnowledgeV2Document = (
   const evidenceIndex = doc.evidence_index.filter((entry) =>
     supported(entry.meeting_id, entry.quote),
   );
+  const profile = parsePersonProfile(doc.person_profile).flatMap((claim) => {
+    const citations = claim.citations.filter((citation) =>
+      supported(citation.meeting_id, citation.quote),
+    );
+    return citations.length === claim.citations.length
+      ? [{ ...claim, citations }]
+      : [];
+  });
   const personRead = buildPersonDossierRead(
     expectedPersonName,
     doc.active_streams,
@@ -191,11 +204,14 @@ export const groundPersonKnowledgeV2Document = (
   const recurringStreamIds = new Set(
     personRead.workstreams.map((stream) => stream.id),
   );
-  const headlineMeetingIds = new Set(
-    personRead.workstreams.flatMap((stream) =>
+  const headlineMeetingIds = new Set([
+    ...personRead.workstreams.flatMap((stream) =>
       stream.sources.map((source) => source.meeting_id),
     ),
-  );
+    ...profile.flatMap((claim) =>
+      claim.citations.map((citation) => citation.meeting_id),
+    ),
+  ]);
   const cleanItem = (item: KnowledgeV2Item): KnowledgeV2Item => ({
     ...item,
     title: cleanPersonReadText(item.title),
@@ -204,12 +220,20 @@ export const groundPersonKnowledgeV2Document = (
   });
   return {
     ...doc,
+    person_profile: profile,
     current_read: {
       ...doc.current_read,
-      headline: personRead.headline ?? '',
-      supporting_bullets: personRead.workstreams.map(
-        (stream) => `${stream.title}: ${stream.detail}`,
-      ),
+      headline:
+        profile.find((claim) => claim.section === 'overview')?.summary ??
+        personRead.headline ??
+        '',
+      supporting_bullets: profile.length
+        ? profile
+            .filter((claim) => claim.section === 'priorities')
+            .map((claim) => claim.summary)
+        : personRead.workstreams.map(
+            (stream) => `${stream.title}: ${stream.detail}`,
+          ),
       cited_item_count:
         needsAttention.length + patterns.length + risksAndUnknowns.length,
       cited_meeting_count: headlineMeetingIds.size,
@@ -970,6 +994,23 @@ export const applyKnowledgeCorrectionsToDocument = (
 
   return {
     ...doc,
+    person_profile: parsePersonProfile(doc.person_profile).filter(
+      (claim) =>
+        !orderedCorrections.some((correction) => {
+          if (
+            correction.target_kind !== 'claim' ||
+            correction.action !== 'correct_claim'
+          )
+            return false;
+          const original = parseCorrectionPayload(
+            correction.payload_json,
+          )?.original_claim;
+          return (
+            typeof original === 'string' &&
+            claimCorrectionMatches(original, `${claim.title} ${claim.summary}`)
+          );
+        }),
+    ),
     current_read: {
       ...doc.current_read,
       headline,
@@ -1430,6 +1471,13 @@ export const mergeKnowledgeV2Documents = (
   return {
     schema_version: KNOWLEDGE_V2_SCHEMA_VERSION,
     scope,
+    ...(scope.type === 'person_context'
+      ? {
+          person_profile: parsePersonProfile(
+            documents.flatMap((doc) => doc.person_profile ?? []),
+          ),
+        }
+      : {}),
     current_read: {
       headline:
         patterns[0]?.title ||

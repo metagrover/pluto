@@ -167,6 +167,7 @@ type QueueState = {
   timer: ReturnType<typeof setTimeout> | null;
   inFlight: boolean;
   pending: boolean;
+  userRequested?: boolean;
 };
 
 const queueByDocId = new Map<string, QueueState>();
@@ -261,7 +262,7 @@ const getState = (docId: string): QueueState => {
 const flushPendingKnowledgeDocRefreshes = (delayMs = 250): void => {
   for (const [docId, state] of queueByDocId.entries()) {
     if (!state.pending || state.inFlight || state.timer) continue;
-    if (knowledgeDocBackgroundScheduler) {
+    if (knowledgeDocBackgroundScheduler && !state.userRequested) {
       knowledgeDocBackgroundScheduler(docId);
       continue;
     }
@@ -1064,7 +1065,8 @@ const hasStructuredContent = (doc: KnowledgeCompiledDocument): boolean => {
       doc.active_streams.length > 0 ||
       doc.needs_attention.length > 0 ||
       doc.patterns.length > 0 ||
-      doc.risks_and_unknowns.length > 0
+      doc.risks_and_unknowns.length > 0 ||
+      Boolean(doc.person_profile?.length)
     );
   }
   return (
@@ -1293,7 +1295,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
   }
 
   if (params.doc.scope_type === 'person_context') {
-    return mergeKnowledgeV2Documents(
+    const merged = mergeKnowledgeV2Documents(
       { type: 'person_context', title: params.doc.title },
       chunkDocs.map((chunk) =>
         isKnowledgeV2Document(chunk.structured)
@@ -1304,6 +1306,65 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
             ),
       ),
     );
+    if (!merged.person_profile?.length)
+      throw new Error('person_profile_unavailable');
+    if (chunkDocs.length <= 1) return merged;
+    // Consolidate attributable excerpts into one profile, rather than concatenate chunk summaries.
+    const profileMeetings = [
+      ...new Map(
+        [
+          ...params.sourceMeetings.slice(0, 12),
+          ...params.sourceMeetings.slice(-4),
+        ].map((source) => [source.id, source]),
+      ).values(),
+    ];
+    let remainingEvidenceChars = 16_000;
+    const profileSources = profileMeetings.flatMap((source) => {
+      const quotes = merged.evidence_index
+        .filter((entry) => entry.meeting_id === source.id)
+        .map((entry) => entry.quote)
+        .filter((quote) => quote.length <= 1000)
+        .slice(0, 2);
+      const evidence = [...new Set(quotes)].join('\n');
+      if (!evidence || evidence.length > remainingEvidenceChars) return [];
+      remainingEvidenceChars -= evidence.length;
+      return [{ ...source, evidence }];
+    });
+    try {
+      params.signal?.throwIfAborted();
+      const raw = await params.provider.synthesizeKnowledgeDocument(
+        getPersonKnowledgeChunkPrompt(
+          promptScopeTitle(params.doc),
+          profileSources,
+          params.claimCorrections,
+        ),
+        { signal: params.signal },
+      );
+      params.signal?.throwIfAborted();
+      const consolidated = compilePersonKnowledgeChunk(
+        promptScopeTitle(params.doc),
+        0,
+        profileSources,
+        parseKnowledgeJsonResponse(raw),
+      );
+      return consolidated.person_profile?.length
+        ? {
+            ...mergeKnowledgeV2Documents(
+              { type: 'person_context', title: params.doc.title },
+              [merged, consolidated],
+            ),
+            person_profile: consolidated.person_profile,
+          }
+        : merged;
+    } catch (error) {
+      if (params.signal?.aborted || isSerializedTaskPreemption(error))
+        throw error;
+      console.warn(
+        '[KnowledgeDoc] Person profile consolidation failed; retaining cited sections.',
+        error,
+      );
+      return merged;
+    }
   }
 
   if (chunkDocs.length === 1) {
@@ -1521,6 +1582,17 @@ const renderStructuredDocument = (doc: KnowledgeCompiledDocument): string => {
       for (const bullet of doc.current_read.supporting_bullets) {
         lines.push(`- ${bullet}`);
       }
+      lines.push('');
+    }
+    for (const claim of doc.person_profile ?? []) {
+      lines.push(
+        `## ${claim.section.replaceAll('_', ' ')}`,
+        '',
+        claim.summary,
+        '',
+      );
+      for (const citation of claim.citations)
+        lines.push(`Source: ${citation.meeting_id} — ${citation.quote}`);
       lines.push('');
     }
 
@@ -2079,13 +2151,15 @@ const runQueuedSynthesis = (docId: string): void => {
     request.key,
     async () => synthesizeKnowledgeDocNowInternal(request),
   );
-  const settleQueueState = () => {
+  const settleQueueState = (result?: db.KnowledgeDoc) => {
     state.inFlight = false;
+    if (result?.status === 'up_to_date' || result?.status === 'failed')
+      state.userRequested = false;
     if (state.pending) {
       queueKnowledgeDocRefresh(docId, 750);
     }
   };
-  void synthesis.then(settleQueueState, settleQueueState);
+  void synthesis.then(settleQueueState, () => settleQueueState());
 };
 
 export const queueKnowledgeDocRefresh = (
@@ -2105,7 +2179,7 @@ export const queueKnowledgeDocRefresh = (
     return;
   }
 
-  if (knowledgeDocBackgroundScheduler) {
+  if (knowledgeDocBackgroundScheduler && !state.userRequested) {
     knowledgeDocBackgroundScheduler(docId);
     return;
   }
@@ -2134,22 +2208,36 @@ export const setKnowledgeDocSynthesisPaused = (paused: boolean): void => {
 
 export const refreshKnowledgeDocNow = async (
   docId: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; userRequested?: boolean } = {},
 ): Promise<db.KnowledgeDoc | undefined> => {
   if (isAutoSkippedKnowledgeDoc(db.getKnowledgeDoc(docId))) {
     return db.getKnowledgeDoc(docId);
   }
+  const state = getState(docId);
+  if (options.userRequested) state.userRequested = true;
   if (queuedSynthesisPaused) {
-    const state = getState(docId);
     state.pending = true;
+    const doc = db.getKnowledgeDoc(docId);
+    if (options.userRequested && doc)
+      return db.upsertKnowledgeDoc({
+        id: doc.id,
+        scope_type: doc.scope_type,
+        scope_key: doc.scope_key,
+        title: doc.title,
+        status: 'stale',
+      });
     return db.getKnowledgeDoc(docId);
   }
   const baseRequest = buildKnowledgeSynthesisRequest(docId);
   if (!baseRequest) return undefined;
   const request = { ...baseRequest, signal: options.signal };
-  return runKnowledgeDocWithGlobalSynthesisGate(request.key, async () =>
-    synthesizeKnowledgeDocNowInternal(request),
+  const result = await runKnowledgeDocWithGlobalSynthesisGate(
+    request.key,
+    async () => synthesizeKnowledgeDocNowInternal(request),
   );
+  if (result?.status === 'up_to_date' || result?.status === 'failed')
+    state.userRequested = false;
+  return result;
 };
 
 export const synthesizeEntitySummary = async (

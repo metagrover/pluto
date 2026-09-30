@@ -5,7 +5,7 @@ import {
 } from '../../electron/encryptionRollout';
 
 describe('encryption rollout policy', () => {
-  it('keeps every write and cleanup gate dark by default', () => {
+  it('enables audio budget cleanup without enabling encrypted capture by default', () => {
     expect(
       resolveEncryptionRolloutPolicy({
         isPackaged: true,
@@ -16,12 +16,12 @@ describe('encryption rollout policy', () => {
       encryptedCaptureWrites: false,
       encryptedNativeReads: true,
       historicalAudioMigration: false,
-      retentionEnforcement: false,
+      retentionEnforcement: true,
       reason: 'rollout_not_requested',
     });
   });
 
-  it('rejects unsigned and development canaries without partial enablement', () => {
+  it('rejects unsigned and development encrypted capture while allowing cleanup', () => {
     expect(
       resolveEncryptionRolloutPolicy({
         isPackaged: false,
@@ -46,11 +46,11 @@ describe('encryption rollout policy', () => {
       mode: 'off',
       encryptedCaptureWrites: false,
       historicalAudioMigration: false,
-      retentionEnforcement: false,
+      retentionEnforcement: true,
     });
   });
 
-  it('keeps migration and retention as separate explicit canary gates', () => {
+  it('keeps historical migration opt-in while cleanup stays enabled', () => {
     const captureOnly = resolveEncryptionRolloutPolicy({
       isPackaged: true,
       requestedMode: 'signed_canary',
@@ -60,7 +60,7 @@ describe('encryption rollout policy', () => {
       mode: 'signed_canary',
       encryptedCaptureWrites: true,
       historicalAudioMigration: false,
-      retentionEnforcement: false,
+      retentionEnforcement: true,
     });
 
     expect(
@@ -76,6 +76,21 @@ describe('encryption rollout policy', () => {
       historicalAudioMigration: true,
       retentionEnforcement: true,
     });
+  });
+
+  it('supports disabling cleanup independently in every rollout mode', () => {
+    for (const isPackaged of [false, true]) {
+      for (const requestedMode of [undefined, 'signed_canary']) {
+        expect(
+          resolveEncryptionRolloutPolicy({
+            isPackaged,
+            requestedMode,
+            retentionEnforcementRequested: '0',
+            signedBuild: { valid: true, reason: 'signed_distribution_build' },
+          }).retentionEnforcement,
+        ).toBe(false);
+      }
+    }
   });
 });
 

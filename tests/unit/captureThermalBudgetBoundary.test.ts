@@ -33,7 +33,7 @@ describe('capture thermal production boundary', () => {
   });
 
   it('uses bounded EOU dispatch without a recording-time validation worker', () => {
-    expect(audioManager).toContain('createEouRendererSession');
+    expect(audioManager).toContain('createDurableEouSession');
     expect(audioManager).not.toContain('BackgroundTranscriptValidationQueue');
     expect(audioManager).not.toContain('GET_CAPTURE_COMPUTE_POLICY');
   });

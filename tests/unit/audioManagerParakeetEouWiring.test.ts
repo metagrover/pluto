@@ -5,7 +5,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
   const source = readFileSync('src/components/AudioManager.tsx', 'utf8');
 
   it('creates and launches the EOU session without blocking microphone acquisition', () => {
-    const createIndex = source.indexOf('createEouRendererSession({');
+    const createIndex = source.indexOf('createDurableEouSession({');
     const startIndex = source.indexOf('eouSession.start()');
     const microphoneIndex = source.indexOf(
       'navigator.mediaDevices.getUserMedia',
@@ -18,12 +18,10 @@ describe('AudioManager Parakeet EOU wiring', () => {
     );
   });
 
-  it('feeds copied mic PCM and decoded System PCM into EOU', () => {
-    expect(source).toContain('const copied = new Float32Array(input)');
-    expect(source).toContain("eouSessionRef.current?.append('mic', copied, {");
-    expect(source).toContain(
-      "eouSessionRef.current?.append('system', decoded.samples, {",
-    );
+  it('reads persisted audio instead of coupling capture PCM to inference', () => {
+    expect(source).toContain("'PARAKEET_EOU_READ_AUDIO'");
+    expect(source).toContain('micPcmChunksRef.current.push(copied)');
+    expect(source).not.toContain('eouSessionRef.current?.append(');
   });
 
   it('publishes the reconciled reading projection while retaining raw EOU text', () => {
@@ -71,7 +69,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
       generationIndex,
     );
     const sessionIndex = source.indexOf(
-      'createEouRendererSession({',
+      'createDurableEouSession({',
       rolloutIndex,
     );
     expect(generationIndex).toBeGreaterThan(-1);
@@ -238,7 +236,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
   it('does not publish recording until microphone capture is active', () => {
     const startIndex = source.indexOf('const startSession = async ()');
     const microphonePcmIndex = source.indexOf(
-      "eouSessionRef.current?.append('mic', copied, {",
+      'micPcmChunksRef.current.push(copied)',
       startIndex,
     );
     const recorderStartIndex = source.indexOf(
@@ -301,17 +299,5 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(recorderStartBlock).not.toContain(
       'systemPcmChunksRef.current = [];',
     );
-  });
-
-  it('configures EOU renderer session with warm-up queue tolerance (maxOutstanding: 48)', () => {
-    expect(source).toContain('maxOutstanding: 48');
-  });
-
-  it('raises the retained-audio budget to survive local Ollama inference latency (askPlutoLive ≤ 20 s)', () => {
-    // 45 s per source gives headroom above the 20 s Ollama live timeout so that
-    // CPU/ANE contention during askPlutoLive does not trigger parakeet_backpressure.
-    // 24 MiB covers both sources at 16 kHz Float32 for the full 45 s window.
-    expect(source).toContain('maxRetainedAudioSecondsPerSource: 45');
-    expect(source).toContain('maxRetainedPcmBytes: 24 * 1024 * 1024');
   });
 });

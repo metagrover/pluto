@@ -481,11 +481,16 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
               </output>
             ) : null}
             {isAsking && !streamingAnswer ? (
-              <output className="meeting-ask-pluto-dock__loading meeting-ask-pluto-dock__loading--latest">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                {liveContext
-                  ? 'Reading live transcript'
-                  : 'Reading this meeting'}
+              <output className="meeting-ask-pluto-dock__loading--latest block">
+                <span className="meeting-ask-pluto-dock__loading">
+                  <Loader2
+                    className="h-4 w-4 animate-spin"
+                    aria-hidden="true"
+                  />
+                  {liveContext
+                    ? 'Reading live transcript'
+                    : 'Reading this meeting'}
+                </span>
               </output>
             ) : null}
           </div>

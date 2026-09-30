@@ -179,16 +179,12 @@ export const LiveTranscript = ({
   interimText,
   integrity = 'healthy',
   conversation = null,
-  onOpenSettings,
   forceShowWarning = false,
 }: {
   segments: LiveTranscriptSegment[];
   interimText: string;
   integrity?: LiveTranscriptIntegrity;
   conversation?: LiveConversationSnapshot | null;
-  onOpenSettings?: (
-    tab?: 'personal' | 'meetings' | 'intelligence' | 'advanced',
-  ) => void;
   forceShowWarning?: boolean;
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -255,6 +251,8 @@ export const LiveTranscript = ({
 
   const showWarning =
     forceShowWarning ||
+    conversation?.status === 'catching_up' ||
+    conversation?.status === 'reconnecting' ||
     conversation?.status === 'degraded' ||
     conversation?.status === 'unavailable';
 
@@ -280,16 +278,24 @@ export const LiveTranscript = ({
             <h1 id="live-transcript-title">Live transcript</h1>
           </div>
           <span>
-            {visibleCount === 0 && !conversation?.draft
-              ? 'Listening'
-              : !isFollowingLive
-                ? 'Reviewing earlier'
-                : integrity === 'lagging'
-                  ? 'Falling behind'
-                  : conversation?.draft ||
-                      visibleSegments.some((segment) => !segment.confirmed)
-                    ? 'Refining'
-                    : 'Caught up'}
+            {conversation?.status === 'catching_up'
+              ? 'Catching up'
+              : conversation?.status === 'reconnecting'
+                ? 'Reconnecting'
+                : conversation?.status === 'unavailable'
+                  ? 'Paused'
+                  : visibleCount === 0 && !conversation?.draft
+                    ? 'Listening'
+                    : !isFollowingLive
+                      ? 'Reviewing earlier'
+                      : integrity === 'lagging'
+                        ? 'Falling behind'
+                        : conversation?.draft ||
+                            visibleSegments.some(
+                              (segment) => !segment.confirmed,
+                            )
+                          ? 'Refining'
+                          : 'Caught up'}
           </span>
         </div>
         <div className="live-transcript-body">
@@ -348,23 +354,23 @@ export const LiveTranscript = ({
                   className="live-conversation-warning__dot"
                   aria-hidden="true"
                 />
-                <span>Audio is recording safely · Live wording paused</span>
+                <span>
+                  {conversation?.status === 'catching_up'
+                    ? 'Catching up with the conversation'
+                    : conversation?.status === 'reconnecting'
+                      ? 'Reconnecting live transcription'
+                      : 'Live wording paused'}
+                  {' · Audio is still recording'}
+                </span>
               </div>
               <div className="live-conversation-warning__body">
                 <p>
-                  To keep live transcript and questions active with local AI
-                  models, turn off Generate notes during meetings in Settings →
-                  Meetings.
+                  {conversation?.status === 'catching_up'
+                    ? 'Text is arriving a little later. Pluto is working through the saved audio in order.'
+                    : conversation?.status === 'reconnecting'
+                      ? 'Pluto is restarting transcription and will catch up from the saved audio.'
+                      : 'Local transcription is unavailable right now. Pluto will use the saved audio to complete the transcript after the meeting.'}
                 </p>
-                {onOpenSettings && (
-                  <button
-                    type="button"
-                    onClick={() => onOpenSettings('meetings')}
-                    className="live-conversation-warning__action"
-                  >
-                    Open Settings →
-                  </button>
-                )}
               </div>
             </aside>
           )}

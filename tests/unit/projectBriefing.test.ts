@@ -7,6 +7,7 @@ import {
   buildUserProjectMilestones,
   cleanPersonRole,
   readProjectDisplayTitle,
+  readProjectThemeSynthesis,
   sortProjectMilestones,
   withProjectDisplayTitle,
 } from '../../src/utils/projectBriefing';
@@ -276,5 +277,69 @@ describe('project milestones and health', () => {
     expect(buildProjectMomentum([], [], now).headline).toBe(
       'Not enough evidence for a trend',
     );
+  });
+});
+
+describe('saved project profile compatibility', () => {
+  const theme = {
+    sourceMeetingIds: ['m1', 'm2'],
+    candidateProjectIds: [],
+    outcome: 'Searchable records',
+    currentFocus: 'Validate access',
+    recentChanges: [],
+    openThreads: [],
+    synthesizedAt: '2026-09-29T12:00:00Z',
+  };
+  it.each([1, 2, 3])('reads supported synthesis version %s', (version) => {
+    expect(
+      readProjectThemeSynthesis(
+        JSON.stringify({ projectThemeSynthesis: { ...theme, version } }),
+      )?.currentFocus,
+    ).toBe('Validate access');
+  });
+  it('omits malformed and foreign-source profile claims without losing the base brief', () => {
+    const result = readProjectThemeSynthesis(
+      JSON.stringify({
+        projectThemeSynthesis: {
+          ...theme,
+          version: 3,
+          summary: {
+            text: 'Unrelated claim',
+            sourceMeetingId: 'outside',
+            evidenceQuote: 'A long unrelated supporting quote.',
+          },
+          recentChanges: [
+            null,
+            {
+              sourceMeetingId: 'm1',
+              summary: 'Access approved',
+              evidenceQuote: 'Access controls were approved.',
+            },
+          ],
+          openThreads: [
+            null,
+            {
+              kind: 'invented',
+              text: 'bad',
+              sourceMeetingId: 'm1',
+              evidenceQuote: 'A long supporting quote.',
+            },
+          ],
+          workstreams: [
+            null,
+            {
+              name: 'Access',
+              text: 'Needs validation',
+              sourceMeetingId: 'm1',
+              evidenceQuote: 'Access controls need validation.',
+            },
+          ],
+        },
+      }),
+    );
+    expect(result?.summary).toBeUndefined();
+    expect(result?.recentChanges).toHaveLength(1);
+    expect(result?.openThreads).toEqual([]);
+    expect(result?.workstreams).toHaveLength(1);
   });
 });

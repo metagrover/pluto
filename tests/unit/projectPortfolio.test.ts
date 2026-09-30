@@ -216,3 +216,21 @@ describe('project portfolio', () => {
     expect(result.dormant.map((p) => p.id)).toContain('Weekly Project');
   });
 });
+
+it('keeps ordinary single-source extraction out of the main projects without requiring a legacy marker', () => {
+  const extracted = entry('Pilot design', 'qualified');
+  extracted.metadata = JSON.stringify({
+    projectQualification: {
+      version: 1,
+      state: 'qualified',
+      source: 'extraction',
+      reason: 'An extracted plan',
+      assessedAt: '2026-09-30',
+    },
+  });
+  expect(buildProjectPortfolio([extracted]).current).toHaveLength(0);
+  expect(buildProjectPortfolio([extracted]).suggested).toHaveLength(1);
+  expect(
+    buildProjectPortfolio([entry('Confirmed pilot', 'qualified')]).current,
+  ).toHaveLength(1);
+});

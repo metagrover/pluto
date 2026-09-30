@@ -209,6 +209,7 @@ export interface LLMProvider {
     options?: {
       signal?: AbortSignal;
       purpose?: 'projectScope' | 'commitmentReconciliation' | 'dreaming';
+      budget?: { contextTokens: number; outputTokens: number };
       responseSchema?: Record<string, unknown>;
       model?: string;
       promptVersion?: string;
@@ -222,6 +223,7 @@ export interface LLMProvider {
     options?: {
       signal?: AbortSignal;
       mode?: 'fast' | 'deep';
+      jsonMode?: boolean;
       live?: boolean;
       onStart?: () => void;
       onToken?: (delta: string) => void;

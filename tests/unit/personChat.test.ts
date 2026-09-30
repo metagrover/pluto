@@ -37,6 +37,46 @@ const detail = {
 } as unknown as PersonBriefingDetail;
 
 describe('person chat intelligence', () => {
+  it('uses the sourced comprehensive profile and labels shared commitments conservatively', () => {
+    const quote = 'Maya requested a short written recommendation.';
+    const context = buildPersonChatContext({
+      detail: {
+        ...detail,
+        knowledgeDoc: {
+          structured_json: JSON.stringify({
+            person_profile: [
+              {
+                section: 'collaboration',
+                summary:
+                  'Maya requested a written recommendation before the review.',
+                citations: [{ meeting_id: 'confirmed', quote }],
+              },
+            ],
+            evidence_index: [{ meeting_id: 'confirmed', quote }],
+          }),
+        } as PersonBriefingDetail['knowledgeDoc'],
+        sharedCommitments: {
+          open: [
+            {
+              id: 'self-action',
+              text: 'Send the review',
+              sourceMeetingId: 'confirmed',
+            } as PersonBriefingDetail['commitments']['open'][number],
+          ],
+          delivered: [],
+        },
+      },
+      query: 'How should I prepare a recommendation?',
+      getMeeting: () => undefined,
+    });
+    expect(context.evidence).toContain(
+      'Maya requested a written recommendation before the review.',
+    );
+    expect(context.evidence).toContain('not necessarily owed to this person');
+    expect(context.citations.map((item) => item.meetingId)).toContain(
+      'confirmed',
+    );
+  });
   it('routes common conversational intents without a model call', () => {
     expect(routePersonChatIntent('Draft a warmer note')).toBe('draft');
     expect(routePersonChatIntent('Role-play how they might respond')).toBe(

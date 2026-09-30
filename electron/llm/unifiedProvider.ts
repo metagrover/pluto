@@ -920,6 +920,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     options: {
       signal?: AbortSignal;
       purpose?: 'projectScope' | 'commitmentReconciliation' | 'dreaming';
+      budget?: { contextTokens: number; outputTokens: number };
       responseSchema?: Record<string, unknown>;
       model?: string;
       promptVersion?: string;
@@ -949,6 +950,7 @@ export class UnifiedLLMProvider implements LLMProvider {
               : 'knowledgeDoc',
       jsonMode: true,
       responseSchema: options.responseSchema,
+      notesBudget: options.budget,
       modelOverride:
         options.purpose === 'dreaming' ? options.model?.trim() : undefined,
       signal: options.signal,
@@ -978,6 +980,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     options: {
       signal?: AbortSignal;
       mode?: 'fast' | 'deep';
+      jsonMode?: boolean;
       live?: boolean;
       onStart?: () => void;
       onToken?: (delta: string) => void;
@@ -991,6 +994,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           ? 'askPlutoDeep'
           : 'askPluto',
       signal: options.signal,
+      jsonMode: options.jsonMode,
       onStart: options.onStart,
       onToken: options.onToken,
     });
@@ -1431,7 +1435,11 @@ export class UnifiedLLMProvider implements LLMProvider {
           contextTokens: notesBudget.contextTokens,
           outputTokens: notesBudget.outputTokens,
         })
-      : calculateOllamaContextBudget(prompt, task);
+      : calculateOllamaContextBudget(
+          prompt,
+          task,
+          jsonMode && task === 'askPlutoDeep' ? 1024 : undefined,
+        );
     const progressAware =
       Boolean(notesBudget) || usesProgressAwareOllamaDeadline(task);
     const shouldStream = Boolean(onToken) || progressAware;
@@ -2092,9 +2100,11 @@ export class UnifiedLLMProvider implements LLMProvider {
 export function calculateOllamaContextBudget(
   prompt: string,
   task: string,
+  outputTokens?: number,
 ): { num_ctx: number; num_predict: number } {
   const outputTokenBudget =
-    task === 'queryClassification'
+    outputTokens ??
+    (task === 'queryClassification'
       ? 128
       : task === 'title'
         ? 64
@@ -2112,7 +2122,7 @@ export function calculateOllamaContextBudget(
                       task === 'structuredAnalysis' ||
                       task === 'summary'
                     ? 4096
-                    : 2500;
+                    : 2500);
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
   const maxCap =

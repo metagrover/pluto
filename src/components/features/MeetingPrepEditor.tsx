@@ -190,7 +190,7 @@ export const MeetingPrepEditor = forwardRef<
     }
   };
   return (
-    <div className="space-y-5" data-meeting-prep-document>
+    <div className="space-y-9" data-meeting-prep-document>
       <MeetingPrepBrief
         prep={record}
         onOpenMeeting={onOpenMeeting}
@@ -218,14 +218,11 @@ export const MeetingPrepEditor = forwardRef<
           </button>
         </div>
       )}
-      <details
-        open
-        className="group/notes rounded-lg border border-pro-border p-4"
-      >
-        <summary className="flex min-h-6 cursor-pointer list-none items-center justify-between gap-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent text-sm font-medium text-pro-text-main [&::-webkit-details-marker]:hidden">
+      <details open className="group/notes border-b border-pro-border/70 pb-8">
+        <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-3 rounded-sm text-xl font-semibold leading-7 tracking-[-0.012em] text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
           <span>
             Add your notes{' '}
-            <span className="ml-2 text-xs font-normal text-pro-text-muted">
+            <span className="ml-2 align-middle text-xs font-normal tracking-normal text-pro-text-muted">
               {notes.trim() ? status : ''}
             </span>
           </span>
@@ -235,7 +232,7 @@ export const MeetingPrepEditor = forwardRef<
             className="shrink-0 text-pro-text-muted motion-reduce:transition-none transition-transform group-open/notes:rotate-180"
           />
         </summary>
-        <div className="mt-4 space-y-3">
+        <div className="mt-5 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <label
               htmlFor={`prep-notes-${prep.occurrenceKey}`}
@@ -243,7 +240,7 @@ export const MeetingPrepEditor = forwardRef<
             >
               Preparation, questions & agenda
             </label>
-            <span role="status" className="text-[10px] text-pro-text-muted">
+            <span role="status" className="text-xs text-pro-text-muted">
               {status}
             </span>
           </div>
@@ -265,13 +262,13 @@ export const MeetingPrepEditor = forwardRef<
               }
             }}
             placeholder="What do you want to discuss? Add your notes, questions, and agenda…"
-            className="min-h-[240px] w-full resize-y rounded-lg border border-pro-border bg-pro-surface/25 p-4 text-sm leading-6 text-pro-text-main placeholder:text-pro-text-muted/60 focus:outline-none focus:ring-2 focus:ring-pro-accent"
+            className="min-h-[240px] w-full resize-y rounded-lg border border-pro-border/70 bg-pro-surface/25 p-4 text-sm leading-6 text-pro-text-main placeholder:text-pro-text-muted focus:outline-none focus:ring-2 focus:ring-pro-accent"
           />
         </div>
       </details>
-      <section className="space-y-3">
+      <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-xs font-medium text-pro-text-muted">
+          <h3 className="text-xl font-semibold leading-7 tracking-[-0.012em] text-pro-text-main">
             Included meetings
           </h3>
           <button
@@ -289,7 +286,7 @@ export const MeetingPrepEditor = forwardRef<
           </button>
         </div>
         {picker && (
-          <div className="rounded-lg border border-pro-border p-3">
+          <div className="rounded-lg border border-pro-border/70 bg-pro-surface/20 p-4">
             <input
               aria-label="Search past meetings"
               value={query}
@@ -385,7 +382,7 @@ export const MeetingPrepEditor = forwardRef<
           (record.meetings || []).map((meeting) => (
             <article
               key={meeting.id}
-              className="rounded-lg border border-pro-border transition-colors hover:bg-pro-surface/30"
+              className="border-b border-pro-border/60 transition-colors last:border-b-0 hover:bg-pro-surface/30"
             >
               <div className="flex items-center gap-2">
                 <button
@@ -400,7 +397,7 @@ export const MeetingPrepEditor = forwardRef<
                       /* Save error remains visible. */
                     }
                   }}
-                  className="min-w-0 flex-1 rounded-lg p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                  className="min-w-0 flex-1 rounded-md px-2 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
                 >
                   <span
                     title={meeting.title}
@@ -453,7 +450,7 @@ export function MeetingPrepReadOnly({
   onOpenMeeting,
 }: { prep: MeetingPrep; onOpenMeeting?: (id: string) => void }) {
   return (
-    <div className="space-y-5" aria-label="Preparation summary">
+    <div className="space-y-8" aria-label="Preparation summary">
       {prep.briefing?.synthesisStatus === 'ready' && (
         <MeetingPrepBrief
           prep={prep}

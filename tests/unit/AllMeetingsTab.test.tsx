@@ -35,7 +35,7 @@ describe('AllMeetingsTab', () => {
     expect(markup).toContain('1h 3m');
   });
 
-  it('reserves the action slot only when deletion is available', () => {
+  it('allows deletion while post-meeting processing continues', () => {
     const markup = renderToStaticMarkup(
       <AllMeetingsTab
         meetings={[{ ...meetings[0], finalization_status: 'processing' }]}
@@ -44,8 +44,8 @@ describe('AllMeetingsTab', () => {
       />,
     );
 
-    expect(markup).not.toContain('meetings-index__row-open--deletable');
-    expect(markup).not.toContain('meetings-index__row-delete');
+    expect(markup).toContain('meetings-index__row-open--deletable');
+    expect(markup).toContain('meetings-index__row-delete');
   });
 
   it('uses the same calm surface for the empty state', () => {

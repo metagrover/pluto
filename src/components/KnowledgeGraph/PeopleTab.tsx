@@ -30,6 +30,7 @@ import {
   resolvePersonCommitmentOwner,
   restorePersonMerge,
   triggerDreamingNow,
+  updateEntityStatus,
   updatePersonName,
   upsertEntity,
 } from '../../api/knowledgeGraph';
@@ -57,12 +58,15 @@ import {
   scorePersonActivity,
 } from '../../utils/personBriefing';
 import {
+  PERSON_CONTEXT_SYNTHESIS_VERSION,
   buildPersonDossierRead,
   isCurrentPersonDossier,
 } from '../../utils/personDossierRead';
+import { readPersonProfile } from '../../utils/personProfile';
 import { PersonChatDock } from '../features/PersonChatDock';
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
+import { PersonProfileContent } from './PersonProfileContent';
 import { compileKnowledgeBrief } from './knowledgeDocument';
 
 export type PersonBriefingRow = PersonBriefingSummary;
@@ -477,52 +481,79 @@ export const formatCommitmentChronology = (
 const CommitmentList = ({
   items,
   onOpenMeeting,
+  states = {},
+  onToggle,
 }: {
   items: PersonBriefingCommitment[];
   onOpenMeeting: (meetingId: string) => void;
+  states?: Record<string, 'saving' | 'error'>;
+  onToggle?: (item: PersonBriefingCommitment) => void;
 }) => (
   <ul className="person-dossier__commitments">
-    {items.slice(0, 3).map((item) => {
+    {items.map((item) => {
       const timing = formatCommitmentChronology(item);
       return (
         <li key={item.id}>
-          <button
-            type="button"
-            onClick={() => onOpenMeeting(item.sourceMeetingId)}
-          >
-            <span
-              className="person-dossier__commitment-icon"
-              aria-hidden="true"
+          <div className="flex items-center gap-2">
+            <button
+              className="person-dossier__commitment-source"
+              type="button"
+              onClick={() => onOpenMeeting(item.sourceMeetingId)}
             >
-              {item.status === 'completed' ? (
-                <CheckCircle2 size={15} />
-              ) : (
-                <Clock3 size={15} />
-              )}
-            </span>
-            <span className="person-dossier__commitment-copy">
-              <strong>{item.text}</strong>
-              <span className="flex flex-wrap items-center gap-1.5">
-                <span
-                  className={
-                    timing.isOverdue
-                      ? 'text-rose-600 dark:text-rose-400 font-medium'
-                      : timing.isLingering
-                        ? 'text-amber-700 dark:text-amber-400 font-medium'
-                        : ''
-                  }
-                >
-                  {timing.label}
-                </span>
-                {item.sourceMeetingTitle && (
-                  <span className="text-pro-text-muted/70 text-[11px] truncate max-w-[200px]">
-                    · &ldquo;{item.sourceMeetingTitle}&rdquo;
-                  </span>
+              <span
+                className="person-dossier__commitment-icon"
+                aria-hidden="true"
+              >
+                {item.status === 'completed' ? (
+                  <CheckCircle2 size={15} />
+                ) : (
+                  <Clock3 size={15} />
                 )}
               </span>
-            </span>
-            <ChevronRight aria-hidden="true" size={14} />
-          </button>
+              <span className="person-dossier__commitment-copy">
+                <strong>{item.text}</strong>
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <span
+                    className={
+                      timing.isOverdue
+                        ? 'text-rose-600 dark:text-rose-400 font-medium'
+                        : timing.isLingering
+                          ? 'text-amber-700 dark:text-amber-400 font-medium'
+                          : ''
+                    }
+                  >
+                    {timing.label}
+                  </span>
+                  {item.sourceMeetingTitle && (
+                    <span className="text-pro-text-muted/70 text-[11px] truncate max-w-[200px]">
+                      · &ldquo;{item.sourceMeetingTitle}&rdquo;
+                    </span>
+                  )}
+                </span>
+              </span>
+              <ChevronRight aria-hidden="true" size={14} />
+            </button>
+            {onToggle && (
+              <button
+                type="button"
+                className="shrink-0 rounded-lg px-3 py-2 text-xs font-medium text-pro-accent hover:bg-pro-hover focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-50"
+                aria-label={`${item.status === 'completed' ? 'Reopen' : 'Mark done'}: ${item.text}`}
+                disabled={states[item.id] === 'saving'}
+                onClick={() => onToggle(item)}
+              >
+                {states[item.id] === 'saving'
+                  ? 'Saving…'
+                  : item.status === 'completed'
+                    ? 'Reopen'
+                    : 'Mark done'}
+              </button>
+            )}
+          </div>
+          {states[item.id] === 'error' && (
+            <p role="alert" className="px-2 pb-2 text-xs text-rose-600">
+              Could not update this commitment. Try again.
+            </p>
+          )}
         </li>
       );
     })}
@@ -662,6 +693,63 @@ export const PersonDossier = ({
   onIdentityChanged?: () => Promise<void>;
 }) => {
   const [currentDetail, setCurrentDetail] = useState(detail);
+  const [completionStates, setCompletionStates] = useState<
+    Record<string, 'saving' | 'error'>
+  >({});
+  const toggleCommitment = async (item: PersonBriefingCommitment) => {
+    if (completionStates[item.id] === 'saving') return;
+    const personId = currentDetail.person.id;
+    setCompletionStates((states) => ({ ...states, [item.id]: 'saving' }));
+    const status: PersonBriefingCommitment['status'] =
+      item.status === 'completed' ? 'active' : 'completed';
+    try {
+      await updateEntityStatus(item.id, status);
+      setCurrentDetail((current) => {
+        if (current.person.id !== personId) return current;
+        const move = (group: {
+          open: PersonBriefingCommitment[];
+          delivered: PersonBriefingCommitment[];
+        }) => ({
+          ...group,
+          open:
+            status === 'active'
+              ? [
+                  ...group.open.filter((entry) => entry.id !== item.id),
+                  { ...item, status },
+                ]
+              : group.open.filter((entry) => entry.id !== item.id),
+          delivered:
+            status === 'completed'
+              ? [
+                  { ...item, status },
+                  ...group.delivered.filter((entry) => entry.id !== item.id),
+                ]
+              : group.delivered.filter((entry) => entry.id !== item.id),
+        });
+        const theirs = [
+          ...current.commitments.open,
+          ...current.commitments.delivered,
+        ].some((entry) => entry.id === item.id);
+        return {
+          ...current,
+          commitments: theirs
+            ? { ...current.commitments, ...move(current.commitments) }
+            : current.commitments,
+          sharedCommitments:
+            !theirs && current.sharedCommitments
+              ? move(current.sharedCommitments)
+              : current.sharedCommitments,
+        };
+      });
+      setCompletionStates((states) => {
+        const next = { ...states };
+        delete next[item.id];
+        return next;
+      });
+    } catch {
+      setCompletionStates((states) => ({ ...states, [item.id]: 'error' }));
+    }
+  };
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(detail.person.name);
   const [nameState, setNameState] = useState<
@@ -849,6 +937,10 @@ export const PersonDossier = ({
     (currentDetail.knowledgeDoc?.status === 'up_to_date' ||
       currentDetail.knowledgeDoc?.status === 'synthesizing') &&
     Boolean(personRead.headline);
+  const profileClaims =
+    summaryVersion >= PERSON_CONTEXT_SYNTHESIS_VERSION
+      ? readPersonProfile(currentDetail.knowledgeDoc?.structured_json)
+      : [];
   const sourceNoteOverview = hasPersonSummary
     ? []
     : rankedActivity
@@ -1187,13 +1279,17 @@ export const PersonDossier = ({
       const refreshed = await refreshKnowledgeDoc(
         currentDetail.knowledgeDoc.id,
       );
+      if (!refreshed || refreshed.status === 'failed') {
+        setDreamingState('error');
+        return;
+      }
       if (
-        !refreshed ||
         refreshed.status !== 'up_to_date' ||
         refreshed.last_synthesized_at ===
           currentDetail.knowledgeDoc.last_synthesized_at
       ) {
-        setDreamingState('error');
+        setCurrentDetail((prev) => ({ ...prev, knowledgeDoc: refreshed }));
+        setDreamingState('backoff');
         return;
       }
       let parsed: Record<string, unknown> = {};
@@ -1212,6 +1308,7 @@ export const PersonDossier = ({
       setCurrentDetail((prev) => ({
         ...prev,
         person: updatedPerson,
+        knowledgeDoc: refreshed,
       }));
       await onIdentityChanged();
       setDreamingState('idle');
@@ -1257,6 +1354,22 @@ export const PersonDossier = ({
       try {
         const fresh = await getPersonBriefing(currentDetail.person.id);
         if (!fresh || cancelled) return;
+        if (fresh.knowledgeDoc?.status === 'failed') setDreamingState('error');
+        else {
+          let version: number | undefined;
+          try {
+            version = JSON.parse(
+              fresh.knowledgeDoc?.config || '{}',
+            ).synthesis_version;
+          } catch {
+            /* Keep polling malformed older documents. */
+          }
+          if (isCurrentPersonDossier(fresh.knowledgeDoc?.status, version)) {
+            setDreamingState((state) =>
+              state === 'running' || state === 'backoff' ? 'idle' : state,
+            );
+          }
+        }
         setCurrentDetail((current) =>
           current.person.id === fresh.person.id &&
           current.knowledgeDoc?.updated_at !== fresh.knowledgeDoc?.updated_at
@@ -1745,193 +1858,251 @@ export const PersonDossier = ({
         </section>
       ) : null}
 
-      <section
-        className="person-dossier__about"
-        aria-labelledby="person-summary"
-      >
-        <div className="person-dossier__major-heading mb-3">
-          <h2 id="person-summary">
-            {hasPersonSummary
-              ? 'What they work on'
-              : 'Recent work we can verify'}
-          </h2>
-        </div>
-        {isContextOutdated && (
-          <p className="mb-4 max-w-[68ch] text-sm text-pro-text-muted">
-            Context marked outdated.{' '}
-            <button
-              type="button"
-              disabled={dreamingState === 'running'}
-              className="font-semibold text-pro-accent hover:underline disabled:opacity-50"
-              onClick={() => void handleSynthesizeFreshRead()}
-            >
-              {dreamingState === 'running' ? 'Refreshing…' : 'Refresh summary'}
-            </button>
-          </p>
-        )}
-        {hasPersonSummary ? (
-          <div>
-            <p className="max-w-[64ch] font-serif text-lg leading-7 text-pro-text-main">
-              {personRead.headline}
-            </p>
-            <p className="mt-2 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-main/80">
-              {`Based on ${personReadSourceCount} cited conversations${formattedDate ? ` through ${formattedDate}` : ''}.`}
-              {!roleSourceMeetingId || role === 'Known from conversations'
-                ? ' A formal job title has not been established.'
-                : ''}
-            </p>
-            {personRead.workstreams.length > 0 && (
-              <div className="mt-6 space-y-4">
-                {personRead.workstreams.length > 1 && (
-                  <h3 className="text-sm font-semibold text-pro-text-main">
-                    Recurring work
-                  </h3>
-                )}
-                {personRead.workstreams.map((stream) => (
-                  <div
-                    key={stream.id}
-                    className="max-w-[68ch] border-b border-pro-border/50 pb-4 last:border-0 last:pb-0"
-                  >
-                    {personRead.workstreams.length > 1 && (
-                      <h4 className="text-sm font-semibold text-pro-text-main">
-                        {stream.title}
-                      </h4>
-                    )}
-                    <div className="mt-3 space-y-3">
-                      {stream.sources.slice(0, 2).map((source) => (
-                        <div key={source.meeting_id}>
-                          {source.captured_at && (
-                            <p className="mb-1 text-xs font-medium text-pro-text-muted">
-                              {`Discussed ${formatDate(source.captured_at)}`}
-                            </p>
-                          )}
-                          <p className="text-sm leading-6 text-pro-text-main/90">
-                            {source.quote}
-                          </p>
-                          <button
-                            type="button"
-                            className="mt-1 text-left text-xs leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                            onClick={() => onOpenMeeting(source.meeting_id)}
-                          >
-                            {source.meeting_title || 'Open source meeting'}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
+      {profileClaims.length > 0 ? (
+        <PersonProfileContent
+          claims={profileClaims}
+          meetings={currentDetail.meetings}
+          refreshing={
+            dreamingState === 'running' ||
+            currentDetail.knowledgeDoc?.status === 'synthesizing'
+          }
+          outdated={isContextOutdated}
+          queued={dreamingState === 'backoff'}
+          failed={
+            dreamingState === 'error' ||
+            currentDetail.knowledgeDoc?.status === 'failed'
+          }
+          onRefresh={() => void handleSynthesizeFreshRead()}
+          onOpenMeeting={onOpenMeeting}
+        />
+      ) : (
+        <>
+          <section
+            className="person-dossier__about"
+            aria-labelledby="person-summary"
+          >
+            <div className="person-dossier__major-heading mb-3">
+              <h2 id="person-summary">
+                {hasPersonSummary
+                  ? 'What they work on'
+                  : 'Recent work we can verify'}
+              </h2>
+              {!currentDetail.isSelf && currentDetail.knowledgeDoc && (
+                <button
+                  type="button"
+                  disabled={dreamingState === 'running'}
+                  className="text-sm font-medium text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-50"
+                  onClick={() => void handleSynthesizeFreshRead()}
+                >
+                  {dreamingState === 'running'
+                    ? 'Preparing profile…'
+                    : dreamingState === 'error' ||
+                        currentDetail.knowledgeDoc.status === 'failed'
+                      ? 'Retry profile'
+                      : 'Refresh profile'}
+                </button>
+              )}
+            </div>
+            {(dreamingState === 'error' ||
+              currentDetail.knowledgeDoc?.status === 'failed') && (
+              <p className="person-dossier__about-empty mb-4" role="status">
+                The profile could not be updated. Your existing meeting context
+                is still available.
+              </p>
             )}
-          </div>
-        ) : sourceNoteOverview.length > 0 ? (
-          <div>
-            <div className="max-w-[68ch] space-y-5">
-              {sourceNoteOverview.map((item) => (
-                <article key={`${item.meetingId}-${item.text}`}>
-                  {item.occurredAt && (
-                    <p className="mb-1 text-xs font-medium text-pro-text-muted">
-                      {`Discussed ${formatDate(item.occurredAt)}`}
-                    </p>
-                  )}
-                  <p className="text-[15px] leading-7 text-pro-text-main">
-                    {item.text}
-                  </p>
+            {dreamingState === 'backoff' && (
+              <p className="person-dossier__about-empty mb-4" role="status">
+                Profile refresh queued while Pluto finishes other work. It will
+                start when that work is complete.
+              </p>
+            )}
+            {isContextOutdated && (
+              <p className="mb-4 max-w-[68ch] text-sm text-pro-text-muted">
+                Context marked outdated.{' '}
+                <button
+                  type="button"
+                  disabled={dreamingState === 'running'}
+                  className="font-semibold text-pro-accent hover:underline disabled:opacity-50"
+                  onClick={() => void handleSynthesizeFreshRead()}
+                >
+                  {dreamingState === 'running'
+                    ? 'Refreshing…'
+                    : 'Refresh summary'}
+                </button>
+              </p>
+            )}
+            {hasPersonSummary ? (
+              <div>
+                <p className="max-w-[64ch] font-serif text-lg leading-7 text-pro-text-main">
+                  {personRead.headline}
+                </p>
+                <p className="mt-2 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-main/80">
+                  {`Based on ${personReadSourceCount} cited conversations${formattedDate ? ` through ${formattedDate}` : ''}.`}
+                  {!roleSourceMeetingId || role === 'Known from conversations'
+                    ? ' A formal job title has not been established.'
+                    : ''}
+                </p>
+                {personRead.workstreams.length > 0 && (
+                  <div className="mt-6 space-y-4">
+                    {personRead.workstreams.length > 1 && (
+                      <h3 className="text-sm font-semibold text-pro-text-main">
+                        Recurring work
+                      </h3>
+                    )}
+                    {personRead.workstreams.map((stream) => (
+                      <div
+                        key={stream.id}
+                        className="max-w-[68ch] border-b border-pro-border/50 pb-4 last:border-0 last:pb-0"
+                      >
+                        {personRead.workstreams.length > 1 && (
+                          <h4 className="text-sm font-semibold text-pro-text-main">
+                            {stream.title}
+                          </h4>
+                        )}
+                        <div className="mt-3 space-y-3">
+                          {stream.sources.slice(0, 2).map((source) => (
+                            <div key={source.meeting_id}>
+                              {source.captured_at && (
+                                <p className="mb-1 text-xs font-medium text-pro-text-muted">
+                                  {`Discussed ${formatDate(source.captured_at)}`}
+                                </p>
+                              )}
+                              <p className="text-sm leading-6 text-pro-text-main/90">
+                                {source.quote}
+                              </p>
+                              <button
+                                type="button"
+                                className="mt-1 text-left text-xs leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                                onClick={() => onOpenMeeting(source.meeting_id)}
+                              >
+                                {source.meeting_title || 'Open source meeting'}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : sourceNoteOverview.length > 0 ? (
+              <div>
+                <div className="max-w-[68ch] space-y-5">
+                  {sourceNoteOverview.map((item) => (
+                    <article key={`${item.meetingId}-${item.text}`}>
+                      {item.occurredAt && (
+                        <p className="mb-1 text-xs font-medium text-pro-text-muted">
+                          {`Discussed ${formatDate(item.occurredAt)}`}
+                        </p>
+                      )}
+                      <p className="text-[15px] leading-7 text-pro-text-main">
+                        {item.text}
+                      </p>
+                      <button
+                        type="button"
+                        className="mt-1 text-left text-xs leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                        onClick={() => onOpenMeeting(item.meetingId)}
+                      >
+                        {item.meetingTitle}
+                      </button>
+                    </article>
+                  ))}
+                </div>
+                <p className="mt-3 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-main/80">
+                  {dreamingState === 'error' ||
+                  currentDetail.knowledgeDoc?.status === 'failed'
+                    ? 'From person-specific meeting notes. The broader profile could not be updated.'
+                    : dreamingState === 'backoff'
+                      ? 'From person-specific meeting notes. The broader profile refresh is queued.'
+                      : isCurrentPersonDossier(
+                            currentDetail.knowledgeDoc?.status,
+                            summaryVersion,
+                          )
+                        ? 'From person-specific meeting notes. Pluto has not established a broader role summary from this synthesis.'
+                        : 'From person-specific meeting notes. A broader account of their role and contributions is being prepared.'}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <p className="max-w-[68ch] font-sans text-sm leading-6 text-pro-text-muted">
+                  {dreamingState === 'error'
+                    ? 'The person summary could not be updated. Recent developments remain available below.'
+                    : summaryVersion >= 6 &&
+                        currentDetail.knowledgeDoc?.status === 'up_to_date'
+                      ? 'Pluto has not established a source-backed summary of this person’s role and contributions.'
+                      : confirmedMeetings.length === 0 &&
+                          (currentDetail.recentActivity ?? []).length === 0
+                        ? 'There is not enough verified context to describe this person yet.'
+                        : meetingCount > 0
+                          ? 'A source-backed summary of this person’s role and contributions is being prepared. Recent developments are below.'
+                          : 'No conversations are linked to this person yet.'}
+                </p>
+                {dreamingState === 'error' && currentDetail.knowledgeDoc && (
                   <button
                     type="button"
-                    className="mt-1 text-left text-xs leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                    onClick={() => onOpenMeeting(item.meetingId)}
+                    className="mt-2 text-sm text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
+                    onClick={() => void handleSynthesizeFreshRead()}
                   >
-                    {item.meetingTitle}
+                    Retry summary
                   </button>
-                </article>
-              ))}
-            </div>
-            <p className="mt-3 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-main/80">
-              {isCurrentPersonDossier(
-                currentDetail.knowledgeDoc?.status,
-                summaryVersion,
-              )
-                ? 'From person-specific meeting notes. Pluto has not established a broader role summary from this synthesis.'
-                : 'From person-specific meeting notes. A broader account of their role and contributions is being prepared.'}
-            </p>
-          </div>
-        ) : (
-          <div>
-            <p className="max-w-[68ch] font-sans text-sm leading-6 text-pro-text-muted">
-              {dreamingState === 'error'
-                ? 'The person summary could not be updated. Recent developments remain available below.'
-                : summaryVersion >= 6 &&
-                    currentDetail.knowledgeDoc?.status === 'up_to_date'
-                  ? 'Pluto has not established a source-backed summary of this person’s role and contributions.'
-                  : confirmedMeetings.length === 0 &&
-                      (currentDetail.recentActivity ?? []).length === 0
-                    ? 'There is not enough verified context to describe this person yet.'
-                    : meetingCount > 0
-                      ? 'A source-backed summary of this person’s role and contributions is being prepared. Recent developments are below.'
-                      : 'No conversations are linked to this person yet.'}
-            </p>
-            {dreamingState === 'error' && currentDetail.knowledgeDoc && (
-              <button
-                type="button"
-                className="mt-2 text-sm text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
-                onClick={() => void handleSynthesizeFreshRead()}
-              >
-                Retry summary
-              </button>
+                )}
+              </div>
             )}
-          </div>
-        )}
-      </section>
+          </section>
 
-      {(remainingActivity.length > 0 || sourceNoteOverview.length === 0) && (
-        <section
-          className="person-dossier__about"
-          aria-labelledby="person-recent-work"
-        >
-          <div className="person-dossier__major-heading mb-3">
-            <h2 id="person-recent-work">Recent developments</h2>
-          </div>
-          {remainingActivity.length > 0 ? (
-            <>
-              <span className="mb-5 block max-w-[68ch] text-sm leading-6 text-pro-text-muted">
-                Specific updates from recent conversations. Open a meeting to
-                see the source.
-              </span>
-              <ol className="space-y-4">
-                {remainingActivity.map((item) => (
-                  <li
-                    key={`${item.meetingId}-${item.text}`}
-                    className="border-b border-pro-border/50 pb-4 last:border-0"
-                  >
-                    <p className="max-w-[68ch] text-sm leading-6 text-pro-text-main">
-                      {item.text}
-                    </p>
-                    <button
-                      type="button"
-                      className="mt-1 text-left text-xs leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                      onClick={() => onOpenMeeting(item.meetingId)}
-                    >
-                      {item.source === 'accepted_focus'
-                        ? 'Accepted focus update'
-                        : item.evidence === 'confirmed'
-                          ? 'Confirmed conversation'
-                          : 'Mentioned in notes'}
-                      {' · '}
-                      {item.meetingTitle}
-                      {item.occurredAt
-                        ? ` · ${formatDate(item.occurredAt)}`
-                        : ''}
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            </>
-          ) : sourceNoteOverview.length === 0 ? (
-            <p className="person-dossier__about-empty">
-              Recent notes do not yet describe this person's work specifically.
-            </p>
-          ) : null}
-        </section>
+          {(remainingActivity.length > 0 ||
+            sourceNoteOverview.length === 0) && (
+            <section
+              className="person-dossier__about"
+              aria-labelledby="person-recent-work"
+            >
+              <div className="person-dossier__major-heading mb-3">
+                <h2 id="person-recent-work">Recent developments</h2>
+              </div>
+              {remainingActivity.length > 0 ? (
+                <>
+                  <span className="mb-5 block max-w-[68ch] text-sm leading-6 text-pro-text-muted">
+                    Specific updates from recent conversations. Open a meeting
+                    to see the source.
+                  </span>
+                  <ol className="space-y-4">
+                    {remainingActivity.map((item) => (
+                      <li
+                        key={`${item.meetingId}-${item.text}`}
+                        className="border-b border-pro-border/50 pb-4 last:border-0"
+                      >
+                        <p className="max-w-[68ch] text-sm leading-6 text-pro-text-main">
+                          {item.text}
+                        </p>
+                        <button
+                          type="button"
+                          className="mt-1 text-left text-xs leading-5 text-pro-text-main underline decoration-pro-accent underline-offset-2 hover:decoration-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                          onClick={() => onOpenMeeting(item.meetingId)}
+                        >
+                          {item.source === 'accepted_focus'
+                            ? 'Accepted focus update'
+                            : item.evidence === 'confirmed'
+                              ? 'Confirmed conversation'
+                              : 'Mentioned in notes'}
+                          {' · '}
+                          {item.meetingTitle}
+                          {item.occurredAt
+                            ? ` · ${formatDate(item.occurredAt)}`
+                            : ''}
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              ) : sourceNoteOverview.length === 0 ? (
+                <p className="person-dossier__about-empty">
+                  Recent notes do not yet describe this person's work
+                  specifically.
+                </p>
+              ) : null}
+            </section>
+          )}
+        </>
       )}
 
       {(currentDetail.mergedPeople ?? []).length > 0 ? (
@@ -1953,11 +2124,19 @@ export const PersonDossier = ({
         </details>
       ) : null}
 
-      <section className="person-dossier__open-loops">
+      <section className="person-dossier__open-loops" id="person-commitments">
         <div className="person-dossier__major-heading">
           <h2>Commitments</h2>
-          <span>{currentDetail.commitments.open.length}</span>
+          <span>
+            {currentDetail.commitments.open.length +
+              (currentDetail.sharedCommitments?.open.length ?? 0)}
+          </span>
         </div>
+        {profileClaims.length > 0 && (
+          <h3 className="person-profile__commitment-heading">
+            Their commitments
+          </h3>
+        )}
         {currentDetail.commitments.open.length === 0 ? (
           <p className="person-dossier__section-empty">
             No verified commitments.
@@ -1965,17 +2144,39 @@ export const PersonDossier = ({
         ) : (
           <CommitmentList
             items={currentDetail.commitments.open}
+            states={completionStates}
+            onToggle={(item) => void toggleCommitment(item)}
             onOpenMeeting={onOpenMeeting}
           />
         )}
+        {!currentDetail.isSelf &&
+          (currentDetail.sharedCommitments?.open.length ?? 0) > 0 && (
+            <div className="person-profile__shared-commitments">
+              <h3 className="person-profile__commitment-heading">
+                Your commitments in shared conversations
+              </h3>
+              <p className="person-dossier__disclosure">
+                Confirmed commitments from conversations with this person. They
+                may concern other people or projects.
+              </p>
+              <CommitmentList
+                items={currentDetail.sharedCommitments!.open}
+                states={completionStates}
+                onToggle={(item) => void toggleCommitment(item)}
+                onOpenMeeting={onOpenMeeting}
+              />
+            </div>
+          )}
         {currentDetail.commitments.candidates.length > 0 ||
-        currentDetail.commitments.delivered.length > 0 ? (
+        currentDetail.commitments.delivered.length > 0 ||
+        (currentDetail.sharedCommitments?.delivered.length ?? 0) > 0 ? (
           <details className="person-dossier__commitment-more">
             <summary>
               More commitments
               <span>
                 {currentDetail.commitments.candidates.length +
-                  currentDetail.commitments.delivered.length}
+                  currentDetail.commitments.delivered.length +
+                  (currentDetail.sharedCommitments?.delivered.length ?? 0)}
               </span>
               <ChevronDown aria-hidden="true" size={14} />
             </summary>
@@ -2010,15 +2211,30 @@ export const PersonDossier = ({
                 </div>
                 <CommitmentList
                   items={currentDetail.commitments.delivered}
+                  states={completionStates}
+                  onToggle={(item) => void toggleCommitment(item)}
                   onOpenMeeting={onOpenMeeting}
                 />
               </section>
             ) : null}
+            {(currentDetail.sharedCommitments?.delivered.length ?? 0) > 0 && (
+              <section className="person-dossier__commitment-group">
+                <h3 className="person-profile__commitment-heading">
+                  Your recent deliveries in shared conversations
+                </h3>
+                <CommitmentList
+                  items={currentDetail.sharedCommitments!.delivered}
+                  states={completionStates}
+                  onToggle={(item) => void toggleCommitment(item)}
+                  onOpenMeeting={onOpenMeeting}
+                />
+              </section>
+            )}
           </details>
         ) : null}
       </section>
 
-      <section className="person-dossier__history">
+      <section className="person-dossier__history" id="person-meetings">
         <div className="person-dossier__major-heading">
           <h2>Meetings</h2>
           <span>{confirmedMeetings.length}</span>

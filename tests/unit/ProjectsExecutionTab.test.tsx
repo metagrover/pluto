@@ -1484,7 +1484,7 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     expect(promoteTopicToInitiativeMock).toHaveBeenCalledWith('topic-1');
   });
 
-  it('renders Reference badge instead of 0 calls for topics with 0 meetings', async () => {
+  it('keeps unsourced auto-compiled topics out of the radar', async () => {
     const initiative = qualified();
     const zeroCallTopic = {
       ...qualified(),
@@ -1502,8 +1502,7 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     await act(async () => root.render(<ProjectsExecutionTab />));
 
     const topicRow = container.querySelector('[data-project-id="topic-zero"]');
-    expect(topicRow?.textContent).toContain('Reference');
-    expect(topicRow?.textContent).not.toContain('0 calls');
+    expect(topicRow).toBeNull();
   });
 
   it('renders Dormant initiatives section with dormancy badge for projects untouched >30 days', async () => {

@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-29 - Recover live transcription from the durable capture journal
+
+- **Status:** Accepted
+- **Supersedes:** “2026-09-21 - Raise EOU renderer retained-audio budget to survive local Ollama inference.”
+- **Decision:** Feed live inference from checksum-verified saved capture chunks, with a small paced PCM queue. Restart stalled inference after 30 seconds without append progress (120 seconds for model startup), retry with bounded backoff, and replay from the last confirmed wording with a one-second overlap. Fence old generations and preserve confirmed rows. Show Catching up or Reconnecting during recovery.
+- **Rationale:** A temporary inference slowdown must not permanently stop live wording. Unread audio belongs on disk, independently of the transcription worker.
+- **Consequences:** Text waits for the existing capture chunk to become durable, adding roughly one chunk of latency. Restarting inference never stops AudioCap, clears capture buffers, or deletes source audio. Live finishing remains bounded at eight seconds; the existing saved-audio final transcription handles remaining audio. Replay and encrypted/plain journal integrity have regression coverage; real-device meeting acceptance remains necessary.
+
 ## 2026-09-25 - Limit the dashboard agenda to two weeks
 
 - **Status:** Accepted.
@@ -1380,3 +1388,34 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Supersedes:** The excerpt-only briefing presentation and fallback-publication behavior in “2026-09-27 - Regenerate sourced prep explicitly after saving meeting selection.” Manual selection, explicit generation, separate personal notes, source links, and the boundary between preparation and current-meeting evidence remain in force.
 - **Decision:** The prep recap leads with the last discussion and groups currently confirmed open commitments by explicitly assigned self, other, or unconfirmed ownership. The analysis provider may supply a short paraphrase only with an exact quote from a grounded saved discussion excerpt; unsupported references and new numeric claims are rejected, leaving the original excerpt. Source text remains available behind disclosure, and review-needed excerpts carry a visible label.
 - **Failure and freshness:** A failed or invalid regeneration leaves the last successful saved recap intact. Only a validated generated result replaces it. Refreshing a selected meeting's saved notes is an explicit control that invalidates the previous recap; opening prep does not silently refresh historical snapshots or start generation.
+
+## 2026-09-29 - Give meeting prep a fuller evidence-linked read
+
+- **Supersedes:** The two-sentence, bullet-first recap presentation in “2026-09-28 - Make saved meeting prep a source-linked recap.” Its source validation, current commitment ownership, failure preservation, manual refresh, and preparation evidence boundaries remain in force.
+- **Decision:** A generated prep leads with a short paragraph about the latest linked discussion. Possible next steps and things to watch appear as separate, optional suggestions when supported by exact saved excerpts. Confirmed open commitments remain a distinct current-state section. Each generated statement retains its supporting quote and route to the source meeting; unsupported output falls back to saved evidence rather than padded prose.
+- **Scope:** The brief uses manually selected local meeting history and calendar context. Opening prep continues to avoid automatic inference, recording, external research, or email access.
+
+
+## 2026-09-29 - Synthesize comprehensive People dossiers
+
+- **Supersedes:** The narrow relationship-insight presentation in “2026-08-31 - Make People an evidence-backed relationship briefing.” Participation tiers, stable identity, reversible corrections, and source preservation remain in force. The peer commitment treatment in “2026-09-16 - Automatically accept person commitments for non-self individuals” remains unchanged.
+- **Decision:** A person dossier presents a coherent overview followed by supported responsibilities and contributions, shared context, priorities and decisions, explicitly stated or qualified observed collaboration preferences, dated evolution, suggested preparation, and evidenced unresolved questions. Empty sections are omitted. A versioned optional profile extension reuses the existing knowledge document rather than adding a document type or migration.
+- **Evidence:** Every profile claim must retain exact attributable citations to supplied person-specific synthesized meeting notes. Unknown sources, mismatched quotes, malformed citations, and corrected claims are omitted. Source disclosure distinguishes confirmed conversations from mention-only context. Citation validation establishes provenance; semantic entailment still depends on model quality and requires real-world acceptance. No personality, relationship closeness, formal authority, or sensitive personal attributes are inferred. Historical observations and suggested next steps are distinguished from current commitments.
+- **Continuity:** A bounded consolidation pass connects recent and older cited context across chunks; if consolidation fails, cited chunk sections remain. The complete previous profile remains visible during refresh. Existing person dossiers refresh under synthesis version 15.
+- **Requested refreshes:** Opening an outdated dossier or requesting a refresh uses the normal source and publication pipeline. If foreground work pauses it, the request resumes after that pause without the background scheduler's system-idle requirement. The UI distinguishes queued work from failure and polls for the completed profile. Capture and active-work pauses remain in force.
+- **Commitments:** Their existing commitments remain visible. The user's confirmed commitments and recent deliveries appear separately only when their source conversation has confirmed participation by this person; this association does not assert that the commitment was owed to them. Retired, rejected, unconfirmed-self, mention-only, and unrelated items remain excluded.
+- **Presentation:** Pluto's current palette and type system remain authoritative. A section index, readable prose, source disclosure, commitments, and conversation history replace excerpt-led presentation when a validated comprehensive profile exists. Sparse and failed profiles preserve the existing evidence fallback.
+
+## 2026-09-30 - Enable automatic audio budgets independently
+
+- **Supersedes:** The default-off automatic-retention gate in the accepted [Local Encryption Root of Trust and Database Backend ADR](adr/2026-09-07-local-encryption-root-and-database.md). New encrypted capture and historical audio migration remain opt-in signed canaries.
+- **Decision:** Automatic audio cleanup uses the existing selected storage budget (10 GB by default, with unlimited disabling budget deletion), independent of encryption rollout. `PLUTO_AUDIO_RETENTION_ENFORCEMENT=0` disables automatic sweeps. Existing foreground-work pauses, finalization/validated-transcript eligibility, analysis and migration guards, oldest-first ordering, and exclusive deletion leases remain required. Audio cleanup preserves meeting keys because retained encrypted journals and transcript evidence still need them.
+- **Deferred key custody:** Keep the existing recovery-key and Keychain behavior. Do not automatically rewrap or remove recovery keys. Revisit a verified transition and signed-build upgrade continuity when Apple Developer ID distribution is available.
+
+## 2026-09-30 - Synthesize project profiles around durable project identity
+
+- **Status:** Accepted
+- **Supersedes:** The presentation ordering in “2026-09-13 - Restore the evidence-backed Project dossier” and candidate-set identity behavior in “2026-09-01 - Establish projects from cross-conversation themes.” Their structured-note evidence boundary, qualification, grounded analytics, and reversible data remain in force.
+- **Decision:** Projects open with a saved synthesized brief, supported changes, workstreams, unresolved discussion points, and confirmed commitments. Next discussion and History have dedicated views. Meeting rhythm, health, and participation provide supporting context; source disclosures retain exact evidence. Sparse profiles state what is missing instead of paraphrasing raw snippets or manufacturing progress, dates, or ownership.
+- **Grouping:** Synthesis reuses established project identities and files only evidence-supported aliases or narrower work. Ambiguous assignments abstain. Explicit user classifications, completed projects, dismissals, and keep-separate corrections are protected. Child work and aliases contribute future evidence to the parent without deleting their source records.
+- **Lifecycle:** Automatic synthesis runs after source/catalog changes and refreshes open project views. Readers support existing synthesis versions. Single-source extracted entries stay suggestions until confirmed or supported across discussions.

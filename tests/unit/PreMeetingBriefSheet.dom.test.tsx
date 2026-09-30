@@ -422,7 +422,7 @@ it('keeps briefing compact without duplicate overview or empty sections and uses
   const headings = Array.from(host.querySelectorAll('h3,h4')).map(
     (node) => node.textContent,
   );
-  expect(headings).toContain('Meeting recap');
+  expect(headings).toContain('Meeting prep');
   expect(headings).toContain('Last discussion');
   expect(headings).not.toContain('Overview');
   expect(headings).not.toContain('Open follow-ups');
@@ -438,11 +438,15 @@ it('keeps briefing compact without duplicate overview or empty sections and uses
   expect(Array.from(briefing.querySelectorAll('details'))[0].open).toBe(false);
 });
 
-it('shows a concise generated recap with the original excerpt behind disclosure', async () => {
+it('shows a connected recap paragraph, next steps, watchouts, and supporting excerpts', async () => {
   const source =
     'Local speaker said the review was delayed until the new draft arrived.';
   const summary =
     'The review is waiting for the new draft before it can proceed.';
+  const secondSource =
+    'The team agreed to check the revised timeline after the draft arrived.';
+  const secondSummary =
+    'The team planned to revisit the timeline after receiving that draft.';
   prep.meetings = [
     {
       id: 'past',
@@ -466,6 +470,50 @@ it('shows a concise generated recap with the original excerpt behind disclosure'
         sourceLabel: 'Launch review',
         sourceDate: event.start,
       },
+      {
+        id: 'history-2',
+        text: secondSource,
+        summary: secondSummary,
+        sourceQuote: secondSource,
+        trustStatus: 'grounded',
+        sourceMeetingId: 'past',
+        sourceLabel: 'Launch review',
+        sourceDate: event.start,
+      },
+    ],
+    possibleNextSteps: [
+      {
+        id: 'next',
+        text: secondSource,
+        summary: 'Consider confirming whether the revised draft is available.',
+        sourceQuote: secondSource,
+        trustStatus: 'inferred',
+        sourceMeetingId: 'past',
+        sourceLabel: 'Launch review',
+        sourceDate: event.start,
+      },
+      {
+        id: 'calendar-next',
+        text: 'Review the revised timeline.',
+        summary: 'Consider reviewing the revised timeline during this meeting.',
+        sourceQuote: 'Review the revised timeline.',
+        trustStatus: 'inferred',
+        sourceMeetingId: null,
+        sourceLabel: 'Calendar agenda',
+        sourceDate: event.start,
+      },
+    ],
+    watchouts: [
+      {
+        id: 'watch',
+        text: source,
+        summary: 'The draft delay could affect the review timeline.',
+        sourceQuote: source,
+        trustStatus: 'inferred',
+        sourceMeetingId: 'past',
+        sourceLabel: 'Launch review',
+        sourceDate: event.start,
+      },
     ],
     lastTime: [],
     stillOpen: [],
@@ -474,11 +522,16 @@ it('shows a concise generated recap with the original excerpt behind disclosure'
   });
   await render();
   const briefing = host.querySelector('[aria-label="Meeting briefing"]')!;
-  expect(briefing.textContent).toContain(summary);
+  const paragraph = briefing.querySelector('p.max-w-prose')!;
+  expect(paragraph.textContent).toContain(summary);
+  expect(paragraph.textContent).toContain(secondSummary);
+  expect(briefing.textContent).toContain('Possible next steps');
+  expect(briefing.textContent).toContain('Calendar agenda excerpt');
+  expect(briefing.textContent).toContain('Things to watch');
   expect(briefing.querySelector('summary')?.textContent).toContain(
-    'Read source excerpt',
+    'Read supporting excerpts',
   );
-  expect(briefing.querySelector('details p')?.textContent).toBe(source);
+  expect(briefing.querySelector('details li')?.textContent).toBe(source);
 });
 
 it('keeps existing excerpts visible while regenerating and replaces them with a completed recap', async () => {
@@ -513,7 +566,7 @@ it('keeps existing excerpts visible while regenerating and replaces them with a 
   expect(host.textContent).toContain(
     'The previous discussion remains readable.',
   );
-  expect(host.textContent).toContain('Refreshing recap…');
+  expect(host.textContent).toContain('Generating recap…');
   expect(
     host
       .querySelector('[aria-label="Meeting briefing"]')
@@ -668,19 +721,22 @@ it('labels uncertain excerpts and separates commitments by confirmed ownership',
   expect(host.textContent).toContain('Ownership unconfirmed');
 });
 
-it('shows calendar agenda in a collapsible tile with a right-side chevron', async () => {
+it('shows calendar agenda directly', async () => {
   await render({
     event: { ...event, agenda: 'Review launch timing and the budget.' },
   });
   const agenda = host.querySelector('[aria-label="Calendar agenda"]')!;
-  expect(agenda.tagName).toBe('DETAILS');
-  expect(agenda.hasAttribute('open')).toBe(false);
-  expect(agenda.className).toContain('rounded-xl');
-  const summary = agenda.querySelector('summary')!;
-  expect(summary.textContent).toContain('Calendar agenda');
-  expect(summary.className).toContain('justify-between');
-  expect(summary.querySelector('svg')).not.toBeNull();
+  expect(agenda.tagName).toBe('SECTION');
+  expect(agenda.className).not.toContain('border');
+  expect(agenda.querySelector('h3')?.textContent).toBe('Calendar agenda');
   expect(agenda.textContent).toContain('Review launch timing and the budget.');
+});
+
+it('explains when a calendar event has no agenda', async () => {
+  await render();
+  expect(
+    host.querySelector('[aria-label="Calendar agenda"]')?.textContent,
+  ).toContain('No calendar agenda was available to Pluto for this event.');
 });
 
 it('includes a newly linked meeting even when the overview selects only the earlier meeting', async () => {

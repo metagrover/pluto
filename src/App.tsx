@@ -1261,11 +1261,6 @@ function App() {
     setPreMeetingBriefVisible(true);
   }, []);
 
-  const handlePrepareAnother = useCallback(() => {
-    setPreMeetingBriefEvent(null);
-    setPreMeetingBriefVisible(true);
-  }, []);
-
   // Synchronize calendar meeting prompt with the native macOS notification alert window (outside the app)
   useEffect(() => {
     if (!window.ipcRenderer) return;
@@ -2167,11 +2162,6 @@ function App() {
           setAskPlutoConversation={setMeetingAskPlutoConversation}
           askPlutoMinimized={meetingAskPlutoMinimized}
           setAskPlutoMinimized={setMeetingAskPlutoMinimized}
-          onOpenSettings={(tab = 'meetings') => {
-            setSettingsInitialTab(tab);
-            setActiveTab('settings');
-            setZenVisible(false);
-          }}
         />
       ) : (
         <main
@@ -2318,7 +2308,6 @@ function App() {
                   onCalendarRefresh={handleCalendarRefresh}
                   onCalendarOpenSettings={handleCalendarOpenSettings}
                   onPrepareMeeting={handlePrepareMeeting}
-                  onPrepareAnother={handlePrepareAnother}
                 />
               </>
             ) : activeTab === 'people' ? (

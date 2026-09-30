@@ -86,7 +86,11 @@ export class ParakeetRuntimeHost {
     this.transport.onFailure((code) => this.invalidateActiveLease(code));
   }
 
-  acquire(kind: ParakeetRuntimeWorkload): Promise<ParakeetRuntimeLease> {
+  acquire(
+    kind: ParakeetRuntimeWorkload,
+    signal?: AbortSignal,
+  ): Promise<ParakeetRuntimeLease> {
+    if (signal?.aborted) return Promise.reject(new Error('parakeet_cancelled'));
     if (this.closed)
       return Promise.reject(new Error('parakeet_runtime_closed'));
     if (kind === 'final' && this.livePriority) {
@@ -94,7 +98,26 @@ export class ParakeetRuntimeHost {
     }
     this.clearIdleTimer();
     return new Promise((resolve, reject) => {
-      const record = this.makeRecord(kind, resolve, reject);
+      const cleanup = () => signal?.removeEventListener('abort', abort);
+      const record = this.makeRecord(
+        kind,
+        (lease) => {
+          cleanup();
+          resolve(lease);
+        },
+        (error) => {
+          cleanup();
+          reject(error);
+        },
+      );
+      const abort = () => {
+        const index = this.queue.indexOf(record);
+        if (index < 0) return;
+        this.queue.splice(index, 1);
+        record.released = true;
+        record.reject(new Error('parakeet_cancelled'));
+      };
+      signal?.addEventListener('abort', abort, { once: true });
       this.queue.push(record);
       this.drain();
     });
@@ -113,7 +136,10 @@ export class ParakeetRuntimeHost {
     return record.lease;
   }
 
-  async startRecordingLive(): Promise<ParakeetRuntimeLease> {
+  async startRecordingLive(
+    signal?: AbortSignal,
+  ): Promise<ParakeetRuntimeLease> {
+    signal?.throwIfAborted();
     this.livePriority = true;
     const queuedFinals = this.queue.filter((record) => record.kind === 'final');
     for (const record of queuedFinals) {
@@ -134,7 +160,7 @@ export class ParakeetRuntimeHost {
       if (this.active?.kind === 'final') {
         await this.active.lease.cancelAndPersistForRetry();
       }
-      return await this.acquire('live');
+      return await this.acquire('live', signal);
     } finally {
       this.livePriority = false;
     }

@@ -1,4 +1,4 @@
-import { ChevronDown, RefreshCw, Sparkles } from 'lucide-react';
+import { ChevronDown, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { MeetingPrep } from '../../../electron/meetingPrep';
 import type { PreMeetingBrief } from '../../../electron/preMeetingBrief';
@@ -108,6 +108,8 @@ export function MeetingPrepBrief({
   const overview = brief?.overview?.length
     ? brief.overview
     : brief?.lastTime || [];
+  const isNarrative =
+    brief?.synthesisStatus === 'ready' && overview.some((item) => item.summary);
   const represented = new Set(overview.map((item) => item.sourceMeetingId));
   const additional = (prep.meetings || []).flatMap((meeting) => {
     if (represented.has(meeting.id)) return [];
@@ -131,8 +133,12 @@ export function MeetingPrepBrief({
             item.text.trim().toLowerCase(),
         ),
   );
-  const visibleBullets = bullets.slice(0, 6);
+  const visibleBullets = isNarrative
+    ? overview.slice(0, 4)
+    : bullets.slice(0, 6);
   const openItems = brief?.stillOpen || [];
+  const possibleNextSteps = brief?.possibleNextSteps || [];
+  const watchouts = brief?.watchouts || [];
   const myCommitments = openItems.filter((item) => item.ownerScope === 'self');
   const otherCommitments = openItems.filter(
     (item) => item.ownerScope === 'other',
@@ -142,7 +148,7 @@ export function MeetingPrepBrief({
   );
   const sources = Array.from(
     new Map(
-      [...visibleBullets, ...openItems]
+      [...visibleBullets, ...openItems, ...possibleNextSteps, ...watchouts]
         .filter((item) => item.sourceMeetingId)
         .map((item) => [item.sourceMeetingId!, item]),
     ).values(),
@@ -158,19 +164,43 @@ export function MeetingPrepBrief({
     <section
       aria-label="Meeting briefing"
       aria-busy={generating}
-      className="rounded-2xl border border-pro-border bg-pro-surface/15 p-5 sm:p-6"
+      className="pb-2"
     >
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-pro-accent">
-          <Sparkles size={14} aria-hidden="true" className="shrink-0" />
-          Meeting recap
-        </h3>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0 max-w-[60ch]">
+          <h3 className="text-xl font-semibold leading-7 tracking-[-0.012em] text-pro-text-main">
+            Meeting prep
+          </h3>
+          {error && (
+            <p
+              role="alert"
+              className="mt-1.5 text-xs leading-5 text-pro-text-muted"
+            >
+              {brief?.synthesisStatus === 'ready'
+                ? 'Could not refresh the recap. The last successful version is still shown.'
+                : 'Could not generate a recap. Saved meeting excerpts are shown below.'}
+            </p>
+          )}
+          {generating && brief && (
+            <p
+              role="status"
+              className="mt-1.5 text-xs leading-5 text-pro-text-muted"
+            >
+              Generating recap…
+            </p>
+          )}
+          {brief?.synthesisStatus === 'fallback' && !generating && !error && (
+            <p className="mt-1.5 text-xs leading-5 text-pro-text-muted">
+              Showing saved excerpts. Regenerate to choose highlights.
+            </p>
+          )}
+        </div>
         {!readOnly && (
           <button
             type="button"
             disabled={disabled || generating}
             onClick={onRegenerate}
-            className="inline-flex min-h-8 items-center gap-2 rounded-md px-2 text-xs text-pro-text-muted hover:bg-pro-surface hover:text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-50"
+            className="inline-flex min-h-9 items-center gap-2 rounded-md px-2 text-xs font-medium text-pro-text-muted hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-50"
           >
             <RefreshCw
               size={13}
@@ -181,91 +211,123 @@ export function MeetingPrepBrief({
           </button>
         )}
       </div>
-      {error && (
-        <p role="alert" className="mb-3 text-xs text-pro-text-muted">
-          {brief?.synthesisStatus === 'ready'
-            ? 'Could not refresh the recap. The last successful version is still shown.'
-            : 'Could not generate a recap. Saved meeting excerpts are shown below.'}
-        </p>
-      )}
-      {generating && brief && (
-        <p role="status" className="mb-3 text-xs text-pro-text-muted">
-          Refreshing recap…
-        </p>
-      )}
       {generating && !brief && <MeetingPrepBriefSkeleton />}
-      {brief?.synthesisStatus === 'fallback' && !generating && !error && (
-        <p className="mb-3 text-xs text-pro-text-muted">
-          Showing saved excerpts. Regenerate to choose highlights.
-        </p>
-      )}
       {!!visibleBullets.length && (
         <div>
-          <h4 className="mb-3 text-xs font-medium text-pro-text-muted">
+          <h4 className="mb-3 text-[15px] font-semibold text-pro-text-main">
             Last discussion
           </h4>
-          <ul className="space-y-4">
-            {visibleBullets.map((item) => {
-              const number =
-                sources.findIndex(
-                  (source) => source.sourceMeetingId === item.sourceMeetingId,
-                ) + 1;
-              const short = item.summary || excerpt(item.text);
-              return (
-                <li
-                  key={item.id}
-                  className="flex items-start gap-3 text-sm leading-6 text-pro-text-main"
-                >
-                  <span
+          {isNarrative ? (
+            <>
+              <p className="max-w-prose text-[15px] leading-7 text-pro-text-main">
+                {visibleBullets.map((item, index) => {
+                  const number =
+                    sources.findIndex(
+                      (source) =>
+                        source.sourceMeetingId === item.sourceMeetingId,
+                    ) + 1;
+                  return (
+                    <span key={item.id}>
+                      {index > 0 ? ' ' : ''}
+                      {item.summary || item.text}
+                      {item.sourceMeetingId && (
+                        <button
+                          type="button"
+                          aria-label={`Open source: ${item.sourceLabel}`}
+                          title={`${item.sourceLabel}${item.sourceDate ? ` · ${formatPrepDate(item.sourceDate)}` : ''}`}
+                          onClick={() => onOpenMeeting?.(item.sourceMeetingId!)}
+                          className="ml-1 rounded-sm align-super text-[10px] leading-none text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                        >
+                          [{number}]
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </p>
+              <details className="group/context mt-3 text-xs text-pro-text-muted">
+                <summary className="flex min-h-6 w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
+                  Read supporting excerpts
+                  <ChevronDown
+                    size={16}
                     aria-hidden="true"
-                    className="flex h-6 w-1.5 shrink-0 items-center"
+                    className="shrink-0 transition-transform group-open/context:rotate-180"
+                  />
+                </summary>
+                <ul className="mt-2 space-y-2 pl-4">
+                  {visibleBullets.map((item) => (
+                    <li key={item.id} className="list-disc leading-5">
+                      {item.sourceQuote || item.text}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </>
+          ) : (
+            <ul className="max-w-[68ch] space-y-3">
+              {visibleBullets.map((item) => {
+                const number =
+                  sources.findIndex(
+                    (source) => source.sourceMeetingId === item.sourceMeetingId,
+                  ) + 1;
+                const short = item.summary || excerpt(item.text);
+                return (
+                  <li
+                    key={item.id}
+                    className="flex items-start gap-2.5 text-sm leading-6 text-pro-text-main"
                   >
-                    <span className="h-1.5 w-1.5 rounded-full bg-pro-accent" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <span>{short}</span>
-                    {item.trustStatus !== 'grounded' && !!item.trustStatus && (
-                      <span className="ml-2 text-xs text-pro-text-muted">
-                        {item.trustStatus === 'stale'
-                          ? 'Source may be outdated'
-                          : item.trustStatus === 'inferred'
-                            ? 'Suggested interpretation'
-                            : 'Needs review'}
-                      </span>
-                    )}
-                    {item.sourceMeetingId && (
-                      <button
-                        type="button"
-                        aria-label={`Open source: ${item.sourceLabel}`}
-                        title={`${item.sourceLabel}${item.sourceDate ? ` · ${formatPrepDate(item.sourceDate)}` : ''}`}
-                        onClick={() => onOpenMeeting?.(item.sourceMeetingId!)}
-                        className="relative -top-0.5 ml-1.5 text-[10px] leading-none text-pro-accent"
-                      >
-                        [{number}]
-                      </button>
-                    )}
-                    {(short !== item.text || item.sourceQuote) && (
-                      <details className="group/context mt-1 text-xs text-pro-text-muted">
-                        <summary className="flex min-h-6 w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
-                          {item.summary
-                            ? 'Read source excerpt'
-                            : 'Read full context'}
-                          <ChevronDown
-                            size={16}
-                            aria-hidden="true"
-                            className="shrink-0 motion-reduce:transition-none transition-transform group-open/context:rotate-180"
-                          />
-                        </summary>
-                        <p className="mt-2 text-xs leading-5 text-pro-text-muted">
-                          {item.text}
-                        </p>
-                      </details>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                    <span
+                      aria-hidden="true"
+                      className="flex h-6 w-1.5 shrink-0 items-center"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-pro-text-muted/60" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span>{short}</span>
+                      {item.trustStatus !== 'grounded' &&
+                        !!item.trustStatus && (
+                          <span className="ml-2 text-xs text-pro-text-muted">
+                            {item.trustStatus === 'stale'
+                              ? 'Source may be outdated'
+                              : item.trustStatus === 'inferred'
+                                ? 'Suggested interpretation'
+                                : 'Needs review'}
+                          </span>
+                        )}
+                      {item.sourceMeetingId && (
+                        <button
+                          type="button"
+                          aria-label={`Open source: ${item.sourceLabel}`}
+                          title={`${item.sourceLabel}${item.sourceDate ? ` · ${formatPrepDate(item.sourceDate)}` : ''}`}
+                          onClick={() => onOpenMeeting?.(item.sourceMeetingId!)}
+                          className="relative -top-0.5 ml-1.5 text-[10px] leading-none text-pro-accent"
+                        >
+                          [{number}]
+                        </button>
+                      )}
+                      {(short !== item.text || item.sourceQuote) && (
+                        <details className="group/context mt-1 text-xs text-pro-text-muted">
+                          <summary className="flex min-h-6 w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
+                            {item.summary
+                              ? 'Read source excerpt'
+                              : 'Read full context'}
+                            <ChevronDown
+                              size={16}
+                              aria-hidden="true"
+                              className="shrink-0 motion-reduce:transition-none transition-transform group-open/context:rotate-180"
+                            />
+                          </summary>
+                          <p className="mt-2 text-xs leading-5 text-pro-text-muted">
+                            {item.text}
+                          </p>
+                        </details>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       )}
       {!generating && brief && !visibleBullets.length && !openItems.length && (
@@ -274,7 +336,7 @@ export function MeetingPrepBrief({
         </p>
       )}
       {!!openItems.length && (
-        <div className="mt-5 border-t border-pro-border pt-4">
+        <div className="mt-9">
           {(
             [
               ['Your commitments', myCommitments],
@@ -284,11 +346,11 @@ export function MeetingPrepBrief({
           ).map(
             ([heading, items]) =>
               !!items.length && (
-                <div key={heading} className="mb-4 last:mb-0">
-                  <h4 className="mb-3 text-xs font-medium text-pro-text-muted">
+                <div key={heading} className="mb-6 last:mb-0">
+                  <h4 className="mb-3 text-[15px] font-semibold text-pro-text-main">
                     {heading}
                   </h4>
-                  <ul className="space-y-3">
+                  <ul className="max-w-[68ch] space-y-3">
                     {items.map((item) => {
                       const number =
                         sources.findIndex(
@@ -304,7 +366,7 @@ export function MeetingPrepBrief({
                             aria-hidden="true"
                             className="flex h-6 w-1.5 shrink-0 items-center"
                           >
-                            <span className="h-1.5 w-1.5 rounded-full bg-pro-accent" />
+                            <span className="h-1.5 w-1.5 rounded-full bg-pro-text-muted/60" />
                           </span>
                           <span>
                             {item.text}
@@ -331,8 +393,61 @@ export function MeetingPrepBrief({
           )}
         </div>
       )}
+      {(
+        [
+          ['Possible next steps', possibleNextSteps],
+          ['Things to watch', watchouts],
+        ] as const
+      ).map(
+        ([heading, items]) =>
+          !!items.length && (
+            <section key={heading} className="mt-9">
+              <h4 className="mb-3 text-[15px] font-semibold text-pro-text-main">
+                {heading}
+              </h4>
+              <ul className="max-w-[68ch] space-y-3">
+                {items.map((item) => {
+                  const number =
+                    sources.findIndex(
+                      (source) =>
+                        source.sourceMeetingId === item.sourceMeetingId,
+                    ) + 1;
+                  return (
+                    <li
+                      key={item.id}
+                      className="text-sm leading-6 text-pro-text-main"
+                    >
+                      {item.summary || item.text}
+                      {item.sourceMeetingId && (
+                        <button
+                          type="button"
+                          aria-label={`Open source: ${item.sourceLabel}`}
+                          title={`${item.sourceLabel}${item.sourceDate ? ` · ${formatPrepDate(item.sourceDate)}` : ''}`}
+                          onClick={() => onOpenMeeting?.(item.sourceMeetingId!)}
+                          className="ml-1 rounded-sm align-super text-[10px] leading-none text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                        >
+                          [{number}]
+                        </button>
+                      )}
+                      {item.sourceQuote && (
+                        <details className="mt-1 text-xs text-pro-text-muted">
+                          <summary className="w-fit cursor-pointer rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent">
+                            {item.sourceMeetingId
+                              ? 'Supporting excerpt'
+                              : 'Calendar agenda excerpt'}
+                          </summary>
+                          <p className="mt-1 leading-5">{item.sourceQuote}</p>
+                        </details>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ),
+      )}
       {!!sources.length && (
-        <details className="group/sources mt-5 text-xs text-pro-text-muted">
+        <details className="group/sources mt-7 text-xs text-pro-text-muted">
           <summary className="flex min-h-6 w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
             Sources · {sources.length}
             <ChevronDown

@@ -275,7 +275,7 @@ export const createAudioRetentionManager = (options: {
             'UPDATE meetings SET audio_path = NULL, system_audio_path = NULL, mixed_audio_path = NULL WHERE id = ?',
           )
           .run(meetingId);
-        options.audioKeyStore?.deleteMeetingAudioKey(meetingId);
+        // Retained encrypted journals and transcript sidecars still need this key.
         writeStatus(meetingId, 'deleted', 0, null);
       })();
       return { status: 'deleted' as const, deletedBytes: artifacts.bytes };

@@ -195,7 +195,71 @@
     @apply flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-pro-text-main hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:opacity-40;
   }
   .person-dossier__identity {
-    @apply flex items-start gap-4 pb-3;
+    @apply flex items-start gap-4 border-b border-pro-border/60 pb-7;
+  }
+  .person-profile {
+    @apply grid gap-6 py-8 lg:grid-cols-[10rem_minmax(0,1fr)] lg:gap-10;
+  }
+  .person-profile__contents {
+    @apply flex gap-4 overflow-x-auto pb-2 lg:flex-col lg:gap-1 lg:overflow-visible lg:pb-0;
+  }
+  .person-profile__contents a {
+    @apply shrink-0 whitespace-nowrap rounded-sm py-1 text-xs leading-5 text-pro-text-main/80 underline-offset-4 hover:text-pro-text-main hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent lg:whitespace-normal;
+  }
+  .person-profile__body {
+    @apply min-w-0;
+  }
+  .person-profile__coverage,
+  .person-profile__status {
+    @apply mb-5 text-xs leading-5 text-pro-text-main/80;
+  }
+  .person-profile__status {
+    @apply text-pro-text-main;
+  }
+  .person-profile__status button {
+    @apply ml-2 rounded-sm font-semibold underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-profile__section {
+    @apply scroll-mt-6 border-b border-pro-border/60 pb-8 pt-8 first-of-type:pt-0 last:border-b-0 last:pb-0;
+  }
+  .person-profile__section h2 {
+    @apply mb-5 text-lg font-semibold tracking-[-0.01em] text-pro-text-main;
+  }
+  .person-profile__claim + .person-profile__claim {
+    @apply mt-6;
+  }
+  .person-profile__claim h3 {
+    @apply mb-1.5 text-sm font-semibold text-pro-text-main;
+  }
+  .person-profile__claim > p {
+    @apply max-w-[70ch] whitespace-pre-line text-[15px] leading-7 text-pro-text-main;
+  }
+  .person-profile__section--overview .person-profile__claim > p {
+    @apply font-serif text-xl leading-8;
+  }
+  .person-profile__sources {
+    @apply mt-2;
+  }
+  .person-profile__sources summary {
+    @apply w-fit cursor-pointer rounded-sm py-1 text-xs font-medium leading-5 text-pro-text-main/80 underline decoration-pro-border underline-offset-4 hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-profile__sources > div {
+    @apply mt-3 border-t border-pro-border/40 pt-3;
+  }
+  .person-profile__sources button {
+    @apply rounded-sm py-1 text-left text-xs font-semibold text-pro-text-main underline decoration-pro-accent underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-profile__sources span {
+    @apply block text-xs leading-5 text-pro-text-main/80;
+  }
+  .person-profile__sources blockquote {
+    @apply mt-2 max-w-[70ch] text-sm leading-6 text-pro-text-main;
+  }
+  .person-profile__commitment-heading {
+    @apply mt-5 text-sm font-semibold text-pro-text-main;
+  }
+  .person-profile__shared-commitments {
+    @apply mt-7 border-t border-pro-border/40 pt-1;
   }
   .person-dossier__identity .person-avatar {
     @apply h-12 w-12 rounded-xl border-pro-border bg-pro-surface text-base text-pro-text-main;
@@ -334,7 +398,7 @@
   .person-dossier__commitments li {
     @apply border-b border-pro-border/40 last:border-b-0;
   }
-  .person-dossier__commitments li > button {
+  .person-dossier__commitments .person-dossier__commitment-source {
     @apply grid min-h-16 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-2 text-left transition-colors hover:bg-pro-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .person-dossier__commitment-icon {
@@ -2106,10 +2170,7 @@
     @apply h-1.5 w-1.5 shrink-0 rounded-full bg-pro-text-muted/60;
   }
   .live-conversation-warning__body {
-    @apply mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between text-xs text-pro-text-muted;
-  }
-  .live-conversation-warning__action {
-    @apply shrink-0 font-medium text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent self-start sm:self-auto;
+    @apply mt-1.5 text-xs text-pro-text-muted;
   }
   .live-transcript-follow-control {
     @apply flex shrink-0 justify-center border-t border-pro-border/50 bg-pro-surface px-4 py-3;

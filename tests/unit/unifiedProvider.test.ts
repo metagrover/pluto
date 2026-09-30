@@ -543,6 +543,29 @@ describe('UnifiedLLMProvider', () => {
     });
   });
 
+  it('gives rich project profiles enough output room while keeping ordinary scope reviews bounded', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    installFetchMock((_url, init) => {
+      bodies.push(parseRequestBody(init));
+      return jsonResponse({ response: '{}', done: true, done_reason: 'stop' });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    });
+    await provider.synthesizeKnowledgeDocument('Profile source evidence', {
+      purpose: 'projectScope',
+      budget: { contextTokens: 32768, outputTokens: 8192 },
+    });
+    expect(bodies[0]).toMatchObject({
+      options: { num_ctx: 32768, num_predict: 8192 },
+      think: false,
+    });
+    await provider.synthesizeKnowledgeDocument('Ordinary scope review', {
+      purpose: 'projectScope',
+    });
+    expect(bodies[1]).toMatchObject({ options: { num_predict: 2500 } });
+  });
+
   it.each(['ollama', 'openai'] as const)(
     'constrains %s project scope responses to the supplied schema',
     async (providerType) => {
@@ -706,6 +729,28 @@ describe('UnifiedLLMProvider', () => {
       num_predict: 512,
       top_k: 40,
       top_p: 1,
+    });
+  });
+
+  it('uses a larger JSON budget for structured deep prep requests', async () => {
+    let requestBody: Record<string, unknown> = {};
+    installFetchMock((_url, init) => {
+      requestBody = parseRequestBody(init);
+      return jsonResponse({ response: '{"overview":[]}' });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+
+    await provider.answerAskPluto('Prepare this meeting', {
+      mode: 'deep',
+      jsonMode: true,
+    });
+
+    expect(requestBody.format).toBe('json');
+    expect(requestBody.options).toMatchObject({
+      num_ctx: 4096,
+      num_predict: 1024,
     });
   });
 

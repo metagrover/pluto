@@ -74,7 +74,7 @@ describe('recording workspace components', () => {
     const root = createRoot(container);
     await act(async () => root.render(<MeetingPrepReadOnly prep={prep} />));
     const html = container.innerHTML;
-    expect(html).toContain('Meeting recap');
+    expect(html).toContain('Meeting prep');
     expect(html).toContain('Trial dates remain open.');
     expect(html).not.toContain('Your preparation notes');
     expect(html).not.toContain('Ask about the trial dates.');

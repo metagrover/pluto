@@ -955,11 +955,13 @@ export function withMeetingPrepContext(
   if (prep.briefing) {
     const text = [
       ...(prep.briefing.overview || []),
+      ...(prep.briefing.possibleNextSteps || []),
+      ...(prep.briefing.watchouts || []),
       ...(prep.briefing.talkingPoints || []),
     ]
       .map(
         (item) =>
-          `${item.text} [${item.sourceLabel}; ${item.sourceDate || 'date unknown'}]`,
+          `${item.summary || item.text} [${item.sourceLabel}; ${item.sourceDate || 'date unknown'}]`,
       )
       .join('\n')
       .slice(0, 4000);

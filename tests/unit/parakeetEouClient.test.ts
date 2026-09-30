@@ -76,6 +76,30 @@ const append = (source: 'mic' | 'system', sequence: number) => ({
 });
 
 describe('ParakeetEouClient', () => {
+  it('cancels orphaned request timers and never reuses IDs after replacement', async () => {
+    const process = new FakeTransport();
+    const first = new ParakeetEouClient({
+      process,
+      maxOutstandingPerSource: 4,
+    });
+    await first.open(identity('mic'));
+    const appending = first.append(append('mic', 1));
+    const rejected = expect(appending).rejects.toThrow('parakeet_cancelled');
+    const pendingId = String(process.pendingAppends[0].payload.id);
+    await first.close();
+    await rejected;
+    expect(process.cancelPending).toHaveBeenCalledWith(pendingId);
+    const second = new ParakeetEouClient({
+      process,
+      maxOutstandingPerSource: 4,
+    });
+    await second.open({ ...identity('mic'), generation: 2 });
+    const ids = process.requests.map((request) => request.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    process.resolveAppend(0);
+    await second.close();
+  });
+
   it('opens exactly one independent stream for each source', async () => {
     const process = new FakeTransport();
     const client = new ParakeetEouClient({

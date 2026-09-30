@@ -41,7 +41,7 @@ type ActiveMeeting = ParakeetEouMeetingStart & {
 };
 
 type CoordinatorOptions = {
-  createClient(): Promise<EouClient>;
+  createClient(signal: AbortSignal): Promise<EouClient>;
   onUpdate(payload: {
     meetingId: string;
     owner: string;
@@ -61,6 +61,7 @@ const ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/;
 export class ParakeetEouMeetingCoordinator {
   private active: ActiveMeeting | null = null;
   private pendingStart: ParakeetEouMeetingStart | null = null;
+  private pendingController: AbortController | null = null;
   private failing: Promise<void> | null = null;
 
   constructor(private readonly options: CoordinatorOptions) {}
@@ -75,15 +76,18 @@ export class ParakeetEouMeetingCoordinator {
       throw new Error('parakeet_meeting_active');
     const pending = { ...start };
     this.pendingStart = pending;
+    const controller = new AbortController();
+    this.pendingController = controller;
 
     let client: EouClient;
     try {
       if (this.failing) await this.failing;
       if (this.pendingStart !== pending) throw new Error('parakeet_cancelled');
-      client = await this.options.createClient();
+      client = await this.options.createClient(controller.signal);
     } catch {
       if (this.pendingStart !== pending) throw new Error('parakeet_cancelled');
       this.pendingStart = null;
+      if (this.pendingController === controller) this.pendingController = null;
       this.options.onUnavailable({
         meetingId: start.meetingId,
         owner: start.owner,
@@ -96,6 +100,7 @@ export class ParakeetEouMeetingCoordinator {
       throw new Error('parakeet_cancelled');
     }
     this.pendingStart = null;
+    if (this.pendingController === controller) this.pendingController = null;
     const identities = Object.fromEntries(
       SOURCES.map((source) => [
         source,
@@ -189,6 +194,8 @@ export class ParakeetEouMeetingCoordinator {
     const pending = this.pendingStart;
     if (pending) {
       this.pendingStart = null;
+      this.pendingController?.abort();
+      this.pendingController = null;
       this.options.onUnavailable({
         meetingId: pending.meetingId,
         owner: pending.owner,

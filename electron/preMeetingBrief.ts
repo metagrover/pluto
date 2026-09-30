@@ -44,6 +44,7 @@ export interface PreMeetingBrief {
   title: string;
   startsAt: string | null;
   agenda: string | null;
+  calendarInvitees?: string[];
   relationship: 'same_series' | 'related' | 'manual' | 'none';
   priorMeeting: {
     id: string;
@@ -63,6 +64,8 @@ export interface PreMeetingBrief {
     evidence: 'confirmed' | 'invited' | 'related';
   }>;
   overview?: PreMeetingBriefItem[];
+  possibleNextSteps?: PreMeetingBriefItem[];
+  watchouts?: PreMeetingBriefItem[];
   evidenceItems?: PreMeetingBriefItem[];
   talkingPoints?: PreMeetingBriefItem[];
   synthesisStatus?: 'ready' | 'fallback';

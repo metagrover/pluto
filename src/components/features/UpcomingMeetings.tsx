@@ -17,7 +17,6 @@ interface UpcomingMeetingsProps {
   onRefreshCalendar: () => Promise<void>;
   onOpenSettings: () => void;
   onPrepare: (event: CalendarEvent) => void;
-  onPrepareAnother: () => void;
 }
 
 const LARGE_DASHBOARD_QUERY = '(min-width: 1024px)';
@@ -106,7 +105,6 @@ export const UpcomingMeetings = ({
   onRefreshCalendar,
   onOpenSettings,
   onPrepare,
-  onPrepareAnother,
 }: UpcomingMeetingsProps) => {
   const [expanded, setExpanded] = useState(false);
   const [usesLargeLayout, setUsesLargeLayout] = useState(matchesLargeDashboard);
@@ -238,12 +236,12 @@ export const UpcomingMeetings = ({
       className="min-w-0"
     >
       <div>
-        <p className="text-[10px] font-medium text-pro-text-muted/60">
+        <p className="text-[11px] font-normal tracking-[0.02em] text-pro-text-muted">
           Your day
         </p>
         <h2
           id="upcoming-meetings-title"
-          className="mt-1 whitespace-nowrap text-[18px] font-serif font-medium text-pro-text-main"
+          className="mt-1.5 whitespace-nowrap text-[18px] font-serif font-medium leading-tight text-pro-text-main"
         >
           Upcoming meetings
         </h2>
@@ -404,14 +402,14 @@ export const UpcomingMeetings = ({
                           <time
                             dateTime={event.start}
                             data-testid="upcoming-meeting-date"
-                            className="block truncate text-[9px] font-semibold text-pro-text-muted/75"
+                            className="block truncate text-[10px] font-normal text-pro-text-muted"
                           >
                             {eventDay}
                           </time>
                         ) : null}
                         <time
                           dateTime={event.start}
-                          className="block text-[10px] font-semibold tabular-nums text-pro-text-muted"
+                          className="block text-[11px] font-normal tabular-nums text-pro-text-muted"
                         >
                           {formatTime(event.start)}
                         </time>
@@ -421,7 +419,7 @@ export const UpcomingMeetings = ({
                       <div className="min-w-0">
                         <h3
                           title={event.title || 'Untitled event'}
-                          className="truncate text-[13px] font-medium leading-5 text-pro-text-main"
+                          className="truncate text-[13px] font-normal leading-5 text-pro-text-main"
                         >
                           <button
                             type="button"
@@ -431,7 +429,7 @@ export const UpcomingMeetings = ({
                             {event.title || 'Untitled event'}
                           </button>
                         </h3>
-                        <p className="text-[10px] font-medium leading-4 text-pro-text-muted/70">
+                        <p className="text-[11px] font-normal leading-4 text-pro-text-muted">
                           {formatDuration(event)}
                         </p>
                       </div>
@@ -439,7 +437,7 @@ export const UpcomingMeetings = ({
                         type="button"
                         aria-label={`Prepare for ${event.title || 'upcoming meeting'}`}
                         onClick={() => onPrepare(event)}
-                        className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10px] font-semibold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+                        className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
                       >
                         <BookOpenText
                           className="h-3.5 w-3.5"
@@ -498,7 +496,7 @@ export const UpcomingMeetings = ({
       {hasConnectedCalendar ? (
         <div
           data-testid="upcoming-meetings-source"
-          className="mt-4 flex min-w-0 items-center gap-2 text-[9px] font-medium text-pro-text-muted/60"
+          className="mt-4 flex min-w-0 items-center gap-2 text-[10px] font-normal text-pro-text-muted"
         >
           <span
             title={
@@ -518,17 +516,9 @@ export const UpcomingMeetings = ({
             type="button"
             aria-label="Change calendar"
             onClick={onOpenSettings}
-            className="shrink-0 rounded-sm px-1 py-1 font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+            className="shrink-0 rounded-sm px-1 py-1 font-medium text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
           >
             Change
-          </button>
-          <button
-            type="button"
-            aria-label="Prepare another conversation"
-            onClick={onPrepareAnother}
-            className="shrink-0 rounded-sm px-1 py-1 font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-          >
-            Prepare…
           </button>
         </div>
       ) : null}

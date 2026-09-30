@@ -14,7 +14,7 @@ import {
 } from '../services/diarizationFirstFinalization';
 import { registerFinalTranscriptionVocabulary } from '../services/finalTranscription/finalTranscriptionVocabularyRegistry';
 import { shouldOfferIncrementalMeetingNotes } from '../services/incrementalMeetingNotesOffer';
-import { createEouRendererSession } from '../services/liveTranscription/eouRendererSession';
+import { createDurableEouSession } from '../services/liveTranscription/durableEouSession';
 import type { LiveConversationSnapshot } from '../services/liveTranscription/liveConversationProjection';
 import {
   type LiveConversationProjector,
@@ -334,7 +334,7 @@ export const AudioManager = ({
     null,
   );
   const eouSessionRef = useRef<ReturnType<
-    typeof createEouRendererSession
+    typeof createDurableEouSession
   > | null>(null);
   const meetingContextIngestionRef =
     useRef<ConfirmedSegmentIngestionSession | null>(null);
@@ -812,11 +812,7 @@ export const AudioManager = ({
         markSystemCaptureUnresponsive,
       );
       cancelSystemAudioHealthTimeoutRef.current = systemLiveness.stop;
-      const handler = (
-        _: unknown,
-        chunk: NativeAudioChunk,
-        receivedAtMs?: number,
-      ) => {
+      const handler = (_: unknown, chunk: NativeAudioChunk) => {
         if (!chunk) return;
         systemAudioChunkSeenRef.current = true;
         let chunkBytes: Uint8Array | null = null;
@@ -855,17 +851,6 @@ export const AudioManager = ({
         );
         systemPcmCarryoverBytesRef.current = decoded.carryoverBytes;
         if (!systemLiveness.received(decoded.samples)) return;
-        const systemCaptureStartSeconds =
-          Number.isFinite(receivedAtMs) && startTimeRef.current
-            ? Math.max(
-                0,
-                (receivedAtMs! - startTimeRef.current) / 1_000 -
-                  decoded.samples.length / systemPcmSampleRateRef.current,
-              )
-            : undefined;
-        eouSessionRef.current?.append('system', decoded.samples, {
-          captureStartSeconds: systemCaptureStartSeconds,
-        });
         if (
           !systemFailureRecorded &&
           systemAudioHealthRef.current !== 'healthy'
@@ -956,23 +941,30 @@ export const AudioManager = ({
       });
       meetingContextIngestionRef.current?.close();
       meetingContextIngestionRef.current = meetingContextIngestion;
-      const eouSession = createEouRendererSession({
+      let liveTranscriptionRecovering = false;
+      const eouSession = createDurableEouSession({
         meetingId,
         generation: eouGeneration,
-        sampleRates: {
-          mic: () => micPcmSampleRateRef.current,
-          system: () => systemPcmSampleRateRef.current,
+        readAudio: (source, fromSeconds) =>
+          window.ipcRenderer.invoke('PARAKEET_EOU_READ_AUDIO', {
+            meetingId,
+            source,
+            fromSeconds,
+          }),
+        onStatus: (status) => {
+          if (
+            currentMeetingIdRef.current !== meetingId ||
+            eouGenerationRef.current !== eouGeneration
+          )
+            return;
+          liveTranscriptionRecovering = status !== 'active';
+          onLiveTranscriptIntegrityChange?.(
+            liveTranscriptionRecovering ? 'lagging' : 'healthy',
+          );
+          const projector = liveConversationProjectorRef.current;
+          if (projector)
+            onLiveConversation?.(projector.recovering(eouGeneration, status));
         },
-        maxOutstanding: 48,
-        // Raise the retained-audio budget above the Ollama live inference ceiling
-        // (OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS = 20 s). When askPlutoLive saturates
-        // the CPU/ANE the Parakeet EOU IPC round-trip slows and the renderer
-        // queue can accumulate up to ~20 s of PCM before the main process drains
-        // it. 45 s gives a comfortable margin; 24 MiB covers both sources at
-        // 16 kHz Float32 for the full window (2 × 45 s × 16 000 × 4 B ≈ 5.76 MiB
-        // each, 11.5 MiB total — well within 24 MiB).
-        maxRetainedAudioSecondsPerSource: 45,
-        maxRetainedPcmBytes: 24 * 1024 * 1024,
         transport: {
           invoke: (channel, payload) =>
             window.ipcRenderer.invoke(channel, payload),
@@ -1061,6 +1053,7 @@ export const AudioManager = ({
               );
               if (
                 fasterNotesEnabledRef.current !== false &&
+                !liveTranscriptionRecovering &&
                 shouldOfferIncrementalMeetingNotes({
                   sourceCharacterCount,
                   lastOfferedCharacterCount:
@@ -1098,7 +1091,9 @@ export const AudioManager = ({
           onLiveTranscriptIntegrityChange?.('lagging');
           const projector = liveConversationProjectorRef.current;
           if (projector)
-            onLiveConversation?.(projector.unavailable(eouGeneration));
+            onLiveConversation?.(
+              projector.recovering(eouGeneration, 'reconnecting'),
+            );
         },
       });
       eouSessionRef.current = eouSession;
@@ -1185,8 +1180,6 @@ export const AudioManager = ({
       )();
       audioContextRef.current = audioContext;
       if (audioContext.state === 'suspended') await audioContext.resume();
-      const audioContextMeetingOffsetSeconds =
-        getMeetingElapsedSeconds() - audioContext.currentTime;
 
       if (micStream) {
         const micSource = audioContext.createMediaStreamSource(micStream);
@@ -1210,12 +1203,6 @@ export const AudioManager = ({
             if (resampled.length === 0) return;
             const copied = new Float32Array(resampled);
             micPcmChunksRef.current.push(copied);
-            eouSessionRef.current?.append('mic', copied, {
-              captureStartSeconds: Math.max(
-                0,
-                audioContextMeetingOffsetSeconds + evt.playbackTime,
-              ),
-            });
           };
           micSource.connect(processor);
           processor.connect(sink);
@@ -1634,7 +1621,6 @@ export const AudioManager = ({
       const flushed = micResamplerRef.current.flush();
       if (flushed && flushed.length > 0) {
         micPcmChunksRef.current.push(flushed);
-        eouSessionRef.current?.append('mic', flushed);
       }
     }
   };
@@ -1721,8 +1707,6 @@ export const AudioManager = ({
       if (audioContext.state === 'suspended') {
         await audioContext.resume();
       }
-      const audioContextMeetingOffsetSeconds =
-        getMeetingElapsedSeconds() - audioContext.currentTime;
 
       if (isSessionAborted()) {
         console.log(
@@ -1755,12 +1739,6 @@ export const AudioManager = ({
         if (resampled.length === 0) return;
         const copied = new Float32Array(resampled);
         micPcmChunksRef.current.push(copied);
-        eouSessionRef.current?.append('mic', copied, {
-          captureStartSeconds: Math.max(
-            0,
-            audioContextMeetingOffsetSeconds + evt.playbackTime,
-          ),
-        });
       };
 
       micSource.connect(processor);

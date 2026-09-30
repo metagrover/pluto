@@ -17,7 +17,7 @@ describe('transcription architecture cleanup', () => {
     expect(`${renderer}\n${main}\n${retry}`).not.toContain(
       ['WHISPER', 'TRANSCRIBE'].join('_'),
     );
-    expect(renderer).toContain('createEouRendererSession');
+    expect(renderer).toContain('createDurableEouSession');
     expect(renderer).not.toContain('TRANSCRIPTION_TRANSCRIBE_PREVIEW');
     expect(renderer).not.toContain('TRANSCRIPTION_TRANSCRIBE_FINAL');
     expect(app).toContain('runPersistedMeetingFinalTranscription');

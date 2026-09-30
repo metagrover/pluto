@@ -83,6 +83,7 @@ export const normalizeEvent = (value: unknown): CalendarEvent | null => {
     (value.calendarItemExternalIdentifier !== undefined &&
       !isStringOrNull(value.calendarItemExternalIdentifier)) ||
     (value.notes !== undefined && !isStringOrNull(value.notes)) ||
+    (value.agenda !== undefined && !isStringOrNull(value.agenda)) ||
     (value.hasRecurrenceRules !== undefined &&
       typeof value.hasRecurrenceRules !== 'boolean') ||
     (value.recurrenceRules !== undefined &&
@@ -152,7 +153,9 @@ export const normalizeEvent = (value: unknown): CalendarEvent | null => {
     calendarItemExternalIdentifier:
       value.calendarItemExternalIdentifier ?? null,
     notes: value.notes ?? null,
-    agenda: sanitizeCalendarAgenda(value.notes ?? null),
+    agenda:
+      sanitizeCalendarAgenda(value.notes ?? null) ??
+      sanitizeCalendarAgenda(value.agenda ?? null),
     hasRecurrenceRules: value.hasRecurrenceRules ?? recurrenceRules.length > 0,
     recurrenceRules,
     seriesKey: null,

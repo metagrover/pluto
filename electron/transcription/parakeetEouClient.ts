@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { type EouPcmAppend, encodeEouPcmAppend } from './eouPcmContract';
 import type {
   NativeEouUpdateEvent,
@@ -52,6 +53,8 @@ export class ParakeetEouClient {
   private runtimeLease: ParakeetRuntimeLease | null;
   private runtimeLeasePromise: Promise<ParakeetRuntimeLease> | null = null;
   private nextId = 0;
+  private readonly requestPrefix = randomUUID();
+  private readonly pendingRequestIds = new Set<string>();
   private closed = false;
   private closePromise: Promise<void> | null = null;
   private terminalCode: string | null = null;
@@ -227,6 +230,7 @@ export class ParakeetEouClient {
       }
     }
 
+    for (const id of this.pendingRequestIds) this.process.cancelPending(id);
     await this.releaseRuntimeLeaseIfIdle(true);
   }
 
@@ -405,13 +409,19 @@ export class ParakeetEouClient {
     method: string,
     fields: Record<string, unknown>,
   ): Promise<void> {
-    const response = await this.process.request({
-      schemaVersion: 1,
-      id: `eou-${method}-${++this.nextId}`,
-      method,
-      ...fields,
-    });
-    this.requireEmptySuccess(response);
+    const id = `eou-${this.requestPrefix}-${method}-${++this.nextId}`;
+    this.pendingRequestIds.add(id);
+    try {
+      const response = await this.process.request({
+        schemaVersion: 1,
+        id,
+        method,
+        ...fields,
+      });
+      this.requireEmptySuccess(response);
+    } finally {
+      this.pendingRequestIds.delete(id);
+    }
   }
 
   private requireEmptySuccess(response: NativeResponse): void {

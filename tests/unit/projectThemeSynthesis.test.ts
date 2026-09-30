@@ -295,3 +295,185 @@ describe('cross-conversation project theme synthesis', () => {
     expect(fixture.state).toBeNull();
   });
 });
+
+describe('stable project identities and grounded grouping', () => {
+  const established = {
+    id: 'archive',
+    type: 'project',
+    name: 'Archive program',
+    status: 'active',
+    metadata: JSON.stringify({
+      projectQualification: {
+        version: 1,
+        state: 'qualified',
+        source: 'review',
+        reason: 'Two conversations',
+        assessedAt: '2026-08-20',
+      },
+      projectThemeSynthesis: {
+        candidateProjectIds: ['candidate-1'],
+        outcome: 'Make historical records searchable',
+      },
+    }),
+  };
+  it('updates the established identity when a later discussion changes the candidate set', async () => {
+    const { deps } = makeDeps();
+    const original = deps.getProject;
+    const withRegistry = {
+      ...deps,
+      listProjects: () => [established],
+      getProject: (id: string) =>
+        id === established.id ? established : original(id),
+    };
+    deps.generate.mockResolvedValue(
+      JSON.stringify({
+        themes: [
+          {
+            ...response.themes[0],
+            existingProjectId: established.id,
+            candidateProjectIds: ['candidate-2'],
+          },
+        ],
+      }),
+    );
+    await synthesizeProjectThemes(withRegistry);
+    expect(deps.saveTheme).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'archive', name: 'Archive program' }),
+    );
+    expect(deps.generate.mock.calls[0][0]).toContain('KNOWN PROJECTS');
+  });
+  it('recovers an established identity from its recorded candidates without relying on wording', async () => {
+    const { deps } = makeDeps();
+    const original = deps.getProject;
+    await synthesizeProjectThemes({
+      ...deps,
+      listProjects: () => [established],
+      getProject: (id) => (id === 'archive' ? established : original(id)),
+    });
+    expect(deps.saveTheme).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'archive' }),
+    );
+  });
+  it('groups only a candidate supported by the supplied source and quote', async () => {
+    const { deps } = makeDeps();
+    deps.generate.mockResolvedValue(
+      JSON.stringify({
+        themes: [
+          {
+            ...response.themes[0],
+            memberships: [
+              {
+                projectId: 'candidate-1',
+                relationship: 'workstream',
+                ...response.themes[0].evidence[0],
+              },
+              {
+                projectId: 'candidate-2',
+                relationship: 'alias',
+                sourceMeetingId: 'm1',
+                evidenceQuote: response.themes[0].evidence[0].evidenceQuote,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    await synthesizeProjectThemes(deps);
+    expect(deps.saveTheme.mock.calls[0][0].memberships).toEqual([
+      expect.objectContaining({
+        projectId: 'candidate-1',
+        relationship: 'workstream',
+      }),
+    ]);
+  });
+  it('keeps an ambiguous candidate separate when two themes claim it', async () => {
+    const { deps } = makeDeps();
+    const theme = {
+      ...response.themes[0],
+      memberships: [
+        {
+          projectId: 'candidate-1',
+          relationship: 'workstream',
+          ...response.themes[0].evidence[0],
+        },
+      ],
+    };
+    deps.generate.mockResolvedValue(
+      JSON.stringify({
+        themes: [
+          theme,
+          {
+            ...theme,
+            name: 'Separate outcome',
+            candidateProjectIds: ['candidate-1'],
+          },
+        ],
+      }),
+    );
+    await synthesizeProjectThemes(deps);
+    expect(
+      deps.saveTheme.mock.calls.every(
+        ([saved]) => saved.memberships.length === 0,
+      ),
+    ).toBe(true);
+  });
+  it('ignores a stale registry target changed during generation', async () => {
+    const { deps } = makeDeps();
+    let current = established;
+    const original = deps.getProject;
+    deps.generate.mockImplementation(async () => {
+      current = {
+        ...established,
+        metadata: JSON.stringify({ projectPortfolioDisposition: 'dismissed' }),
+      };
+      return JSON.stringify({
+        themes: [{ ...response.themes[0], existingProjectId: 'archive' }],
+      });
+    });
+    await synthesizeProjectThemes({
+      ...deps,
+      listProjects: () => [established],
+      getProject: (id) => (id === 'archive' ? current : original(id)),
+    });
+    expect(deps.saveTheme).not.toHaveBeenCalled();
+  });
+  it('persists profile statements only with valid evidence from supporting meetings', async () => {
+    const { deps } = makeDeps();
+    deps.generate.mockResolvedValue(
+      JSON.stringify({
+        themes: [
+          {
+            ...response.themes[0],
+            summary: {
+              text: 'Searchable records are moving toward launch.',
+              ...response.themes[0].evidence[0],
+            },
+            workstreams: [
+              {
+                name: 'Access controls',
+                text: 'Validate before launch',
+                sourceMeetingId: 'm2',
+                evidenceQuote: response.themes[0].openThreads[0].evidenceQuote,
+              },
+            ],
+            decisions: [
+              {
+                text: 'A fabricated decision',
+                sourceMeetingId: 'm2',
+                evidenceQuote: 'This passage does not exist.',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    await synthesizeProjectThemes(deps);
+    const theme =
+      deps.saveTheme.mock.calls[0][0].metadata.projectThemeSynthesis;
+    expect(theme).toMatchObject({
+      summary: { text: 'Searchable records are moving toward launch.' },
+      workstreams: [expect.objectContaining({ name: 'Access controls' })],
+      decisions: [],
+    });
+  });
+});

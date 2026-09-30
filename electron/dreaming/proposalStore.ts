@@ -629,7 +629,7 @@ export function createDreamingProposalStore(
     };
     const nextTheme = {
       ...existing,
-      version: 1,
+      version: typeof existing.version === 'number' ? existing.version : 1,
       sourceMeetingIds,
       candidateProjectIds: Array.isArray(existing.candidateProjectIds)
         ? existing.candidateProjectIds
@@ -639,6 +639,13 @@ export function createDreamingProposalStore(
           ? existing.outcome
           : proposal.payload.summary,
       currentFocus: proposal.payload.summary,
+      summary: proposal.evidence[0]
+        ? {
+            text: proposal.payload.summary,
+            sourceMeetingId: proposal.evidence[0].meetingId,
+            evidenceQuote: proposal.evidence[0].excerpt,
+          }
+        : existing.summary,
       recentChanges: Array.isArray(existing.recentChanges)
         ? existing.recentChanges
         : [],

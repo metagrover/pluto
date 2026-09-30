@@ -629,8 +629,10 @@ export const PersonChatDock: React.FC<{
               </div>
             ) : null}
             {asking && !streaming ? (
-              <output className="person-chat__loading person-chat__loading--latest">
-                <Loader2 className="animate-spin" size={15} /> {status}
+              <output className="person-chat__loading--latest block">
+                <span className="person-chat__loading">
+                  <Loader2 className="animate-spin" size={15} /> {status}
+                </span>
               </output>
             ) : null}
             {error ? (

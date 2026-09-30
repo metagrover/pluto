@@ -936,6 +936,44 @@ describe('meeting analysis run publication', () => {
     expect(getMeetingAnalysisRun(meetingId)).toBeNull();
   });
 
+  it('deletes a processing meeting and rejects a late save for the same id', () => {
+    const meetingId = 'delete-processing-meeting';
+    saveMeeting({
+      id: meetingId,
+      title: 'Meeting',
+      transcript_status: 'provisional',
+      finalization_status: 'processing',
+    });
+
+    deleteMeeting(meetingId);
+
+    expect(getMeeting(meetingId)).toBeUndefined();
+    expect(
+      saveMeeting({
+        id: meetingId,
+        title: 'Late materialization',
+        transcript_status: 'provisional',
+        finalization_status: 'processing',
+      }),
+    ).toBe(false);
+    expect(getMeeting(meetingId)).toBeUndefined();
+  });
+
+  it('keeps a recovery-required meeting until recovery completes', () => {
+    const meetingId = 'delete-recovery-required-meeting';
+    saveMeeting({
+      id: meetingId,
+      title: 'Meeting',
+      transcript_status: 'needs_attention',
+      finalization_status: 'recovery_required',
+    });
+
+    expect(() => deleteMeeting(meetingId)).toThrow(
+      'Meeting recovery must complete before deletion',
+    );
+    expect(getMeeting(meetingId)).toBeDefined();
+  });
+
   it('persists queued position and clears it when generation starts', () => {
     const meetingId = 'queued-run-state';
     const revisions = fixture(meetingId);

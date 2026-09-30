@@ -10,6 +10,7 @@ import {
   createAudioRetentionManager,
   parseAudioStorageBudgetGb,
 } from '../../electron/audioRetention';
+import { EncryptedArtifactStore } from '../../electron/crypto/encryptedArtifactStore';
 import { writeEncryptedAudioBundle } from '../../electron/crypto/encryptedAudioBundle';
 
 const makeDatabase = () => {
@@ -144,7 +145,7 @@ describe('audio retention', () => {
     expect(result.overBudget).toBe(false);
     expect(fs.existsSync(oldPath)).toBe(false);
     expect(fs.existsSync(newPath)).toBe(true);
-    expect(deleteMeetingAudioKey).toHaveBeenCalledWith('old');
+    expect(deleteMeetingAudioKey).not.toHaveBeenCalled();
     expect(
       sqlite.prepare('SELECT audio_path FROM meetings WHERE id = ?').get('old'),
     ).toEqual({ audio_path: null });
@@ -230,7 +231,7 @@ describe('audio retention', () => {
     sqlite.close();
   });
 
-  it('authenticates and removes every encrypted bundle segment before deleting its key', async () => {
+  it('authenticates and removes every encrypted audio segment while retaining its journal key', async () => {
     const root = makeRoot();
     const sqlite = makeDatabase();
     const meetingKey = Buffer.alloc(32, 7);
@@ -249,10 +250,40 @@ describe('audio retention', () => {
     });
     const filesBefore = fs.readdirSync(root);
     expect(filesBefore.length).toBe(2);
+    const transcriptRoot = path.join(
+      root,
+      'encrypted',
+      'transcript-checkpoints',
+    );
+    fs.mkdirSync(transcriptRoot, { recursive: true });
+    const transcriptPath = path.join(transcriptRoot, 'mic.enc');
+    const transcriptHeader = {
+      artifactKind: 'sidecar' as const,
+      meetingId: context.meetingId,
+      generation: context.generation,
+      keyId: context.keyId,
+      source: 'mic' as const,
+      sequence: 0,
+    };
+    fs.writeFileSync(
+      transcriptPath,
+      EncryptedArtifactStore.seal(
+        Buffer.from('transcript evidence'),
+        meetingKey,
+        transcriptHeader,
+      ).fullBuffer,
+    );
     sqlite
       .prepare('INSERT INTO meetings (id, audio_path) VALUES (?, ?)')
       .run('encrypted', bundlePath);
-    const deleteMeetingAudioKey = vi.fn(() => true);
+    let keyAvailable = true;
+    const deleteMeetingAudioKey = vi.fn(() => {
+      keyAvailable = false;
+      return true;
+    });
+    const getMeetingAudioKey = vi.fn(() =>
+      keyAvailable ? { meetingKey, keyId: context.keyId } : null,
+    );
     const meeting = {
       ...eligibleMeeting('encrypted', bundlePath),
       capture_journal_generation: context.generation,
@@ -263,10 +294,7 @@ describe('audio retention', () => {
       listMeetings: () => [meeting],
       getSetting: () => '10',
       audioKeyStore: {
-        getMeetingAudioKey: vi.fn(() => ({
-          meetingKey,
-          keyId: context.keyId,
-        })),
+        getMeetingAudioKey,
         deleteMeetingAudioKey,
       },
     });
@@ -274,8 +302,17 @@ describe('audio retention', () => {
     await expect(manager.deleteMeetingAudio(meeting)).resolves.toMatchObject({
       status: 'deleted',
     });
-    expect(fs.readdirSync(root)).toEqual([]);
-    expect(deleteMeetingAudioKey).toHaveBeenCalledWith('encrypted');
+    expect(fs.readdirSync(root)).toEqual(['encrypted']);
+    expect(deleteMeetingAudioKey).not.toHaveBeenCalled();
+    const retainedKey = getMeetingAudioKey();
+    expect(retainedKey).not.toBeNull();
+    expect(
+      EncryptedArtifactStore.open(
+        fs.readFileSync(transcriptPath),
+        retainedKey!.meetingKey,
+        transcriptHeader,
+      ).plaintext.toString(),
+    ).toBe('transcript evidence');
     sqlite.close();
   });
 
@@ -313,7 +350,7 @@ describe('audio retention', () => {
     expect(fs.existsSync(chunksRoot)).toBe(false);
     expect(fs.existsSync(repairRoot)).toBe(false);
     expect(fs.readFileSync(transcriptPath, 'utf8')).toBe('transcript evidence');
-    expect(deleteMeetingAudioKey).toHaveBeenCalledWith('journaled');
+    expect(deleteMeetingAudioKey).not.toHaveBeenCalled();
     sqlite.close();
   });
 
@@ -350,7 +387,7 @@ describe('audio retention', () => {
       deletedBytes: 2 * 1024 ** 2,
     });
     expect(fs.existsSync(audioPath)).toBe(false);
-    expect(deleteMeetingAudioKey).toHaveBeenCalledWith('legacy');
+    expect(deleteMeetingAudioKey).not.toHaveBeenCalled();
     sqlite.close();
   });
 

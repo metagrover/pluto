@@ -49,7 +49,13 @@ export type LiveConversationMetrics = {
 
 export type LiveConversationSnapshot = {
   generation: number;
-  status: 'active' | 'unavailable' | 'finished' | 'degraded';
+  status:
+    | 'active'
+    | 'unavailable'
+    | 'finished'
+    | 'degraded'
+    | 'catching_up'
+    | 'reconnecting';
   rows: LiveConversationRow[];
   draft: LiveConversationDraft | null;
   metrics: LiveConversationMetrics;
@@ -607,6 +613,15 @@ export const createLiveConversationProjection = ({
       if (updateGeneration !== generation || snapshot.status === 'finished')
         return snapshot;
       return publish('unavailable', snapshot.draft);
+    },
+
+    recovering(
+      updateGeneration: number,
+      status: 'active' | 'catching_up' | 'reconnecting',
+    ): LiveConversationSnapshot {
+      if (updateGeneration !== generation || snapshot.status === 'finished')
+        return snapshot;
+      return publish(status, status === 'reconnecting' ? null : snapshot.draft);
     },
 
     degraded(updateGeneration: number): LiveConversationSnapshot {

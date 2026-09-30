@@ -40,6 +40,60 @@ interface NativeContinuationItem {
   completed?: boolean;
 }
 
+/** Mirror an explicit entity completion into its exact source note block. */
+export const syncActionCompletionToMeetingNotes = (
+  sqlite: Database.Database,
+  entityId: string,
+  completed: boolean,
+): void => {
+  const entity = sqlite
+    .prepare('SELECT * FROM entities WHERE id = ?')
+    .get(entityId) as PersistedEntityRow | undefined;
+  if (!entity || entity.type !== 'action_item') return;
+  const meta = parseActionMetadata(entity.metadata);
+  if (meta.meeting_regeneration_retired_at) return;
+  const meetingId = meta.source_meeting_id;
+  const path = meta.source_path;
+  if (typeof meetingId !== 'string' || typeof path !== 'string') return;
+  const meeting = sqlite
+    .prepare(
+      'SELECT id, user_edits_json, analysis_json FROM meetings WHERE id = ?',
+    )
+    .get(meetingId) as PersistedMeetingRow | undefined;
+  if (!meeting) return;
+  // A corrupt edit document must never be replaced with a partial one.
+  const edits = JSON.parse(meeting.user_edits_json || '{}');
+  const editedAt = new Date().toISOString();
+  if (typeof meta.continuation_id === 'string') {
+    const entry = edits[path];
+    if (!entry) return;
+    const items = JSON.parse(entry.edited) as NativeContinuationItem[];
+    const item = items.find((item) => item.id === meta.continuation_id);
+    if (!item) return;
+    item.completed = completed;
+    edits[path] = {
+      ...entry,
+      edited: JSON.stringify(items),
+      edited_at: editedAt,
+    };
+  } else {
+    const match = path.match(/^(?:all_action_items|v2:action):(\d+)$/);
+    if (!match) return;
+    // Both note formats read the same completion, including after format changes.
+    for (const prefix of ['all_action_items', 'v2:action']) {
+      edits[`completion:${prefix}:${match[1]}`] = {
+        original: 'false',
+        edited: String(completed),
+        edited_at: editedAt,
+      };
+    }
+  }
+  sqlite
+    .prepare('UPDATE meetings SET user_edits_json = ? WHERE id = ?')
+    .run(JSON.stringify(edits), meetingId);
+  syncMeetingActionEntitiesFromUserEdits(sqlite, meetingId);
+};
+
 /**
  * Synchronize action item entities and user-authored continuation commitments
  * for a meeting from its user_edits_json.

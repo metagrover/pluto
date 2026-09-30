@@ -78,7 +78,7 @@
     "react-markdown": "^10.1.0",
     "react-textarea-autosize": "^8.5.9",
     "remark-gfm": "^4.0.1",
-    "undici": "^6.27.0",
+    "undici": "^6.29.0",
     "unpdf": "^1.8.1",
     "zustand": "^5.0.11"
   },

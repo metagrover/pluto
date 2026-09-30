@@ -2,6 +2,10 @@ import type {
   PersonChatCitation,
   PersonChatMessage,
 } from '../../src/types/personChat';
+import {
+  PERSON_PROFILE_SECTIONS,
+  readPersonProfile,
+} from '../../src/utils/personProfile';
 import type { PersistedMeeting, PersonBriefingDetail } from '../db';
 import {
   buildSocialReply,
@@ -92,6 +96,18 @@ export const buildPersonChatContext = (input: {
   const queryWords = words(query);
   const citations: PersonChatCitation[] = [];
   const sections: string[] = [];
+  const profile = readPersonProfile(detail.knowledgeDoc?.structured_json)
+    .sort(
+      (a, b) =>
+        scoreText(queryWords, `${b.title} ${b.summary}`) -
+        scoreText(queryWords, `${a.title} ${a.summary}`),
+    )
+    .slice(0, 4);
+  if (profile.length) {
+    sections.push(
+      `Source-linked person profile (historical observations, not proof of current status):\n${profile.map((claim) => `${PERSON_PROFILE_SECTIONS[claim.section]}: ${compact(claim.summary, 600)}\n${claim.citations.map((citation) => `[meeting:${citation.meeting_id}] ${compact(citation.quote, 240)}`).join('\n')}`).join('\n\n')}`,
+    );
+  }
   const snapshot = detail.workingMemorySnapshot?.payload;
   if (snapshot) {
     sections.push(
@@ -124,6 +140,11 @@ export const buildPersonChatContext = (input: {
   if (verified || candidates) {
     sections.push(
       `Commitments:\n${verified || '- None verified'}\n${candidates}`,
+    );
+  }
+  if (detail.sharedCommitments?.open.length) {
+    sections.push(
+      `Your confirmed commitments from shared conversations (not necessarily owed to this person):\n${detail.sharedCommitments.open.map((item) => `- ${item.text} [meeting:${item.sourceMeetingId}]`).join('\n')}`,
     );
   }
 
@@ -191,6 +212,26 @@ export const buildPersonChatContext = (input: {
       excerpt,
       answerUsage: 'used_during_generation',
     });
+  }
+  for (const claim of profile) {
+    for (const citation of claim.citations) {
+      if (citations.some((item) => item.meetingId === citation.meeting_id))
+        continue;
+      const meeting = detail.meetings.find(
+        (item) => item.id === citation.meeting_id,
+      );
+      if (!meeting || meeting.evidence === 'scheduled') continue;
+      citations.push({
+        id: `meeting:${meeting.id}`,
+        type: 'meeting',
+        meetingId: meeting.id,
+        title: meeting.title,
+        date: meeting.started_at || meeting.created_at,
+        evidenceClass: meeting.evidence,
+        excerpt: compact(citation.quote, 500),
+        answerUsage: 'used_during_generation',
+      });
+    }
   }
 
   return {

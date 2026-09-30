@@ -31,6 +31,117 @@ const saveFixtureMeeting = (id: string, startedAt: string) =>
   });
 
 describe('person briefing database read model', () => {
+  it('creates a missing dossier on open for a person with recorded context, without replacing an existing dossier', () => {
+    const person = db.upsertEntity({
+      id: 'dossier-peer',
+      type: 'person',
+      name: 'Avery Chen',
+    });
+    saveFixtureMeeting('dossier-shared', '2026-09-20T12:00:00.000Z');
+    db.identityStore.setBinding('dossier-shared', {
+      speaker: 'Speaker 2',
+      personId: person.id,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'source-v1',
+      evidence: [],
+    });
+    expect(db.getPersonBriefing(person.id)?.knowledgeDoc).toBeNull();
+    const first = db.getPersonBriefing(person.id, {
+      ensureKnowledgeDoc: true,
+    })?.knowledgeDoc;
+    expect(first).toMatchObject({
+      scope_type: 'person_context',
+      scope_key: person.id,
+      status: 'stale',
+    });
+    expect(
+      db.getPersonBriefing(person.id, { ensureKnowledgeDoc: true })
+        ?.knowledgeDoc?.id,
+    ).toBe(first?.id);
+  });
+
+  it('does not create dossiers for self or people without recorded context', () => {
+    const person = db.upsertEntity({
+      id: 'dossier-self',
+      type: 'person',
+      name: 'Jordan Vale',
+    });
+    expect(
+      db.getPersonBriefing(person.id, { ensureKnowledgeDoc: true })
+        ?.knowledgeDoc,
+    ).toBeNull();
+    saveFixtureMeeting('dossier-self-meeting', '2026-09-20T12:00:00.000Z');
+    db.addMeetingEntity({
+      meeting_id: 'dossier-self-meeting',
+      entity_id: person.id,
+      context: 'Jordan reviewed the proposal.',
+    });
+    db.identityStore.setSelfPersonId(person.id);
+    expect(
+      db.getPersonBriefing(person.id, { ensureKnowledgeDoc: true })
+        ?.knowledgeDoc,
+    ).toBeNull();
+    db.identityStore.setSelfPersonId(null);
+  });
+  it('shows only confirmed self commitments from confirmed shared conversations', () => {
+    const self = db.upsertEntity({
+      id: 'profile-self',
+      type: 'person',
+      name: 'Jordan Vale',
+    });
+    const person = db.upsertEntity({
+      id: 'profile-peer',
+      type: 'person',
+      name: 'Avery Chen',
+    });
+    db.identityStore.setSelfPersonId(self.id);
+    for (const id of ['shared', 'mention-only', 'unrelated'])
+      saveFixtureMeeting(id, '2026-09-20T12:00:00.000Z');
+    db.identityStore.setBinding('shared', {
+      speaker: 'Speaker 2',
+      personId: person.id,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'source-v1',
+      evidence: [],
+    });
+    db.addMeetingEntity({
+      meeting_id: 'mention-only',
+      entity_id: person.id,
+      context: 'Avery was mentioned.',
+    });
+    for (const [id, meetingId, confirmed] of [
+      ['confirmed-shared', 'shared', true],
+      ['candidate-shared', 'shared', false],
+      ['confirmed-mentioned', 'mention-only', true],
+      ['confirmed-unrelated', 'unrelated', true],
+      ['retired-shared', 'shared', true],
+    ] as const) {
+      const action = db.upsertEntity({
+        id,
+        type: 'action_item',
+        dedupe_by_name: false,
+        name: 'Send the review',
+        status: 'active',
+        assigned_to: confirmed ? null : self.id,
+        metadata: {
+          source_meeting_id: meetingId,
+          ...(id === 'retired-shared'
+            ? { meeting_regeneration_retired_at: '2026-09-21T00:00:00.000Z' }
+            : {}),
+        },
+      });
+      if (confirmed) db.correctActionOwner(action.id, self.id);
+    }
+    expect(
+      db
+        .getPersonBriefing(person.id)
+        ?.sharedCommitments?.open.map((item) => item.id),
+    ).toEqual(['confirmed-shared']);
+    expect(db.getPersonBriefing(self.id)?.sharedCommitments?.open).toEqual([]);
+    db.identityStore.setSelfPersonId(null);
+  });
   it('builds every People list row in one bounded summary read', () => {
     const person = db.upsertEntity({
       id: 'person-summary',

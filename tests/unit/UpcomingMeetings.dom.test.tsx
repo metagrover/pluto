@@ -217,9 +217,11 @@ describe('UpcomingMeetings', () => {
       title: 'Plans with Pookie and the extended family calendar',
     };
     const onOpenSettings = vi.fn();
+    const onPrepare = vi.fn();
     const agenda = render({
       snapshot: snapshot({ selectedCalendar: longCalendar }),
       onOpenSettings,
+      onPrepare,
     });
 
     const heading = agenda.container.querySelector('#upcoming-meetings-title');
@@ -235,6 +237,15 @@ describe('UpcomingMeetings', () => {
     expect(source?.textContent).toContain(longCalendar.title);
     expect(source?.textContent).toContain('iCloud');
     expect(source?.querySelector('.truncate')).not.toBeNull();
+    expect(
+      source?.querySelector('[aria-label="Prepare another conversation"]'),
+    ).toBeNull();
+    agenda.container
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="Prepare for Product review"]',
+      )
+      ?.click();
+    expect(onPrepare).toHaveBeenCalledWith(meeting(0));
     source
       ?.querySelector<HTMLButtonElement>('button[aria-label="Change calendar"]')
       ?.click();

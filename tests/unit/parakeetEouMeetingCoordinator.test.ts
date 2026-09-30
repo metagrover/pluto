@@ -60,6 +60,28 @@ const audio = (source: 'mic' | 'system') => ({
 });
 
 describe('ParakeetEouMeetingCoordinator', () => {
+  it('aborts pending model preparation when recovery or recording is cancelled', async () => {
+    let preparationSignal: AbortSignal | undefined;
+    const coordinator = new ParakeetEouMeetingCoordinator({
+      createClient: (signal) => {
+        preparationSignal = signal;
+        return new Promise((_, reject) =>
+          signal.addEventListener(
+            'abort',
+            () => reject(new Error('cancelled')),
+            { once: true },
+          ),
+        );
+      },
+      onUpdate: vi.fn(),
+      onUnavailable: vi.fn(),
+    });
+    const started = coordinator.start(start);
+    const rejected = expect(started).rejects.toThrow('parakeet_cancelled');
+    await coordinator.cancel(start.meetingId);
+    await rejected;
+    expect(preparationSignal?.aborted).toBe(true);
+  });
   it('fences a cancelled pending creation and preserves the next meeting', async () => {
     const cancelledClient = makeClient();
     const nextClient = makeClient();
