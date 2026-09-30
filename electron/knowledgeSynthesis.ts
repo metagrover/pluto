@@ -16,7 +16,6 @@ import {
   splitKnowledgeSourceChunk,
 } from './knowledgeChunking';
 import {
-  PERSON_CONTEXT_SYNTHESIS_VERSION,
   getKnowledgeSynthesisInputConfig,
   knowledgeDocNeedsSynthesis,
   knowledgeDocSatisfiesMeetingRefresh,
@@ -42,6 +41,10 @@ import {
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
 } from './llm/prompts';
+import {
+  compilePersonKnowledgeChunk,
+  getPersonKnowledgeChunkPrompt,
+} from './personKnowledgeSynthesis';
 import {
   collectPersonSynthesisActivity,
   focusPersonSynthesisSources,
@@ -1131,24 +1134,37 @@ const synthesizeKnowledgeChunkWithRetry = async (params: {
   signal?: AbortSignal;
 }): Promise<KnowledgeCompiledDocument[]> => {
   try {
-    const prompt = getKnowledgeDocumentPrompt({
-      scopeType: params.doc.scope_type,
-      scopeTitle:
-        params.doc.scope_type === 'person_context'
-          ? promptScopeTitle(params.doc)
-          : `${params.doc.title} - ${params.chunk.label}`,
-      sourceMeetings: params.chunk.sourceMeetings,
-      previousStructuredJson: null,
-      claimCorrections: params.claimCorrections,
-    });
-    const structured = await synthesizeStructuredFromPrompt({
-      provider: params.provider,
-      prompt,
-      scopeType: params.doc.scope_type,
-      scopeTitle: params.doc.title,
-      sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
-      signal: params.signal,
-    });
+    const structured =
+      params.doc.scope_type === 'person_context'
+        ? compilePersonKnowledgeChunk(
+            promptScopeTitle(params.doc),
+            params.chunk.index,
+            params.chunk.sourceMeetings,
+            parseKnowledgeJsonResponse(
+              await params.provider.synthesizeKnowledgeDocument(
+                getPersonKnowledgeChunkPrompt(
+                  promptScopeTitle(params.doc),
+                  params.chunk.sourceMeetings,
+                  params.claimCorrections,
+                ),
+                { signal: params.signal },
+              ),
+            ),
+          )
+        : await synthesizeStructuredFromPrompt({
+            provider: params.provider,
+            prompt: getKnowledgeDocumentPrompt({
+              scopeType: params.doc.scope_type,
+              scopeTitle: `${params.doc.title} - ${params.chunk.label}`,
+              sourceMeetings: params.chunk.sourceMeetings,
+              previousStructuredJson: null,
+              claimCorrections: params.claimCorrections,
+            }),
+            scopeType: params.doc.scope_type,
+            scopeTitle: params.doc.title,
+            sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+            signal: params.signal,
+          });
     return hasStructuredContent(structured) ? [structured] : [];
   } catch (error) {
     if (params.signal?.aborted) throw error;
@@ -1221,10 +1237,19 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
     if (queuedSynthesisPaused) {
       throw new DOMException('foreground_preempted', 'AbortError');
     }
-    for (const [index, structured] of structuredDocs.entries()) {
+    const completeChunkDocs =
+      structuredDocs.length === 0 && params.doc.scope_type === 'person_context'
+        ? [
+            buildDeterministicKnowledgeV2Document(
+              { type: 'person_context', title: params.doc.title },
+              chunk.sourceMeetings,
+            ),
+          ]
+        : structuredDocs;
+    for (const [index, structured] of completeChunkDocs.entries()) {
       chunkDocs.push({
         label:
-          structuredDocs.length === 1
+          completeChunkDocs.length === 1
             ? chunk.label
             : `${chunk.label} part ${index + 1}`,
         structured,
@@ -1263,6 +1288,20 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
     return buildDeterministicKnowledgeV2Document(
       { type: params.doc.scope_type, title: params.doc.title },
       params.sourceMeetings,
+    );
+  }
+
+  if (params.doc.scope_type === 'person_context') {
+    return mergeKnowledgeV2Documents(
+      { type: 'person_context', title: params.doc.title },
+      chunkDocs.map((chunk) =>
+        isKnowledgeV2Document(chunk.structured)
+          ? chunk.structured
+          : buildDeterministicKnowledgeV2Document(
+              { type: 'person_context', title: params.doc.title },
+              params.sourceMeetings,
+            ),
+      ),
     );
   }
 
@@ -1333,12 +1372,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
         label: chunk.label,
         structuredJson: JSON.stringify(chunk.structured),
       })),
-      previousStructuredJson:
-        params.doc.scope_type === 'person_context' &&
-        (parseKnowledgeDocConfig(params.doc.config).synthesis_version ?? 0) <
-          PERSON_CONTEXT_SYNTHESIS_VERSION
-          ? null
-          : params.doc.structured_json,
+      previousStructuredJson: params.doc.structured_json,
       claimCorrections: params.claimCorrections,
     });
     const merged = await synthesizeStructuredFromPrompt({
