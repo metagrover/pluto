@@ -8,8 +8,9 @@ describe('person dossier read', () => {
   it('refreshes older completed reads and waits for the current one', () => {
     expect(isCurrentPersonDossier('up_to_date', 7)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 8)).toBe(false);
-    expect(isCurrentPersonDossier('synthesizing', 9)).toBe(false);
-    expect(isCurrentPersonDossier('up_to_date', 9)).toBe(true);
+    expect(isCurrentPersonDossier('up_to_date', 9)).toBe(false);
+    expect(isCurrentPersonDossier('synthesizing', 10)).toBe(false);
+    expect(isCurrentPersonDossier('up_to_date', 10)).toBe(true);
   });
 
   it('leads with recurring work and shows an attributable example', () => {
@@ -88,6 +89,11 @@ describe('person dossier read', () => {
           title: 'Query and Pipeline Optimization',
           current_read: 'Avery improved query performance.',
         },
+        {
+          id: 'merged-uat-stream',
+          title: 'UAT and Content Strategy',
+          current_read: 'Avery worked across UAT and content.',
+        },
       ],
       [
         {
@@ -107,6 +113,18 @@ describe('person dossier read', () => {
           meeting_title: 'Release review',
           quote: 'Avery reviewed the release checklist.',
           stream_ids: ['chunk-release-stream'],
+        },
+        {
+          meeting_id: 'meeting-four',
+          meeting_title: 'Testing review',
+          quote: 'Avery is addressing missing personas in UAT.',
+          stream_ids: ['chunk-uat-stream'],
+        },
+        {
+          meeting_id: 'meeting-five',
+          meeting_title: 'Performance testing',
+          quote: 'Avery is reviewing test cases before UAT.',
+          stream_ids: ['chunk-testing-stream'],
         },
       ],
     );
