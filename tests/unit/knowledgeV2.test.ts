@@ -210,6 +210,41 @@ describe('knowledge V2 utilities', () => {
     expect(mismatchedIds.evidence_index[0].stream_ids).toContain(
       'merged-query',
     );
+
+    const broadTitle = groundPersonKnowledgeV2Document(
+      {
+        ...doc,
+        active_streams: [
+          {
+            ...doc.active_streams[0],
+            id: 'interface',
+            title: 'Interface and Data Validation',
+          },
+        ],
+        evidence_index: [
+          {
+            ...doc.evidence_index[0],
+            quote: 'Avery added the client tenure to the UI.',
+            stream_ids: ['interface'],
+          },
+          {
+            ...doc.evidence_index[0],
+            id: 'second',
+            meeting_id: 'm2',
+            quote: 'Avery will review the tenure field.',
+            stream_ids: ['interface'],
+          },
+        ],
+      },
+      new Map([
+        ['m1', 'avery added the client tenure to the ui.'],
+        ['m2', 'avery will review the tenure field.'],
+      ]),
+    );
+    expect(broadTitle.active_streams.map((stream) => stream.id)).toEqual([
+      'interface',
+    ]);
+    expect(broadTitle.current_read.source_count).toBe(2);
   });
 
   it('filters true throwaway recordings without blocking testing strategy meetings', () => {
