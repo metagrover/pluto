@@ -151,6 +151,57 @@ describe('person dossier read', () => {
     expect(result.workstreams).toEqual([]);
   });
 
+  it('summarizes a narrow repeated activity from separate person-specific notes', () => {
+    const activity = [
+      {
+        meeting_id: 'meeting-two',
+        meeting_title: 'Technical check-in',
+        captured_at: '2026-09-23T12:00:00.000Z',
+        quote: 'Avery is preparing SQL queries for the report.',
+        stream_ids: [],
+      },
+      {
+        meeting_id: 'meeting-one',
+        meeting_title: 'Data review',
+        captured_at: '2026-09-22T12:00:00.000Z',
+        quote: 'Avery is working to replace stale views with reliable queries.',
+        stream_ids: [],
+      },
+    ];
+    const result = buildPersonDossierRead('Avery', [], [], activity);
+
+    expect(result.headline).toBe(
+      'Recent conversations show Avery working on queries.',
+    );
+    expect(
+      result.workstreams[0]?.sources.map((source) => source.meeting_id),
+    ).toEqual(['meeting-two', 'meeting-one']);
+  });
+
+  it('does not infer a shared work area from a repeated collaborator name', () => {
+    const result = buildPersonDossierRead(
+      'Avery',
+      [],
+      [],
+      [
+        {
+          meeting_id: 'meeting-one',
+          meeting_title: 'Interface review',
+          quote: 'Avery worked with Jordan on the onboarding layout.',
+          stream_ids: [],
+        },
+        {
+          meeting_id: 'meeting-two',
+          meeting_title: 'Launch review',
+          quote: 'Avery worked with Jordan on the announcement email.',
+          stream_ids: [],
+        },
+      ],
+    );
+
+    expect(result.headline).toBeNull();
+  });
+
   it('keeps repeated direct evidence when a broad stream title omits its shared topic', () => {
     const result = buildPersonDossierRead(
       'Avery',

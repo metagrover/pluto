@@ -806,10 +806,29 @@ export const PersonDossier = ({
       'No reliable compiled brief yet.',
       'Indexed knowledge needs a stronger synthesis.',
     ].includes(brief.headline);
+  const personActivity = (currentDetail.recentActivity ?? []).filter(
+    (item) => !/\bwill (?:notify|ping|inform)\b/i.test(item.text),
+  );
+  const activityNames = [
+    currentDetail.person.name,
+    currentDetail.person.name.split(' ')[0],
+  ];
+  const rankedActivity = [...personActivity].sort(
+    (a, b) =>
+      scorePersonActivity(b.text, activityNames) -
+      scorePersonActivity(a.text, activityNames),
+  );
   const personRead = buildPersonDossierRead(
     currentDetail.person.name,
     brief.activeStreams,
     brief.evidenceIndex,
+    rankedActivity.slice(0, 8).map((item) => ({
+      meeting_id: item.meetingId,
+      meeting_title: item.meetingTitle,
+      captured_at: item.occurredAt,
+      quote: item.text,
+      stream_ids: [],
+    })),
   );
   const personReadSourceCount = new Set(
     personRead.workstreams.flatMap((stream) =>
@@ -829,18 +848,6 @@ export const PersonDossier = ({
     (currentDetail.knowledgeDoc?.status === 'up_to_date' ||
       currentDetail.knowledgeDoc?.status === 'synthesizing') &&
     Boolean(personRead.headline);
-  const personActivity = (currentDetail.recentActivity ?? []).filter(
-    (item) => !/\bwill (?:notify|ping|inform)\b/i.test(item.text),
-  );
-  const activityNames = [
-    currentDetail.person.name,
-    currentDetail.person.name.split(' ')[0],
-  ];
-  const rankedActivity = [...personActivity].sort(
-    (a, b) =>
-      scorePersonActivity(b.text, activityNames) -
-      scorePersonActivity(a.text, activityNames),
-  );
   const sourceNoteOverview = hasPersonSummary
     ? []
     : rankedActivity
