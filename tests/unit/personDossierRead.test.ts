@@ -9,8 +9,9 @@ describe('person dossier read', () => {
     expect(isCurrentPersonDossier('up_to_date', 7)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 8)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 9)).toBe(false);
-    expect(isCurrentPersonDossier('synthesizing', 10)).toBe(false);
-    expect(isCurrentPersonDossier('up_to_date', 10)).toBe(true);
+    expect(isCurrentPersonDossier('up_to_date', 10)).toBe(false);
+    expect(isCurrentPersonDossier('synthesizing', 11)).toBe(false);
+    expect(isCurrentPersonDossier('up_to_date', 11)).toBe(true);
   });
 
   it('leads with recurring work and shows an attributable example', () => {
@@ -114,6 +115,36 @@ describe('person dossier read', () => {
 
     expect(result.headline).toBeNull();
     expect(result.workstreams).toEqual([]);
+  });
+
+  it('keeps repeated direct evidence when a broad stream title omits its shared topic', () => {
+    const result = buildPersonDossierRead(
+      'Avery',
+      [
+        {
+          id: 'interface',
+          title: 'Interface and Data Validation',
+          current_read: 'Avery is refining the tenure field in the UI.',
+        },
+      ],
+      [
+        {
+          meeting_id: 'meeting-one',
+          meeting_title: 'Interface review',
+          quote: 'Avery added the client tenure to the UI.',
+          stream_ids: ['interface'],
+        },
+        {
+          meeting_id: 'meeting-two',
+          meeting_title: 'Field review',
+          quote: 'Avery will review the tenure field.',
+          stream_ids: ['interface'],
+        },
+      ],
+    );
+
+    expect(result.workstreams).toHaveLength(1);
+    expect(result.workstreams[0]?.sources).toHaveLength(2);
   });
 
   it('reconnects recurring evidence when merged stream IDs differ', () => {

@@ -1835,8 +1835,12 @@ export const PersonDossier = ({
               ))}
             </div>
             <p className="mt-3 max-w-[68ch] font-sans text-xs leading-5 text-pro-text-main/80">
-              From person-specific meeting notes. A broader account of their
-              role and contributions is being prepared.
+              {isCurrentPersonDossier(
+                currentDetail.knowledgeDoc?.status,
+                summaryVersion,
+              )
+                ? 'From person-specific meeting notes. Pluto has not established a broader role summary from this synthesis.'
+                : 'From person-specific meeting notes. A broader account of their role and contributions is being prepared.'}
             </p>
           </div>
         ) : (
@@ -1846,7 +1850,7 @@ export const PersonDossier = ({
                 ? 'The person summary could not be updated. Recent developments remain available below.'
                 : summaryVersion >= 6 &&
                     currentDetail.knowledgeDoc?.status === 'up_to_date'
-                  ? 'The linked conversations do not yet establish a reliable summary of this person’s role and contributions.'
+                  ? 'Pluto has not established a source-backed summary of this person’s role and contributions.'
                   : confirmedMeetings.length === 0 &&
                       (currentDetail.recentActivity ?? []).length === 0
                     ? 'There is not enough verified context to describe this person yet.'
