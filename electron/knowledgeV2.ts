@@ -183,18 +183,9 @@ export const groundPersonKnowledgeV2Document = (
   const evidenceIndex = doc.evidence_index.filter((entry) =>
     supported(entry.meeting_id, entry.quote),
   );
-  const supportedStreamIds = new Set([
-    ...evidenceIndex.flatMap((entry) => entry.stream_ids),
-    ...[...needsAttention, ...patterns, ...risksAndUnknowns].flatMap(
-      (item) => item.stream_ids,
-    ),
-  ]);
-  const activeStreams = doc.active_streams.filter((stream) =>
-    supportedStreamIds.has(stream.id),
-  );
   const personRead = buildPersonDossierRead(
     expectedPersonName,
-    activeStreams,
+    doc.active_streams,
     evidenceIndex,
   );
   const recurringStreamIds = new Set(
@@ -233,7 +224,7 @@ export const groundPersonKnowledgeV2Document = (
         source_count: headlineMeetingIds.size,
       },
     },
-    active_streams: activeStreams
+    active_streams: doc.active_streams
       .filter((stream) => recurringStreamIds.has(stream.id))
       .map((stream) => ({
         ...stream,
@@ -243,7 +234,17 @@ export const groundPersonKnowledgeV2Document = (
     needs_attention: needsAttention.map(cleanItem),
     patterns: patterns.map(cleanItem),
     risks_and_unknowns: risksAndUnknowns.map(cleanItem),
-    evidence_index: evidenceIndex,
+    evidence_index: evidenceIndex.map((entry) => ({
+      ...entry,
+      stream_ids: Array.from(
+        new Set([
+          ...entry.stream_ids,
+          ...personRead.workstreams
+            .filter((stream) => stream.sources.includes(entry))
+            .map((stream) => stream.id),
+        ]),
+      ),
+    })),
   };
 };
 
