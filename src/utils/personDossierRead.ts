@@ -38,6 +38,21 @@ const genericTitleWords = new Set([
   'management',
   'support',
 ]);
+const connectiveWords = new Set([
+  'and',
+  'are',
+  'for',
+  'from',
+  'has',
+  'into',
+  'the',
+  'their',
+  'they',
+  'this',
+  'was',
+  'were',
+  'with',
+]);
 
 const topicWords = (text: string): Set<string> =>
   new Set(
@@ -77,6 +92,24 @@ export const cleanPersonReadText = (text: string): string =>
     .replace(/\.{2,}/g, '.')
     .trim();
 
+const sourceBackedRead = (
+  read: string,
+  sources: PersonReadEvidence[],
+): string | null => {
+  const clean = cleanPersonReadText(read);
+  if (!clean || clean.length > 240) return null;
+  const sourceWords = new Set(
+    sources.flatMap((source) => [...topicWords(source.quote)]),
+  );
+  const claimWords = [...topicWords(clean)].filter(
+    (word) => word.length >= 3 && !connectiveWords.has(word),
+  );
+  return claimWords.length > 0 &&
+    claimWords.every((word) => sourceWords.has(word))
+    ? clean
+    : null;
+};
+
 /** Only recurring, named work may describe a person's operating capacity. */
 export const buildPersonDossierRead = <T extends PersonReadEvidence>(
   name: string,
@@ -103,6 +136,7 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
       return {
         id: stream.id,
         title: cleanPersonReadText(stream.title),
+        read: sourceBackedRead(stream.current_read, sources),
         detail: cleanPersonReadText(
           sources.find((source) => observedWork.test(source.quote))?.quote ??
             stream.current_read,
@@ -122,9 +156,12 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
     word.toLocaleLowerCase(),
   );
   return {
-    headline: topic
-      ? `${name} has worked on ${topic} across multiple conversations.`
-      : null,
+    headline:
+      recurring.length === 1 && recurring[0]?.read
+        ? recurring[0].read
+        : topic
+          ? `${name} has worked on ${topic} across multiple conversations.`
+          : null,
     workstreams: recurring,
   };
 };

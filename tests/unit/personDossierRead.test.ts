@@ -50,6 +50,42 @@ describe('person dossier read', () => {
     expect(result.workstreams[0]?.sources[0]?.meeting_id).toBe('meeting-two');
   });
 
+  it('uses a concise model read only when every factual word appears in the cited sources', () => {
+    const sources = [
+      {
+        meeting_id: 'meeting-one',
+        meeting_title: 'Query review',
+        quote: 'Avery is improving query performance for the pipeline.',
+        stream_ids: ['query'],
+      },
+      {
+        meeting_id: 'meeting-two',
+        meeting_title: 'Pipeline review',
+        quote: 'Avery is optimizing queries in the pipeline.',
+        stream_ids: ['query'],
+      },
+    ];
+    const stream = {
+      id: 'query',
+      title: 'Query and Pipeline Optimization',
+      current_read:
+        'Avery is improving query performance and optimizing the pipeline.',
+    };
+
+    expect(buildPersonDossierRead('Avery', [stream], sources).headline).toBe(
+      stream.current_read,
+    );
+    expect(
+      buildPersonDossierRead(
+        'Avery',
+        [{ ...stream, current_read: 'Avery leads query performance work.' }],
+        sources,
+      ).headline,
+    ).toBe(
+      'Avery has worked on query and pipeline optimization across multiple conversations.',
+    );
+  });
+
   it('does not merge unrelated one-off tasks into a recurring work area', () => {
     const result = buildPersonDossierRead(
       'Avery',
