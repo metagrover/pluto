@@ -23,6 +23,64 @@ const saveMeeting = (id: string, day: number) =>
   });
 
 describe('canonical person identity', () => {
+  it('excludes the owner alias family from People and dossier creation', () => {
+    const canonical = db.upsertEntity({
+      id: 'owner-canonical',
+      type: 'person',
+      name: 'Morgan Vale',
+      dedupe_by_name: false,
+    });
+    const alias = db.upsertEntity({
+      id: 'owner-alias',
+      type: 'person',
+      name: 'M. Vale',
+      dedupe_by_name: false,
+    });
+    saveMeeting('owner-meeting-a', 20);
+    saveMeeting('owner-meeting-b', 21);
+    for (const meetingId of ['owner-meeting-a', 'owner-meeting-b']) {
+      db.addMeetingEntity({
+        meeting_id: meetingId,
+        entity_id: alias.id,
+        mention_count: 2,
+      });
+    }
+    db.mergePerson(alias.id, canonical.id);
+    db.identityStore.setSelfPersonId(alias.id);
+    try {
+      const oldAliasDoc = db.upsertKnowledgeDoc({
+        scope_type: 'person_context',
+        scope_key: alias.id,
+        title: 'Earlier owner dossier',
+        status: 'stale',
+      });
+      expect(
+        db.getPeopleBriefingSummaries().some((row) => row.id === canonical.id),
+      ).toBe(false);
+      expect(
+        db
+          .getKnowledgeDocPersonCandidates({
+            activeDays: 60,
+            minMeetings: 2,
+            minMentions: 3,
+          })
+          .some((candidate) => candidate.person_id === canonical.id),
+      ).toBe(false);
+      db.syncKnowledgePersonLifecycle({
+        activeDays: 60,
+        minMeetings: 2,
+        minMentions: 3,
+      });
+      expect(
+        db.getKnowledgeDocByScope('person_context', canonical.id),
+      ).toBeUndefined();
+      expect(db.getKnowledgeDoc(oldAliasDoc.id)?.status).toBe('stale');
+      expect(db.getPersonBriefing(canonical.id)?.person.id).toBe(canonical.id);
+    } finally {
+      db.identityStore.setSelfPersonId(null);
+    }
+  });
+
   it('renames the canonical person and resolves future detections of the old name', () => {
     const person = db.upsertEntity({
       id: 'rename-person',

@@ -5019,7 +5019,11 @@ export const getKnowledgeDocPersonCandidates = (options?: {
   const minMeetings = options?.minMeetings ?? 2;
   const minMentions = options?.minMentions ?? 3;
 
-  return db
+  const selfPersonId = identityStore.getSelfPersonId();
+  const canonicalSelfPersonId = selfPersonId
+    ? resolvePersonIdentityId(selfPersonId)
+    : null;
+  const candidates = db
     .prepare(`
       WITH person_identity AS (
         SELECT e.id AS source_id,
@@ -5046,6 +5050,9 @@ export const getKnowledgeDocPersonCandidates = (options?: {
       ORDER BY meeting_count DESC, mention_count DESC
     `)
     .all(activeDays, minMeetings, minMentions) as KnowledgeDocPersonCandidate[];
+  return candidates.filter(
+    (candidate) => candidate.person_id !== canonicalSelfPersonId,
+  );
 };
 
 /**
@@ -5090,10 +5097,19 @@ export const syncKnowledgePersonLifecycle = (options?: {
       "SELECT * FROM knowledge_docs WHERE scope_type = 'person_context' ORDER BY updated_at DESC",
     )
     .all() as KnowledgeDoc[];
+  const selfPersonId = identityStore.getSelfPersonId();
+  const canonicalSelfPersonId = selfPersonId
+    ? resolvePersonIdentityId(selfPersonId)
+    : null;
   const inactiveDocIds: string[] = [];
   const inactiveDays = options?.inactiveDays ?? 90;
 
   for (const doc of personDocs) {
+    if (
+      canonicalSelfPersonId &&
+      resolvePersonIdentityId(doc.scope_key) === canonicalSelfPersonId
+    )
+      continue;
     if (activePersonIds.has(doc.scope_key)) continue;
     const hasRecentMention = (
       db
@@ -9117,12 +9133,8 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
 
   return rows
     .filter((row) => isUsablePersonName(row.name))
+    .filter((row) => row.id !== canonicalSelfPersonId)
     .map((row) => {
-      const isSelf =
-        canonicalSelfPersonId !== null && row.id === canonicalSelfPersonId;
-      const verifiedOpenCount = Number(
-        row.verified_open_commitment_count ?? row.open_commitment_count,
-      );
       const allAssignedOpenCount = Number(row.open_commitment_count);
       const candidateCount = Number(row.candidate_commitment_count);
       return {
@@ -9136,15 +9148,13 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         latestMeetingTitle: row.latest_meeting_title,
         latestMeetingAt: row.latest_meeting_at,
         context: row.latest_context,
-        openCommitmentCount: isSelf
-          ? verifiedOpenCount
-          : allAssignedOpenCount + candidateCount,
-        candidateCommitmentCount: isSelf ? candidateCount : 0,
+        openCommitmentCount: allAssignedOpenCount + candidateCount,
+        candidateCommitmentCount: 0,
         briefHeadline: row.brief_headline,
         briefStatus: row.brief_status,
         briefUpdatedAt: row.brief_updated_at,
         possibleDuplicateCount: Number(row.possible_duplicate_count),
-        isSelf,
+        isSelf: false,
       };
     })
     .sort(

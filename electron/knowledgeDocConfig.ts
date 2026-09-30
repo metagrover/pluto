@@ -8,6 +8,14 @@ export { PERSON_CONTEXT_SYNTHESIS_VERSION };
 export const shouldPublishPartialKnowledgeDoc = (scopeType: string): boolean =>
   scopeType !== 'person_context';
 
+export const isOwnPersonContextDoc = (
+  doc: { scope_type: string; scope_key: string },
+  canonicalSelfPersonId: string | null,
+): boolean =>
+  doc.scope_type === 'person_context' &&
+  canonicalSelfPersonId !== null &&
+  doc.scope_key === canonicalSelfPersonId;
+
 const synthesisVersionForScope = (scopeType?: string): number =>
   scopeType === 'person_context'
     ? PERSON_CONTEXT_SYNTHESIS_VERSION

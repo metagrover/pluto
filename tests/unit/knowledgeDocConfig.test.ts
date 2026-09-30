@@ -4,6 +4,7 @@ import {
   KNOWLEDGE_SYNTHESIS_VERSION,
   PERSON_CONTEXT_SYNTHESIS_VERSION,
   getKnowledgeSynthesisInputConfig,
+  isOwnPersonContextDoc,
   knowledgeDocNeedsSynthesis,
   knowledgeDocSatisfiesMeetingRefresh,
   shouldPublishPartialKnowledgeDoc,
@@ -11,6 +12,27 @@ import {
 } from '../../electron/knowledgeDocConfig';
 
 describe('knowledge doc config', () => {
+  it('only skips automatic synthesis for the canonical self person dossier', () => {
+    expect(
+      isOwnPersonContextDoc(
+        { scope_type: 'person_context', scope_key: 'canonical-self' },
+        'canonical-self',
+      ),
+    ).toBe(true);
+    expect(
+      isOwnPersonContextDoc(
+        { scope_type: 'person_context', scope_key: 'colleague' },
+        'canonical-self',
+      ),
+    ).toBe(false);
+    expect(
+      isOwnPersonContextDoc(
+        { scope_type: 'global', scope_key: 'global' },
+        'canonical-self',
+      ),
+    ).toBe(false);
+  });
+
   it('keeps a complete person read in place until its replacement is ready', () => {
     expect(shouldPublishPartialKnowledgeDoc('person_context')).toBe(false);
     expect(shouldPublishPartialKnowledgeDoc('project')).toBe(true);

@@ -157,16 +157,17 @@ export const PeopleBriefing = ({
   onDeletePerson?: (personId: string, personName: string) => Promise<void>;
 }) => {
   const [query, setQuery] = useState('');
+  const visibleRows = useMemo(() => rows.filter((row) => !row.isSelf), [rows]);
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return normalized
-      ? rows.filter((row) =>
+      ? visibleRows.filter((row) =>
           `${row.name} ${row.role} ${row.briefHeadline ?? ''} ${row.latestMeetingTitle ?? ''}`
             .toLowerCase()
             .includes(normalized),
         )
-      : rows;
-  }, [query, rows]);
+      : visibleRows;
+  }, [query, visibleRows]);
 
   const regularRows = useMemo(
     () => sortPeopleRows(filtered.filter((row) => isRegularCollaborator(row))),
@@ -293,7 +294,7 @@ export const PeopleBriefing = ({
     <section aria-label="People" className="people-briefing">
       <PageHeader title="People">
         <div className="flex flex-wrap items-center gap-2">
-          {rows.length > 0 && (
+          {visibleRows.length > 0 && (
             <label className="people-search">
               <Search aria-hidden="true" size={13} />
               <span className="sr-only">Search people</span>
@@ -317,7 +318,7 @@ export const PeopleBriefing = ({
         </div>
       </PageHeader>
 
-      {rows.length === 0 ? (
+      {visibleRows.length === 0 ? (
         <div className="people-empty">
           <UserRound aria-hidden="true" size={22} />
           <h2>No relationship context yet</h2>
@@ -1222,6 +1223,7 @@ export const PersonDossier = ({
 
   useEffect(() => {
     if (
+      currentDetail.isSelf ||
       !currentDetail.knowledgeDoc ||
       meetingCount === 0 ||
       isCurrentPersonDossier(
@@ -1235,6 +1237,7 @@ export const PersonDossier = ({
     autoRefreshedPersonId.current = currentDetail.person.id;
     void handleSynthesizeFreshRead();
   }, [
+    currentDetail.isSelf,
     currentDetail.person.id,
     currentDetail.knowledgeDoc,
     meetingCount,
@@ -1243,6 +1246,7 @@ export const PersonDossier = ({
 
   useEffect(() => {
     if (
+      currentDetail.isSelf ||
       !currentDetail.knowledgeDoc ||
       isCurrentPersonDossier(currentDetail.knowledgeDoc.status, summaryVersion)
     ) {
@@ -1268,6 +1272,7 @@ export const PersonDossier = ({
       window.clearInterval(timer);
     };
   }, [
+    currentDetail.isSelf,
     currentDetail.person.id,
     currentDetail.knowledgeDoc?.id,
     currentDetail.knowledgeDoc?.status,

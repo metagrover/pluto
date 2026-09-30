@@ -270,10 +270,7 @@ describe('person briefing database read model', () => {
       db
         .getPeopleBriefingSummaries()
         .find((summary) => summary.id === person.id),
-    ).toMatchObject({
-      openCommitmentCount: 1,
-      candidateCommitmentCount: 1,
-    });
+    ).toBeUndefined();
     expect(selfBriefing?.commitments.open.map((item) => item.id)).toEqual([
       'verified-action',
     ]);
@@ -365,10 +362,7 @@ describe('person briefing database read model', () => {
       db
         .getPeopleBriefingSummaries()
         .find((summary) => summary.id === person.id),
-    ).toMatchObject({
-      openCommitmentCount: 0,
-      candidateCommitmentCount: 1,
-    });
+    ).toBeUndefined();
 
     const selfBriefing = db.getPersonBriefing(person.id);
     expect(selfBriefing?.commitments.candidates).toEqual([
