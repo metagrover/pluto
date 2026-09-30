@@ -259,6 +259,36 @@ describe('person dossier read', () => {
     expect(result.workstreams[0]?.sources).toHaveLength(2);
   });
 
+  it('does not replace the latest work with an older repeated topic', () => {
+    const result = buildPersonDossierRead(
+      'Avery',
+      [],
+      [],
+      [
+        {
+          meeting_id: 'meeting-three',
+          meeting_title: 'Current work',
+          quote: 'Avery is preparing a launch checklist.',
+          stream_ids: [],
+        },
+        {
+          meeting_id: 'meeting-two',
+          meeting_title: 'Earlier work',
+          quote: 'Avery worked on an archive migration.',
+          stream_ids: [],
+        },
+        {
+          meeting_id: 'meeting-one',
+          meeting_title: 'Earlier planning',
+          quote: 'Avery reviewed the archive migration.',
+          stream_ids: [],
+        },
+      ],
+    );
+
+    expect(result.headline).toBeNull();
+  });
+
   it('keeps repeated direct evidence when a broad stream title omits its shared topic', () => {
     const result = buildPersonDossierRead(
       'Avery',

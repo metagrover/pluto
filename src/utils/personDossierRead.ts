@@ -65,13 +65,17 @@ const genericEvidenceWords = new Set([
   'added',
   'adding',
   'client',
+  'current',
   'currently',
   'data',
   'field',
   'identified',
   'identifying',
   'meeting',
+  'needed',
+  'other',
   'performance',
+  'process',
   'project',
   'review',
   'reviewed',
@@ -154,16 +158,18 @@ const recurringActivityRead = <T extends PersonReadEvidence>(
 ) => {
   const nameWords = topicWords(name);
   const sources = evidence;
-  const anchors = sources.flatMap((source) =>
-    (source.quote.match(/\b[a-z][a-z]+\b/g) ?? [])
-      .map((word) => ({ word, topic: [...topicWords(word)][0] }))
-      .filter(
-        ({ topic }) =>
-          topic.length >= 5 &&
-          !nameWords.has(topic) &&
-          !genericEvidenceWords.has(topic),
-      ),
-  );
+  const anchors = sources
+    .slice(0, 1)
+    .flatMap((source) =>
+      (source.quote.match(/\b[a-z][a-z]+\b/g) ?? [])
+        .map((word) => ({ word, topic: [...topicWords(word)][0] }))
+        .filter(
+          ({ topic }) =>
+            topic.length >= 5 &&
+            !nameWords.has(topic) &&
+            !genericEvidenceWords.has(topic),
+        ),
+    );
   for (const { word, topic } of anchors) {
     const matches = sources.filter((source) =>
       topicWords(source.quote).has(topic),
