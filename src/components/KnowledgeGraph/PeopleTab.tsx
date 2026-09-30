@@ -1788,6 +1788,11 @@ export const PersonDossier = ({
                     <div className="mt-3 space-y-3">
                       {stream.sources.slice(0, 2).map((source) => (
                         <div key={source.meeting_id}>
+                          {source.captured_at && (
+                            <p className="mb-1 text-xs font-medium text-pro-text-muted">
+                              {`Discussed ${formatDate(source.captured_at)}`}
+                            </p>
+                          )}
                           <p className="text-sm leading-6 text-pro-text-main/90">
                             {source.quote}
                           </p>
@@ -1797,9 +1802,6 @@ export const PersonDossier = ({
                             onClick={() => onOpenMeeting(source.meeting_id)}
                           >
                             {source.meeting_title || 'Open source meeting'}
-                            {source.captured_at
-                              ? ` · ${formatDate(source.captured_at)}`
-                              : ''}
                           </button>
                         </div>
                       ))}
@@ -1814,7 +1816,12 @@ export const PersonDossier = ({
             <div className="max-w-[68ch] space-y-5">
               {sourceNoteOverview.map((item) => (
                 <article key={`${item.meetingId}-${item.text}`}>
-                  <p className="font-serif text-lg leading-7 text-pro-text-main">
+                  {item.occurredAt && (
+                    <p className="mb-1 text-xs font-medium text-pro-text-muted">
+                      {`Discussed ${formatDate(item.occurredAt)}`}
+                    </p>
+                  )}
+                  <p className="text-[15px] leading-7 text-pro-text-main">
                     {item.text}
                   </p>
                   <button
@@ -1823,7 +1830,6 @@ export const PersonDossier = ({
                     onClick={() => onOpenMeeting(item.meetingId)}
                   >
                     {item.meetingTitle}
-                    {item.occurredAt ? ` · ${formatDate(item.occurredAt)}` : ''}
                   </button>
                 </article>
               ))}
