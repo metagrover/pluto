@@ -144,6 +144,103 @@ describe('SpeakerIdentificationModal', () => {
     expect(document.body.querySelector('dialog, [role="dialog"]')).toBeNull();
   });
 
+  it('advances unchanged confirmed speakers without saving or enrolling again', async () => {
+    const saved = meeting();
+    saved.bindings = ['Remote Speaker 1', 'Remote Speaker 2'].map(
+      (speaker) => ({
+        speaker,
+        personId: 'person-jordan',
+        source: 'user',
+        individual: true,
+        sourceRevision: 'source-1',
+        evidence: [],
+      }),
+    );
+    const originalInvoke = invoke.getMockImplementation()!;
+    invoke.mockImplementation((channel, payload) =>
+      channel === 'GET_MEETING_IDENTITY'
+        ? Promise.resolve(saved)
+        : originalInvoke(channel, payload),
+    );
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={vi.fn()}
+          meetingId="meeting-modal"
+          attendeeNames={['Jordan Doe']}
+        />,
+      );
+    });
+
+    await click('Next');
+    expect(document.body.textContent).toContain('Speaker 2 of 2');
+    await click('Back');
+    await act(async () => {
+      typeInput(
+        document.querySelector('input[role="combobox"]') as HTMLInputElement,
+        'Jordan Doe',
+      );
+    });
+    await click('Next');
+    await click('Back');
+    await click('+ Jordan Doe');
+    await click('Next');
+    expect(document.body.textContent).toContain('Done');
+    expect(invoke.mock.calls.map(([channel]) => channel)).not.toContain(
+      'SET_MEETING_IDENTITY_BINDING',
+    );
+    expect(invoke.mock.calls.map(([channel]) => channel)).not.toContain(
+      'SPEAKER_VOICE_ENROLL',
+    );
+  });
+
+  it.each([
+    'voice_match_strong_v1',
+    'manual_participant_singleton_v1',
+  ] as const)(
+    'still explicitly confirms an automatic %s assignment',
+    async (kind) => {
+      const saved = meeting();
+      saved.bindings = [
+        {
+          speaker: 'Remote Speaker 1',
+          personId: 'person-jordan',
+          source: 'user',
+          individual: true,
+          sourceRevision: 'source-1',
+          evidence: [],
+          assignment: { kind },
+        },
+      ];
+      const originalInvoke = invoke.getMockImplementation()!;
+      invoke.mockImplementation((channel, payload) =>
+        channel === 'GET_MEETING_IDENTITY'
+          ? Promise.resolve(saved)
+          : originalInvoke(channel, payload),
+      );
+      await act(async () => {
+        root.render(
+          <SpeakerIdentificationModal
+            isOpen={true}
+            onClose={vi.fn()}
+            meetingId="meeting-modal"
+          />,
+        );
+      });
+
+      await click('Confirm & Next');
+      expect(invoke).toHaveBeenCalledWith(
+        'SET_MEETING_IDENTITY_BINDING',
+        expect.objectContaining({
+          speaker: 'Remote Speaker 1',
+          personId: 'person-jordan',
+        }),
+      );
+      expect(document.body.textContent).toContain('Speaker 2 of 2');
+    },
+  );
+
   it('renders modal with step indicator and skips workspace user from suggested chips', async () => {
     await act(async () => {
       root.render(

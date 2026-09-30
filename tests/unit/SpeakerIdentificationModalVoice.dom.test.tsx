@@ -776,6 +776,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     invoke.mockImplementation(async (channel: string, payload: any) => {
       if (channel === 'GET_IDENTITY_STATE') return workspace;
       if (channel === 'GET_MEETING_IDENTITY') {
+        if (enrollmentAttempt === 0) return meeting(payload?.meetingId);
         return {
           ...meeting(payload?.meetingId ?? 'meeting-voice'),
           revision: 12,

@@ -524,12 +524,30 @@ export const SpeakerIdentificationModal = ({
     ];
   });
 
+  const isUnchangedBinding = (
+    speaker: string,
+    selection: IdentitySelection,
+  ) => {
+    const binding = state?.bindings.find((item) => item.speaker === speaker);
+    return Boolean(
+      selection.personId &&
+        binding?.personId === selection.personId &&
+        binding.source === 'user' &&
+        binding.individual &&
+        !binding.assignment,
+    );
+  };
+
   const saveBinding = async (
     speaker: string,
     selection: IdentitySelection,
     autoAdvance = true,
   ) => {
     if (!state || busy) return;
+    if (isUnchangedBinding(speaker, selection)) {
+      if (autoAdvance) handleNextOrSkip();
+      return;
+    }
     setBusy(true);
     setError('');
     const bindingStart = performance.now();
@@ -1232,7 +1250,16 @@ export const SpeakerIdentificationModal = ({
                     onClick={handleConfirmCurrent}
                     className="inline-flex items-center justify-center rounded-lg bg-pro-accent px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-pro-accent/90 disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
                   >
-                    {busy ? 'Saving…' : 'Confirm & Next'}
+                    {busy
+                      ? 'Saving…'
+                      : isUnchangedBinding(
+                            currentSpeaker,
+                            selectedSelection ?? {
+                              personId: exactMatch?.id ?? null,
+                            },
+                          )
+                        ? 'Next'
+                        : 'Confirm & Next'}
                   </button>
                 )}
               </>
