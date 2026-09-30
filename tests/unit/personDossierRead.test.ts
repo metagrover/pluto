@@ -9,8 +9,9 @@ describe('person dossier read', () => {
     expect(isCurrentPersonDossier('up_to_date', 7)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 8)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 9)).toBe(false);
-    expect(isCurrentPersonDossier('synthesizing', 10)).toBe(false);
-    expect(isCurrentPersonDossier('up_to_date', 10)).toBe(true);
+    expect(isCurrentPersonDossier('up_to_date', 10)).toBe(false);
+    expect(isCurrentPersonDossier('synthesizing', 11)).toBe(false);
+    expect(isCurrentPersonDossier('up_to_date', 11)).toBe(true);
   });
 
   it('leads with recurring work and shows an attributable example', () => {
@@ -50,6 +51,42 @@ describe('person dossier read', () => {
     expect(result.workstreams[0]?.sources[0]?.meeting_id).toBe('meeting-two');
   });
 
+  it('uses a concise model read only when every factual word appears in the cited sources', () => {
+    const sources = [
+      {
+        meeting_id: 'meeting-one',
+        meeting_title: 'Query review',
+        quote: 'Avery is improving query performance for the pipeline.',
+        stream_ids: ['query'],
+      },
+      {
+        meeting_id: 'meeting-two',
+        meeting_title: 'Pipeline review',
+        quote: 'Avery is optimizing queries in the pipeline.',
+        stream_ids: ['query'],
+      },
+    ];
+    const stream = {
+      id: 'query',
+      title: 'Query and Pipeline Optimization',
+      current_read:
+        'Avery is improving query performance and optimizing the pipeline.',
+    };
+
+    expect(buildPersonDossierRead('Avery', [stream], sources).headline).toBe(
+      stream.current_read,
+    );
+    expect(
+      buildPersonDossierRead(
+        'Avery',
+        [{ ...stream, current_read: 'Avery leads query performance work.' }],
+        sources,
+      ).headline,
+    ).toBe(
+      'Avery has worked on query and pipeline optimization across multiple conversations.',
+    );
+  });
+
   it('does not merge unrelated one-off tasks into a recurring work area', () => {
     const result = buildPersonDossierRead(
       'Avery',
@@ -78,6 +115,36 @@ describe('person dossier read', () => {
 
     expect(result.headline).toBeNull();
     expect(result.workstreams).toEqual([]);
+  });
+
+  it('keeps repeated direct evidence when a broad stream title omits its shared topic', () => {
+    const result = buildPersonDossierRead(
+      'Avery',
+      [
+        {
+          id: 'interface',
+          title: 'Interface and Data Validation',
+          current_read: 'Avery is refining the tenure field in the UI.',
+        },
+      ],
+      [
+        {
+          meeting_id: 'meeting-one',
+          meeting_title: 'Interface review',
+          quote: 'Avery added the client tenure to the UI.',
+          stream_ids: ['interface'],
+        },
+        {
+          meeting_id: 'meeting-two',
+          meeting_title: 'Field review',
+          quote: 'Avery will review the tenure field.',
+          stream_ids: ['interface'],
+        },
+      ],
+    );
+
+    expect(result.workstreams).toHaveLength(1);
+    expect(result.workstreams[0]?.sources).toHaveLength(2);
   });
 
   it('reconnects recurring evidence when merged stream IDs differ', () => {

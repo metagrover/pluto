@@ -4,7 +4,7 @@ interface PersonReadStream {
   current_read: string;
 }
 
-export const PERSON_CONTEXT_SYNTHESIS_VERSION = 10;
+export const PERSON_CONTEXT_SYNTHESIS_VERSION = 11;
 
 export const isCurrentPersonDossier = (
   status: string | null | undefined,
@@ -25,7 +25,7 @@ interface PersonReadEvidence {
 const citationId =
   /\s*\([^)]*[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}[^)]*\)/gi;
 const observedWork =
-  /\b(?:working|worked|building|built|developing|developed|implementing|implemented|leading|led|managing|managed|optimizing|optimized|reviewing|reviewed|investigating|addressing|running|advising|advised|responsible for|owns|owned)\b/i;
+  /\b(?:working|worked|building|built|developing|developed|implementing|implemented|leading|led|managing|managed|optimizing|optimized|review|reviewing|reviewed|investigating|addressing|running|advising|advised|adding|added|identifying|identified|responsible for|owns|owned)\b/i;
 const genericTitleWords = new Set([
   'and',
   'work',
@@ -37,6 +37,39 @@ const genericTitleWords = new Set([
   'development',
   'management',
   'support',
+]);
+const connectiveWords = new Set([
+  'and',
+  'are',
+  'for',
+  'from',
+  'has',
+  'into',
+  'the',
+  'their',
+  'they',
+  'this',
+  'was',
+  'were',
+  'with',
+]);
+const genericEvidenceWords = new Set([
+  ...genericTitleWords,
+  ...connectiveWords,
+  'added',
+  'adding',
+  'client',
+  'data',
+  'field',
+  'identified',
+  'identifying',
+  'meeting',
+  'project',
+  'review',
+  'reviewed',
+  'team',
+  'worked',
+  'working',
 ]);
 
 const topicWords = (text: string): Set<string> =>
@@ -70,12 +103,58 @@ const recurringTopicSources = <T extends PersonReadEvidence>(
   );
 };
 
+const recurringDirectSources = <T extends PersonReadEvidence>(
+  name: string,
+  sources: T[],
+): T[] => {
+  const nameWords = topicWords(name);
+  const anchors = new Set(
+    sources
+      .flatMap((source) => [...topicWords(source.quote)])
+      .filter(
+        (word) =>
+          word.length >= 5 &&
+          !nameWords.has(word) &&
+          !genericEvidenceWords.has(word),
+      ),
+  );
+  return (
+    [...anchors]
+      .map((anchor) =>
+        sources.filter((source) => topicWords(source.quote).has(anchor)),
+      )
+      .filter(
+        (matches) =>
+          new Set(matches.map((source) => source.meeting_id)).size >= 2,
+      )
+      .sort((a, b) => b.length - a.length)[0] ?? []
+  );
+};
+
 export const cleanPersonReadText = (text: string): string =>
   text
     .replace(citationId, '')
     .replace(/\s+([.,;:])/g, '$1')
     .replace(/\.{2,}/g, '.')
     .trim();
+
+const sourceBackedRead = (
+  read: string,
+  sources: PersonReadEvidence[],
+): string | null => {
+  const clean = cleanPersonReadText(read);
+  if (!clean || clean.length > 240) return null;
+  const sourceWords = new Set(
+    sources.flatMap((source) => [...topicWords(source.quote)]),
+  );
+  const claimWords = [...topicWords(clean)].filter(
+    (word) => word.length >= 3 && !connectiveWords.has(word),
+  );
+  return claimWords.length > 0 &&
+    claimWords.every((word) => sourceWords.has(word))
+    ? clean
+    : null;
+};
 
 /** Only recurring, named work may describe a person's operating capacity. */
 export const buildPersonDossierRead = <T extends PersonReadEvidence>(
@@ -88,11 +167,15 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
       const directSources = evidence.filter((item) =>
         item.stream_ids.includes(stream.id),
       );
-      const matchedSources = recurringTopicSources(
+      const titleSources = recurringTopicSources(
         stream.title,
         directSources.length >= 2 ? directSources : evidence,
         directSources.length >= 2 ? 3 : 5,
       );
+      const matchedSources =
+        titleSources.length > 0 || directSources.length < 2
+          ? titleSources
+          : recurringDirectSources(name, directSources);
       const sources = Array.from(
         new Map(matchedSources.map((item) => [item.meeting_id, item])).values(),
       ).sort(
@@ -103,6 +186,7 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
       return {
         id: stream.id,
         title: cleanPersonReadText(stream.title),
+        read: sourceBackedRead(stream.current_read, sources),
         detail: cleanPersonReadText(
           sources.find((source) => observedWork.test(source.quote))?.quote ??
             stream.current_read,
@@ -122,9 +206,12 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
     word.toLocaleLowerCase(),
   );
   return {
-    headline: topic
-      ? `${name} has worked on ${topic} across multiple conversations.`
-      : null,
+    headline:
+      recurring.length === 1 && recurring[0]?.read
+        ? recurring[0].read
+        : topic
+          ? `${name} has worked on ${topic} across multiple conversations.`
+          : null,
     workstreams: recurring,
   };
 };

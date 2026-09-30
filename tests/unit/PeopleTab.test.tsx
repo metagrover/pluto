@@ -524,12 +524,17 @@ describe('PersonDossier', () => {
     expect(markup).toContain('Based on 2 cited conversations');
     expect(markup).toContain('through Jul 12');
     expect(markup).not.toContain('through Jul 18');
-    expect(markup).toContain('Product review · Jul 12');
+    expect(markup.indexOf('Discussed Jul 12')).toBeLessThan(
+      markup.indexOf('Avery reviewed the launch handoff.'),
+    );
     expect(markup.indexOf('Avery reviewed the launch handoff.')).toBeLessThan(
-      markup.indexOf('Product review · Jul 12'),
+      markup.indexOf('Product review'),
+    );
+    expect(markup.indexOf('Discussed Jul 10')).toBeLessThan(
+      markup.indexOf('Avery worked on the written handoff.'),
     );
     expect(markup.indexOf('Avery worked on the written handoff.')).toBeLessThan(
-      markup.indexOf('Design handoff · Jul 10'),
+      markup.indexOf('Design handoff'),
     );
     expect(markup).not.toContain('One example:');
     expect(markup).not.toContain('Recurring work');
@@ -681,15 +686,15 @@ describe('PersonDossier', () => {
     expect(markup.indexOf('Avery will coordinate')).toBeLessThan(
       markup.indexOf('Commitments'),
     );
-    expect(markup.indexOf('Product review · Jul 12')).toBeGreaterThan(
+    expect(markup.indexOf('Product review')).toBeGreaterThan(
       markup.indexOf('Avery Chen will revise'),
     );
-    expect(markup.indexOf('Product review · Jul 12')).toBeLessThan(
+    expect(markup.indexOf('Product review')).toBeLessThan(
       markup.indexOf('Avery will coordinate'),
     );
     expect(markup).not.toContain('Avery Chen noted');
     expect(markup).not.toContain('Recent developments');
-    expect(markup.match(/>Product review ·/g)).toHaveLength(1);
+    expect(markup.match(/>Discussed Jul 12</g)).toHaveLength(1);
   });
 
   it('shows a concise description, verified commitments, and meetings', () => {
