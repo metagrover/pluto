@@ -200,6 +200,64 @@ describe('person dossier read', () => {
     expect(result.headline).toBeNull();
   });
 
+  it('does not treat generic status or performance words as shared work', () => {
+    const result = buildPersonDossierRead(
+      'Avery',
+      [
+        {
+          id: 'api',
+          title: 'API performance initiative',
+          current_read: 'Avery owns API performance.',
+        },
+      ],
+      [
+        {
+          meeting_id: 'meeting-one',
+          meeting_title: 'Query review',
+          quote: 'Avery is currently improving query performance.',
+          stream_ids: ['api'],
+        },
+        {
+          meeting_id: 'meeting-two',
+          meeting_title: 'API review',
+          quote:
+            'Avery is currently working on the API performance initiative.',
+          stream_ids: ['api'],
+        },
+      ],
+    );
+
+    expect(result.headline).toBeNull();
+    expect(result.workstreams).toEqual([]);
+  });
+
+  it('uses an activity and a later discussion of the same concrete work', () => {
+    const result = buildPersonDossierRead(
+      'Avery',
+      [],
+      [],
+      [
+        {
+          meeting_id: 'meeting-two',
+          meeting_title: 'Implementation review',
+          quote: 'Avery is preparing batching for incoming requests.',
+          stream_ids: [],
+        },
+        {
+          meeting_id: 'meeting-one',
+          meeting_title: 'Capacity discussion',
+          quote: 'Avery noted that batching is needed to avoid timeouts.',
+          stream_ids: [],
+        },
+      ],
+    );
+
+    expect(result.headline).toBe(
+      'Recent conversations show Avery working on batching.',
+    );
+    expect(result.workstreams[0]?.sources).toHaveLength(2);
+  });
+
   it('keeps repeated direct evidence when a broad stream title omits its shared topic', () => {
     const result = buildPersonDossierRead(
       'Avery',
