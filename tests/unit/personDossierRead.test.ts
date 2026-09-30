@@ -45,7 +45,7 @@ describe('person dossier read', () => {
     );
 
     expect(result.headline).toBe(
-      'Avery has worked on launch and partner coordination across multiple conversations.',
+      'Avery has worked on launch and partner coordination.',
     );
     expect(result.workstreams[0]?.detail).toBe(
       'Avery worked through the partner handoff.',
@@ -53,7 +53,7 @@ describe('person dossier read', () => {
     expect(result.workstreams[0]?.sources[0]?.meeting_id).toBe('meeting-two');
   });
 
-  it('uses a concise model read only when every factual word appears in the cited sources', () => {
+  it('uses a grammatical topic headline even when the model read is awkward or overstated', () => {
     const sources = [
       {
         meeting_id: 'meeting-one',
@@ -76,7 +76,7 @@ describe('person dossier read', () => {
     };
 
     expect(buildPersonDossierRead('Avery', [stream], sources).headline).toBe(
-      stream.current_read,
+      'Avery has worked on query and pipeline optimization.',
     );
     expect(
       buildPersonDossierRead(
@@ -84,9 +84,7 @@ describe('person dossier read', () => {
         [{ ...stream, current_read: 'Avery leads query performance work.' }],
         sources,
       ).headline,
-    ).toBe(
-      'Avery has worked on query and pipeline optimization across multiple conversations.',
-    );
+    ).toBe('Avery has worked on query and pipeline optimization.');
   });
 
   it('does not merge unrelated one-off tasks into a recurring work area', () => {
