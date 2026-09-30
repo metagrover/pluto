@@ -518,9 +518,7 @@ describe('PersonDossier', () => {
     expect(markup.indexOf('What they work on')).toBeLessThan(
       markup.indexOf('Recent developments'),
     );
-    expect(markup).toContain(
-      'Avery Chen has worked on launch handoffs across multiple conversations.',
-    );
+    expect(markup).toContain('Avery Chen has worked on launch handoffs.');
     expect(markup).toContain('Based on 2 cited conversations');
     expect(markup).toContain('through Jul 12');
     expect(markup).not.toContain('through Jul 18');
@@ -558,9 +556,7 @@ describe('PersonDossier', () => {
       />,
     );
     expect(markup).not.toContain('Recurring work');
-    expect(markup).toContain(
-      'Avery Chen has worked on launch handoffs across multiple conversations.',
-    );
+    expect(markup).toContain('Avery Chen has worked on launch handoffs.');
     expect(markup).not.toContain('Avery is coordinating the launch handoff.');
   });
 
@@ -618,9 +614,7 @@ describe('PersonDossier', () => {
       />,
     );
 
-    expect(markup).toContain(
-      'Avery Chen has worked on launch handoffs across multiple conversations.',
-    );
+    expect(markup).toContain('Avery Chen has worked on launch handoffs.');
     expect(markup).not.toContain('Incomplete draft');
   });
 
