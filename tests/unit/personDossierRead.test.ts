@@ -7,8 +7,9 @@ import {
 describe('person dossier read', () => {
   it('refreshes older completed reads and waits for the current one', () => {
     expect(isCurrentPersonDossier('up_to_date', 7)).toBe(false);
-    expect(isCurrentPersonDossier('synthesizing', 8)).toBe(false);
-    expect(isCurrentPersonDossier('up_to_date', 8)).toBe(true);
+    expect(isCurrentPersonDossier('up_to_date', 8)).toBe(false);
+    expect(isCurrentPersonDossier('synthesizing', 9)).toBe(false);
+    expect(isCurrentPersonDossier('up_to_date', 9)).toBe(true);
   });
 
   it('leads with recurring work and shows an attributable example', () => {
@@ -76,5 +77,43 @@ describe('person dossier read', () => {
 
     expect(result.headline).toBeNull();
     expect(result.workstreams).toEqual([]);
+  });
+
+  it('reconnects recurring evidence when merged stream IDs differ', () => {
+    const result = buildPersonDossierRead(
+      'Avery',
+      [
+        {
+          id: 'merged-query-stream',
+          title: 'Query and Pipeline Optimization',
+          current_read: 'Avery improved query performance.',
+        },
+      ],
+      [
+        {
+          meeting_id: 'meeting-one',
+          meeting_title: 'Performance review',
+          quote: 'Avery is improving query performance for the pipeline.',
+          stream_ids: ['chunk-query-stream'],
+        },
+        {
+          meeting_id: 'meeting-two',
+          meeting_title: 'Pipeline review',
+          quote: 'Avery optimized queries to relieve the pipeline bottleneck.',
+          stream_ids: ['chunk-query-stream'],
+        },
+        {
+          meeting_id: 'meeting-three',
+          meeting_title: 'Release review',
+          quote: 'Avery reviewed the release checklist.',
+          stream_ids: ['chunk-release-stream'],
+        },
+      ],
+    );
+
+    expect(result.workstreams).toHaveLength(1);
+    expect(
+      result.workstreams[0]?.sources.map((source) => source.meeting_id),
+    ).toEqual(['meeting-one', 'meeting-two']);
   });
 });

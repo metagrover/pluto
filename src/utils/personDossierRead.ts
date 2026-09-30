@@ -4,7 +4,7 @@ interface PersonReadStream {
   current_read: string;
 }
 
-export const PERSON_CONTEXT_SYNTHESIS_VERSION = 8;
+export const PERSON_CONTEXT_SYNTHESIS_VERSION = 9;
 
 export const isCurrentPersonDossier = (
   status: string | null | undefined,
@@ -41,21 +41,31 @@ const genericTitleWords = new Set([
 
 const topicWords = (text: string): Set<string> =>
   new Set(
-    (text.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map((word) =>
-      word.length > 4 ? word.replace(/s$/u, '') : word,
-    ),
+    (text.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map((word) => {
+      if (word.length > 4 && word.endsWith('ies')) {
+        return `${word.slice(0, -3)}y`;
+      }
+      return word.length > 4 ? word.replace(/s$/u, '') : word;
+    }),
   );
 
-const sharesRecurringTopic = (
+const recurringTopicSources = <T extends PersonReadEvidence>(
   title: string,
-  sources: PersonReadEvidence[],
-): boolean => {
+  sources: T[],
+): T[] => {
   const anchors = [...topicWords(title)].filter(
     (word) => word.length >= 3 && !genericTitleWords.has(word),
   );
-  const sourceTopics = sources.map((source) => topicWords(source.quote));
-  return anchors.some(
-    (anchor) => sourceTopics.filter((topics) => topics.has(anchor)).length >= 2,
+  return (
+    anchors
+      .map((anchor) =>
+        sources.filter((source) => topicWords(source.quote).has(anchor)),
+      )
+      .filter(
+        (matches) =>
+          new Set(matches.map((source) => source.meeting_id)).size >= 2,
+      )
+      .sort((a, b) => b.length - a.length)[0] ?? []
   );
 };
 
@@ -74,12 +84,15 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
 ) => {
   const recurring = streams
     .map((stream) => {
+      const directSources = evidence.filter((item) =>
+        item.stream_ids.includes(stream.id),
+      );
+      const matchedSources = recurringTopicSources(
+        stream.title,
+        directSources.length >= 2 ? directSources : evidence,
+      );
       const sources = Array.from(
-        new Map(
-          evidence
-            .filter((item) => item.stream_ids.includes(stream.id))
-            .map((item) => [item.meeting_id, item]),
-        ).values(),
+        new Map(matchedSources.map((item) => [item.meeting_id, item])).values(),
       ).sort(
         (a, b) =>
           (Date.parse(b.captured_at ?? '') || 0) -
@@ -99,7 +112,6 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
       (stream) =>
         stream.sources.length >= 2 &&
         stream.title &&
-        sharesRecurringTopic(stream.title, stream.sources) &&
         stream.sources.some((source) => observedWork.test(source.quote)),
     )
     .sort((a, b) => b.sources.length - a.sources.length)

@@ -171,6 +171,45 @@ describe('knowledge V2 utilities', () => {
     );
     expect(recurring.current_read.source_count).toBe(2);
     expect(recurring.active_streams[0].current_read).not.toContain('208a5a10');
+
+    const mismatchedIds = groundPersonKnowledgeV2Document(
+      {
+        ...doc,
+        active_streams: [
+          {
+            ...doc.active_streams[0],
+            id: 'merged-query',
+            title: 'Query and Pipeline Optimization',
+          },
+        ],
+        evidence_index: [
+          {
+            ...doc.evidence_index[0],
+            quote: 'Avery is improving query performance for the pipeline.',
+            stream_ids: ['chunk-query'],
+          },
+          {
+            ...doc.evidence_index[0],
+            id: 'second',
+            meeting_id: 'm2',
+            quote:
+              'Avery optimized queries to relieve the pipeline bottleneck.',
+            stream_ids: ['chunk-query'],
+          },
+        ],
+      },
+      new Map([
+        ['m1', 'avery is improving query performance for the pipeline.'],
+        ['m2', 'avery optimized queries to relieve the pipeline bottleneck.'],
+      ]),
+    );
+    expect(mismatchedIds.active_streams.map((stream) => stream.id)).toEqual([
+      'merged-query',
+    ]);
+    expect(mismatchedIds.current_read.cited_meeting_count).toBe(2);
+    expect(mismatchedIds.evidence_index[0].stream_ids).toContain(
+      'merged-query',
+    );
   });
 
   it('filters true throwaway recordings without blocking testing strategy meetings', () => {
