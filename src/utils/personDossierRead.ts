@@ -4,7 +4,7 @@ interface PersonReadStream {
   current_read: string;
 }
 
-export const PERSON_CONTEXT_SYNTHESIS_VERSION = 12;
+export const PERSON_CONTEXT_SYNTHESIS_VERSION = 13;
 
 export const isCurrentPersonDossier = (
   status: string | null | undefined,
@@ -37,6 +37,12 @@ const genericTitleWords = new Set([
   'development',
   'management',
   'support',
+  'review',
+  'reviewed',
+  'reviewing',
+  'update',
+  'updated',
+  'updating',
 ]);
 const connectiveWords = new Set([
   'and',
@@ -88,7 +94,7 @@ const recurringTopicSources = <T extends PersonReadEvidence>(
   minAnchorLength: number,
 ): T[] => {
   const anchors = [...topicWords(title)].filter(
-    (word) => word.length >= minAnchorLength && !genericTitleWords.has(word),
+    (word) => word.length >= minAnchorLength && !genericEvidenceWords.has(word),
   );
   return (
     anchors

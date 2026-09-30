@@ -12,7 +12,8 @@ describe('person dossier read', () => {
     expect(isCurrentPersonDossier('up_to_date', 10)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 11)).toBe(false);
     expect(isCurrentPersonDossier('synthesizing', 12)).toBe(false);
-    expect(isCurrentPersonDossier('up_to_date', 12)).toBe(true);
+    expect(isCurrentPersonDossier('up_to_date', 12)).toBe(false);
+    expect(isCurrentPersonDossier('up_to_date', 13)).toBe(true);
   });
 
   it('leads with recurring work and shows an attributable example', () => {
@@ -110,6 +111,38 @@ describe('person dossier read', () => {
           meeting_title: 'Editorial review',
           quote: 'Avery drafted the customer email.',
           stream_ids: ['mixed'],
+        },
+      ],
+    );
+
+    expect(result.headline).toBeNull();
+    expect(result.workstreams).toEqual([]);
+  });
+
+  it('does not call unrelated reviews a recurring area of work', () => {
+    const result = buildPersonDossierRead(
+      'Avery',
+      [
+        {
+          id: 'review',
+          title: 'ECI data review',
+          current_read: 'Avery reviews ECI data.',
+        },
+      ],
+      [
+        {
+          meeting_id: 'meeting-one',
+          meeting_title: 'Data check',
+          quote:
+            'Avery will review specific ECIs to check where data is missing.',
+          stream_ids: ['review'],
+        },
+        {
+          meeting_id: 'meeting-two',
+          meeting_title: 'Interface check',
+          quote:
+            'Avery will review the tenure field and the shared HTML code today.',
+          stream_ids: ['review'],
         },
       ],
     );
