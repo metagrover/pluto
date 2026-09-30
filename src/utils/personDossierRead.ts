@@ -120,7 +120,7 @@ const recurringTopicSources = <T extends PersonReadEvidence>(
 const recurringDirectSources = <T extends PersonReadEvidence>(
   name: string,
   sources: T[],
-): T[] => {
+): { anchor: string; sources: T[] } | null => {
   const nameWords = topicWords(name);
   const anchors = new Set(
     sources
@@ -134,14 +134,17 @@ const recurringDirectSources = <T extends PersonReadEvidence>(
   );
   return (
     [...anchors]
-      .map((anchor) =>
-        sources.filter((source) => topicWords(source.quote).has(anchor)),
-      )
+      .map((anchor) => ({
+        anchor,
+        sources: sources.filter((source) =>
+          topicWords(source.quote).has(anchor),
+        ),
+      }))
       .filter(
-        (matches) =>
+        ({ sources: matches }) =>
           new Set(matches.map((source) => source.meeting_id)).size >= 2,
       )
-      .sort((a, b) => b.length - a.length)[0] ?? []
+      .sort((a, b) => b.sources.length - a.sources.length)[0] ?? null
   );
 };
 
@@ -217,10 +220,12 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
         directSources.length >= 2 ? directSources : evidence,
         directSources.length >= 2 ? 3 : 5,
       );
+      const directTopic =
+        titleSources.length === 0 && directSources.length >= 2
+          ? recurringDirectSources(name, directSources)
+          : null;
       const matchedSources =
-        titleSources.length > 0 || directSources.length < 2
-          ? titleSources
-          : recurringDirectSources(name, directSources);
+        titleSources.length > 0 ? titleSources : (directTopic?.sources ?? []);
       const sources = Array.from(
         new Map(matchedSources.map((item) => [item.meeting_id, item])).values(),
       ).sort(
@@ -230,7 +235,9 @@ export const buildPersonDossierRead = <T extends PersonReadEvidence>(
       );
       return {
         id: stream.id,
-        title: cleanPersonReadText(stream.title),
+        title: directTopic
+          ? `${directTopic.anchor}-related changes`
+          : cleanPersonReadText(stream.title),
         detail: cleanPersonReadText(
           sources.find((source) => observedWork.test(source.quote))?.quote ??
             stream.current_read,
