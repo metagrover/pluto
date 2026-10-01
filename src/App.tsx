@@ -385,6 +385,7 @@ function App() {
     useState<CalendarEvent | null>(null);
   const [settingsInitialTab, setSettingsInitialTab] =
     useState<SettingsTabId>('personal');
+  const [settingsNavigationToken, setSettingsNavigationToken] = useState(0);
   const [calendarAutoNameEnabled, setCalendarAutoNameEnabled] = useState(true);
   const [calendarPromptEnabled, setCalendarPromptEnabled] = useState(true);
   const [silenceAutoStopDuration, setSilenceAutoStopDuration] = useState<
@@ -398,6 +399,21 @@ function App() {
   const [activeCalendarEvent, setActiveCalendarEvent] =
     useState<CalendarEvent | null>(null);
   const activeCalendarEventRef = useRef<CalendarEvent | null>(null);
+
+  useEffect(() => {
+    if (!window.ipcRenderer?.on || !window.ipcRenderer?.send) return;
+    const unsubscribe = window.ipcRenderer.on(
+      'PLUTO_NATIVE_MENU_OPEN_SETTINGS',
+      () => {
+        setSettingsInitialTab('personal');
+        setSettingsNavigationToken((token) => token + 1);
+        setActiveTab('settings');
+        setSelectedMeetingId(null);
+      },
+    );
+    window.ipcRenderer.send('PLUTO_NATIVE_MENU_RENDERER_READY');
+    return unsubscribe;
+  }, []);
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const stopSessionRef = useRef<((endReason?: string) => void) | null>(null);
@@ -974,7 +990,11 @@ function App() {
         e.preventDefault();
         setSearchVisible(true);
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key === ',' &&
+        window.plutoRuntimePlatform?.platform !== 'darwin'
+      ) {
         e.preventDefault();
         setActiveTab('settings');
         setSelectedMeetingId(null);
@@ -2391,6 +2411,7 @@ function App() {
               </div>
             ) : activeTab === 'settings' ? (
               <SettingsTab
+                key={settingsNavigationToken}
                 llmProvider={llmProvider}
                 setLlmProvider={setLlmProvider}
                 ollamaModel={ollamaModel}

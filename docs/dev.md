@@ -15,6 +15,10 @@ app, signing certificate, or exported recovery key is required. A fresh profile
 creates its own local key through Electron safeStorage; an existing profile
 reuses its original envelope. macOS may request Keychain access.
 
+Development startup uses a cached `Pluto.app` copy of Electron under ignored
+`node_modules` so the macOS menu bar shows Pluto. It leaves the installed Electron
+dependency untouched and recreates the copy when the Electron binary changes.
+
 For an isolated profile, set `PLUTO_USER_DATA_DIR` to a separate absolute directory
 before either command. Previously isolated meetings at
 `/tmp/pluto-development-profile` stay there; use that explicit override to reopen

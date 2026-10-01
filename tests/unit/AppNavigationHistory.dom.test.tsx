@@ -89,6 +89,7 @@ const flush = async () => {
 };
 
 describe('App Navigation History', () => {
+  let openSettingsFromMenu: (() => void) | undefined;
   const meeting = {
     id: 'meeting-1',
     title: 'Weekly Sync',
@@ -98,6 +99,7 @@ describe('App Navigation History', () => {
   };
 
   beforeEach(() => {
+    openSettingsFromMenu = undefined;
     window.__PLUTO_BROWSER_PREVIEW__ = false;
     Object.defineProperty(window, 'ipcRenderer', {
       configurable: true,
@@ -125,9 +127,53 @@ describe('App Navigation History', () => {
         }),
         send: vi.fn(),
         off: vi.fn(),
-        on: vi.fn(() => () => {}),
+        on: vi.fn((channel: string, listener: () => void) => {
+          if (channel === 'PLUTO_NATIVE_MENU_OPEN_SETTINGS') {
+            openSettingsFromMenu = listener;
+          }
+          return () => {};
+        }),
       },
     });
+  });
+
+  it('opens Settings from the native menu while a meeting is selected', async () => {
+    const { default: App } = await import('../../src/App');
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(<App />);
+        await flush();
+      });
+      expect(window.ipcRenderer.send).toHaveBeenCalledWith(
+        'PLUTO_NATIVE_MENU_RENDERER_READY',
+      );
+      const meetingButton = Array.from(
+        container.querySelectorAll('button'),
+      ).find((button) => button.textContent?.includes('Weekly Sync'));
+      await act(async () => {
+        meetingButton?.click();
+        await flush();
+      });
+      expect(
+        container.querySelector('[data-testid="meeting-view"]'),
+      ).not.toBeNull();
+
+      await act(async () => {
+        openSettingsFromMenu?.();
+        await flush();
+      });
+      expect(
+        container.querySelector('[data-testid="meeting-view"]'),
+      ).toBeNull();
+      expect(container.textContent).toContain('Personal');
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
   });
 
   it('navigates from person dossier to meeting and preserves back navigation to that person', async () => {

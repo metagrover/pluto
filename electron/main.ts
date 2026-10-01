@@ -112,6 +112,10 @@ import {
 } from './localArtifacts';
 import { createLogger } from './logger';
 import {
+  buildMacApplicationMenuTemplate,
+  updateResultDialog,
+} from './macAppMenu';
+import {
   buildMeetingPrepBrief,
   refreshMeetingPrepBrief,
 } from './meetingPrepBrief';
@@ -119,6 +123,7 @@ import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioPcm,
 } from './nativeAudioCapture';
+import { createNativeSettingsNavigation } from './nativeSettingsNavigation';
 import { resolveUnpackedExecutablePath } from './packagedExecutablePath';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import { validatePreMeetingBriefRequest } from './preMeetingBrief';
@@ -297,6 +302,61 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
 let win: BrowserWindow | null;
 let tray: Tray | null = null;
 let updateChecker: UpdateChecker | null = null;
+let checkingFromMenu = false;
+const settingsMenuNavigation = createNativeSettingsNavigation({
+  getWindow: () => win,
+  createWindow: () => createWindow(),
+  focusWindow: () => focusPrimaryWindow(),
+});
+
+ipcMain.on('PLUTO_NATIVE_MENU_RENDERER_READY', (event) => {
+  settingsMenuNavigation.ready(event.sender);
+});
+
+const openSettingsFromMenu = (): void => {
+  settingsMenuNavigation.open();
+};
+
+const checkForUpdatesFromMenu = async (): Promise<void> => {
+  if (checkingFromMenu || !updateChecker) return;
+  checkingFromMenu = true;
+  try {
+    const status = await updateChecker.checkForUpdates();
+    const options = updateResultDialog(status);
+    const owner = win && !win.isDestroyed() ? win : null;
+    const result = owner
+      ? await dialog.showMessageBox(owner, options)
+      : await dialog.showMessageBox(options);
+    if (status.hasUpdate && result.response === 0) {
+      await shell.openExternal(
+        status.releaseUrl ??
+          'https://github.com/metagrover/pluto/releases/latest',
+      );
+    }
+  } catch (error) {
+    plutoLog.warn('Native update check failed:', error);
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'Pluto Update Check',
+      message: 'Pluto could not check for updates.',
+      buttons: ['OK'],
+    });
+  } finally {
+    checkingFromMenu = false;
+  }
+};
+
+const installMacApplicationMenu = (): void => {
+  if (process.platform !== 'darwin') return;
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      buildMacApplicationMenuTemplate({
+        openSettings: openSettingsFromMenu,
+        checkForUpdates: () => void checkForUpdatesFromMenu(),
+      }),
+    ),
+  );
+};
 
 export const focusPrimaryWindow = (): void => {
   if (!win || win.isDestroyed()) return;
@@ -382,11 +442,16 @@ function createWindow() {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
   });
+  const createdWindow = win;
+  settingsMenuNavigation.loading(createdWindow.webContents);
 
   // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
     postMeetingBackgroundActivity.reset();
     win?.webContents.send('main-process-message', new Date().toLocaleString());
+  });
+  win.webContents.on('did-start-loading', () => {
+    settingsMenuNavigation.loading(createdWindow.webContents);
   });
   win.webContents.on('will-prevent-unload', () => {
     captureLog.warn('Navigation prevented: capture_active');
@@ -8486,6 +8551,7 @@ app.whenReady().then(async () => {
       );
     });
   createWindow();
+  installMacApplicationMenu();
   await prepareFinalTranscriptionBeforeRecovery({
     shouldPrepare: db.getSetting('setup_complete') === 'true',
     prepare: async () => {
