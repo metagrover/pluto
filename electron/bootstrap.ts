@@ -31,7 +31,7 @@ const developmentUserDataDir = resolveUserDataArgument(process.argv);
 if (!app.isPackaged && developmentUserDataDir) {
   app.setPath('userData', developmentUserDataDir);
 }
-if (app.isPackaged) app.setName(PLUTO_PRODUCT_NAME);
+app.setName(PLUTO_PRODUCT_NAME);
 const productionSignature = app.isPackaged
   ? probeSignedMacBuild(process.execPath, {
       expectedIdentifier: PLUTO_BUNDLE_IDENTIFIER,

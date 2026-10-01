@@ -7,6 +7,7 @@ import {
   resolveDevelopmentUserDataDir,
   resolveProductionUserDataDir,
 } from './electron/appRuntimePolicy';
+import { prepareDevElectron } from './scripts/prepareDevElectron';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => ({
@@ -45,13 +46,17 @@ export default defineConfig(({ command }) => ({
           });
           const remoteDebuggingPort =
             process.env.PLUTO_REMOTE_DEBUGGING_PORT?.trim();
-          return startup([
-            '.',
-            `--user-data-dir=${userDataDir}`,
-            ...(remoteDebuggingPort
-              ? [`--remote-debugging-port=${remoteDebuggingPort}`]
-              : []),
-          ]);
+          return startup(
+            [
+              '.',
+              `--user-data-dir=${userDataDir}`,
+              ...(remoteDebuggingPort
+                ? [`--remote-debugging-port=${remoteDebuggingPort}`]
+                : []),
+            ],
+            undefined,
+            prepareDevElectron(),
+          );
         },
         vite: {
           build: {
