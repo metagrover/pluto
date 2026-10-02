@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 
 it('subscribes to native PCM and failures before starting capture and persists failure evidence', () => {
   const source = readFileSync('src/components/AudioManager.tsx', 'utf8');
-  const start = source.indexOf("invoke('NATIVE_AUDIO_START')");
+  const start = source.indexOf('const nativeAudioStartPromise =');
   expect(start).toBeGreaterThan(-1);
   expect(source.indexOf("'NATIVE_AUDIO_CHUNK',")).toBeGreaterThan(-1);
   expect(source.indexOf("'NATIVE_AUDIO_FAILURE',")).toBeGreaterThan(-1);
@@ -16,7 +16,15 @@ it('subscribes to native PCM and failures before starting capture and persists f
   expect(source).toMatch(
     /createPcmLivenessMonitor\(\s*markSystemCaptureUnresponsive/u,
   );
-  expect(source).toMatch(/'NATIVE_AUDIO_FAILURE',\s*markSystemCaptureFailed/u);
+  expect(source).toContain('void systemRecovery.recover()');
+  expect(source).toContain('if (systemRecovery.isRecovering()) return;');
+  expect(source).toMatch(
+    /onRecovering: \(\) => \{[\s\S]*?recordSystemCaptureGap\(\);/u,
+  );
+  expect(source).toContain('if (systemGapRecorded) return;');
+  expect(source).toContain(
+    'if (isRecordingRef.current) recordSystemCaptureGap();',
+  );
   const failureMutation = source.slice(
     source.indexOf('const markSystemCaptureFailed ='),
     source.indexOf(
@@ -34,7 +42,7 @@ it('overlaps native PCM startup with independent meeting setup without weakening
   const source = readFileSync('src/components/AudioManager.tsx', 'utf8');
   const journalStart = source.indexOf("'AUDIO_CAPTURE_JOURNAL_START'");
   const nativeLaunch = source.indexOf(
-    "window.ipcRenderer.invoke('NATIVE_AUDIO_START')",
+    'const nativeAudioStartPromise =',
     journalStart,
   );
   const vocabularyStart = source.indexOf(

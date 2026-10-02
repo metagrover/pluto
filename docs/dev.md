@@ -174,6 +174,69 @@ already installed on the machine and keep the module cache in a writable
 temporary directory. If no installed SDK works, update or reinstall Command
 Line Tools before continuing.
 
+## Capture continuity diagnostics
+
+New recordings keep a bounded, content-free `capture-journal/diagnostics.json`
+beside the capture journal. Counters cover native frames successfully written
+to the pipe, bytes received/forwarded by Electron, renderer samples accepted,
+packaged and trimmed, and raw/repair disk-write progress. Native heartbeat
+messages reuse the existing watchdog every five seconds. Renderer counters
+piggyback on existing microphone chunk writes. There is no per-frame logging,
+new healthy-path timer, extra audio copy, database write, or provider request.
+
+The report retains at most 120 progress records and 32 fault records, preserving
+early faults and the latest faults. It saves asynchronously on at most four
+faults and once on stop; report failures cannot reject capture or delay sealing.
+Only numeric counters and fixed event codes are retained, not general stderr,
+exceptions, paths, process IDs, audio, transcripts or participant identities.
+
+Interpret sustained counter differences within the same `nativeRun`:
+
+- Fresh native `framesWritten` advances, but Electron `bytesReceived` does not:
+  investigate native pipe delivery/main-process responsiveness.
+- Electron `bytesForwarded` advances, but renderer `samplesAccepted` does not:
+  investigate renderer delivery, decoding or responsiveness.
+- Renderer `samplesAccepted` advances but `samplesPackaged` does not, or
+  `samplesTrimmed` rises: investigate interval packaging and delayed PCM.
+- Disk `pending`/`pendingSinceMs` remains set or failure counters rise:
+  investigate journal persistence rather than assuming source audio stopped.
+- No fresh native heartbeat: native capture, its control queue, pipe backpressure
+  and main-process responsiveness remain possible; a stale counter cannot
+  establish which failed.
+
+These are diagnostic clues, not capture-completeness or transcript-trust
+evidence. Missing intervals must remain missing unless original captured audio
+and its provenance can actually be recovered. Digital silence counts as valid
+PCM transport. Historical recordings cannot acquire retrospective native
+diagnostics.
+
+The renderer warns after three seconds without valid PCM and allows the native
+watchdog another three seconds before a bounded process restart. Recovery is
+limited to two attempts per recording and fenced against stop and replacement
+sessions. A detected recording interruption records `failed_during_capture` in the journal;
+receiving PCM again restores current capture health but cannot clear the
+historical interruption. Final transcription retains its incomplete-capture
+check even when partially populated intervals are all marked captured.
+
+Opt-in checks (no production database or microphone; synthetic fixtures only):
+
+```bash
+node scripts/verify_capture_continuity.mjs /tmp/pluto-capture-continuity-report.json
+python3 scripts/verify_native_capture_health.py /tmp/pluto-native-capture-report.json
+node scripts/benchmark_capture_health.mjs
+```
+
+The first uses a temporary Electron profile, real IPC, real journal writes and
+saved-byte checks. It injects source stalls, delivery loss and a disk-write
+failure, with accelerated health deadlines. It uses a synthetic producer and
+sample clock; it does not exercise the full meeting UI, MediaRecorder interval
+timing, Parakeet or model workload. The native check compiles HEAD and current
+Swift sources, taps only a muted synthetic playback process, and discards
+captured PCM while measuring transport, CPU and memory. The benchmark compares
+healthy per-frame work against HEAD. Do not run timing comparisons alongside
+other benchmarks; finite checks cannot guarantee zero overhead or reproduce
+every macOS capture failure.
+
 ## Code Formatting with Biome
 
 This project uses [Biome](https://biomejs.dev/) for code formatting and linting.

@@ -55,6 +55,7 @@ import {
   resolveCalendarHelperPath,
 } from './calendar/client';
 import { createCalendarService } from './calendar/service';
+import { createCaptureDiagnostics } from './captureDiagnostics';
 import {
   appendCaptureJournalChunk,
   appendCaptureTranscriptAcceptanceFrame,
@@ -2340,6 +2341,22 @@ app.whenReady().then(async () => {
     },
   });
 
+  let captureDiagnosticSession: {
+    meetingId: string;
+    generation: string;
+    ownerId: number;
+    report: ReturnType<typeof createCaptureDiagnostics>;
+  } | null = null;
+  const diagnosticsFor = (
+    ownerId: number,
+    request: { meetingId?: unknown; generation?: unknown },
+  ) =>
+    captureDiagnosticSession?.ownerId === ownerId &&
+    captureDiagnosticSession.meetingId === request.meetingId &&
+    captureDiagnosticSession.generation === request.generation
+      ? captureDiagnosticSession.report
+      : null;
+
   const stopNativeAudioCapture = () => {
     const processToStop = nativeAudioProcess;
     nativeAudioProcess = null;
@@ -2363,6 +2380,10 @@ app.whenReady().then(async () => {
         parakeetEouGeneration = null;
       }
       if (released) {
+        if (captureDiagnosticSession?.ownerId === owner.id) {
+          void captureDiagnosticSession.report.stop('owner_destroyed');
+          captureDiagnosticSession = null;
+        }
         liveMeetingContextIndex.flush(released.meetingId);
         liveMeetingContextIndex.clear(released.meetingId, {
           retainCheckpoint: true,
@@ -2724,6 +2745,41 @@ app.whenReady().then(async () => {
         });
         if (manifest.meetingId !== meetingId)
           throw new Error('capture_session_already_active');
+        if (
+          'generation' in manifest &&
+          'artifactRootRelativePath' in manifest &&
+          captureDiagnosticSession?.generation !== manifest.generation
+        ) {
+          const diagnosticPath = path.join(
+            getMeetingArtifactsRootDir(),
+            manifest.artifactRootRelativePath,
+            'diagnostics.json',
+          );
+          captureDiagnosticSession = {
+            meetingId: manifest.meetingId,
+            generation: manifest.generation,
+            ownerId: event.sender.id,
+            report: createCaptureDiagnostics({
+              persist: async (report) => {
+                const temporaryPath = `${diagnosticPath}.${randomUUID()}.tmp`;
+                try {
+                  await fs.promises.writeFile(
+                    temporaryPath,
+                    JSON.stringify(report),
+                    { mode: 0o600, flag: 'wx' },
+                  );
+                  await fs.promises.rename(temporaryPath, diagnosticPath);
+                } catch {
+                  captureLog.warn('Capture diagnostics could not be saved');
+                } finally {
+                  await fs.promises
+                    .rm(temporaryPath, { force: true })
+                    .catch(() => undefined);
+                }
+              },
+            }),
+          };
+        }
         return manifest;
       } catch (error) {
         if (prep) db.meetingPrepStore.abortStart(meetingId);
@@ -2751,6 +2807,12 @@ app.whenReady().then(async () => {
       );
       if (nativeAudioOwner?.id === event.sender.id) {
         stopNativeAudioCapture();
+      }
+      if (
+        captureDiagnosticSession?.ownerId === event.sender.id &&
+        captureDiagnosticSession.meetingId === normalizedMeetingId
+      ) {
+        captureDiagnosticSession = null;
       }
       try {
         await deleteCaptureJournal(
@@ -2830,27 +2892,71 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_RAW_APPEND',
-    async (_event, request = {}) =>
-      await persistCaptureJournalRawChunk(getMeetingArtifactsRootDir(), {
-        ...request,
-        meetingId: String(request.meetingId || ''),
-        data: Buffer.from(request.data ?? []),
-      }),
+    async (event, request = {}) => {
+      const diagnostics = diagnosticsFor(event.sender.id, request);
+      if (request.source === 'mic') diagnostics?.renderer(request.diagnostics);
+      const started = performance.now();
+      const data = Buffer.from(request.data ?? []);
+      if (request.source === 'mic' || request.source === 'system')
+        diagnostics?.writeStarted(request.source);
+      try {
+        const result = await persistCaptureJournalRawChunk(
+          getMeetingArtifactsRootDir(),
+          {
+            ...request,
+            meetingId: String(request.meetingId || ''),
+            data,
+          },
+        );
+        if (request.source === 'mic' || request.source === 'system')
+          diagnostics?.written(
+            request.source,
+            'raw',
+            data.length,
+            performance.now() - started,
+          );
+        return result;
+      } catch (error) {
+        if (request.source === 'mic' || request.source === 'system')
+          diagnostics?.writeFailed(request.source, 'raw');
+        throw error;
+      }
+    },
   );
 
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
     async (event, request = {}) => {
-      const completed = await completeCaptureJournalCapturedChunk(
-        getMeetingArtifactsRootDir(),
-        {
-          ...request,
-          meetingId: String(request.meetingId || ''),
-          ...(request.repairData
-            ? { repairData: Buffer.from(request.repairData) }
-            : {}),
-        },
-      );
+      const diagnostics = diagnosticsFor(event.sender.id, request);
+      const started = performance.now();
+      if (request.source === 'mic' || request.source === 'system')
+        diagnostics?.writeStarted(request.source);
+      let completed: Awaited<
+        ReturnType<typeof completeCaptureJournalCapturedChunk>
+      >;
+      try {
+        completed = await completeCaptureJournalCapturedChunk(
+          getMeetingArtifactsRootDir(),
+          {
+            ...request,
+            meetingId: String(request.meetingId || ''),
+            ...(request.repairData
+              ? { repairData: Buffer.from(request.repairData) }
+              : {}),
+          },
+        );
+        if (request.source === 'mic' || request.source === 'system')
+          diagnostics?.written(
+            request.source,
+            'complete',
+            0,
+            performance.now() - started,
+          );
+      } catch (error) {
+        if (request.source === 'mic' || request.source === 'system')
+          diagnostics?.writeFailed(request.source, 'complete');
+        throw error;
+      }
       await appendParakeetLiveReceipt(event.sender, completed.receipt).catch(
         () => console.warn('[Pluto] parakeet_shadow_append_failed'),
       );
@@ -2936,6 +3042,14 @@ app.whenReady().then(async () => {
     liveMeetingContextIndex.flush(normalizedMeetingId);
     await stopParakeetLiveRecording(normalizedMeetingId);
     captureSessionLease.markStopped(normalizedMeetingId, event.sender.id);
+    if (
+      captureDiagnosticSession?.meetingId === normalizedMeetingId &&
+      captureDiagnosticSession.ownerId === event.sender.id
+    ) {
+      // Diagnostic IO is independent of the audio seal and cannot delay stop.
+      void captureDiagnosticSession.report.stop();
+      captureDiagnosticSession = null;
+    }
     captureLog.info('Transitioned: capture_stopped');
     return manifest;
   });
@@ -3233,6 +3347,11 @@ app.whenReady().then(async () => {
 
       const spawnedProcess = spawn(execPath);
       const captureOwner = event.sender;
+      const diagnostics =
+        captureDiagnosticSession?.ownerId === captureOwner.id
+          ? captureDiagnosticSession.report
+          : null;
+      diagnostics?.nativeStarted();
       nativeAudioProcess = spawnedProcess;
       nativeAudioOwner = captureOwner;
       const pcmReady = waitForNativeAudioPcm(spawnedProcess);
@@ -3244,17 +3363,22 @@ app.whenReady().then(async () => {
           nativeAudioProcess === spawnedProcess &&
           !captureOwner.isDestroyed()
         ) {
+          diagnostics?.received(chunk.length);
           captureOwner.send('NATIVE_AUDIO_CHUNK', chunk, Date.now());
+          diagnostics?.forwarded(chunk.length);
         }
       });
 
       spawnedProcess.stderr?.on('data', (data) => {
-        const line = data.toString().trim();
+        const text = data.toString();
+        if (nativeAudioProcess === spawnedProcess) diagnostics?.stderr(text);
+        const line = text.trim();
         if (line) audioCapLog.debug(line);
       });
 
       const captureFailed = () => {
         if (nativeAudioProcess !== spawnedProcess) return;
+        diagnostics?.event('native_failed');
         if (!captureOwner.isDestroyed()) {
           captureOwner.send('NATIVE_AUDIO_FAILURE');
         }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CalendarEvent } from '../../electron/calendar/types';
+import type { RendererCaptureCounters } from '../../electron/captureDiagnostics';
 import {
   type SilenceWatchdog,
   createSilenceWatchdog,
@@ -50,6 +51,7 @@ import {
   createLiveTranscriptResponsivenessRuntime,
 } from '../utils/liveTranscriptResponsiveness';
 import { waitForMediaRecorderStop } from '../utils/mediaRecorderLifecycle';
+import { createNativeAudioRecovery } from '../utils/nativeAudioRecovery';
 import { createPcmLivenessMonitor } from '../utils/pcmLiveness';
 import { isGrantedStatus } from '../utils/permissions';
 import {
@@ -279,6 +281,12 @@ export const AudioManager = ({
   const systemChunkIndexRef = useRef(0);
 
   const systemPcmChunksRef = useRef<Float32Array[]>([]);
+  const captureDiagnosticsRef = useRef<RendererCaptureCounters>({
+    bytesReceived: 0,
+    samplesAccepted: 0,
+    samplesPackaged: 0,
+    samplesTrimmed: 0,
+  });
   const systemPcmCarryoverBytesRef = useRef<Uint8Array>(new Uint8Array(0));
   const systemPcmSampleRateRef = useRef(48000);
   const systemChunkDecodeDropCountRef = useRef(0);
@@ -522,6 +530,9 @@ export const AudioManager = ({
           sequence,
           format,
           data: journalData,
+          ...(source === 'mic'
+            ? { diagnostics: { ...captureDiagnosticsRef.current } }
+            : {}),
         },
       )) as JournalManifestState & {
         intervals?: Array<{
@@ -746,6 +757,7 @@ export const AudioManager = ({
       const systemCaptureGeneration =
         captureJournalStateRef.current?.generation;
       let systemFailureRecorded = false;
+      let systemGapRecorded = false;
       const markSystemCaptureUnresponsive = () => {
         if (
           systemFailureRecorded ||
@@ -753,6 +765,7 @@ export const AudioManager = ({
           currentMeetingIdRef.current !== meetingId
         )
           return;
+        if (isRecordingRef.current) recordSystemCaptureGap();
         systemAudioHealthRef.current = 'warning';
         publishCaptureHealth({
           ...captureHealthRef.current,
@@ -770,8 +783,12 @@ export const AudioManager = ({
           ...captureHealthRef.current,
           systemAudio: 'unavailable',
         });
-        if (systemFailureRecorded) return;
         systemFailureRecorded = true;
+        recordSystemCaptureGap();
+      };
+      const recordSystemCaptureGap = () => {
+        if (systemGapRecorded) return;
+        systemGapRecorded = true;
         void captureJournalMutationCoordinatorRef.current
           .run(async () => {
             try {
@@ -808,8 +825,42 @@ export const AudioManager = ({
       systemAudioHealthRef.current = 'warning';
       systemPcmCarryoverBytesRef.current = new Uint8Array(0);
       systemChunkDecodeDropCountRef.current = 0;
+      captureDiagnosticsRef.current = {
+        bytesReceived: 0,
+        samplesAccepted: 0,
+        samplesPackaged: 0,
+        samplesTrimmed: 0,
+      };
+      const systemRecovery = createNativeAudioRecovery({
+        isActive: () =>
+          isRecordingRef.current &&
+          !stopInFlightRef.current &&
+          !systemFailureRecorded &&
+          currentMeetingIdRef.current === meetingId &&
+          captureJournalStateRef.current?.generation ===
+            systemCaptureGeneration,
+        stopCapture: () => window.ipcRenderer.invoke('NATIVE_AUDIO_STOP'),
+        startCapture: () => {
+          systemPcmCarryoverBytesRef.current = new Uint8Array(0);
+          return window.ipcRenderer.invoke('NATIVE_AUDIO_START');
+        },
+        onRecovering: () => {
+          // Recovery restores future capture; it cannot restore the lost interval.
+          recordSystemCaptureGap();
+          systemAudioHealthRef.current = 'reconfiguring';
+          publishCaptureHealth({
+            ...captureHealthRef.current,
+            systemAudio: 'reconfiguring',
+          });
+        },
+        onFailed: markSystemCaptureFailed,
+      });
       const systemLiveness = createPcmLivenessMonitor(
         markSystemCaptureUnresponsive,
+        3000,
+        () => {
+          void systemRecovery.recover();
+        },
       );
       cancelSystemAudioHealthTimeoutRef.current = systemLiveness.stop;
       const handler = (_: unknown, chunk: NativeAudioChunk) => {
@@ -845,12 +896,14 @@ export const AudioManager = ({
           }
           return;
         }
+        captureDiagnosticsRef.current.bytesReceived += chunkBytes.length;
         const decoded = decodeFloat32PcmChunk(
           chunkBytes,
           systemPcmCarryoverBytesRef.current,
         );
         systemPcmCarryoverBytesRef.current = decoded.carryoverBytes;
         if (!systemLiveness.received(decoded.samples)) return;
+        captureDiagnosticsRef.current.samplesAccepted += decoded.samples.length;
         if (
           !systemFailureRecorded &&
           systemAudioHealthRef.current !== 'healthy'
@@ -860,9 +913,8 @@ export const AudioManager = ({
             validPcmSeen: true,
           });
           publishCaptureHealth({
-            microphone: 'healthy',
+            ...captureHealthRef.current,
             systemAudio: systemAudioHealthRef.current,
-            captureDurability: captureHealthRef.current.captureDurability,
           });
         }
         systemPcmChunksRef.current.push(decoded.samples);
@@ -876,7 +928,15 @@ export const AudioManager = ({
       );
       const unsubscribeFailures = window.ipcRenderer.on(
         'NATIVE_AUDIO_FAILURE',
-        markSystemCaptureFailed,
+        () => {
+          if (systemRecovery.isRecovering()) return;
+          if (isRecordingRef.current && !stopInFlightRef.current) {
+            markSystemCaptureUnresponsive();
+            void systemRecovery.recover();
+          } else {
+            markSystemCaptureFailed();
+          }
+        },
       );
       nativeAudioUnsubscribeRef.current = () => {
         unsubscribeChunks();
@@ -1388,6 +1448,10 @@ export const AudioManager = ({
                 48000,
                 chunkDurationSec,
               );
+              captureDiagnosticsRef.current.samplesPackaged +=
+                intervalPcm.length;
+              captureDiagnosticsRef.current.samplesTrimmed +=
+                merged.length - intervalPcm.length;
               systemBlob = createWavBlob(intervalPcm, 48000, 1);
               // Clear for next chunk
               systemPcmChunksRef.current = [];

@@ -38,6 +38,7 @@ import {
   ENVELOPE_MAGIC,
   EncryptedArtifactStore,
 } from '../../electron/crypto/encryptedArtifactStore';
+import { hasCompleteSystemCapture } from '../../src/services/finalTranscription/systemCaptureEvidence';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 import { canonicalizeTranscriptCheckpointConfig } from '../../src/utils/transcriptCheckpointConfig';
 
@@ -98,9 +99,43 @@ describe('capture journal', () => {
       expectedRevision: failed.revision,
     });
     expect(again.revision).toBe(failed.revision);
+    const authorized = await authorizeCaptureJournalInterval(root, {
+      ...identity,
+      expectedRevision: again.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 5,
+    });
+    const data = Buffer.from('recovered-system-audio');
+    const raw = await persistCaptureJournalRawChunk(root, {
+      ...identity,
+      expectedRevision: authorized.revision,
+      sequence: 0,
+      format: 'wav',
+      data,
+    });
+    const completed = await completeCaptureJournalCapturedChunk(root, {
+      ...identity,
+      expectedRevision: raw.revision,
+      sequence: 0,
+      rawChecksumSha256: createHash('sha256').update(data).digest('hex'),
+      repairData: data,
+    });
+    expect(completed.manifest.intervals[0].sources.system.disposition).toBe(
+      'captured',
+    );
+    expect(completed.manifest.sourceAvailability.system).toBe(
+      'failed_during_capture',
+    );
+    expect(
+      hasCompleteSystemCapture(
+        { ...completed.manifest, lifecycleState: 'sealed' },
+        manifest.generation,
+      ),
+    ).toBe(false);
     const stopping = await stopCaptureJournal(root, {
       ...identity,
-      expectedRevision: failed.revision,
+      expectedRevision: completed.manifest.revision,
     });
     expect(stopping.sourceAvailability.system).toBe('failed_during_capture');
   });

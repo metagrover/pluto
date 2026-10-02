@@ -73,6 +73,7 @@ class AudioCapCLI {
     private var watchdogRetries = 0
     private let maxWatchdogRetries = 2
     private var lastFrameTime: Date = Date()
+    private var lastHealthReportTime: Date = Date()
     let targetSampleRate: Double = 48000.0
     
     init(includeSelf: Bool, targetPids: [Int32]?) {
@@ -124,6 +125,10 @@ class AudioCapCLI {
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isRunning else { return }
             let now = Date()
+            if now.timeIntervalSince(self.lastHealthReportTime) >= 5.0 {
+                self.emitHealth("heartbeat")
+                self.lastHealthReportTime = now
+            }
             let elapsedSinceTapStart = now.timeIntervalSince(self.tapStartTime)
             let elapsedSinceLastFrame = now.timeIntervalSince(self.lastFrameTime)
             
@@ -131,6 +136,7 @@ class AudioCapCLI {
             let isStalled = (self.tapFramesReceived > 0 && elapsedSinceLastFrame >= 3.0)
             
             if isInitialSilence || isStalled {
+                self.emitHealth("stalled")
                 if self.watchdogRetries < self.maxWatchdogRetries {
                     self.watchdogRetries += 1
                     let reason = isInitialSilence ? "0 frames received in 3.0s" : "audio stream stalled for 3.0s"
@@ -149,6 +155,7 @@ class AudioCapCLI {
     }
 
     private func restartTap(isExternalRouteChange: Bool = false) {
+        emitHealth(isExternalRouteChange ? "route_change" : "restart")
         isSelfModifyingDevices = true
         reconnectWorkItem?.cancel()
         tapGeneration += 1
@@ -190,6 +197,7 @@ class AudioCapCLI {
             self?.controlQueue.async { [weak self] in
                 guard let self = self, self.isRunning, self.tapGeneration == currentGeneration else { return }
                 fputs("[AudioCap] Input stream format changed, reconfiguring tap...\n", stderr)
+                self.emitHealth("format_change")
                 self.restartTap(isExternalRouteChange: true)
             }
         }, prepare: { desc in
@@ -221,7 +229,13 @@ class AudioCapCLI {
                 self?.controlQueue.async { [weak self] in
                     guard let self = self, self.tapGeneration == currentGeneration else { return }
                     normalized.withUnsafeBytes { bytes in
-                        try? stdout.write(contentsOf: Data(bytes))
+                        do {
+                            try stdout.write(contentsOf: Data(bytes))
+                        } catch {
+                            // A broken pipe must trigger recovery, not silently discard PCM.
+                            self.emitHealth("write_failed")
+                            exit(1)
+                        }
                     }
                     self.framesReceived += frameCount
                     self.tapFramesReceived += frameCount
@@ -229,6 +243,13 @@ class AudioCapCLI {
                 }
             }
         })
+    }
+
+    private func emitHealth(_ event: String) {
+        // Reuse the watchdog/control queue; no per-frame logging or extra timer.
+        // event is one of the internal literals above; avoid a JSON object/encoder
+        // allocation for this fixed numeric protocol.
+        fputs("[AudioCapHealth] {\"event\":\"\(event)\",\"framesWritten\":\(framesReceived),\"tapGeneration\":\(tapGeneration),\"retries\":\(watchdogRetries)}\n", stderr)
     }
 
     @discardableResult
