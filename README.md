@@ -8,8 +8,14 @@
   <strong>A local-first meeting assistant and second brain for Apple Silicon Macs.</strong>
 </p>
 
+<h3 align="center">
+  <a href="https://github.com/metagrover/pluto/releases/latest">⬇ Download latest for Mac</a>
+</h3>
+
+<p align="center">Apple Silicon · macOS 14.2 or later</p>
+
 <p align="center">
-  <a href="#install-pluto">Install Pluto</a> ·
+  <a href="#install-pluto">Install guide</a> ·
   <a href="#ai-models">AI models</a> ·
   <a href="#privacy-and-data">Privacy</a> ·
   <a href="#development">Build from source</a> ·
@@ -54,9 +60,7 @@ on them.
 For people who want to use the app, the packaged Mac installer is the simplest
 path. You do not need Node.js, pnpm, Xcode, or Python to use a packaged installer.
 
-**Download status:** a packaged release has not been published yet. Check the
-[Releases page](https://github.com/metagrover/pluto/releases) for availability.
-Until then, running Pluto requires the [source setup](#development) below.
+**[Download the latest Mac release](https://github.com/metagrover/pluto/releases/latest)**
 
 ### What you need
 
@@ -71,10 +75,8 @@ chosen model.
 
 ### Download and install
 
-Once a packaged release is available:
-
-1. Open the [Releases page](https://github.com/metagrover/pluto/releases) and read
-   the release notes, including signing status and any known limitations.
+1. **[Download the latest release](https://github.com/metagrover/pluto/releases/latest).**
+   Read its release notes for signing status and any known limitations.
 2. Under **Assets**, download the Mac installer ending in `.dmg`. GitHub's
    **Source code** archives contain the project source, not an installable app.
 3. Open the `.dmg` and drag **Pluto** into **Applications**.
@@ -120,24 +122,53 @@ Ask Pluto use the intelligence provider configured in **Settings**.
 
 ### Local intelligence with Ollama
 
-Install and run Ollama, download a model that fits your Mac, and select **Ollama**
-in Pluto's Settings. Configure the local analysis and fast chat model names to
-match models installed on your machine. You can check installed models with:
+For local notes and chat, start with **Gemma 4 12B for analysis** and
+**Phi-4 Mini for fast chat**. These are Pluto's current UI defaults; you can
+replace either with another installed model that fits your Mac.
 
-```bash
-ollama list
-```
+1. **[Download Ollama for Mac](https://ollama.com/download/mac)**, drag it into
+   **Applications**, and open it. Complete its setup so the `ollama` command is
+   available in Terminal.
+2. **Download the two models.** Open Terminal and run:
 
-Keep the Ollama service running while using local intelligence. With the speech
-and intelligence models downloaded and Ollama running locally, capture,
-transcription, and local intelligence do not require a cloud model provider.
-Initial setup, model downloads, and updates still need network access.
+   ```bash
+   ollama pull gemma4:12b
+   ollama pull phi4-mini:3.8b
+   ```
 
-The UI model defaults are defined in
-[`src/utils/ollamaModels.ts`](src/utils/ollamaModels.ts); provider fallback defaults
-live in [`electron/llm/providerCatalog.ts`](electron/llm/providerCatalog.ts).
-Select model names supported by your installation rather than assuming every
-default is available or suitable for your hardware.
+   The first downloads can take several minutes. Model storage and memory use
+   depend on the model and context size; allow room for Pluto and other apps too.
+3. **Configure Pluto.** Open **Settings → Intelligence**, select **Ollama**, and
+   enter these names:
+
+   | Setting | Model | Used for |
+   | --- | --- | --- |
+   | Local Analysis & Deep Model | `gemma4:12b` | Meeting preparation and deeper cross-meeting analysis. |
+   | Fast Chat Model | `phi4-mini:3.8b` | Quick Ask Pluto answers. |
+
+4. **Check the downloads.** Both models should appear when you run:
+
+   ```bash
+   ollama list
+   ```
+
+5. **Keep Ollama running** while using Pluto. Record a short conversation and
+   try asking a question about it after processing finishes.
+
+If Pluto cannot connect to Ollama, open the Ollama app again. If you use the CLI
+without the app, start the local service with `ollama serve` in a separate
+Terminal window and leave it running.
+
+For model details and other sizes, see
+[Gemma 4](https://ollama.com/library/gemma4) and
+[Phi-4 Mini](https://ollama.com/library/phi4-mini). On a Mac with limited memory,
+choose a smaller model and update the corresponding field in Pluto. Larger
+models need more resources; try them with your own workflows before switching.
+
+With speech models and local Ollama models downloaded, capture, transcription,
+and local intelligence do not require a cloud provider or API key. Initial
+setup, model downloads, and updates still need network access. Ollama models
+are separate from the transcription models downloaded by Pluto.
 
 ### Cloud intelligence with your own key
 
