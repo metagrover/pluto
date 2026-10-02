@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="#getting-started">Getting started</a> ·
+  <a href="#install-pluto">Install Pluto</a> ·
   <a href="#ai-models">AI models</a> ·
   <a href="#privacy-and-data">Privacy</a> ·
-  <a href="#development">Development</a> ·
+  <a href="#development">Build from source</a> ·
   <a href="#contributing">Contributing</a> ·
   <a href="LICENSE">MIT License</a>
 </p>
@@ -49,47 +49,56 @@ on them.
   calendar attendees are hints, not proof of who spoke. Identity confirmations
   and manual corrections remain important.
 
-## Getting started
+## Install Pluto
 
-The source setup below is the documented way to run Pluto. Packaged installers,
-when published, are available on the repository's
-[Releases page](https://github.com/metagrover/pluto/releases). Check the release
-notes for availability and signing status.
+For people who want to use the app, the packaged Mac installer is the simplest
+path. You do not need Node.js, pnpm, Xcode, or Python to use a packaged installer.
 
-### Requirements
+**Download status:** a packaged release has not been published yet. Check the
+[Releases page](https://github.com/metagrover/pluto/releases) for availability.
+Until then, running Pluto requires the [source setup](#development) below.
 
-- An **Apple Silicon Mac** running **macOS 14.2 or later**. System audio capture
-  uses Core Audio process taps introduced in macOS 14.2.
-- **Node.js 24.11.0**, the version pinned in `package.json` and used by release CI.
-- **pnpm 9**, the version used by release CI.
-- **Xcode Command Line Tools with Swift 6.0 or later** and a compatible macOS SDK.
-  Install the tools with `xcode-select --install` if needed, then check
-  `swift --version` and `xcode-select -p`.
-- An internet connection for dependency installation and initial model downloads.
-  Local models require additional disk space and memory; requirements depend on
-  the models you choose.
+### What you need
 
-Python is only needed for optional benchmark tooling. FFmpeg and ffprobe are
-supplied by project dependencies.
+- An **Apple Silicon Mac** (M1 or later) running **macOS 14.2 or later**.
+- An internet connection for initial model downloads.
+- For notes and chat, either **Ollama with a local model** or an **API key for a
+  supported cloud provider**. See [AI models](#ai-models).
 
-### Run from source
+Intel Macs, Windows, and Linux are not currently supported. Model downloads need
+additional disk space; local intelligence also needs memory appropriate to your
+chosen model.
 
-```bash
-git clone https://github.com/metagrover/pluto.git
-cd pluto
-pnpm install --frozen-lockfile
-pnpm dev
-```
+### Download and install
 
-`pnpm dev` prepares the media tools, checks the Electron SQLite binding, builds
-missing or stale native capture and transcription executables, and prepares the
-calendar helper before launching the app with hot reload. `pnpm start` runs the
-same source app and startup preparation. The first native build can take several
-minutes; compiler tools are required even though the scripts automate the build.
+Once a packaged release is available:
 
-On first use, follow Pluto's setup screen to download and verify the local
-transcription models, grant audio permissions, and configure an intelligence
-provider for notes and chat. Speech models and Ollama models are separate downloads.
+1. Open the [Releases page](https://github.com/metagrover/pluto/releases) and read
+   the release notes, including signing status and any known limitations.
+2. Under **Assets**, download the Mac installer ending in `.dmg`. GitHub's
+   **Source code** archives contain the project source, not an installable app.
+3. Open the `.dmg` and drag **Pluto** into **Applications**.
+4. Eject the installer disk, then open **Pluto** from Applications or Spotlight.
+   If macOS blocks launch, follow that release's instructions for its signing
+   status.
+
+### First launch and your first recording
+
+1. Follow the setup screen to download and verify the local transcription
+   models. Wait for setup to finish before recording.
+2. Grant **Microphone** and **System Audio Recording** access when prompted.
+   Calendar access is optional. See [macOS permissions](#macos-permissions).
+3. Open **Settings → Intelligence** and choose a provider for notes and chat:
+   use Ollama with installed local models, or enter your own cloud API key.
+   Cloud intelligence sends meeting text to the selected provider.
+4. Start a short recording, speak into your selected microphone, and check the
+   live transcript. For a call, check that incoming system audio is captured too.
+5. Stop recording, wait for transcription and configured intelligence processing
+   to finish, then review the transcript and generated notes.
+
+Speech models and Ollama models are separate downloads. For provider setup, see
+[AI models](#ai-models); for audio or startup problems, see
+[Troubleshooting](#troubleshooting).
 
 ### macOS permissions
 
@@ -181,6 +190,44 @@ its database and key envelope; see
 [profile troubleshooting](docs/dev.md#source-startup-and-local-profiles).
 
 ## Development
+
+For contributors and people who want to build or run Pluto from source. If you
+only want to use the packaged app, start with [Install Pluto](#install-pluto).
+
+### Requirements
+
+- An **Apple Silicon Mac** running **macOS 14.2 or later**. System audio capture
+  uses Core Audio process taps introduced in macOS 14.2.
+- **Node.js 24.11.0**, the version pinned in `package.json` and used by release CI.
+- **pnpm 9**, the version used by release CI.
+- **Xcode Command Line Tools with Swift 6.0 or later** and a compatible macOS SDK.
+  Install the tools with `xcode-select --install` if needed, then check
+  `swift --version` and `xcode-select -p`.
+- An internet connection for dependency installation and initial model downloads.
+  Local models require additional disk space and memory; requirements depend on
+  the models you choose.
+
+Python is only needed for optional benchmark tooling. FFmpeg and ffprobe are
+supplied by project dependencies.
+
+### Run from source
+
+```bash
+git clone https://github.com/metagrover/pluto.git
+cd pluto
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+`pnpm dev` prepares the media tools, checks the Electron SQLite binding, builds
+missing or stale native capture and transcription executables, and prepares the
+calendar helper before launching the app with hot reload. `pnpm start` runs the
+same source app and startup preparation. The first native build can take several
+minutes; compiler tools are required even though the scripts automate the build.
+
+On first use, follow Pluto's setup screen to download and verify the local
+transcription models, grant audio permissions, and configure an intelligence
+provider for notes and chat. Speech models and Ollama models are separate downloads.
 
 ### Repository layout
 
