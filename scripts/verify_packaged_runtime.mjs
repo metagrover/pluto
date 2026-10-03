@@ -1,5 +1,6 @@
 import { constants, existsSync, readFileSync, statSync } from 'node:fs';
 import { access } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { verifyMediaExecutable } from './verify_media_executable.mjs';
@@ -12,6 +13,29 @@ const appPath = path.resolve(
 );
 const resourcesRoot = path.join(appPath, 'Contents', 'Resources');
 const resourcesPath = path.join(resourcesRoot, 'bin');
+const iconName = execFileSync(
+  'plutil',
+  [
+    '-extract',
+    'CFBundleIconFile',
+    'raw',
+    '-o',
+    '-',
+    path.join(appPath, 'Contents', 'Info.plist'),
+  ],
+  { encoding: 'utf8' },
+).trim();
+if (iconName !== 'icon.icns') {
+  throw new Error(`Packaged app has the wrong icon: ${iconName}`);
+}
+const packagedIcon = readFileSync(path.join(resourcesRoot, iconName));
+const sourceIcon = readFileSync(path.resolve('build/pluto.icns'));
+if (
+  packagedIcon.subarray(0, 4).toString('ascii') !== 'icns' ||
+  !packagedIcon.equals(sourceIcon)
+) {
+  throw new Error('Packaged app is missing the Pluto icon.');
+}
 const requiredExecutables = [
   'audiocap',
   'parakeet-runtime',
@@ -79,5 +103,5 @@ for (const [name, relativePath] of mediaTools) {
 }
 
 console.log(
-  `Verified ${requiredExecutables.length + mediaTools.length} packaged runtimes.`,
+  `Verified Pluto icon and ${requiredExecutables.length + mediaTools.length} packaged runtimes.`,
 );
