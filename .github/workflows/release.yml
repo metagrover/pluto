@@ -1,23 +1,18 @@
 name: Release
 
 on:
+  pull_request:
   push:
     tags:
       - 'v*.*.*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release tag (e.g. v0.2.0)'
-        required: true
-        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-macos:
-    name: Build & Release macOS DMG
-    runs-on: macos-15 # Apple Silicon (arm64) runner with Swift 6
+    name: Build & Verify macOS DMG
+    runs-on: macos-26 # Apple Silicon (arm64) runner with Swift 6.4
     timeout-minutes: 30
 
     steps:
@@ -26,17 +21,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve Release Version
+      - name: Verify release toolchain and version
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
+          test "$(uname -m)" = arm64
+          swift --version
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          echo "PACKAGE_VERSION=${PACKAGE_VERSION}" >> "$GITHUB_ENV"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [[ "${TAG_VERSION/.rc./-rc.}" != "${PACKAGE_VERSION}" ]]; then
+              echo "Tag ${GITHUB_REF_NAME} does not match package version ${PACKAGE_VERSION}" >&2
+              exit 1
+            fi
           fi
-          VERSION="${TAG#v}"
-          echo "RELEASE_TAG=${TAG}" >> "$GITHUB_ENV"
-          echo "RELEASE_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "Resolved Tag: ${TAG} (Version: ${VERSION})"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -66,29 +63,55 @@ jobs:
           pnpm exec vite build
           pnpm exec electron-builder --mac --publish never
 
-      - name: Generate Checksums
+      - name: Verify package and generate checksums
         run: |
+          APP="release/${PACKAGE_VERSION}/mac-arm64/Pluto.app"
+          DMG="release/${PACKAGE_VERSION}/Pluto-Mac-${PACKAGE_VERSION}-Installer.dmg"
+          pnpm run package:verify-runtime -- "$APP"
+          test -s "$DMG"
           mkdir -p dist-release
-          cp release/*/*.dmg dist-release/ || cp release/*.dmg dist-release/ || true
+          cp "$DMG" dist-release/
           cd dist-release
           shasum -a 256 *.dmg > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      - name: Save verified installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: pluto-macos-dmg
+          path: dist-release/*
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build-macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified installer
+        uses: actions/download-artifact@v4
+        with:
+          name: pluto-macos-dmg
+          path: dist-release
+
+      - name: Verify downloaded checksum
+        run: cd dist-release && shasum -a 256 -c SHA256SUMS.txt
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          # If release already exists, upload assets to it; otherwise create a new release
-          if gh release view "${RELEASE_TAG}" &>/dev/null; then
-            echo "Release ${RELEASE_TAG} exists. Uploading artifacts..."
-            gh release upload "${RELEASE_TAG}" dist-release/* --clobber
-          else
-            echo "Creating new release ${RELEASE_TAG}..."
-            RELEASE_FLAGS=()
-            if [[ "${RELEASE_VERSION}" == *-* || "${RELEASE_VERSION}" == *.rc.* ]]; then
-              RELEASE_FLAGS+=(--prerelease)
-            fi
-            gh release create "${RELEASE_TAG}" dist-release/* \
-              --title "Pluto ${RELEASE_TAG}" \
-              --generate-notes "${RELEASE_FLAGS[@]}"
+          RELEASE_TAG="${GITHUB_REF_NAME}"
+          RELEASE_VERSION="${RELEASE_TAG#v}"
+          RELEASE_FLAGS=()
+          if [[ "${RELEASE_VERSION}" == *-* || "${RELEASE_VERSION}" == *.rc.* ]]; then
+            RELEASE_FLAGS+=(--prerelease)
           fi
+          gh release create "${RELEASE_TAG}" dist-release/* \
+            --verify-tag \
+            --title "Pluto ${RELEASE_TAG}" \
+            --generate-notes "${RELEASE_FLAGS[@]}"
