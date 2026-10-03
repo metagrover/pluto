@@ -84,7 +84,11 @@ jobs:
             gh release upload "${RELEASE_TAG}" dist-release/* --clobber
           else
             echo "Creating new release ${RELEASE_TAG}..."
+            RELEASE_FLAGS=()
+            if [[ "${RELEASE_VERSION}" == *-* || "${RELEASE_VERSION}" == *.rc.* ]]; then
+              RELEASE_FLAGS+=(--prerelease)
+            fi
             gh release create "${RELEASE_TAG}" dist-release/* \
               --title "Pluto ${RELEASE_TAG}" \
-              --generate-notes
+              --generate-notes "${RELEASE_FLAGS[@]}"
           fi
