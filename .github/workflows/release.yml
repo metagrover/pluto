@@ -17,7 +17,7 @@ permissions:
 jobs:
   build-macos:
     name: Build & Release macOS DMG
-    runs-on: macos-14 # Apple Silicon (arm64) runner
+    runs-on: macos-15 # Apple Silicon (arm64) runner with Swift 6
     timeout-minutes: 30
 
     steps:
