@@ -59,6 +59,8 @@ jobs:
         env:
           # Use an explicit ad-hoc signature until Developer ID is available.
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          # Electron Builder otherwise skips signing for pull request builds.
+          CSC_FOR_PULL_REQUEST: true
         run: |
           pnpm run prebuild
           pnpm exec tsc
