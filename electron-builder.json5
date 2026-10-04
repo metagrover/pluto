@@ -36,6 +36,7 @@
     }
   ],
   "mac": {
+    "icon": "build/pluto.icns",
     "target": [
       {
         "target": "dmg",

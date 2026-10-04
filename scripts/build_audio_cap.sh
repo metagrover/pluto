@@ -8,6 +8,8 @@ source "${SCRIPT_DIR}/configure_swift_environment.sh"
 
 mkdir -p "${PROJECT_ROOT}/resources/bin"
 swiftc "${PROJECT_ROOT}"/resources/swift/audiocap/*.swift \
+  -target "$(uname -m)-apple-macosx14.2" \
+  -sdk "${SDKROOT}" \
   -o "${PROJECT_ROOT}/resources/bin/audiocap" \
   -framework CoreAudio \
   -framework AudioToolbox \
