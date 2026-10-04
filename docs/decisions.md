@@ -1406,6 +1406,14 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Commitments:** Their existing commitments remain visible. The user's confirmed commitments and recent deliveries appear separately only when their source conversation has confirmed participation by this person; this association does not assert that the commitment was owed to them. Retired, rejected, unconfirmed-self, mention-only, and unrelated items remain excluded.
 - **Presentation:** Pluto's current palette and type system remain authoritative. A section index, readable prose, source disclosure, commitments, and conversation history replace excerpt-led presentation when a validated comprehensive profile exists. Sparse and failed profiles preserve the existing evidence fallback.
 
+## 2026-10-04 - Choose database encryption once before onboarding
+
+- **Status:** Accepted
+- **Supersedes:** Mandatory database encryption and automatic plaintext-profile conversion in the accepted [Local Encryption Root of Trust and Database Backend ADR](adr/2026-09-07-local-encryption-root-and-database.md). The September 30 deferred key-custody decision remains in force: existing keys are neither rewrapped nor removed.
+- **Decision:** New profiles choose Standard or Encrypted setup in a native welcome step before database creation and before the existing setup wizard. Standard setup does not create or access a database encryption key. Encrypted setup obtains key-storage permission before committing the choice. Denied permission leaves the choice uncommitted and allows retrying or choosing Standard. The choice is fixed for that profile and displayed read-only in Advanced settings; no conversion or encryption toggle is offered.
+- **Continuity:** Existing databases retain their actual format and skip the welcome choice. A durable profile record distinguishes unfinished first-run initialization from a completed profile. Missing databases with existing data/key artifacts, malformed choices, and format mismatches fail closed. No key failure silently downgrades encryption or replaces an encrypted database.
+- **Scope:** This choice covers the database, not all recording files. Existing encrypted audio remains readable and audio rollout gates are unchanged. Cloud-provider credentials continue to use secure storage with either setup; checking an empty credential does not probe or unlock Keychain. Onboarding and credential entry explain the separate permission requirement. Consistent signing remains necessary for reliable Keychain behavior across updates.
+
 ## 2026-09-30 - Enable automatic audio budgets independently
 
 - **Supersedes:** The default-off automatic-retention gate in the accepted [Local Encryption Root of Trust and Database Backend ADR](adr/2026-09-07-local-encryption-root-and-database.md). New encrypted capture and historical audio migration remain opt-in signed canaries.

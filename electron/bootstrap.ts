@@ -7,11 +7,15 @@ import {
   resolveUserDataArgument,
 } from './appRuntimePolicy';
 import { ApplicationKeyStore } from './crypto/applicationKeyStore';
-import { initializeApplicationDatabase } from './database/applicationDatabase';
+import {
+  initializeApplicationDatabase,
+  resolveApplicationDatabasePath,
+} from './database/applicationDatabase';
 import {
   DatabaseLifecycleError,
   describeDatabaseStartupError,
 } from './database/errors';
+import { initializeDatabaseStorageSetup } from './database/storageSetup';
 import { probeSignedMacBuild } from './encryptionRollout';
 import { createLogger, initializeElectronLogging } from './logger';
 
@@ -43,7 +47,7 @@ const canOpenDatabase = canOpenProductionDatabase({
   signedBuildValid: productionSignature.valid,
   allowUnsignedPackaged,
 });
-const productionKeyStore =
+const createProductionKeyStore = () =>
   app.isPackaged &&
   productionSignature.valid &&
   productionSignature.identifier &&
@@ -80,61 +84,116 @@ if (!canOpenDatabase) {
 } else {
   app.on('second-instance', () => focusPrimaryWindow?.());
 
-  let initialized = false;
-  while (!initialized) {
-    try {
-      initializeApplicationDatabase({ keyStore: productionKeyStore });
-      initialized = true;
-      void import('./main').then((main) => {
-        focusPrimaryWindow = main.focusPrimaryWindow;
-      });
-    } catch (error) {
-      log.error('Database startup failed:', error);
-      const isKeyLocked =
-        error instanceof DatabaseLifecycleError &&
-        error.code === 'database_key_unavailable';
-      const isKeyRejected =
-        error instanceof DatabaseLifecycleError &&
-        error.code === 'database_key_rejected';
-      const isIdentityMismatch =
-        error instanceof DatabaseLifecycleError &&
-        error.code === 'database_key_identity_mismatch';
+  void app.whenReady().then(() => {
+    const databasePath = resolveApplicationDatabasePath({
+      userDataPath: app.getPath('userData'),
+    });
+    let productionKeyStore: ApplicationKeyStore | undefined;
+    const getKeyStore = () => {
+      productionKeyStore ??= createProductionKeyStore();
+      return productionKeyStore;
+    };
+    let initialized = false;
+    while (!initialized) {
+      try {
+        const mode = initializeDatabaseStorageSetup({
+          databasePath,
+          chooseMode: () => {
+            const choice = dialog.showMessageBoxSync({
+              type: 'question',
+              title: 'Welcome to Pluto',
+              message: 'Choose how to store your local meeting data',
+              detail:
+                'Standard setup stores your database without app-level encryption. Encrypted setup protects the database containing transcripts, notes, and people, and macOS may ask for Keychain permission now or on later launches. Recording files have separate protection.\n\nThis is a one-time choice for this profile and cannot be changed in Settings. Saving cloud-provider API keys may require separate Keychain permission with either setup.',
+              buttons: ['Standard setup', 'Encrypted setup', 'Quit'],
+              defaultId: 0,
+              cancelId: 2,
+              noLink: true,
+            });
+            return choice === 0
+              ? 'standard'
+              : choice === 1
+                ? 'encrypted'
+                : null;
+          },
+          prepareEncryption: () => {
+            getKeyStore().getOrCreateMasterKey();
+          },
+          initialize: (storageMode) => {
+            initializeApplicationDatabase({
+              storageMode,
+              keyStore: storageMode === 'encrypted' ? getKeyStore() : undefined,
+            });
+          },
+        });
+        if (mode === null) {
+          app.quit();
+          break;
+        }
+        initialized = true;
+        void import('./main').then((main) => {
+          focusPrimaryWindow = main.focusPrimaryWindow;
+        });
+      } catch (error) {
+        log.error('Database startup failed:', error);
+        const isKeyLocked =
+          error instanceof DatabaseLifecycleError &&
+          error.code === 'database_key_unavailable';
+        const isKeyRejected =
+          error instanceof DatabaseLifecycleError &&
+          error.code === 'database_key_rejected';
+        const isIdentityMismatch =
+          error instanceof DatabaseLifecycleError &&
+          error.code === 'database_key_identity_mismatch';
+        const isSetupKeyUnavailable =
+          error instanceof DatabaseLifecycleError &&
+          error.code === 'database_setup_key_unavailable';
 
-      const title = isIdentityMismatch
-        ? 'Database recovery required'
-        : isKeyLocked || isKeyRejected
-          ? 'Database Encryption Locked'
-          : 'Pluto could not start';
-      const detail = `${describeDatabaseStartupError(error)}\n\nYour data is preserved safely. Pluto will never replace or overwrite your encrypted database without your explicit action.`;
+        const title = isSetupKeyUnavailable
+          ? 'Encrypted setup needs permission'
+          : isIdentityMismatch
+            ? 'Database recovery required'
+            : isKeyLocked || isKeyRejected
+              ? 'Database Encryption Locked'
+              : 'Pluto could not start';
+        const detail = `${describeDatabaseStartupError(error)}\n\nYour data is preserved safely. Pluto will never replace or overwrite your encrypted database without your explicit action.`;
 
-      const choice = dialog.showMessageBoxSync({
-        type: 'error',
-        title,
-        message: title,
-        detail,
-        buttons: isIdentityMismatch
-          ? ['Open Data Folder', 'Quit Pluto']
-          : isKeyLocked
-            ? ['Retry', 'Open Data Folder', 'Quit Pluto']
-            : ['Retry', 'Open Data Folder', 'Quit Pluto'],
-        defaultId: isIdentityMismatch ? 1 : 0,
-        cancelId: isIdentityMismatch ? 1 : 2,
-      });
+        const choice = dialog.showMessageBoxSync({
+          type: 'error',
+          title,
+          message: title,
+          detail,
+          buttons: isSetupKeyUnavailable
+            ? ['Choose setup again', 'Quit Pluto']
+            : isIdentityMismatch
+              ? ['Open Data Folder', 'Quit Pluto']
+              : isKeyLocked
+                ? ['Retry', 'Open Data Folder', 'Quit Pluto']
+                : ['Retry', 'Open Data Folder', 'Quit Pluto'],
+          defaultId: isIdentityMismatch ? 1 : 0,
+          cancelId: isSetupKeyUnavailable || isIdentityMismatch ? 1 : 2,
+        });
 
-      if (isIdentityMismatch) {
-        if (choice === 0) void shell.openPath(app.getPath('userData'));
+        if (isSetupKeyUnavailable) {
+          if (choice === 0) continue;
+          app.quit();
+          break;
+        }
+        if (isIdentityMismatch) {
+          if (choice === 0) void shell.openPath(app.getPath('userData'));
+          app.quit();
+          break;
+        }
+        if (choice === 0) {
+          continue;
+        }
+        if (choice === 1) {
+          void shell.openPath(app.getPath('userData'));
+          continue;
+        }
         app.quit();
         break;
       }
-      if (choice === 0) {
-        continue;
-      }
-      if (choice === 1) {
-        void shell.openPath(app.getPath('userData'));
-        continue;
-      }
-      app.quit();
-      break;
     }
-  }
+  });
 }

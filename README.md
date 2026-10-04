@@ -191,9 +191,12 @@ choice of intelligence provider determines whether meeting text leaves your Mac.
   The transcription path does not use a hosted speech-to-text API.
 - **Intelligence:** local Ollama runs on your machine when configured with a local
   endpoint; cloud providers receive the context used for their requests.
-- **Database:** persistent meeting data uses SQLCipher through
-  `better-sqlite3-multiple-ciphers`. Application key envelopes and provider
-  credentials use Electron `safeStorage`, backed by macOS Keychain.
+- **Database:** new profiles make a one-time choice between Standard setup
+  (without app-level database encryption) and Encrypted setup (SQLCipher through
+  `better-sqlite3-multiple-ciphers`). Encrypted setup uses Electron `safeStorage`,
+  backed by macOS Keychain, and may request permission. Existing profiles keep
+  their current database format. Provider credentials use secure storage with
+  either setup and may require separate Keychain permission.
 - **Recording files:** database encryption does **not** mean all audio files are
   encrypted. Encrypted capture is currently disabled by default and requires an
   explicitly enabled, verified signed distribution build. Source development
@@ -214,8 +217,10 @@ from your regular meeting history, run:
 PLUTO_USER_DATA_DIR="$HOME/Library/Application Support/pluto-sandbox" pnpm dev
 ```
 
-A fresh profile creates its own local encryption key. Existing profiles are not
-moved or merged automatically. Backups of encrypted data also need the original
+A fresh profile chooses its database setup before the database is created.
+The choice is fixed for that profile and shown in Advanced settings. Only
+Encrypted setup creates a database encryption key. Existing profiles are not
+moved, merged, or converted automatically. Backups of encrypted data also need the original
 key access or a supported recovery path. If a profile cannot unlock, preserve
 its database and key envelope; see
 [profile troubleshooting](docs/dev.md#source-startup-and-local-profiles).

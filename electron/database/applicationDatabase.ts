@@ -11,6 +11,7 @@ import {
   type StartupRecoveryResult,
   runDatabaseStartupRecovery,
 } from './startupRecovery';
+import { resolveDatabaseStorageMode } from './storageSetup';
 
 export interface ApplicationDatabase {
   initialize(): Database.Database;
@@ -25,6 +26,7 @@ interface ApplicationDatabaseOptions extends DatabaseRuntimeOptions {
 
 interface InitializeApplicationDatabaseOptions {
   keyStore?: ApplicationKeyStore;
+  storageMode?: 'standard' | 'encrypted';
 }
 
 export const createApplicationDatabase = (
@@ -71,16 +73,27 @@ const getOwner = (options: InitializeApplicationDatabaseOptions = {}) => {
   if (!applicationDatabase) {
     const appRoot =
       typeof app.getAppPath === 'function' ? app.getAppPath() : process.cwd();
+    const databasePath = resolveApplicationDatabasePath({
+      userDataPath: app.getPath('userData'),
+    });
+    const storedMode = resolveDatabaseStorageMode(databasePath);
+    const storageMode = options.storageMode ?? storedMode;
+    if (!storageMode || (storedMode && storedMode !== storageMode)) {
+      throw new Error(
+        'Database storage setup is required or does not match this profile',
+      );
+    }
     applicationDatabase = createApplicationDatabase({
-      databasePath: resolveApplicationDatabasePath({
-        userDataPath: app.getPath('userData'),
-      }),
+      databasePath,
       migrationsFolder: resolveMigrationsFolder({
         isPackaged: app.isPackaged ?? false,
         appRoot,
         resourcesPath: process.resourcesPath ?? appRoot,
       }),
-      keyStore: options.keyStore ?? new ApplicationKeyStore(),
+      keyStore:
+        storageMode === 'encrypted'
+          ? (options.keyStore ?? new ApplicationKeyStore())
+          : undefined,
     });
   }
   return applicationDatabase;

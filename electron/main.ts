@@ -564,6 +564,7 @@ import {
   createBackgroundKnowledgeRefreshCoordinator,
 } from './backgroundKnowledgeRefresh';
 import { handleAudioCaptureJournalStart } from './captureJournalStart';
+import { resolveDatabaseStorageMode } from './database/storageSetup';
 import * as db from './db';
 import {
   type DirtyEntityQueue,
@@ -5870,6 +5871,9 @@ app.whenReady().then(async () => {
     return db.getCredentialStatus(parsed);
   });
   ipcMain.handle('AUDIO_RETENTION_GET_STATUS', () => audioRetention.inspect());
+  ipcMain.handle('DATABASE_STORAGE_MODE', () =>
+    resolveDatabaseStorageMode(path.join(app.getPath('userData'), 'pluto.db')),
+  );
   ipcMain.handle('AUDIO_RETENTION_SET_BUDGET', async (_event, value) => {
     const parsed = parseAudioStorageBudgetGb(value);
     const normalized = parsed === null ? 'unlimited' : String(parsed);

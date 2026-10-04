@@ -340,6 +340,9 @@ export const SettingsTab = ({
   const [audioRetention, setAudioRetention] =
     useState<AudioRetentionSnapshot | null>(null);
   const [audioRetentionError, setAudioRetentionError] = useState(false);
+  const [databaseStorageMode, setDatabaseStorageMode] = useState<
+    'standard' | 'encrypted' | null
+  >(null);
   const [templateToEdit, setTemplateToEdit] =
     useState<MeetingNotesTemplate>('auto');
   const [templateGuidanceDraft, setTemplateGuidanceDraft] = useState('');
@@ -429,6 +432,16 @@ export const SettingsTab = ({
   const persistSetting = (key: string, value: string) => {
     void window.ipcRenderer.invoke('SET_SETTING', { key, value });
   };
+
+  useEffect(() => {
+    void window.ipcRenderer
+      .invoke('DATABASE_STORAGE_MODE')
+      .then((mode: unknown) => {
+        if (mode === 'standard' || mode === 'encrypted')
+          setDatabaseStorageMode(mode);
+      })
+      .catch(() => setDatabaseStorageMode(null));
+  }, []);
 
   const updateMeetingNotesTemplateSettings = async (
     update: MeetingNotesTemplateSettingsUpdate,
@@ -1205,7 +1218,7 @@ export const SettingsTab = ({
                   helper={
                     credentialStatus[llmProvider]?.configured
                       ? 'Stored securely in macOS encrypted storage.'
-                      : 'Enter a key to store it with macOS secure storage.'
+                      : 'Saving a key uses macOS secure storage and may request Keychain permission, even with standard database setup.'
                   }
                 >
                   <div className="space-y-2">
@@ -1324,6 +1337,25 @@ export const SettingsTab = ({
           aria-labelledby="settings-tab-advanced"
         >
           <ChatGptConnectionSettings />
+          <Section title="Local data">
+            <SettingsRow
+              label="Database encryption"
+              helper="Your database setup is fixed for this profile. Encryption protects stored transcripts, notes, and people; recording files have separate protection. Cloud-provider keys use secure storage with either setup."
+              actionControl
+            >
+              <span
+                className="text-sm text-pro-text-muted"
+                role="status"
+                aria-label="Database encryption status"
+              >
+                {databaseStorageMode === 'encrypted'
+                  ? 'On'
+                  : databaseStorageMode === 'standard'
+                    ? 'Off'
+                    : 'Unavailable'}
+              </span>
+            </SettingsRow>
+          </Section>
           <Section title="Application updates">
             <SettingsRow
               label="Pluto Version"

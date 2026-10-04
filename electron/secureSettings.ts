@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, safeStorage } from 'electron';
+import electron, { app } from 'electron';
 import type { ProviderCredentialStatus } from './llm/inferenceTypes';
 import { credentialSettingKey } from './llm/providerCatalog';
 
@@ -81,11 +81,13 @@ function writeSecureSettingsFile(
 
 export function createElectronSecureSettingsBackend(): SecureSettingsBackend {
   return {
-    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    isAvailable: () => electron.safeStorage.isEncryptionAvailable(),
     readAll: () => readSecureSettingsFile(),
     writeAll: (next) => writeSecureSettingsFile(next),
-    encrypt: (value) => safeStorage.encryptString(value).toString('base64'),
-    decrypt: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')),
+    encrypt: (value) =>
+      electron.safeStorage.encryptString(value).toString('base64'),
+    decrypt: (value) =>
+      electron.safeStorage.decryptString(Buffer.from(value, 'base64')),
   };
 }
 
@@ -104,6 +106,8 @@ export function createSecureSettingsManager({
     const encrypted = backend.readAll()[key];
     return encrypted ? backend.decrypt(encrypted) : null;
   };
+  const hasCredential = (key: string) =>
+    Boolean(backend.readAll()[key]) || plaintext.get(key) !== null;
 
   const writeSecureValue = (key: string, value: string) => {
     const next = backend.readAll();
@@ -122,6 +126,7 @@ export function createSecureSettingsManager({
     get(key: string) {
       if (!isSecretSettingKey(key)) return plaintext.get(key);
       try {
+        if (!hasCredential(key)) return null;
         if (!backend.isAvailable()) return null;
         const secureValue = getSecureValue(key);
         if (secureValue !== null) return secureValue;
@@ -172,15 +177,20 @@ export function createSecureSettingsManager({
       provider: ProviderCredentialStatus['provider'],
     ): ProviderCredentialStatus {
       const key = credentialSettingKey(provider);
-      if (!backend.isAvailable()) {
-        return {
-          provider,
-          configured: false,
-          available: false,
-          error: 'secure_storage_unavailable',
-        };
-      }
       try {
+        // Empty credential checks do not need to unlock or probe Keychain.
+        // Availability is verified when a credential is saved or accessed.
+        if (!hasCredential(key)) {
+          return { provider, configured: false, available: true };
+        }
+        if (!backend.isAvailable()) {
+          return {
+            provider,
+            configured: false,
+            available: false,
+            error: 'secure_storage_unavailable',
+          };
+        }
         let credential = getSecureValue(key);
         if (credential === null) {
           const legacyValue = plaintext.get(key);

@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import * as electron from 'electron';
+import electron from 'electron';
 import type { SafeStorageBackend } from './keyCustodyProbe';
 import {
   RECOVERY_KEY_FILE_NAME,
@@ -64,38 +64,45 @@ export class ApplicationKeyStore {
         : '';
     this.storageDir = options.storageDir ?? defaultStorageDir;
 
-    let safeStorageFromElectron: SafeStorageBackend | undefined;
-    try {
-      safeStorageFromElectron = (electron as Record<string, unknown>)
-        .safeStorage as SafeStorageBackend | undefined;
-    } catch {
-      safeStorageFromElectron = undefined;
-    }
-
-    const defaultBackend: SafeStorageBackend =
-      safeStorageFromElectron ??
-      (process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST)
-        ? {
-            isEncryptionAvailable: () => true,
-            encryptString: (str: string) => Buffer.from(`test_enc_${str}`),
-            decryptString: (buf: Buffer) => {
-              const s = buf.toString('utf8');
-              return s.startsWith('test_enc_')
-                ? s.slice('test_enc_'.length)
-                : s;
-            },
-          }
-        : {
-            isEncryptionAvailable: () => false,
-            encryptString: () => {
-              throw new Error('OS key storage is unavailable');
-            },
-            decryptString: () => {
-              throw new Error('OS key storage is unavailable');
-            },
-          });
-
-    this.backend = options.backend ?? defaultBackend;
+    const getBackend = (): SafeStorageBackend => {
+      let safeStorageFromElectron: SafeStorageBackend | undefined;
+      try {
+        safeStorageFromElectron = (
+          electron as unknown as Record<string, unknown>
+        ).safeStorage as SafeStorageBackend | undefined;
+      } catch {
+        safeStorageFromElectron = undefined;
+      }
+      return (
+        safeStorageFromElectron ??
+        (process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST)
+          ? {
+              isEncryptionAvailable: () => true,
+              encryptString: (str: string) => Buffer.from(`test_enc_${str}`),
+              decryptString: (buf: Buffer) => {
+                const s = buf.toString('utf8');
+                return s.startsWith('test_enc_')
+                  ? s.slice('test_enc_'.length)
+                  : s;
+              },
+            }
+          : {
+              isEncryptionAvailable: () => false,
+              encryptString: () => {
+                throw new Error('OS key storage is unavailable');
+              },
+              decryptString: () => {
+                throw new Error('OS key storage is unavailable');
+              },
+            })
+      );
+    };
+    // Constructing audio/key stores must not request Keychain access.
+    this.backend = options.backend ?? {
+      isEncryptionAvailable: () => getBackend().isEncryptionAvailable(),
+      encryptString: (value) => getBackend().encryptString(value),
+      decryptString: (value) => getBackend().decryptString(value),
+    };
     this.envelopePath = path.join(
       this.storageDir,
       options.envelopeFileName ?? 'app-key-envelope.json',

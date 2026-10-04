@@ -48,6 +48,35 @@ const createSecureBackend = ({
 };
 
 describe('secureSettings', () => {
+  it('never probes or unlocks key storage when no credentials have been saved', () => {
+    const backend = createSecureBackend();
+    backend.isAvailable = vi.fn(() => {
+      throw new Error('Unexpected Keychain access');
+    });
+    backend.decrypt = vi.fn(() => {
+      throw new Error('Unexpected Keychain access');
+    });
+    const manager = createSecureSettingsManager({
+      plaintext: createPlaintextStore(),
+      backend,
+    });
+    for (const provider of [
+      'openai',
+      'openrouter',
+      'gemini',
+      'claude',
+    ] as const) {
+      expect(manager.status(provider)).toEqual({
+        provider,
+        configured: false,
+        available: true,
+      });
+      expect(manager.get(`${provider}_api_key`)).toBeNull();
+    }
+    expect(manager.get('hf_token')).toBeNull();
+    expect(backend.isAvailable).not.toHaveBeenCalled();
+    expect(backend.decrypt).not.toHaveBeenCalled();
+  });
   it('identifies the secret-backed setting keys', () => {
     expect(isSecretSettingKey('gemini_api_key')).toBe(true);
     expect(isSecretSettingKey('openai_api_key')).toBe(true);

@@ -65,6 +65,38 @@ afterEach(() => {
 });
 
 describe('SettingsTab', () => {
+  it.each(['standard', 'encrypted'] as const)(
+    'displays the %s database setup without a toggle',
+    async (mode) => {
+      const invoke = vi.fn(async (channel: string) =>
+        channel === 'DATABASE_STORAGE_MODE'
+          ? mode
+          : channel === 'GET_SETTING'
+            ? ''
+            : null,
+      );
+      Object.defineProperty(window, 'ipcRenderer', {
+        configurable: true,
+        value: { invoke, on: vi.fn(() => () => {}) },
+      });
+      const container = document.createElement('div');
+      document.body.append(container);
+      const root = createRoot(container);
+      await act(async () =>
+        root.render(<SettingsTab {...defaultProps} initialTab="advanced" />),
+      );
+      const status = container.querySelector(
+        '[aria-label="Database encryption status"]',
+      )!;
+      expect(status.textContent).toBe(mode === 'encrypted' ? 'On' : 'Off');
+      expect(status.closest('button')).toBeNull();
+      expect(container.textContent).toContain('fixed for this profile');
+      expect(
+        invoke.mock.calls.some(([channel]) => channel === 'SET_SETTING'),
+      ).toBe(false);
+      act(() => root.unmount());
+    },
+  );
   it('shows current recording usage and applies the selected storage budget', async () => {
     const invoke = vi.fn(async (channel: string, value?: string) => {
       if (channel === 'AUDIO_RETENTION_GET_STATUS') {

@@ -12,8 +12,19 @@ commands, not user-facing settings or routine setup requirements.
 Pluto with hot reload. On macOS both use `~/Library/Application Support/pluto` by
 default, so changing commands does not change the visible meetings. No installed
 app, signing certificate, or exported recovery key is required. A fresh profile
-creates its own local key through Electron safeStorage; an existing profile
-reuses its original envelope. macOS may request Keychain access.
+first shows a native welcome step with a one-time Standard or Encrypted database
+choice, before the usual setup wizard. Standard setup does not create or access
+a database key. Encrypted setup obtains key-storage permission before creating
+the database; denied permission permits retrying or choosing Standard setup.
+Existing databases retain their format and skip this choice. Encrypted profiles
+reuse their original keys, and macOS may request Keychain access.
+
+The choice is shown read-only in Advanced settings and is recorded in
+`database-storage.json` for new profiles. Do not edit that file to switch formats;
+format mismatches or a missing database in a completed profile stop startup
+without resetting data. Saved cloud-provider keys use secure storage with either
+setup. Empty credential checks do not request Keychain access, but saving or
+reading a credential may do so.
 
 Development startup uses a cached `Pluto.app` copy of Electron under ignored
 `node_modules` so the macOS menu bar shows Pluto. It leaves the installed Electron
