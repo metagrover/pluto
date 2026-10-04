@@ -14,6 +14,7 @@ because they are not required to build, test, attribute, or maintain the Swift p
 
 Modified upstream files:
 
+- `README.md` (trimmed promotional entries)
 - `Sources/FluidAudio/ASR/Parakeet/SlidingWindow/SlidingWindowAsrManager.swift`
 - `Sources/FluidAudio/ASR/Parakeet/Streaming/EOU/StreamingEouAsrManager.swift`
 - `Sources/FluidAudio/Shared/AppLogger.swift`

@@ -194,7 +194,7 @@ Expected: all `UpcomingMeetings` tests pass.
 
 - [x] **Step 1: Record the durable dashboard-density decision**
 
-Append a dated decision linked to issue #778: the collapsed agenda shows three rows below the dashboard's `lg` breakpoint and five at or above it, overflow remains user-expandable, and an empty day is stated explicitly without copying Granola's visual treatment.
+Append a dated decision linked to issue #778: the collapsed agenda shows three rows below the dashboard's `lg` breakpoint and five at or above it, overflow remains user-expandable, and an empty day is stated explicitly using Pluto's existing visual treatment.
 
 - [x] **Step 2: Add the changelog fragment**
 

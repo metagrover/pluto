@@ -60,14 +60,14 @@ graph LR
 
 ## 2. Key Differentiators
 
-| Feature | Pluto | Granola | Otter.ai | Notion AI |
-|---------|-------|---------|----------|-----------|
-| **Local-first / Private** | ✅ | ❌ | ❌ | ❌ |
-| **Open Source** | ✅ | ❌ | ❌ | ❌ |
-| **Knowledge Graph** | ✅ | ❌ | ❌ | ❌ |
-| **Live Documents** | ✅ | ❌ | ❌ | Partial |
-| **Proactive Accountability** | ✅ | ❌ | ❌ | ❌ |
-| **Works Offline** | ✅ | ❌ | ❌ | ❌ |
+| Feature | Pluto | Otter.ai | Notion AI |
+|---------|-------|----------|-----------|
+| **Local-first / Private** | ✅ | ❌ | ❌ |
+| **Open Source** | ✅ | ❌ | ❌ |
+| **Knowledge Graph** | ✅ | ❌ | ❌ |
+| **Live Documents** | ✅ | ❌ | Partial |
+| **Proactive Accountability** | ✅ | ❌ | ❌ |
+| **Works Offline** | ✅ | ❌ | ❌ |
 
 ---
 
@@ -357,7 +357,6 @@ gantt
 
 **Pluto's Position:** The proactive second brain for work—combining automatic knowledge extraction with privacy and accountability.
 
-| vs. Granola | Local-first, knowledge graph, open-source |
 | vs. Otter.ai | Complete privacy, no subscription |
 | vs. Notion AI | Standalone, proactive accountability |
 | vs. Roam/Obsidian | Automatic extraction from voice |

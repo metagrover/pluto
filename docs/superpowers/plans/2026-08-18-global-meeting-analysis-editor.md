@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Produce concise, Granola-like meeting notes by globally consolidating multi-topic local analysis, resolving high-confidence terminology from meeting-wide context, and retaining explicit commitments whose evidence crosses transcript segment boundaries.
+**Goal:** Produce concise, outcome-oriented meeting notes by globally consolidating multi-topic local analysis, resolving high-confidence terminology from meeting-wide context, and retaining explicit commitments whose evidence crosses transcript segment boundaries.
 
 **Architecture:** Keep the canonical transcript unchanged. Ollama continues to segment and analyze bounded transcript slices, then a single global editorial call receives the raw transcript plus the draft topic document and returns the final `AnalysisDocumentV3`; the existing grounding boundary validates settled items against raw evidence afterward. Extend grounding only to resolve verbatim evidence across at most three adjacent transcript lines, preserving the exact-evidence policy while recovering clauses split by transcription segmentation.
 

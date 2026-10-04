@@ -611,7 +611,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 
 - **Status:** Accepted
 - **Source:** [Issue #639](https://github.com/metagrover/pluto/issues/639)
-- **Decision:** Pluto follows a Granola-like document model: the scratchpad is primary while recording, completed meetings open on Notes, and Transcript is a secondary tab. Generated notes use a small number of adaptive document sections with decisions, actions, edits, templates, and evidence in context instead of parallel dashboard cards.
+- **Decision:** Pluto follows a notes-first document model: the scratchpad is primary while recording, completed meetings open on Notes, and Transcript is a secondary tab. Generated notes use a small number of adaptive document sections with decisions, actions, edits, templates, and evidence in context instead of parallel dashboard cards.
 - **Rationale:** A transcript-first recording layout and card-heavy analysis made it difficult to capture intent or read the meeting afterward. Long analysis could also expose housekeeping, spelling variants, and an inventory of dozens of topics instead of a useful document.
 - **Consequences:** User notes remain autosaved meeting evidence and guide generation; template selection changes emphasis without selecting another model; transcript trust and entity context remain available outside the main reading path; source quotes are disclosed where grounded evidence exists.
 
@@ -842,7 +842,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Status:** Accepted; supersedes the August 27 live-edge refinement's presentation of provisional tails as ordinary conversation turns and its 45-second checkpoint interval, and the August 26 microphone-as-You label.
 - **Decision:** New recordings default to the existing event-time conversation projection; an explicit disabled rollout setting retains the fallback. A compact, separately labelled provisional area holds both sources. Native word-safe checkpoints run every five seconds without resetting the decoder or committing the unfinished word. Only the reading surface splits held words from subsequent speech after long pauses. Echo-prefix removal dates the retained reply from its own word timing and reorders it accordingly. Consecutive source rows form bounded reading turns; fully removed duplicate bookkeeping stays outside the visible feed. Labels describe audio sources (`Mic`, `Call`) rather than asserting identity.
 - **Reconciliation:** Bounded ordered word matching can cross independent source checkpoints when actual paired audio corroborates the timing. Only exactly matched microphone words are removed by the new matcher. Unmatched words, additions, corrections, and raw source evidence remain available; removing acoustic support restores the wording.
-- **Rationale:** The September 8 recordings exposed duplicated channel paragraphs, long provisional blocks, and speech attached to timestamps before intervening replies. OpenOats provides a useful separate-preview and short-segment reference; its callback-order storage is not adopted.
+- **Rationale:** The September 8 recordings exposed duplicated channel paragraphs, long provisional blocks, and speech attached to timestamps before intervening replies. Separate previews and short segments address these issues while preserving timestamp-based storage.
 - **Consequences:** Recordings, raw row persistence, and canonical final transcription remain unchanged. Capture-time rendering and replay must be checked in addition to deterministic tests; ordering does not imply that every uncertain cross-channel duplicate can safely be removed.
 
 ## 2026-08-28 - Qualify project scope before presenting a project
@@ -1171,7 +1171,7 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Status:** Accepted and implemented under [Issue #778](https://github.com/metagrover/pluto/issues/778).
 - **Decision:** The Upcoming meetings agenda reads from today's local midnight through a bounded 30-day forward window in Pluto's existing calendar cache. It shows up to three meeting rows below Pluto's `lg` dashboard breakpoint and up to five at or above it; additional meetings remain available through one inline, reversible disclosure.
 - **Behavior boundary:** When today has no remaining meeting, the agenda states `No meetings today` and continues with dated future rows. Calendar synchronization, event ordering, stale-cache handling, recovery states, and calendar source controls remain unchanged.
-- **Design boundary:** The Granola reference established the desired information density and empty-day clarity, while Pluto's existing typography, spacing, color, hierarchy, and control styling remain authoritative.
+- **Design boundary:** The agenda prioritizes information density and empty-day clarity using Pluto's existing typography, spacing, color, hierarchy, and control styling.
 
 ## 2026-09-07 - Use concise project guidance and optional workflows
 

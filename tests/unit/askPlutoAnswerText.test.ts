@@ -32,8 +32,7 @@ describe('Ask Pluto answer repetition', () => {
   });
 
   it('drops prior answer claims while retaining new supported claims and sources', () => {
-    const previous =
-      'Granola can recognize who a meeting is with via calendar data.';
+    const previous = 'The calendar integration can suggest meeting participants.';
     const earlier = 'The team decided to hide the button or label.';
     const newClaim = 'The capability to add multiple calendars has been added.';
     const result = removeRepeatedAskPlutoClaims(

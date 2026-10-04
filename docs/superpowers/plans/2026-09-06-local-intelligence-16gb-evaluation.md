@@ -42,15 +42,9 @@ Source reference: `c592a997fb0103aec96756ea1086a817eec8bb5d`, inspected Septembe
 
 Current source inspection is not proof that the active Electron bundle contains the same fixes. A completed replay is not proof of actual publication or successful notification.
 
-### OpenOats reference: what is verified
+### Benchmark comparison controls
 
-Pin: [`6dc50ebb9b66da2dbb19faf1a6c14f8174f3eafa`](https://github.com/yazinsai/OpenOats/tree/6dc50ebb9b66da2dbb19faf1a6c14f8174f3eafa), inspected September 6, 2026.
-
-- Stored defaults are `qwen3:8b` for Ollama and `mlx-community/Llama-3.2-3B-Instruct-4bit` for MLX. The OpenRouter model default is `google/gemini-3-flash-preview`. These are provider-specific fallback settings, not proof of the user's installed configuration. [SettingsStore.swift](https://github.com/yazinsai/OpenOats/blob/6dc50ebb9b66da2dbb19faf1a6c14f8174f3eafa/OpenOats/Sources/OpenOats/Settings/SettingsStore.swift#L1317)
-- The inspected notes engine makes a streaming Markdown completion request with a 4,096-token allowance, using the configured provider. It progressively appends output. When formatted transcript content exceeds 60,000 characters, its formatter retains the first and last thirds of utterance lines and marks the omission. This is not an exact 60,000-character hard cap. The visible generation path does not contain Pluto's writer/editor stages. [NotesEngine.swift](https://github.com/yazinsai/OpenOats/blob/6dc50ebb9b66da2dbb19faf1a6c14f8174f3eafa/OpenOats/Sources/OpenOats/Intelligence/NotesEngine.swift#L215)
-- Its chat-completions stream handling can emit an ellipsis for a length finish instead of treating that finish as a hard truncation error. That is a different completion contract, not proof of bad notes. [OpenRouterClient.swift](https://github.com/yazinsai/OpenOats/blob/6dc50ebb9b66da2dbb19faf1a6c14f8174f3eafa/OpenOats/Sources/OpenOats/Intelligence/OpenRouterClient.swift#L227)
-
-The user's fast experience is a useful lead, but provider, model, hardware, input size, output length, and completion quality are unknown. Do not describe a reproduction as an OpenOats benchmark unless the actual pinned app and settings were tested. Otherwise call it an OpenOats-inspired one-pass ablation.
+Reported speed alone is not a benchmark. Pin provider, model, hardware, input size, output length, and completion quality before comparing results. Label a simplified Pluto notes pipeline as a one-pass ablation and measure it under the same conditions as the production pipeline.
 
 ### Hypotheses, not decisions
 
@@ -92,7 +86,7 @@ Screen first, promote selectively; do not execute an unbounded full Cartesian pr
 | --- | --- | --- |
 | Gemma `gemma4:12b` | Current notes/deep/dreaming control | Always retain as paired baseline, including failures |
 | Phi `phi4-mini:3.8b` | Current quick-chat control; cheap notes probe | Continue notes lane only if fidelity screen passes |
-| Llama `llama3.2:3b` | Small-model reference motivated by OpenOats | Pin actual available digest/quantization before execution |
+| Llama `llama3.2:3b` | Small-model comparison baseline | Pin actual available digest/quantization before execution |
 | Qwen `qwen3.5:4b` | Small-default challenger | Full notes + downstream quality screen |
 | Ministral `ministral-3:8b` | Medium-size fidelity challenger | Continue if small candidates fail quality or this wins cost/quality |
 | Qwen `qwen3.5:9b` | Historical Pluto comparator | Reserve; run if first screen is inconclusive |
@@ -390,6 +384,6 @@ rtk git diff --check
 - [ ] Fixed-notes and candidate-notes downstream tracks both reported.
 - [ ] Failed, timed-out, cancelled, and contaminated runs retained.
 - [ ] Resource and recording gates verified on the integrated configuration.
-- [ ] OpenOats observations remain pinned source findings, not unsupported speed/quality claims.
+- [ ] Performance comparisons use pinned configurations and measured results, not unsupported speed/quality claims.
 - [ ] Local artifacts remain private; public reports are content-free.
 - [ ] Final decision, follow-up scope, canary, and rollback agreed before any default migration.
