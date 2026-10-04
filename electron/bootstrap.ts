@@ -154,7 +154,7 @@ if (!canOpenDatabase) {
           : isIdentityMismatch
             ? 'Database recovery required'
             : isKeyLocked || isKeyRejected
-              ? 'Database Encryption Locked'
+              ? 'Could not unlock existing database'
               : 'Pluto could not start';
         const detail = `${describeDatabaseStartupError(error)}\n\nYour data is preserved safely. Pluto will never replace or overwrite your encrypted database without your explicit action.`;
 

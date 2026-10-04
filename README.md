@@ -335,9 +335,13 @@ and verifying the speech models before transcription is available.
 selected input device, and restart Pluto after changing macOS permissions.
 
 **Keychain or database unlock errors:** allow access for the Pluto runtime you
-intend to use. Preserve the existing data and key envelope; an envelope tied to
-a signed app identity may require that same signed app to unlock it. See
-[docs/dev.md](docs/dev.md) for recovery guidance.
+intend to use. Standard setup applies to new profiles; an existing encrypted
+database still needs its original key. **Open Anyway** permits an unsigned app
+to launch but does not grant Keychain access. An ad-hoc signed update may need
+renewed Keychain permission. If no prompt appears, the recovery dialog
+distinguishes Keychain unavailability from a failed key decryption. Keep the
+database and key envelope together; see [docs/dev.md](docs/dev.md) for recovery
+guidance.
 
 ## Contributing
 

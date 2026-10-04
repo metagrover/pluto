@@ -147,6 +147,55 @@ describe('ApplicationKeyStore', () => {
     );
   });
 
+  it('identifies unavailable Keychain access before decryption and preserves the key envelope', () => {
+    const store = new ApplicationKeyStore({
+      storageDir: tmpDir,
+      backend: mockBackend,
+    });
+    store.getOrCreateMasterKey();
+    const envelopePath = path.join(tmpDir, 'app-key-envelope.json');
+    const original = fs.readFileSync(envelopePath);
+    const decryptString = vi.fn(mockBackend.decryptString);
+    const unavailable = new ApplicationKeyStore({
+      storageDir: tmpDir,
+      backend: {
+        ...mockBackend,
+        isEncryptionAvailable: () => false,
+        decryptString,
+      },
+    });
+
+    expect(() => unavailable.getMasterKey()).toThrowError(
+      expect.objectContaining({ stage: 'keychain_unavailable' }),
+    );
+    expect(decryptString).not.toHaveBeenCalled();
+    expect(fs.readFileSync(envelopePath)).toEqual(original);
+  });
+
+  it('identifies failed decryption without replacing an existing key envelope', () => {
+    const store = new ApplicationKeyStore({
+      storageDir: tmpDir,
+      backend: mockBackend,
+    });
+    store.getOrCreateMasterKey();
+    const envelopePath = path.join(tmpDir, 'app-key-envelope.json');
+    const original = fs.readFileSync(envelopePath);
+    const denied = new ApplicationKeyStore({
+      storageDir: tmpDir,
+      backend: {
+        ...mockBackend,
+        decryptString: () => {
+          throw new Error('permission denied');
+        },
+      },
+    });
+
+    expect(() => denied.getMasterKey()).toThrowError(
+      expect.objectContaining({ stage: 'keychain_decrypt_failed' }),
+    );
+    expect(fs.readFileSync(envelopePath)).toEqual(original);
+  });
+
   it('rejects signed envelopes in source before decryption without changing them', () => {
     const signed = new ApplicationKeyStore({
       storageDir: tmpDir,

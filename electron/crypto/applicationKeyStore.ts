@@ -34,6 +34,22 @@ export class ApplicationKeyBindingMismatchError extends Error {
   }
 }
 
+export type ApplicationKeyAccessStage =
+  | 'keychain_unavailable'
+  | 'envelope_unreadable'
+  | 'keychain_decrypt_failed';
+
+export class ApplicationKeyAccessError extends Error {
+  constructor(
+    readonly stage: ApplicationKeyAccessStage,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = 'ApplicationKeyAccessError';
+  }
+}
+
 export interface MasterKeyResult {
   key: Buffer;
   keyId: string;
@@ -120,6 +136,25 @@ export class ApplicationKeyStore {
     );
   }
 
+  private requireKeychainAvailable(): void {
+    let available = false;
+    try {
+      available = this.backend?.isEncryptionAvailable() ?? false;
+    } catch (cause) {
+      throw new ApplicationKeyAccessError(
+        'keychain_unavailable',
+        'OS key storage availability could not be checked',
+        { cause },
+      );
+    }
+    if (!available) {
+      throw new ApplicationKeyAccessError(
+        'keychain_unavailable',
+        'OS key storage is unavailable or locked',
+      );
+    }
+  }
+
   getMasterKey(): MasterKeyResult | null {
     const recoveryKey = readRecoveryKeyFile({
       storageDir: this.storageDir,
@@ -128,17 +163,17 @@ export class ApplicationKeyStore {
     if (recoveryKey) return recoveryKey;
     if (!this.hasMasterKey()) return null;
 
-    if (!this.backend || !this.backend.isEncryptionAvailable()) {
-      throw new Error('OS key storage is unavailable or locked');
-    }
+    this.requireKeychainAvailable();
 
     let parsed: unknown;
     try {
       const raw = fs.readFileSync(this.envelopePath, 'utf8');
       parsed = JSON.parse(raw);
     } catch (error) {
-      throw new Error(
+      throw new ApplicationKeyAccessError(
+        'envelope_unreadable',
         `Malformed key envelope: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
       );
     }
 
@@ -183,8 +218,10 @@ export class ApplicationKeyStore {
         );
       }
     } catch (error) {
-      throw new Error(
+      throw new ApplicationKeyAccessError(
+        'keychain_decrypt_failed',
         `Failed to decrypt application root key: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
       );
     }
 
@@ -206,11 +243,7 @@ export class ApplicationKeyStore {
     const existing = this.getMasterKey();
     if (existing) return existing;
 
-    if (!this.backend || !this.backend.isEncryptionAvailable()) {
-      throw new Error(
-        'OS key storage is unavailable; cannot create master key',
-      );
-    }
+    this.requireKeychainAvailable();
 
     const key = randomBytes(32);
     const salt = randomBytes(32);
