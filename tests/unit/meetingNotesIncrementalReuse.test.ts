@@ -68,6 +68,7 @@ it('does not spend live inference on a compact meeting that still fits the direc
   expect(generate).not.toHaveBeenCalled();
 });
 
+// This exercises repeated full planning and review, rather than a single unit call.
 it('reuses compact live work in the real bounded final plan, without skipping final review', async () => {
   const finalSource = makeSyntheticNotesSource(
     Array.from({ length: 443 }, (_, i) => ({
@@ -167,7 +168,7 @@ it('reuses compact live work in the real bounded final plan, without skipping fi
     generate.mock.calls.find(([request]) => request.task === 'notesWriter')![0]
       .prompt,
   ).toContain('Fresh meeting detail');
-});
+}, 30_000);
 
 it('precomputes only a closed leaf and reuses it during final generation', async () => {
   const finalSource = makeSyntheticNotesSource(

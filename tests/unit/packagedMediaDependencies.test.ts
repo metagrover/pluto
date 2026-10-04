@@ -11,6 +11,7 @@ const collectorPath = builderRequire.resolve(
 );
 const { PnpmNodeModulesCollector } = require(collectorPath);
 
+// Dependency collection launches pnpm; allow process startup on shared CI runners.
 it('includes the native ffprobe package in the actual pnpm packaging dependency graph', async () => {
   const temporaryRoot = await mkdtemp(
     path.join(os.tmpdir(), 'pluto-media-deps-'),
@@ -32,4 +33,4 @@ it('includes the native ffprobe package in the actual pnpm packaging dependency 
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
-});
+}, 30_000);
