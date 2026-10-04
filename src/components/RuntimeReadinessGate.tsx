@@ -1,10 +1,15 @@
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 
 import { useModelDownloadProgress } from '../hooks/useModelDownloadProgress';
+import {
+  describeTranscriptionSetupFailure,
+  preparationFailureCode,
+} from '../services/setupReadiness';
 import { Logo } from './Brand/Logo';
 import { ModelDownloadProgress } from './ModelDownloadProgress';
 
 type ReadinessStatus = {
+  preparationError?: string;
   details: {
     parakeetClient: boolean;
     parakeetModel: boolean;
@@ -31,6 +36,9 @@ export const RuntimeReadinessGate = ({
   children,
 }: RuntimeReadinessGateProps) => {
   const [phase, setPhase] = useState<ReadinessPhase>('checking');
+  const [failure, setFailure] = useState(() =>
+    describeTranscriptionSetupFailure(),
+  );
   const modelDownloadProgress = useModelDownloadProgress();
 
   const verify = useCallback(async () => {
@@ -48,8 +56,14 @@ export const RuntimeReadinessGate = ({
       const prepared = (await window.ipcRenderer.invoke(
         'RECORDING_READINESS_PREPARE',
       )) as ReadinessStatus;
+      setFailure(describeTranscriptionSetupFailure(prepared));
       setPhase(hasLocalTranscriptionRuntime(prepared) ? 'ready' : 'error');
-    } catch {
+    } catch (error) {
+      setFailure(
+        describeTranscriptionSetupFailure({
+          preparationError: preparationFailureCode(error),
+        }),
+      );
       setPhase('error');
     }
   }, []);
@@ -75,7 +89,7 @@ export const RuntimeReadinessGate = ({
         ? 'Loading local transcription'
         : 'Checking local transcription';
   const description = failed
-    ? "Pluto couldn't prepare the English transcription models. Check your connection, then try again."
+    ? failure.message
     : downloading
       ? 'Downloading missing or damaged models. Keep Pluto open.'
       : loading
@@ -100,6 +114,11 @@ export const RuntimeReadinessGate = ({
           <p className="mt-3 max-w-sm text-sm leading-6 text-pro-text-muted">
             {description}
           </p>
+          {failed && (
+            <p className="mt-3 break-words text-xs text-pro-text-muted">
+              Setup code: {failure.code}
+            </p>
+          )}
 
           {failed ? (
             <button

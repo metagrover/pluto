@@ -190,4 +190,27 @@ describe('RuntimeReadinessGate', () => {
     expect(container.textContent).toContain('Pluto workspace');
     expect(invoke).toHaveBeenCalledTimes(4);
   });
+
+  it('shows the runtime failure instead of blaming the connection', async () => {
+    invoke.mockResolvedValueOnce(readiness(false)).mockResolvedValueOnce({
+      ...readiness(false),
+      preparationError: 'parakeet_process_exited',
+    });
+    act(() =>
+      root.render(
+        <RuntimeReadinessGate>
+          <div>Workspace</div>
+        </RuntimeReadinessGate>,
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('runtime stopped unexpectedly');
+    expect(container.textContent).toContain(
+      'Setup code: parakeet_process_exited',
+    );
+    expect(container.textContent).not.toContain('Check your connection');
+  });
 });

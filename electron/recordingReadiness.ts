@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import { systemPreferences } from 'electron';
+import { preparationFailureCode } from '../src/services/setupReadiness';
 import type { TranscriptionRuntimeHealth } from '../src/services/transcription/contracts';
+import { createLogger } from './logger';
 import type {
   ParakeetFinalClient,
   ParakeetPreparationProgress,
@@ -8,6 +10,7 @@ import type {
 
 export interface ReadinessStatus {
   ready: boolean;
+  preparationError?: string;
   blockers: string[];
   details: {
     parakeetClient: boolean;
@@ -97,19 +100,6 @@ const evaluateRecordingReadiness = (
   };
 };
 
-const prepareParakeetCapability = async (
-  client: ParakeetFinalClient | null,
-  onProgress?: (progress: ParakeetPreparationProgress) => void,
-): Promise<TranscriptionRuntimeHealth | null> => {
-  if (!client) return null;
-  try {
-    return await client.prepare(onProgress);
-  } catch (error) {
-    console.error('[Readiness] Parakeet prepare failed:', error);
-    return null;
-  }
-};
-
 export async function getRecordingReadinessStatus(
   options: ReadinessOptions,
 ): Promise<ReadinessStatus> {
@@ -123,9 +113,20 @@ export async function prepareRecordingReadiness(
   options: ReadinessOptions,
   onProgress?: (progress: ParakeetPreparationProgress) => void,
 ): Promise<ReadinessStatus> {
-  const capability = await prepareParakeetCapability(
-    options.parakeetFinalClient,
-    onProgress,
-  );
-  return evaluateRecordingReadiness(options, capability);
+  let capability: TranscriptionRuntimeHealth | null = null;
+  let preparationError: string | undefined;
+  try {
+    capability =
+      (await options.parakeetFinalClient?.prepare(onProgress)) ?? null;
+  } catch (error) {
+    createLogger('Readiness').error(
+      'Local transcription preparation failed',
+      error,
+    );
+    preparationError = preparationFailureCode(error);
+  }
+  return {
+    ...evaluateRecordingReadiness(options, capability),
+    ...(preparationError ? { preparationError } : {}),
+  };
 }

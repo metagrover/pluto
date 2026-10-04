@@ -51,6 +51,10 @@ never bypass protection or force-push.
 The existing Release workflow tests the code, builds native runtimes and the
 Apple Silicon DMG, verifies the packaged runtimes and checksum, then creates
 the GitHub Release with the committed notes, installer, and SHA256SUMS.txt.
+Publication also requires a real packaged-runtime prepare against an empty
+model cache and a separate cached restart with no additional downloads
+(`pnpm run package:verify-setup`). This downloads about 1 GB into a disposable
+directory; it never reads your profile or meeting data.
 RCs are marked prerelease and never marked Latest. The command waits for the
 workflow result and prints the release URL. The current pipeline uses ad-hoc
 signing; it does not claim Developer ID signing or notarization.

@@ -219,7 +219,12 @@ describe('SetupWizard', () => {
     act(() => root.render(<SetupWizard onComplete={vi.fn()} />));
     await flush();
 
-    expect(container.textContent).toContain('Could not prepare transcription');
+    expect(container.textContent).toContain(
+      'could not verify local transcription',
+    );
+    expect(container.textContent).toContain(
+      'Setup code: parakeet_setup_failed',
+    );
     expect(container.textContent).toContain('Try again');
   });
 

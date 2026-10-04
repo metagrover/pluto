@@ -83,6 +83,32 @@ describe('recordingReadiness', () => {
     expect(mockParakeetClient.prepare).not.toHaveBeenCalled();
   });
 
+  it('preserves a safe preparation failure code for the setup screen', async () => {
+    vi.mocked(mockParakeetClient.prepare).mockRejectedValue(
+      new Error('parakeet_process_exited'),
+    );
+    const result = await prepareRecordingReadiness({
+      parakeetFinalClient: mockParakeetClient,
+      parakeetModelRoot,
+      audiocapPath,
+    });
+    expect(result.preparationError).toBe('parakeet_process_exited');
+    expect(result.details.parakeetModel).toBe(false);
+  });
+
+  it('keeps raw error messages and private paths out of the IPC result', async () => {
+    vi.mocked(mockParakeetClient.prepare).mockRejectedValue(
+      new Error('Failed /private/profile/model with secret-token'),
+    );
+    const result = await prepareRecordingReadiness({
+      parakeetFinalClient: mockParakeetClient,
+      parakeetModelRoot,
+      audiocapPath,
+    });
+    expect(result.preparationError).toBe('parakeet_setup_failed');
+    expect(JSON.stringify(result)).not.toContain('secret-token');
+  });
+
   it('fails closed when the client is missing', async () => {
     const result = await getRecordingReadinessStatus({
       parakeetFinalClient: null,

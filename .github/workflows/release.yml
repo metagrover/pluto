@@ -80,6 +80,7 @@ jobs:
           APP="release/${PACKAGE_VERSION}/mac-arm64/Pluto.app"
           DMG="release/${PACKAGE_VERSION}/Pluto-Mac-${PACKAGE_VERSION}-Installer.dmg"
           pnpm run package:verify-runtime -- "$APP"
+          pnpm run package:verify-setup -- "$APP"
           test -s "$DMG"
           mkdir -p dist-release
           cp "$DMG" dist-release/

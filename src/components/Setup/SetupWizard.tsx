@@ -19,6 +19,8 @@ import { useModelDownloadProgress } from '../../hooks/useModelDownloadProgress';
 import {
   type SetupReadinessInput,
   deriveSetupReadiness,
+  describeTranscriptionSetupFailure,
+  preparationFailureCode,
 } from '../../services/setupReadiness';
 import { Logo } from '../Brand/Logo';
 import { ModelDownloadProgress } from '../ModelDownloadProgress';
@@ -39,6 +41,9 @@ const requirementTone = (ready: boolean, blocked = false) =>
 export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [setupError, setSetupError] = useState('');
+  const [transcriptionFailure, setTranscriptionFailure] = useState(() =>
+    describeTranscriptionSetupFailure(),
+  );
   const [hydrated, setHydrated] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [typedSetupQualifier, setTypedSetupQualifier] = useState('');
@@ -90,6 +95,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
       const status = await window.ipcRenderer.invoke(
         'RECORDING_READINESS_PREPARE',
       );
+      setTranscriptionFailure(describeTranscriptionSetupFailure(status));
       const isTranscriptionReady =
         status.details.parakeetClient &&
         status.details.parakeetModel &&
@@ -100,7 +106,12 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         ...current,
         transcription: isTranscriptionReady ? 'ready' : 'error',
       }));
-    } catch {
+    } catch (error) {
+      setTranscriptionFailure(
+        describeTranscriptionSetupFailure({
+          preparationError: preparationFailureCode(error),
+        }),
+      );
       setRequirements((current) => ({
         ...current,
         transcription: 'error',
@@ -347,7 +358,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                       : requirements.transcription === 'ready'
                         ? 'English Parakeet live transcription is verified'
                         : requirements.transcription === 'error'
-                          ? 'Could not prepare transcription'
+                          ? `${transcriptionFailure.message} Setup code: ${transcriptionFailure.code}`
                           : 'Checking local models'
                   }
                   state={requirements.transcription}
