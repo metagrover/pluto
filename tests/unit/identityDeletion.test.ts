@@ -59,8 +59,10 @@ it('deletes source-scoped history even for unpublished actions, preserving anoth
 });
 
 it('deletes transcript-derived meeting context with its source meeting', () => {
+  const contextMeetingId = 'delete-context-source';
+  db.saveMeeting({ id: contextMeetingId, title: contextMeetingId });
   db.appendMeetingContextEvent({
-    meetingId: 'delete-source',
+    meetingId: contextMeetingId,
     eventKey: 'decision:segment-1:private',
     kind: 'decision',
     summary: 'Private source summary',
@@ -75,7 +77,7 @@ it('deletes transcript-derived meeting context with its source meeting', () => {
   });
   db.saveMeetingContextSnapshot({
     schemaVersion: 1,
-    meetingId: 'delete-source',
+    meetingId: contextMeetingId,
     updatedThrough: { segmentId: 'segment-1', timestampMs: 1_000 },
     summary: 'Private rolling summary',
     currentTopics: [],
@@ -86,10 +88,10 @@ it('deletes transcript-derived meeting context with its source meeting', () => {
     importantFacts: [],
   });
 
-  db.deleteMeeting('delete-source');
+  db.deleteMeeting(contextMeetingId);
 
-  expect(db.listMeetingContextEvents('delete-source')).toEqual([]);
-  expect(db.listMeetingContextSnapshots('delete-source')).toEqual([]);
+  expect(db.listMeetingContextEvents(contextMeetingId)).toEqual([]);
+  expect(db.listMeetingContextSnapshots(contextMeetingId)).toEqual([]);
 });
 
 it('preserves people referenced only by self selection or a surviving speaker/capture binding', () => {

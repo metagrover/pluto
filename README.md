@@ -9,7 +9,7 @@
 </p>
 
 <h3 align="center">
-  <a href="https://github.com/metagrover/pluto/releases/download/v1.0.0.rc.2/Pluto-Mac-1.0.0-rc.2-Installer.dmg">⬇ Download RC2 DMG</a>
+  <a href="https://github.com/metagrover/pluto/releases/download/v1.0.0.rc.3/Pluto-Mac-1.0.0-rc.3-Installer.dmg">⬇ Download RC3 DMG</a>
 </h3>
 
 <p align="center">Apple Silicon · macOS 14.2 or later</p>
@@ -60,7 +60,7 @@ on them.
 For people who want to use the app, the packaged Mac installer is the simplest
 path. You do not need Node.js, pnpm, Xcode, or Python to use a packaged installer.
 
-**[Download the RC2 Mac DMG](https://github.com/metagrover/pluto/releases/download/v1.0.0.rc.2/Pluto-Mac-1.0.0-rc.2-Installer.dmg)** · [Release notes](https://github.com/metagrover/pluto/releases/tag/v1.0.0.rc.2)
+**[Download the RC3 Mac DMG](https://github.com/metagrover/pluto/releases/download/v1.0.0.rc.3/Pluto-Mac-1.0.0-rc.3-Installer.dmg)** · [Release notes](https://github.com/metagrover/pluto/releases/tag/v1.0.0.rc.3)
 
 ### What you need
 
@@ -75,8 +75,8 @@ chosen model.
 
 ### Download and install
 
-1. **[Download the RC2 installer](https://github.com/metagrover/pluto/releases/download/v1.0.0.rc.2/Pluto-Mac-1.0.0-rc.2-Installer.dmg).**
-   Read the [release notes](https://github.com/metagrover/pluto/releases/tag/v1.0.0.rc.2) for known limitations.
+1. **[Download the RC3 installer](https://github.com/metagrover/pluto/releases/download/v1.0.0.rc.3/Pluto-Mac-1.0.0-rc.3-Installer.dmg).**
+   Read the [release notes](https://github.com/metagrover/pluto/releases/tag/v1.0.0.rc.3) for known limitations.
    GitHub's **Source code** archives contain the project source, not an installable app.
 2. Open the `.dmg` and drag **Pluto** into **Applications**.
 3. Eject the installer disk, then open **Pluto** from Applications or Spotlight.

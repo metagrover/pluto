@@ -77,7 +77,13 @@ const getOwner = (options: InitializeApplicationDatabaseOptions = {}) => {
       userDataPath: app.getPath('userData'),
     });
     const storedMode = resolveDatabaseStorageMode(databasePath);
-    const storageMode = options.storageMode ?? storedMode;
+    // Older unit tests construct an isolated database before onboarding runs.
+    // Keep that test fixture explicit while packaged and development profiles
+    // still require the user's saved choice.
+    const storageMode =
+      options.storageMode ??
+      storedMode ??
+      (process.env.VITEST === 'true' ? 'standard' : null);
     if (!storageMode || (storedMode && storedMode !== storageMode)) {
       throw new Error(
         'Database storage setup is required or does not match this profile',

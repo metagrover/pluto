@@ -123,6 +123,15 @@ describe('packaged runtime resources', () => {
       const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'pluto-app-'));
       const appPath = path.join(temporaryRoot, 'Pluto.app');
       const binPath = path.join(appPath, 'Contents', 'Resources', 'bin');
+      await mkdir(path.dirname(binPath), { recursive: true });
+      await writeFile(
+        path.join(appPath, 'Contents', 'Info.plist'),
+        '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIconFile</key><string>icon.icns</string></dict></plist>',
+      );
+      await copyFile(
+        path.join(projectRoot, 'build', 'pluto.icns'),
+        path.join(appPath, 'Contents', 'Resources', 'icon.icns'),
+      );
       for (const relativePath of [
         'audiocap',
         'parakeet-runtime',
@@ -192,7 +201,7 @@ describe('packaged runtime resources', () => {
         ]);
         if (mediaToolState === 'valid')
           await expect(verification).resolves.toMatchObject({
-            stdout: 'Verified 6 packaged runtimes.\n',
+            stdout: 'Verified Pluto icon and 6 packaged runtimes.\n',
           });
         else if (mediaToolState === 'intel')
           await expect(verification).rejects.toThrow('architecture mismatch');
