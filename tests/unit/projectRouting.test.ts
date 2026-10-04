@@ -81,6 +81,165 @@ function fixture() {
 }
 
 describe('filing new work under established projects', () => {
+  it('reviews visible project suggestions before newer unassessed topics', async () => {
+    const { deps, projects, sources } = fixture();
+    projects.push({ ...projects[1], id: 'unassessed', metadata: '{}' });
+    sources.push({
+      ...sources[1],
+      id: 'newest',
+      startedAt: '2026-10-01',
+      candidateProjects: [{ id: 'unassessed', name: 'New topic' }],
+    });
+    await routeProjectCandidate(deps);
+    expect(deps.saveMembership).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: 'new' }),
+    );
+  });
+
+  it('includes alternate names and the candidate outcome to disambiguate shared conversations', async () => {
+    const { deps, projects, sources } = fixture();
+    sources[0].candidateProjects[0].name = 'Historical collections pilot';
+    const meta = JSON.parse(projects[1].metadata);
+    meta.projectQualification.outcome =
+      'Validate partner access before the archive pilot launches.';
+    projects[1].metadata = JSON.stringify(meta);
+    await routeProjectCandidate(deps);
+    const prompt = deps.generate.mock.calls[0][0];
+    expect(prompt).toContain('Historical collections pilot');
+    expect(prompt).toContain(meta.projectQualification.outcome);
+  });
+
+  it('reconciles an existing synthesized suggestion supported across meetings', async () => {
+    const { deps, projects, sources } = fixture();
+    const meta = JSON.parse(projects[1].metadata);
+    meta.projectThemeSynthesis = { version: 3 };
+    projects[1].metadata = JSON.stringify(meta);
+    sources.push({ ...sources[1], id: 'second-candidate-source' });
+    expect(await routeProjectCandidate(deps)).toMatchObject({ grouped: 1 });
+    const prompt = deps.generate.mock.calls[0][0];
+    const roots = JSON.parse(
+      prompt.split('KNOWN PROJECTS:\n')[1].split('\nCANDIDATE:')[0],
+    );
+    expect(roots.map((root: { id: string }) => root.id)).toEqual(['root']);
+  });
+
+  it('uses already filed work as parent evidence even without a direct parent mention', async () => {
+    const { deps, projects, sources } = fixture();
+    projects.push({
+      ...projects[1],
+      id: 'filed',
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'subordinate',
+          source: 'review',
+          reason: 'Filed',
+          assessedAt: '2026-09-01',
+          parentProjectId: 'root',
+        },
+      }),
+    });
+    sources[0].candidateProjects = [{ id: 'filed', name: 'Access policies' }];
+    expect(await routeProjectCandidate(deps)).toMatchObject({
+      grouped: 1,
+      failed: 0,
+    });
+    expect(deps.generate.mock.calls[0][0]).toContain(sources[0].notes);
+  });
+
+  it('uses an unpinned qualified project supported across conversations as an existing home', async () => {
+    const { deps, projects, sources } = fixture();
+    const meta = JSON.parse(projects[0].metadata);
+    meta.projectStarred = false;
+    projects[0].metadata = JSON.stringify(meta);
+    sources.push({
+      ...sources[0],
+      id: 'second-root-source',
+      startedAt: '2026-08-02',
+    });
+    expect(await routeProjectCandidate(deps)).toMatchObject({ grouped: 1 });
+    expect(deps.saveMembership).toHaveBeenCalledWith(
+      expect.objectContaining({ parentProjectId: 'root' }),
+    );
+  });
+
+  it('retrieves older parent evidence and relevant passages beyond the opening of notes', async () => {
+    const { deps, sources, response } = fixture();
+    sources[0].notes = `${'Routine unrelated context. '.repeat(300)}${response.parentEvidenceQuote}`;
+    sources.push(
+      ...Array.from({ length: 3 }, (_, index) => ({
+        ...sources[0],
+        id: `newer-root-${index}`,
+        startedAt: `2026-09-2${index}`,
+        notes: 'Routine scheduling discussion without continuity of work.',
+      })),
+    );
+    expect(await routeProjectCandidate(deps)).toMatchObject({
+      grouped: 1,
+      failed: 0,
+    });
+    expect(deps.generate.mock.calls[0][0]).toContain(
+      response.parentEvidenceQuote,
+    );
+  });
+
+  it('retries when older root evidence changes, even outside previously selected notes', async () => {
+    const { deps, sources } = fixture();
+    sources.push(
+      ...Array.from({ length: 3 }, (_, index) => ({
+        ...sources[0],
+        id: `root-${index}`,
+        startedAt: `2026-09-2${index}`,
+      })),
+    );
+    deps.generate.mockResolvedValue(JSON.stringify({ relationship: 'none' }));
+    await routeProjectCandidate(deps);
+    sources[0].notes += ' Access validation is now part of the pilot scope.';
+    await routeProjectCandidate(deps);
+    expect(deps.generate).toHaveBeenCalledTimes(2);
+  });
+
+  it('defers new-theme synthesis until the remaining candidates have been reconciled', async () => {
+    const { deps, projects, sources } = fixture();
+    projects.push({
+      ...projects[1],
+      id: 'other',
+      name: 'Archive import checks',
+    });
+    sources.push({
+      ...sources[1],
+      id: 'other-source',
+      startedAt: '2026-09-01',
+      candidateProjects: [{ id: 'other', name: 'Archive import checks' }],
+    });
+    expect(await routeProjectCandidate(deps)).toMatchObject({
+      grouped: 1,
+      remaining: 1,
+      deferred: true,
+    });
+    deps.generate.mockResolvedValue(JSON.stringify({ relationship: 'none' }));
+    expect(await routeProjectCandidate(deps)).toMatchObject({
+      remaining: 0,
+      deferred: false,
+    });
+  });
+
+  it('keeps reconciliation queued when one candidate fails before the queue is drained', async () => {
+    const { deps, projects, sources } = fixture();
+    projects.push({ ...projects[1], id: 'other' });
+    sources.push({
+      ...sources[1],
+      id: 'other-source',
+      candidateProjects: [{ id: 'other', name: 'Other work' }],
+    });
+    deps.generate.mockResolvedValue('invalid');
+    expect(await routeProjectCandidate(deps)).toMatchObject({
+      remaining: 1,
+      failed: 1,
+      deferred: true,
+    });
+  });
+
   it('files a single-source extracted initiative under a pinned root without its literal name in the notes', async () => {
     const { deps } = fixture();
     expect(await routeProjectCandidate(deps)).toMatchObject({

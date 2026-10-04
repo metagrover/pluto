@@ -408,10 +408,44 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     }
   }, [visible]);
 
-  const handleSubmit = async (e?: React.FormEvent, presetQuery?: string) => {
+  const handleSubmit = async (
+    e?: React.FormEvent,
+    presetQuery?: string,
+    retryMessageId?: string,
+  ) => {
     e?.preventDefault();
     const submitQuery = presetQuery || query;
     if (!submitQuery.trim()) return;
+    const retryIndex = retryMessageId
+      ? messages.findIndex((message) => message.id === retryMessageId)
+      : -1;
+    const history =
+      retryIndex >= 0
+        ? messages.slice(
+            0,
+            messages[retryIndex - 1]?.role === 'user'
+              ? retryIndex - 1
+              : retryIndex,
+          )
+        : messages;
+    const failedTurnIndexes = new Set<number>();
+    history.forEach((message, index) => {
+      if (
+        message.role === 'assistant' &&
+        (message.isLoading ||
+          message.retryQuery ||
+          message.outcome === 'unavailable' ||
+          message.outcome === 'failed' ||
+          message.outcome === 'cancelled')
+      ) {
+        failedTurnIndexes.add(index);
+        if (history[index - 1]?.role === 'user')
+          failedTurnIndexes.add(index - 1);
+      }
+    });
+    const validHistory = history.filter(
+      (_message, index) => !failedTurnIndexes.has(index),
+    );
 
     if (isProcessing && activeRequestIdRef.current && window.ipcRenderer) {
       void window.ipcRenderer
@@ -445,6 +479,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               ...m,
               isLoading: false,
               content: m.content || 'Stopped.',
+              outcome: 'cancelled' as const,
             }
           : m,
       );
@@ -476,7 +511,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             content: submitQuery.trim(),
           }).catch(() => undefined);
         }
-        const priorTurns: AskPlutoConversationTurn[] = messages
+        const priorTurns: AskPlutoConversationTurn[] = validHistory
           .slice(-6)
           .map((message) => ({
             role: message.role,
@@ -529,7 +564,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           query: submitQuery.trim(),
           modeOverride,
           priorTurns,
-          ...(workspaceThreads.find(
+          ...(!retryMessageId &&
+          failedTurnIndexes.size === 0 &&
+          workspaceThreads.find(
             (thread) => thread.id === targetWorkspaceThreadId,
           )?.memory
             ? {
@@ -548,6 +585,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                 id: nextMessageId(),
                 role: 'assistant',
                 content: 'Stopped.',
+                outcome: 'cancelled',
               }
             : {
                 id: nextMessageId(),
@@ -590,7 +628,11 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                       ? response.currentMeeting.evidenceState
                       : undefined,
                 outcome:
-                  typeof response === 'string' ? undefined : response.outcome,
+                  typeof response === 'string'
+                    ? undefined
+                    : response.status === 'unavailable'
+                      ? 'unavailable'
+                      : response.outcome,
                 resolvedScope:
                   typeof response === 'string'
                     ? undefined
@@ -635,36 +677,35 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             corrections: [],
             unresolvedQuestions: [],
           };
-          await updateWorkspaceChatMemory({
-            threadId: targetWorkspaceThreadId,
-            memory: {
-              ...previousMemory,
-              activeTopic:
-                assistantMessage.conversationContext?.topic ??
-                previousMemory.activeTopic,
-              currentGoal:
-                assistantMessage.retrievalPolicy === 'fresh'
-                  ? submitQuery.trim().slice(0, 500)
-                  : previousMemory.currentGoal ||
-                    submitQuery.trim().slice(0, 500),
-              lastAnswerSummary: summarizeAnswer(assistantMessage.content),
-              corrections:
-                assistantMessage.turnMode === 'challenge'
-                  ? [
-                      ...previousMemory.corrections.slice(-4),
+          if (
+            !assistantMessage.retryQuery &&
+            assistantMessage.outcome !== 'cancelled' &&
+            assistantMessage.outcome !== 'failed' &&
+            assistantMessage.outcome !== 'unavailable'
+          )
+            await updateWorkspaceChatMemory({
+              threadId: targetWorkspaceThreadId,
+              memory: {
+                ...previousMemory,
+                activeTopic:
+                  assistantMessage.conversationContext?.topic ??
+                  previousMemory.activeTopic,
+                currentGoal:
+                  assistantMessage.retrievalPolicy === 'fresh'
+                    ? submitQuery.trim().slice(0, 500)
+                    : previousMemory.currentGoal ||
                       submitQuery.trim().slice(0, 500),
-                    ]
-                  : previousMemory.corrections,
-              unresolvedQuestions:
-                assistantMessage.retryQuery &&
-                !previousMemory.unresolvedQuestions.includes(submitQuery.trim())
-                  ? [
-                      ...previousMemory.unresolvedQuestions.slice(-4),
-                      submitQuery.trim(),
-                    ]
-                  : previousMemory.unresolvedQuestions,
-            },
-          }).catch(() => undefined);
+                lastAnswerSummary: summarizeAnswer(assistantMessage.content),
+                corrections:
+                  assistantMessage.turnMode === 'challenge'
+                    ? [
+                        ...previousMemory.corrections.slice(-4),
+                        submitQuery.trim().slice(0, 500),
+                      ]
+                    : previousMemory.corrections,
+                unresolvedQuestions: previousMemory.unresolvedQuestions,
+              },
+            }).catch(() => undefined);
           void refreshWorkspaceThreads().catch(() => undefined);
         }
       } else {
@@ -676,6 +717,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             role: 'assistant',
             content:
               'Ask Pluto is unavailable because the desktop connection is not active. Your question was not sent.',
+            outcome: 'unavailable',
           });
           return newMsg;
         });
@@ -709,6 +751,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           role: 'assistant',
           content: errorMsg,
           retryQuery: cancelled ? undefined : submitQuery.trim(),
+          outcome: cancelled ? 'cancelled' : 'failed',
         });
         return newMsg;
       });
@@ -1265,7 +1308,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                         <button
                           type="button"
                           onClick={() =>
-                            void handleSubmit(undefined, msg.retryQuery)
+                            void handleSubmit(undefined, msg.retryQuery, msg.id)
                           }
                           className="px-1 text-[12px] font-medium text-pro-accent hover:text-pro-text-main"
                         >

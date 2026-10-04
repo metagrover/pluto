@@ -3290,6 +3290,47 @@ describe('buildDashboardHomeModel', () => {
       ]);
     });
 
+    it('uses the full description and excludes named third-party infinitives from all personal lists', () => {
+      const fullDescription =
+        'Share the complete launch checklist with the review group once the final approval is recorded, including every dependency and the agreed delivery conditions';
+      const actions = [
+        makeAction({
+          id: 'other',
+          name: 'Alex to book the venue',
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+        makeAction({
+          id: 'mine',
+          name: fullDescription.slice(0, 100),
+          metadata: JSON.stringify({
+            commitment_state: 'possible',
+            full_description: fullDescription,
+            assignee_name: 'Me',
+          }),
+        }),
+        makeAction({
+          id: 'dismissed',
+          name: 'Send old recap',
+          metadata: JSON.stringify({ commitment_state: 'rejected' }),
+        }),
+      ];
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: actions,
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+      });
+      expect(model.commitments.items.map((item) => item.id)).toEqual(['mine']);
+      expect(model.commitments.items[0].title).toBe(fullDescription);
+      expect(model.actionInsights.allItems.map((item) => item.id)).toEqual([
+        'mine',
+      ]);
+    });
+
     it('trusts an explicit self assignment over stale assignee text', () => {
       const candidate = makeAction({
         id: 'self-with-stale-name',

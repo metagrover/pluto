@@ -369,6 +369,7 @@ export async function synthesizeProjectThemes(
         project?.metadata || null,
       );
       return qualification?.source === 'user' ||
+        qualification?.parentProjectId ||
         metadata.projectAutoGroupingOptOut ||
         disposition
         ? [
@@ -376,6 +377,7 @@ export async function synthesizeProjectThemes(
               id,
               qualification:
                 qualification?.source === 'user' ? qualification : null,
+              parentProjectId: qualification?.parentProjectId || null,
               optOut: metadata.projectAutoGroupingOptOut === true,
               disposition,
             },
@@ -592,6 +594,28 @@ ${JSON.stringify(
       (project) => project.id === theme.existingProjectId,
     );
     if (nonempty(theme.existingProjectId) && !requestedProject) continue;
+    // Filed work already has a durable home. Synthesis must not give it a
+    // second identity, or move it between parents without a new review.
+    const filedParentIds = [
+      ...new Set(
+        candidateProjectIds.flatMap((id) => {
+          const parentId = readProjectQualification(
+            deps.getProject(id)?.metadata || null,
+          )?.parentProjectId;
+          return parentId ? [parentId] : [];
+        }),
+      ),
+    ];
+    if (filedParentIds.length > 1) continue;
+    const filedParent = knownProjects.find(
+      (project) => project.id === filedParentIds[0],
+    );
+    if (
+      filedParentIds.length &&
+      (!filedParent ||
+        (requestedProject && requestedProject.id !== filedParent.id))
+    )
+      continue;
     // Two protected identities in one response are ambiguous, never an automatic merge.
     const protectedIds = candidateProjectIds.filter((id) => {
       const classification = readProjectQualification(
@@ -640,10 +664,17 @@ ${JSON.stringify(
         )
       );
     });
+    if (
+      filedParent &&
+      confirmedProject &&
+      filedParent.id !== confirmedProject.id
+    )
+      continue;
     if (!requestedProject && !confirmedProject && historicalMatch.length > 1)
       continue;
     const id =
       requestedProject?.id ||
+      filedParent?.id ||
       confirmedProject?.id ||
       historicalMatch[0]?.id ||
       themeId(candidateProjectIds, theme.name);
@@ -652,6 +683,7 @@ ${JSON.stringify(
     if (
       existing &&
       (readProjectPortfolioDisposition(existing.metadata) === 'dismissed' ||
+        (filedParent && existing.metadata !== filedParent.metadata) ||
         (requestedProject && existing.metadata !== requestedProject.metadata))
     )
       continue;

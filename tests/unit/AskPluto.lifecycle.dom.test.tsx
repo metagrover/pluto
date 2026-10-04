@@ -747,8 +747,243 @@ describe('Ask Pluto request lifecycle', () => {
       ([channel]) => channel === 'intelligence:query',
     );
     expect(queryCalls).toHaveLength(2);
-    expect(queryCalls[1][1]).toMatchObject({ query: 'Who owns the rollout?' });
+    expect(queryCalls[1][1]).toMatchObject({
+      query: 'Who owns the rollout?',
+      priorTurns: [],
+    });
     expect(container.textContent).toContain('Mira owns the rollout.');
+  });
+
+  it.each(['unavailable', 'exception'])(
+    'retries with preceding valid scope and keeps failed turns out of later reasoning: %s',
+    async (failure) => {
+      const previous: AskPlutoMessage[] = [
+        {
+          id: 'previous-user',
+          role: 'user',
+          content: 'Summarize Project Atlas.',
+        },
+        {
+          id: 'previous-assistant',
+          role: 'assistant',
+          content: 'The rollout awaits access review.',
+          outcome: 'answered',
+          conversationContext: {
+            anchor: 'Summarize Project Atlas.',
+            meetingIds: ['atlas-review'],
+          },
+        },
+      ];
+      let attempts = 0;
+      const invoke = vi.fn((channel: string) => {
+        if (channel === 'intelligence:suggested-queries')
+          return Promise.resolve([]);
+        if (channel === 'intelligence:query') {
+          attempts++;
+          if (attempts === 1)
+            return failure === 'exception'
+              ? Promise.reject(new Error('Provider temporarily unavailable'))
+              : Promise.resolve({
+                  status: 'unavailable',
+                  answer: 'Provider temporarily unavailable',
+                  citations: [],
+                });
+          return Promise.resolve({
+            status: 'answered',
+            answer: 'Review the access checklist first.',
+            outcome: 'answered',
+            citations: [],
+          });
+        }
+        return Promise.resolve(null);
+      });
+      Object.defineProperty(window, 'ipcRenderer', {
+        configurable: true,
+        value: { invoke, on: vi.fn(() => () => undefined) },
+      });
+      const Harness = () => {
+        const [messages, setMessages] = useState(previous);
+        return (
+          <AskPluto
+            visible
+            onClose={vi.fn()}
+            onOpenMeeting={vi.fn()}
+            messages={messages}
+            setMessages={setMessages}
+          />
+        );
+      };
+      await act(async () => root.render(<Harness />));
+      const input = container.querySelector(
+        'input[aria-label="Ask Pluto"]',
+      ) as HTMLInputElement;
+      const submit = async (value: string) => {
+        await act(async () => {
+          Object.getOwnPropertyDescriptor(
+            HTMLInputElement.prototype,
+            'value',
+          )?.set?.call(input, value);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await act(async () =>
+          container
+            .querySelector('form')
+            ?.dispatchEvent(
+              new Event('submit', { bubbles: true, cancelable: true }),
+            ),
+        );
+      };
+      await submit('What should I focus on?');
+      const retry = [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Retry',
+      );
+      expect(retry).toBeDefined();
+      await act(async () => retry?.click());
+      const queries = () =>
+        invoke.mock.calls.filter(
+          ([channel]) => channel === 'intelligence:query',
+        );
+      const first = queries()[0][1] as { priorTurns: unknown[] };
+      const retried = queries()[1][1] as { priorTurns: unknown[] };
+      expect(retried).toMatchObject({ query: 'What should I focus on?' });
+      expect(retried.priorTurns).toEqual(first.priorTurns);
+      expect(retried.priorTurns).toMatchObject([
+        { role: 'user', content: 'Summarize Project Atlas.' },
+        {
+          role: 'assistant',
+          content: 'The rollout awaits access review.',
+          meetingIds: ['atlas-review'],
+        },
+      ]);
+      expect(JSON.stringify(retried.priorTurns)).not.toContain(
+        'Provider temporarily unavailable',
+      );
+      // The failure remains visible while only useful conversation is sent onward.
+      expect(container.textContent).toContain(
+        'Provider temporarily unavailable',
+      );
+      await submit('Tell me more');
+      const followup = queries()[2][1] as {
+        priorTurns: Array<{ role: string; content: string }>;
+      };
+      expect(followup.priorTurns).toHaveLength(4);
+      expect(followup.priorTurns.map((turn) => turn.content)).toEqual([
+        'Summarize Project Atlas.',
+        'The rollout awaits access review.',
+        'What should I focus on?',
+        'Review the access checklist first.',
+      ]);
+    },
+  );
+
+  it('does not send later thread memory when retrying an older persisted failure', async () => {
+    const persisted = [
+      {
+        id: 'valid-user',
+        role: 'user',
+        content: 'Summarize Project Atlas.',
+        payload: {},
+      },
+      {
+        id: 'valid-answer',
+        role: 'assistant',
+        content: 'The rollout awaits review.',
+        payload: {
+          outcome: 'answered',
+          conversationContext: {
+            anchor: 'Summarize Project Atlas.',
+            meetingIds: ['atlas-review'],
+          },
+        },
+      },
+      {
+        id: 'failed-user',
+        role: 'user',
+        content: 'What should I focus on?',
+        payload: {},
+      },
+      {
+        id: 'failed-answer',
+        role: 'assistant',
+        content: 'The provider is unavailable.',
+        payload: {
+          outcome: 'unavailable',
+          retryQuery: 'What should I focus on?',
+        },
+      },
+      {
+        id: 'later-user',
+        role: 'user',
+        content: 'Discuss Project Birch.',
+        payload: {},
+      },
+      {
+        id: 'later-answer',
+        role: 'assistant',
+        content: 'Birch needs a staffing update.',
+        payload: { outcome: 'answered' },
+      },
+    ];
+    const invoke = vi.fn((channel: string) => {
+      if (channel === 'intelligence:workspace-chat:list-threads')
+        return Promise.resolve([
+          {
+            id: 'thread-1',
+            title: 'Project review',
+            archivedAt: null,
+            memory: {
+              currentGoal: 'Discuss Project Birch.',
+              lastAnswerSummary: 'Birch needs a staffing update.',
+              corrections: [],
+              unresolvedQuestions: [],
+            },
+          },
+        ]);
+      if (channel === 'intelligence:workspace-chat:list-messages')
+        return Promise.resolve(persisted);
+      if (channel === 'intelligence:suggested-queries')
+        return Promise.resolve([]);
+      if (channel === 'intelligence:query')
+        return Promise.resolve({
+          status: 'answered',
+          answer: 'Review the Atlas rollout.',
+          citations: [],
+          outcome: 'answered',
+        });
+      return Promise.resolve(null);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+    await act(async () =>
+      root.render(
+        <AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />,
+      ),
+    );
+    const retry = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Retry',
+    );
+    expect(retry).toBeDefined();
+    await act(async () => retry?.click());
+    const request = invoke.mock.calls.find(
+      ([channel]) => channel === 'intelligence:query',
+    )?.[1];
+    expect(request).toMatchObject({
+      query: 'What should I focus on?',
+      priorTurns: [
+        { role: 'user', content: 'Summarize Project Atlas.' },
+        {
+          role: 'assistant',
+          content: 'The rollout awaits review.',
+          meetingIds: ['atlas-review'],
+        },
+      ],
+    });
+    expect(request).not.toHaveProperty('conversationMemory');
+    expect(JSON.stringify(request)).not.toMatch(
+      /Birch|provider is unavailable/,
+    );
   });
 
   it('keeps prior conversation text and structured scope after a no-evidence answer', async () => {

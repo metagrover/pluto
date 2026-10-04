@@ -701,6 +701,8 @@ export const ProjectDossier = ({
           <ProjectProfileContent
             key={current.project.id}
             brief={current}
+            onPrepareUpdates={() => void handleDreamNow()}
+            preparationState={dreamingState}
             relatedWork={relatedWork}
             onOpenMeeting={onOpenMeeting}
             onOpenPerson={onOpenPerson}

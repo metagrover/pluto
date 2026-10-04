@@ -465,9 +465,10 @@ describe('Dashboard', () => {
     const markup = renderDashboard(model);
 
     expect(markup).toContain('Remaining commitments · 1');
-    expect(markup).toContain('Add Possible item 1 to today&#x27;s three');
+    expect(markup).toContain('Add Possible item 1 to commitments');
+    expect(markup).toContain('Dismiss suggestion: Possible item 1');
     expect(markup.match(/aria-label="Review suggestion:/g) ?? []).toHaveLength(
-      3,
+      4,
     );
     expect(markup.match(/Needs review/g) ?? []).toHaveLength(4);
   });

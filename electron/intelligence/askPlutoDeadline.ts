@@ -7,13 +7,16 @@ export const askPlutoTimeoutMs = (
   options?: AskPlutoDeadlineOptions,
 ): number => {
   if (options?.isLocal) {
-    return modeOverride === 'deep' ? 120_000 : 90_000;
+    // Auto can select the same deep local model as an explicit deep request.
+    return modeOverride === 'fast' ? 90_000 : 120_000;
   }
   return modeOverride === 'deep' ? 60_000 : 30_000;
 };
 
 export interface RunAskPlutoWithDeadlineOptions {
-  onProgressSetup?: (recordProgress: () => void) => void;
+  onProgressSetup?: (
+    recordProgress: (phase?: 'started' | 'token') => void,
+  ) => void;
   idleTimeoutMs?: number;
 }
 
@@ -55,7 +58,10 @@ export const runAskPlutoWithDeadline = async <Result>(
 
   scheduleDeadline(timeoutMs);
 
-  const recordProgress = () => {
+  const recordProgress = (phase: 'started' | 'token' = 'token') => {
+    // Starting the provider is not evidence of streaming progress. Keep the
+    // initial allowance while a local model loads and evaluates the prompt.
+    if (phase === 'started') return;
     if (controller.signal.aborted) return;
     scheduleDeadline(idleTimeoutMs);
   };

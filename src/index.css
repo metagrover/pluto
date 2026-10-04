@@ -1017,7 +1017,9 @@
     --project-paper-soft: oklch(20.5% 0.014 272);
     --project-paper-muted: oklch(23% 0.016 272);
     --project-rule: oklch(30% 0.014 272);
-    --pro-text-muted: 0 0% 72%;
+    --pro-border: 0 0% 24%;
+    --pro-accent: 214 48% 68%;
+    --pro-text-muted: 0 0% 68%;
     letter-spacing: 0.005em;
   }
   .meeting-document--transcript-collapsed {

@@ -41,6 +41,125 @@ const priorTurns: AskPlutoConversationTurn[] = [
   },
 ];
 
+describe('project evidence follow-up routing', () => {
+  it('returns a complete draft for a tone revision rather than additional details', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      {
+        role: 'user',
+        content: 'Draft a message to Morgan about delivery uncertainty.',
+      },
+      {
+        role: 'assistant',
+        content:
+          'Hi Morgan, delivery remains uncertain. Can you confirm the readiness date?',
+        conversationAnchor:
+          'Draft a message to Morgan about delivery uncertainty.',
+      },
+    ];
+    const result = resolveAskPlutoConversation(
+      'Make it shorter and warmer, keep the delivery uncertainty explicit, and leave out travel logistics.',
+      turns,
+    );
+    expect(result).toMatchObject({
+      relation: 'follow_up',
+      task: 'draft',
+      turnMode: 'draft',
+      retrievalPolicy: 'reuse',
+    });
+    expect(result.answerQuery).toContain('complete revised draft');
+    expect(result.retrievalQuery).toContain('Draft a message to Morgan');
+  });
+  it('retains the draft task through chained revisions', () => {
+    const result = resolveAskPlutoConversation('Remove the second sentence.', [
+      { role: 'user', content: 'Make it warmer.' },
+      {
+        role: 'assistant',
+        content: 'Hi Morgan, could you confirm the readiness date?',
+        conversationAnchor: 'Draft a message about delivery. Make it warmer.',
+      },
+    ]);
+    expect(result.task).toBe('draft');
+  });
+  it('does not treat a non-draft answer or independent question as a draft revision', () => {
+    expect(
+      resolveAskPlutoConversation('Make it shorter.', [
+        { role: 'user', content: 'What are the release blockers?' },
+        { role: 'assistant', content: 'API readiness blocks release.' },
+      ]).task,
+    ).not.toBe('draft');
+    expect(
+      resolveAskPlutoConversation('What did Beacon decide?', [
+        { role: 'user', content: 'Draft a message about Atlas.' },
+        { role: 'assistant', content: 'Hi team, please confirm readiness.' },
+      ]).relation,
+    ).toBe('new_topic');
+  });
+  const projectTurns: AskPlutoConversationTurn[] = [
+    {
+      role: 'user',
+      content:
+        'What was decided for Atlas, and what are the delivery dependencies?',
+    },
+    {
+      role: 'assistant',
+      content:
+        'Atlas needs an onboarding session. The delivery dependencies include API readiness and customer approval.',
+      conversationContext: {
+        anchor: 'Atlas release decisions and dependencies',
+        meetingIds: ['atlas-planning', 'atlas-design'],
+        topic: { kind: 'project', id: 'atlas', label: 'Atlas' },
+      },
+    },
+  ];
+
+  it('recognizes singular dependency references after a plural request', () => {
+    const result = resolveAskPlutoConversation(
+      'Who is explicitly assigned to each dependency, and which owners are still unclear?',
+      projectTurns,
+    );
+    expect(result.relation).toBe('follow_up');
+    expect(result.retrievalQuery).toContain('Atlas');
+  });
+
+  it('keeps a recipient draft grounded in an earlier project turn', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      ...projectTurns,
+      { role: 'user', content: 'Who owns each dependency?' },
+      {
+        ...projectTurns[1],
+        content:
+          'API readiness has an explicit owner; approval ownership is unclear.',
+      },
+    ];
+    const result = resolveAskPlutoConversation(
+      'Draft a short message to Morgan about the onboarding session.',
+      turns,
+    );
+    expect(result).toMatchObject({ relation: 'follow_up', task: 'draft' });
+    expect(result.retrievalQuery).not.toContain(
+      'API readiness has an explicit owner',
+    );
+  });
+
+  it('does not inherit a project for an unrelated draft', () => {
+    expect(
+      resolveAskPlutoConversation(
+        'Draft a birthday message to Taylor.',
+        projectTurns,
+      ).relation,
+    ).toBe('new_topic');
+  });
+
+  it('does not inherit unrelated definite work items', () => {
+    expect(
+      resolveAskPlutoConversation('Who approved the proposals?', [
+        { role: 'user', content: 'Show Atlas dependencies.' },
+        { role: 'assistant', content: 'API readiness blocks release.' },
+      ]).relation,
+    ).toBe('new_topic');
+  });
+});
+
 describe('conversational acknowledgments', () => {
   const turns: AskPlutoConversationTurn[] = [
     { role: 'user', content: 'What is the main strategic takeaway?' },

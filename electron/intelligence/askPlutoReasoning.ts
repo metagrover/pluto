@@ -12,7 +12,9 @@ const DEEP_REASONING_PATTERN =
 const MULTI_MEETING_SYNTHESIS_PATTERN =
   /\b(?:summari[sz]e|recap|overview|breakdown|analy[sz]e)\b[\s\S]{0,60}\b(?:meetings|calls)\b/i;
 const BOUNDED_SYNTHESIZED_ANALYSIS_PATTERN =
-  /\bwhat\s+do\s+you\s+think\s+(?:will|would)\s+satisfy\b|\bwhat\s+do\s+you\s+think\s+(?:i|we)\s+should\s+(?:focus|prioritize)(?:\s+on)?\b|\bwhat\s+(?:should|do)\s+(?:i|we)\s+(?:need\s+to\s+)?(?:focus|prioritize)(?:\s+on)?\b|\bwhat\s+(?:are|is)\s+(?:my|our)\s+(?:top\s+)?priorit(?:y|ies)\b/i;
+  /\bwhat\s+do\s+you\s+think\s+(?:will|would)\s+satisfy\b/i;
+const WORKSPACE_PLANNING_PATTERN =
+  /\bwhat\s+do\s+you\s+think\s+(?:i|we)\s+should\s+(?:focus|prioritize)(?:\s+on)?\b|\bwhat\s+(?:should|do)\s+(?:i|we)\s+(?:need\s+to\s+)?(?:focus|prioritize)(?:\s+on)?\b|\bwhat\s+(?:are|is)\s+(?:my|our)\s+(?:top\s+)?priorit(?:y|ies)\b/i;
 
 export const queryReferencesPriorTurn = (query: string): boolean =>
   /\b(it|that|those|them|previous|earlier|you said|you suggested|why)\b/i.test(
@@ -97,6 +99,7 @@ export const resolveAskPlutoReasoningMode = ({
   if (override !== 'auto') return override;
   if (task === 'comparison') return 'deep';
   if (task === 'draft') return 'fast';
+  if (WORKSPACE_PLANNING_PATTERN.test(query)) return 'deep';
   if (task === 'analysis' && BOUNDED_SYNTHESIZED_ANALYSIS_PATTERN.test(query))
     return 'fast';
   if (

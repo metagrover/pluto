@@ -117,9 +117,19 @@ export const isThirdPartyAssignee = (
     const modalMatch = trimmed.match(
       /^([A-Za-z0-9_'-]+)\s+(?:will|shall|must|should|needs?\s+to|is\s+to|has\s+to)\b/i,
     );
-    if (modalMatch) {
-      const subject = modalMatch[1].toLowerCase();
+    // Named infinitives are common in extracted notes. Keep imperative cues
+    // such as "Remember to send" and "Return to the office" unassigned.
+    const infinitiveMatch = trimmed.match(
+      /^([\p{Lu}][\p{L}'’-]*(?:\s+[\p{Lu}][\p{L}'’-]*)*)\s+to\s+\p{L}/u,
+    );
+    const subjectMatch = modalMatch ?? infinitiveMatch;
+    if (subjectMatch) {
+      const subject = subjectMatch[1].toLowerCase();
       if (
+        (modalMatch ||
+          !/^(?:remember|try|need|plan|aim|want|continue|return|reply|respond|send|forward|report|refer|listen|talk|speak|go|agree|ensure|make sure)$/.test(
+            subject,
+          )) &&
         !SELF_ACTION_ASSIGNEES.has(subject) &&
         !COLLECTIVE_ACTION_ASSIGNEES.has(subject) &&
         !selfNamesSet.has(subject)
@@ -150,9 +160,11 @@ export const isThirdPartyAction = (
   const assigneeName =
     typeof metadata.assignee_name === 'string' ? metadata.assignee_name : null;
   const description =
-    typeof metadata.full_description === 'string'
-      ? metadata.full_description
-      : action.name;
+    !metadata.user_edited && typeof metadata.original_description === 'string'
+      ? metadata.original_description
+      : typeof metadata.full_description === 'string'
+        ? metadata.full_description
+        : action.name;
 
   return isThirdPartyAssignee(
     assigneeName,

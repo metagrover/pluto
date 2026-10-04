@@ -499,6 +499,43 @@ describe('stable project identities and grounded grouping', () => {
     expect(deps.generate).toHaveBeenCalledTimes(2);
     expect(deps.generate.mock.calls[1][0]).toContain('"pinned":true');
   });
+  it('refreshes cached synthesis after filing and retains the established parent identity', async () => {
+    const { deps } = makeDeps();
+    const original = deps.getProject;
+    let parentProjectId: string | null = null;
+    const registry = {
+      ...deps,
+      listProjects: () => [established],
+      getProject: (id: string) => {
+        if (id === established.id) return established;
+        const candidate = original(id);
+        return candidate && parentProjectId
+          ? {
+              ...candidate,
+              metadata: JSON.stringify({
+                projectQualification: {
+                  version: 1,
+                  state: 'subordinate',
+                  source: 'review',
+                  reason: 'Filed work',
+                  assessedAt: '2026-10-01',
+                  parentProjectId,
+                },
+              }),
+            }
+          : candidate;
+      },
+    };
+    await synthesizeProjectThemes(registry);
+    await synthesizeProjectThemes(registry);
+    expect(deps.generate).toHaveBeenCalledTimes(1);
+    parentProjectId = established.id;
+    await synthesizeProjectThemes(registry);
+    expect(deps.generate).toHaveBeenCalledTimes(2);
+    expect(deps.saveTheme).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: established.id, name: established.name }),
+    );
+  });
   it('keeps pinned targets in the registry ahead of eighty unpinned projects', async () => {
     const { deps } = makeDeps();
     const pinned = {
@@ -521,5 +558,36 @@ describe('stable project identities and grounded grouping', () => {
         registry.find((project) => project.id === id) || original(id),
     });
     expect(deps.generate.mock.calls[0][0]).toContain('"id":"pinned-root"');
+  });
+  it('does not combine work already filed under different established projects', async () => {
+    const { deps } = makeDeps();
+    const other = { ...established, id: 'other-program' };
+    const original = deps.getProject;
+    await synthesizeProjectThemes({
+      ...deps,
+      listProjects: () => [established, other],
+      getProject: (id: string) => {
+        if (id === established.id) return established;
+        if (id === other.id) return other;
+        const candidate = original(id);
+        return candidate
+          ? {
+              ...candidate,
+              metadata: JSON.stringify({
+                projectQualification: {
+                  version: 1,
+                  state: 'subordinate',
+                  source: 'review',
+                  reason: 'Filed work',
+                  assessedAt: '2026-10-01',
+                  parentProjectId:
+                    id === 'candidate-1' ? established.id : other.id,
+                },
+              }),
+            }
+          : candidate;
+      },
+    });
+    expect(deps.saveTheme).not.toHaveBeenCalled();
   });
 });

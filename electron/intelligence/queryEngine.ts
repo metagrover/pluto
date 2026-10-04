@@ -18,7 +18,11 @@ import {
 import * as dbModule from '../db';
 // We import the llm provider factory
 import { getAllSettings, getProvider } from '../llm/factory';
-import { buildMeetingNotesEvidenceDocument } from './meetingNotesEvidence';
+import { findExplicitProjectScopes } from './askPlutoProjectScopes';
+import {
+  type MeetingNotesEvidenceDocument,
+  buildMeetingNotesEvidenceDocument,
+} from './meetingNotesEvidence';
 import { getIntentClassificationPrompt } from './queryPrompts';
 import { removeTemporalPhrase, resolveTemporalQuery } from './temporalScope';
 
@@ -213,6 +217,30 @@ export const matchProjectEntity = (
       ? dbModule.getEntitiesByType('project')
       : [];
 
+  // Use the same duplicate-label identity rule as multi-project routing:
+  // a literal project name wins over another entity's matching display alias.
+  const explicitScopes = findExplicitProjectScopes(
+    query,
+    allProjects
+      .map((project) => ({
+        canonicalId:
+          typeof dbModule.resolveProjectIdentityId === 'function'
+            ? dbModule.resolveProjectIdentityId(project.id)
+            : project.id,
+        name: project.name,
+        displayTitle: readProjectDisplayTitle(project.metadata, project.name),
+      }))
+      .filter((project) =>
+        [project.name, project.displayTitle].some((label) => {
+          const normalized = label.toLocaleLowerCase().trim();
+          return (
+            normalized.length >= 3 &&
+            !GENERIC_PROJECT_LABELS.has(normalized) &&
+            queryContainsProjectLabel(normalizedQuery, normalized)
+          );
+        }),
+      ),
+  );
   const explicitMatches = allProjects
     .flatMap((project) => {
       const canonicalId =
@@ -233,7 +261,16 @@ export const matchProjectEntity = (
             !GENERIC_PROJECT_LABELS.has(label) &&
             queryContainsProjectLabel(normalizedQuery, label),
         );
-      if (labels.length === 0) return [];
+      if (
+        labels.length === 0 ||
+        !explicitScopes.some(
+          (scope) =>
+            scope.canonicalId === canonicalId &&
+            scope.name === project.name &&
+            scope.displayTitle === displayTitle,
+        )
+      )
+        return [];
       return [
         {
           score: Math.max(...labels.map((label) => label.length)),
@@ -459,6 +496,50 @@ export const parseQuery = async (
   const tokens = keywordText.split(/[\s,.;:!?]+/).filter((w) => w.length > 2);
   // Basic keyword extraction (exclude stopwords)
   const stopwords = new Set([
+    // Function words and request framing must not turn an OR search into a
+    // match for virtually every meeting or a generic entity such as Work.
+    'and',
+    'or',
+    'but',
+    'nor',
+    'yet',
+    'so',
+    'who',
+    'whom',
+    'whose',
+    'which',
+    'this',
+    'that',
+    'these',
+    'those',
+    'our',
+    'your',
+    'their',
+    'its',
+    'they',
+    'them',
+    'we',
+    'us',
+    'actually',
+    'concrete',
+    'versus',
+    'next',
+    'steps',
+    'work',
+    'notes',
+    'say',
+    'carefully',
+    'whether',
+    'conclude',
+    'help',
+    'prepare',
+    'clarify',
+    'focused',
+    'session',
+    'still',
+    'carry',
+    'into',
+    'room',
     'what',
     'is',
     'the',
@@ -585,7 +666,13 @@ export const parseQuery = async (
   if (options.disputedEntity) {
     stopwords.add(options.disputedEntity.toLowerCase());
   }
-  const keywords = tokens.filter((w) => !stopwords.has(w.toLowerCase()));
+  const seenKeywords = new Set<string>();
+  const keywords = tokens.filter((word) => {
+    const normalized = word.toLowerCase();
+    if (stopwords.has(normalized) || seenKeywords.has(normalized)) return false;
+    seenKeywords.add(normalized);
+    return true;
+  });
 
   // Sanitize text for SQLite FTS5 MATCH queries
   const sanitizeForFts = (str: string) =>
@@ -1391,6 +1478,20 @@ export const buildPersonWorkRecall = (
   };
 };
 
+const recentNotesCutoff = (
+  query: string,
+  timestamps: number[],
+): number | null => {
+  if (!/\b(?:recent|latest)\b/i.test(query) || resolveTemporalQuery(query))
+    return null;
+  const knownDates = timestamps.filter(
+    (value) => Number.isFinite(value) && value > 0,
+  );
+  return knownDates.length
+    ? Math.max(...knownDates) - 14 * 24 * 60 * 60 * 1000
+    : null;
+};
+
 export const buildProjectRecall = (
   query: string,
   entityMentions: string[] = [],
@@ -1418,7 +1519,9 @@ export const buildProjectRecall = (
       : null;
   if (!brief && !snapshot && !entity) return null;
 
-  const displayTitle = brief?.project.displayTitle || matched.displayTitle;
+  // Reconciliation may resolve to a different canonical profile. The identity
+  // actually matched in the user's question remains the retrieval boundary.
+  const displayTitle = matched.displayTitle;
   const status = entity?.status || brief?.project.status || 'active';
   const theme = brief?.theme;
   const currentRead = snapshot?.payload?.current_read;
@@ -1509,312 +1612,204 @@ export const buildProjectRecall = (
 
   const meetingResults: RetrievalResult[] = [];
   let latestNoteAt: string | undefined;
-  {
-    const projectNames = [displayTitle, matched.name]
-      .join(' ')
-      .toLocaleLowerCase();
-    const focusTerms = [
-      ...new Set(
-        (query.toLocaleLowerCase().match(/[\p{L}\p{N}]{4,}/gu) || []).filter(
-          (term) =>
-            !projectNames.includes(term) &&
-            !/^(?:about|across|after|again|all|and|before|changed|checking|concrete|current|detail|details|dive|doing|first|focus|from|given|give|has|have|into|know|latest|more|most|move|need|needs|next|please|project|recent|recently|right|same|should|status|tell|that|there|think|this|what|where|which|would)$/.test(
-              term,
-            ),
+  const aliases = [
+    ...new Set(
+      [displayTitle, matched.name]
+        .flatMap((name) => [name, ...(name.match(/\b[A-Z0-9]{3,}\b/g) || [])])
+        .map(normalizeScopeText)
+        .filter(
+          (name) => name.length >= 3 && !GENERIC_PROJECT_LABELS.has(name),
         ),
-      ),
-    ];
-    const projectAliases = [displayTitle, matched.name].flatMap((name) => {
-      const acronym = name.match(/\b[A-Z0-9]{2,}\b/g) || [];
-      return [name, ...acronym];
-    });
-    const projectPhrases = [...new Set(projectAliases)]
-      .map((phrase) =>
-        phrase
-          .toLocaleLowerCase()
-          .replace(/["*()\[\]{}^:~?!,.\-]/g, ' ')
-          .split(/\s+/)
-          .filter((token) => token.length >= 2),
-      )
-      .filter((tokens) => tokens.length > 0)
-      .map(
-        (tokens) => `(${tokens.map((token) => `"${token}"`).join(' AND ')})`,
-      );
-    const projectSectionCandidates = projectPhrases.length
-      ? searchMeetingContextSectionsFts(projectPhrases.join(' OR '), {
-          limit: 40,
-        }).filter(
-          ({ section }) =>
-            !containsConfidentialAside(
-              `${section.heading}\n${section.summary}\n${section.content}`,
-            ),
-        )
+    ),
+  ];
+  const mentionsProject = (value: string) => {
+    const normalized = normalizeScopeText(value);
+    return aliases.some((alias) =>
+      queryContainsProjectLabel(normalized, alias),
+    );
+  };
+  const headers =
+    typeof dbModule.getAskPlutoMeetingHeaders === 'function'
+      ? dbModule.getAskPlutoMeetingHeaders()
       : [];
-    const projectSectionMatches = projectSectionCandidates.filter(
-      ({ section }) =>
-        focusTerms.length === 0 ||
-        focusTerms.some((term) =>
-          `${section.heading} ${section.summary} ${section.content}`
-            .toLocaleLowerCase()
-            .includes(term),
-        ),
-    );
-    const projectLabels = projectAliases
-      .map((name) => name.trim().toLocaleLowerCase())
-      .filter((name) => name.length >= 3);
-    const stronglyAboutProject = (section: {
-      heading: string;
-      summary: string;
-      content: string;
-    }): boolean => {
-      const headingAndSummary =
-        `${section.heading} ${section.summary}`.toLocaleLowerCase();
-      const content = section.content.toLocaleLowerCase();
-      return projectLabels.some(
-        (label) =>
-          headingAndSummary.includes(label) ||
-          content.split(label).length > 2 ||
-          (focusTerms.length > 0 &&
-            content.includes(label) &&
-            focusTerms.some((term) => content.includes(term))),
-      );
-    };
-    const latestProjectSection = projectSectionCandidates
-      .filter(({ section }) => stronglyAboutProject(section))
-      .sort(
-        (left, right) =>
-          (Date.parse(
-            right.meeting.started_at || right.meeting.created_at || '',
-          ) || 0) -
-          (Date.parse(
-            left.meeting.started_at || left.meeting.created_at || '',
-          ) || 0),
-      )[0];
-    latestNoteAt =
-      latestProjectSection?.meeting.started_at ||
-      latestProjectSection?.meeting.created_at ||
-      undefined;
-    const sectionsByMeeting = new Map<string, typeof projectSectionMatches>();
-    for (const match of projectSectionMatches) {
-      if (!stronglyAboutProject(match.section)) continue;
-      const meetingId = String(match.meeting.id);
-      const matches = sectionsByMeeting.get(meetingId) || [];
-      if (matches.length < 2) matches.push(match);
-      sectionsByMeeting.set(meetingId, matches);
-    }
-    const recentSectionGroups = [...sectionsByMeeting].sort(
-      ([, left], [, right]) =>
-        (Date.parse(
-          right[0].meeting.started_at || right[0].meeting.created_at || '',
-        ) || 0) -
-        (Date.parse(
-          left[0].meeting.started_at || left[0].meeting.created_at || '',
-        ) || 0),
-    );
-    for (const [meetingId, matches] of recentSectionGroups.slice(0, 3)) {
-      const first = matches[0];
-      latestNoteAt ||=
-        first.meeting.started_at || first.meeting.created_at || undefined;
-      const prepared = buildMeetingRetrievalResult(
-        first.meeting,
-        `Project section (${displayTitle})`,
-      );
-      meetingResults.push({
-        ...prepared,
-        meeting_id: meetingId,
-        evidence_text: [
-          `[Project: ${displayTitle}]`,
-          `[Meeting date]: ${first.meeting.started_at || first.meeting.created_at || 'unknown'}`,
-          ...matches.map(
-            ({ section }) =>
-              `[Section: ${section.heading}]: ${section.content.slice(0, 1800)}`,
-          ),
-        ].join('\n'),
-        evidence_kind: 'section',
-        retrieved_sections: matches.map(({ section }) => ({
-          section_id: section.section_id,
-          heading: section.heading,
-          kind: section.kind,
-          summary: section.summary,
-          trust_status: section.trust_status,
-          source_revision: section.source_revision,
-        })),
-        source_revision: first.section.source_revision,
-        trust_status: first.section.trust_status,
-      });
+  const headersById = new Map(
+    headers.map((meeting) => [String(meeting.id), meeting]),
+  );
+  const linkedIds = new Set(
+    [
+      ...(brief?.meetings || []).map((meeting) => String(meeting.id)),
+      ...(theme?.recentChanges || []).map((change) => change.sourceMeetingId),
+      ...(theme?.openThreads || []).map((thread) => thread.sourceMeetingId),
+      ...[...new Set([matched.canonicalId, matched.id])].flatMap((id) =>
+        typeof dbModule.getMeetingsForEntity === 'function'
+          ? dbModule
+              .getMeetingsForEntity(id)
+              .map((link) => String(link.meeting_id))
+          : [],
+      ),
+    ].filter((id): id is string => Boolean(id)),
+  );
+  const candidates = new Map<string, dbModule.PersistedMeeting>();
+  for (const header of headers) {
+    if (
+      mentionsProject(header.title || '') ||
+      linkedIds.has(String(header.id))
+    ) {
+      candidates.set(String(header.id), header);
     }
   }
+  for (const id of linkedIds) {
+    if (!candidates.has(id))
+      candidates.set(id, headersById.get(id) || { id, title: '' });
+  }
+  // Search indexes discover candidate IDs only. Re-read the current published
+  // notes below so stale index content cannot resurrect edits or deleted meetings.
+  const phrases = aliases.map(
+    (alias) =>
+      `(${alias
+        .split(/\s+/)
+        .map((token) => `"${token}"`)
+        .join(' AND ')})`,
+  );
+  if (phrases.length) {
+    for (const match of searchMeetingContextSectionsFts(phrases.join(' OR '), {
+      limit: 40,
+    })) {
+      const id = String(match.meeting.id);
+      if (
+        !linkedIds.has(id) &&
+        !mentionsProject(match.meeting.title || '') &&
+        !mentionsProject(`${match.section.heading} ${match.section.summary}`)
+      )
+        continue;
+      if (!candidates.has(id))
+        candidates.set(id, headersById.get(id) || match.meeting);
+    }
+  }
+  const recentCutoff = recentNotesCutoff(
+    query,
+    [...candidates.values()].map((meeting) =>
+      Date.parse(meeting.started_at || meeting.created_at || ''),
+    ),
+  );
+  const candidateMeetings = [...candidates.values()]
+    .filter(
+      (meeting) =>
+        recentCutoff === null ||
+        Date.parse(meeting.started_at || meeting.created_at || '') >=
+          recentCutoff,
+    )
+    .sort(
+      (left, right) =>
+        Number(mentionsProject(right.title || '')) -
+          Number(mentionsProject(left.title || '')) ||
+        (Date.parse(right.started_at || right.created_at || '') || 0) -
+          (Date.parse(left.started_at || left.created_at || '') || 0),
+    )
+    .slice(0, 80);
+  for (const candidate of candidateMeetings) {
+    const meeting =
+      typeof dbModule.getAskPlutoMeeting === 'function'
+        ? dbModule.getAskPlutoMeeting(String(candidate.id))
+        : undefined;
+    if (!meeting) continue;
+    const document = buildMeetingNotesEvidenceDocument(meeting);
+    if (
+      !document.notesText.trim() ||
+      containsConfidentialAside(document.notesText)
+    )
+      continue;
+    const fullProjectMeeting = mentionsProject(document.title);
+    // A linked mixed meeting may discuss other work. Keep its current scoped
+    // sections, retaining neighboring facts within the same topic. Legacy flat
+    // notes have no topic boundary, so those still require sentence filtering.
+    const scopedSections = document.sections.flatMap((section) => {
+      if (
+        fullProjectMeeting ||
+        mentionsProject(section.heading) ||
+        (section.sectionId !== 'meeting-notes' &&
+          document.notesText.includes(section.content) &&
+          mentionsProject(section.content))
+      )
+        return [section];
+      const content = section.content
+        .split(/\n|(?<=[.!?])\s+/u)
+        .filter((sentence) => mentionsProject(sentence))
+        .join(' ');
+      return content
+        ? [{ ...section, content, summary: content.slice(0, 500) }]
+        : [];
+    });
+    if (!fullProjectMeeting && scopedSections.length === 0) continue;
+    const currentNotes = fullProjectMeeting
+      ? document.notesText
+      : scopedSections
+          .map(
+            (section) =>
+              `[${section.heading.slice(0, 120)}]: ${section.content}`,
+          )
+          .join('\n');
+    const notes =
+      currentNotes.length <= 8000
+        ? currentNotes
+        : `${currentNotes.slice(0, 4000)}\n[Middle of long notes omitted]\n${currentNotes.slice(-4000)}`;
+    const prepared = buildMeetingRetrievalResult(
+      meeting,
+      `Project notes (${displayTitle})`,
+    );
+    meetingResults.push({
+      ...prepared,
+      mid: null,
+      evidence_text: [
+        `[Project: ${displayTitle}]`,
+        `[Meeting]: ${document.title}`,
+        `[Meeting date]: ${meeting.started_at || meeting.created_at || 'unknown'}`,
+        `[Notes trust]: ${document.trustStatus}`,
+        `[Current saved notes]:\n${notes}`,
+      ].join('\n'),
+      evidence_kind: 'note',
+      retrieved_sections: scopedSections.map((section) => ({
+        section_id: section.sectionId,
+        heading: section.heading,
+        kind: section.kind,
+        summary: section.summary.slice(0, 500),
+        source_revision: document.sourceRevision,
+        trust_status: document.trustStatus,
+      })),
+      source_revision: document.sourceRevision,
+      trust_status: document.trustStatus,
+    });
+    const occurredAt = meeting.started_at || meeting.created_at;
+    if (
+      occurredAt &&
+      Date.parse(occurredAt) > (Date.parse(latestNoteAt || '') || 0)
+    )
+      latestNoteAt = occurredAt;
+    if (meetingResults.length === 8) break;
+  }
+  projectRetrievalResult.evidence_text = [
+    ...sections,
+    `[Saved-note coverage]: ${meetingResults.length} newest relevant meeting sources, up to eight sources and 8000 note characters per source.`,
+    '[Evidence freshness]: Current saved notes supersede older project profile descriptions when they differ. Recorded plans and dates do not confirm completion.',
+  ].join('\n');
 
   return {
     project: matched,
     displayTitle,
     ...(profileUpdatedAt ? { asOf: profileUpdatedAt } : {}),
     ...(latestNoteAt ? { latestNoteAt } : {}),
-    context: [projectRetrievalResult, ...meetingResults],
+    // A derived profile can carry obsolete or cross-project tasks. Current
+    // saved notes are the answer evidence; the profile is only a no-notes fallback.
+    context: meetingResults.length
+      ? meetingResults
+      : // Never expose a different canonical project's profile as a fallback.
+        recentCutoff === null &&
+          [brief?.project.displayTitle, entity?.name]
+            .filter(Boolean)
+            .every((name) => mentionsProject(name!))
+        ? [projectRetrievalResult]
+        : [],
   };
-};
-
-export const buildAgedProjectAnswer = (
-  query: string,
-  recall: NonNullable<ReturnType<typeof buildProjectRecall>>,
-  now = new Date(),
-  previousAnswer = '',
-  continuesCurrentRead = false,
-  continuationKind?: 'expand' | 'clarify' | 'challenge',
-): string | null => {
-  if (
-    !continuesCurrentRead &&
-    !/\b(?:current|right now|latest|most recent|recently|changed|next|immediate|status|do first|focus on|pending|blocked|unresolved|needs checking|what we know|what is known)\b/i.test(
-      query,
-    )
-  ) {
-    return null;
-  }
-  const newestRecordedAt = [recall.latestNoteAt, recall.asOf]
-    .map((value) => Date.parse(value || ''))
-    .filter(Number.isFinite)
-    .sort((left, right) => right - left)[0];
-  if (
-    !newestRecordedAt ||
-    now.getTime() - newestRecordedAt < 3 * 24 * 60 * 60 * 1000
-  ) {
-    return null;
-  }
-
-  const dateLabel = (value: string): string =>
-    new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      timeZone: 'UTC',
-    }).format(new Date(value));
-  const latestLabel = dateLabel(new Date(newestRecordedAt).toISOString());
-  const projectLabels = [recall.displayTitle, recall.project.name]
-    .flatMap((label) => [label, ...(label.match(/\b[A-Z0-9]{2,}\b/g) || [])])
-    .map((label) => label.toLocaleLowerCase())
-    .filter((label) => label.length >= 3);
-  const facetQuery = query
-    .toLocaleLowerCase()
-    .replace(recall.displayTitle.toLocaleLowerCase(), '');
-  const requestedFacet =
-    /\b(pipeline|release|outreach|quality|deployment|data|pilot|design|review|risk|blocker|issues?)\b/i
-      .exec(facetQuery)?.[1]
-      .toLocaleLowerCase();
-  const seenDetails = new Set<string>();
-  const candidateDetails = recall.context
-    .filter((source) => source.source_type !== 'artifact')
-    .flatMap((source) => {
-      const occurredAt = source.evidence_text.match(
-        /\[Meeting date\]:\s*([^\n]+)/,
-      )?.[1];
-      const date = occurredAt ? dateLabel(occurredAt) : latestLabel;
-      return (source.retrieved_sections || []).flatMap((section) => {
-        const summary = section.summary?.trim();
-        if (!summary) return [];
-        return summary
-          .split(/(?<=[.!?])\s+(?=[A-Z])/)
-          .map((sentence) => sentence.trim())
-          .filter((sentence) => {
-            const lower = sentence.toLocaleLowerCase();
-            if (/\b(?:today|tomorrow|next week|this week)\b/.test(lower))
-              return false;
-            if (
-              /\b(?:the other participant|local speaker|remote speaker)\b/.test(
-                lower,
-              )
-            )
-              return false;
-            return (
-              projectLabels.some((label) => lower.includes(label)) ||
-              (Boolean(requestedFacet) && lower.includes(requestedFacet ?? ''))
-            );
-          })
-          .filter((sentence) => {
-            const key = sentence.toLocaleLowerCase();
-            if (seenDetails.has(key)) return false;
-            seenDetails.add(key);
-            return true;
-          })
-          .map((sentence) => ({ date, sentence }));
-      });
-    });
-  const facetDetails = requestedFacet
-    ? candidateDetails.filter(({ sentence }) =>
-        sentence.toLocaleLowerCase().includes(requestedFacet ?? ''),
-      )
-    : [];
-  const details = (requestedFacet ? facetDetails : candidateDetails)
-    .filter(({ sentence }) => !previousAnswer.includes(sentence))
-    .slice(0, 3)
-    .map(({ date, sentence }) => `- ${date}: ${sentence}`);
-  const profileHeadline = recall.context[0]?.evidence_text
-    .match(/\[Current Read\]:\s*([^\n]+)/)?.[1]
-    ?.trim()
-    .replace(/[.]+$/, '');
-  const concreteProfileHeadline =
-    profileHeadline &&
-    /\b(?:is|are|will|has|have|focus(?:ed|ing)?|work(?:ing)?|build(?:ing)?|release|pilot|pipeline)\b/i.test(
-      profileHeadline,
-    )
-      ? profileHeadline
-      : undefined;
-  const profileFocus = recall.context[0]?.evidence_text
-    .match(/\[Current Focus\]:\s*([^\n]+)/)?.[1]
-    ?.trim()
-    .replace(/[.]+$/, '');
-  const profileMilestone = recall.context[0]?.evidence_text
-    .match(/\[Milestones\]:\n-\s*([^\n]+)/)?.[1]
-    ?.trim();
-  const profileOpenThreads = recall.context[0]?.evidence_text
-    .match(/\[Open Threads & Risks\]:\n([\s\S]*?)(?=\n\[|$)/)?.[1]
-    ?.split('\n')
-    .map((line) => line.replace(/^-\s*(?:\[[^\]]+\]\s*)?/, '').trim())
-    .filter(Boolean)
-    .slice(0, 3);
-  const profilePicture =
-    profileFocus && profileFocus.length >= 16
-      ? profileFocus
-      : concreteProfileHeadline;
-  const recorded = details.length
-    ? `\n\nThe last notes say:\n${details.join('\n')}`
-    : (profilePicture || profileMilestone) && recall.asOf
-      ? `\n\nThe project profile (as of ${dateLabel(recall.asOf)}) ${profilePicture ? `said: ${profilePicture}.${profileMilestone ? ` It listed ${profileMilestone} as a milestone.` : ''}` : `listed ${profileMilestone} as a milestone.`}`
-      : '';
-  const nextStep =
-    /\b(?:next|immediate|do first|focus on|needs checking|what we know)\b/i.test(
-      query,
-    )
-      ? '\n\nI’d verify the release status and current owner before treating an older target or follow-up as today’s action.'
-      : '';
-  if (
-    /\b(?:what (?:would|should|could) (?:you|i|we) (?:do|tackle|check) (?:first|next)|first move|next move)\b/i.test(
-      query,
-    )
-  ) {
-    return `For ${recall.displayTitle}, I’d first confirm the release status and who owns the next step. The newest project information I found is from ${latestLabel}, so I wouldn’t assume an older target is still pending.`;
-  }
-  if (continuationKind === 'challenge') {
-    return `You're right to question the freshness. The newest project note I found for ${recall.displayTitle} is from ${latestLabel}, so my earlier description is a last recorded picture—not a verified status today. I can't confirm which recorded steps have since been completed.`;
-  }
-  if (continuationKind === 'clarify') {
-    return `I mean the latest record I found for ${recall.displayTitle} is dated ${latestLabel}. It tells us what was discussed then, but not whether those plans were completed or changed afterward. I wouldn't call that a live project status.`;
-  }
-  if (continuationKind === 'expand' && continuesCurrentRead) {
-    const addedDetail = details[0]
-      ? ` The additional dated detail I found is ${details[0].replace(/^- /, '')}`
-      : '';
-    return `I can add a little to the last recorded picture of ${recall.displayTitle}, but not confirm its status today.${addedDetail} The newest project note I found is from ${latestLabel}; I’d check what has actually shipped and who owns the next step before treating an older plan as current.`;
-  }
-  if (/\b(?:unresolved|issues?|risks?|blockers?)\b/i.test(facetQuery)) {
-    const openThreads = profileOpenThreads?.length
-      ? `\n\nThe project profile last listed${recall.asOf ? ` (as of ${dateLabel(recall.asOf)})` : ''}:\n${profileOpenThreads.map((thread) => `- ${thread}`).join('\n')}`
-      : '';
-    return `I can't confirm which issues are still open for ${recall.displayTitle} today. The newest project note I found is from ${latestLabel}.${openThreads} ${openThreads ? 'I’d verify which of those remain active before ranking them.' : 'I’d need a newer project update before ranking concerns.'}`.trim();
-  }
-  if (previousAnswer && requestedFacet && details.length === 0) {
-    return `I don't have a newer confirmed ${requestedFacet} update for ${recall.displayTitle} beyond what we just covered. The newest project note I found is from ${latestLabel}; it does not establish whether that work has shipped or who owns the next step today. I’d check those two points before calling it blocked or complete.`;
-  }
-  return `I can give you the last recorded picture of ${recall.displayTitle}, but I can't verify its status today. The newest project information I found is from ${latestLabel}.${recorded}${nextStep}`;
 };
 
 export const buildWorkingMemoryOverviewRecall = (
@@ -1999,6 +1994,34 @@ const truncateAtThoughtBoundary = (
   return `${candidate.slice(0, Math.max(1, wordEnd)).trim()}…`;
 };
 
+const workspaceNotesExcerpt = (
+  document: MeetingNotesEvidenceDocument,
+): string => {
+  const excerpt = (value: string, budget: number) => {
+    const text = value.replace(/\s+/g, ' ').trim();
+    if (text.length <= budget) return text;
+    const head = truncateAtThoughtBoundary(text, Math.floor(budget * 0.6));
+    const tail = text.slice(-(budget - head.length - 4));
+    return `${head} … ${tail.slice(Math.max(0, tail.indexOf(' ') + 1))}`;
+  };
+  // Give later topics and outcomes room even when the overview starts with
+  // introductions. Evidence quotes and transcript ranges never enter this text.
+  const sections = document.sections.slice(0, 8);
+  const budget = Math.floor(3600 / Math.max(1, sections.length));
+  const notes = sections.length
+    ? sections
+        .map(
+          (section) =>
+            `[${section.heading.slice(0, 120)}]: ${excerpt(section.content, budget)}`,
+        )
+        .join('\n')
+    : excerpt(document.notesText, 3600);
+  const omitted = document.sections.length - sections.length;
+  return omitted
+    ? `${notes}\n[Additional note sections omitted]: ${omitted}`
+    : notes;
+};
+
 const isGenericProjectDescription = (value: string | null | undefined) =>
   Boolean(
     value &&
@@ -2180,42 +2203,50 @@ export const buildWorkspaceIntelligenceRecall = (input: {
     (project) => !isProjectCurrent(project),
   );
 
-  // A recent meeting is not necessarily a useful update to a priority brief.
-  // Keep the source set bounded, but do not let greetings and small talk crowd
-  // out concrete changes recorded in newer synthesized notes.
-  const seekingRisks = mode === 'risks' || mode === 'risks_expanded';
-  const recentMeetings = input.persistedMeetings
+  // Recent saved notes are the fresh evidence layer. Do not require a MID
+  // decision or a priority keyword: that drops new work the snapshot never saw.
+  const recentCandidates = input.persistedMeetings
     .filter((meeting) => {
       const occurredAt = Date.parse(
         meeting.started_at || meeting.created_at || '',
       );
-      if (!occurredAt || occurredAt < recentCutoff) return false;
-      const mid = parseMid(meeting.mid_json);
-      const notes = meeting.enhanced_notes || meeting.user_notes || '';
-      if (containsConfidentialAside(notes)) return false;
-      if (seekingRisks) {
-        const structuredItems = [
-          ...(mid?.decisions || []).map((item) => item.description),
-          ...(mid?.action_items || []).map((item) => item.description),
-        ].join(' ');
-        return /\b(?:risk|blocker|concern|issue|incident|failure|failed|unreliable|delay|approval)\b/i.test(
-          `${notes} ${structuredItems}`,
-        );
-      }
-      if (mid?.decisions?.length || mid?.action_items?.length) return true;
-      return /\b(?:blocker|risk|issue|incident|deadline|milestone|release|deploy(?:ment|ed)?|launch|pilot|approval|review|follow[- ]?up|next step|action item|pull request|\bPR\b|pipeline|rollout|ship(?:ped|ping)?|fix(?:ed|ing)?|decision)\b/i.test(
-        notes,
-      );
+      return occurredAt > 0 && occurredAt >= recentCutoff;
     })
     .sort(
       (left, right) =>
         (Date.parse(right.started_at || right.created_at || '') || 0) -
         (Date.parse(left.started_at || left.created_at || '') || 0),
+    );
+  const recentNotes: Array<{
+    meeting: dbModule.PersistedMeeting;
+    document: MeetingNotesEvidenceDocument;
+    excerpt: string;
+    result: RetrievalResult;
+  }> = [];
+  for (const meeting of recentCandidates) {
+    const document = buildMeetingNotesEvidenceDocument(meeting);
+    if (
+      !document.notesText.trim() ||
+      containsConfidentialAside(document.notesText)
     )
-    .slice(0, 4);
-  const recentMeetingResults = recentMeetings.map((meeting) =>
-    buildMeetingRetrievalResult(meeting, 'Recent meeting context'),
-  );
+      continue;
+    const excerpt = workspaceNotesExcerpt(document);
+    const result = buildMeetingRetrievalResult(
+      meeting,
+      'Recent saved meeting notes',
+    );
+    result.mid = null;
+    result.evidence_text = [
+      `[Recent saved meeting notes]: ${document.title}`,
+      `[Occurred]: ${meeting.started_at || meeting.created_at}`,
+      `[Notes trust]: ${document.trustStatus}`,
+      `[Current notes]:\n${excerpt}`,
+    ].join('\n');
+    recentNotes.push({ meeting, document, excerpt, result });
+    if (recentNotes.length === 8) break;
+  }
+  const recentMeetings = recentNotes.map(({ meeting }) => meeting);
+  const recentMeetingResults = recentNotes.map(({ result }) => result);
 
   const sections: string[] = ['[Workspace Intelligence & Executive Briefing]'];
 
@@ -2227,40 +2258,47 @@ export const buildWorkspaceIntelligenceRecall = (input: {
   const workspaceRefreshedTimestamp = workspaceRefreshedAt
     ? Date.parse(workspaceRefreshedAt) || 0
     : 0;
-  const noteUpdatesSinceSnapshot = recentMeetings.flatMap((meeting, index) => {
-    const occurredAt = Date.parse(
-      meeting.started_at || meeting.created_at || '',
-    );
-    if (
-      !workspaceRefreshedTimestamp ||
-      !occurredAt ||
-      occurredAt <= workspaceRefreshedTimestamp
-    )
-      return [];
-    const result = recentMeetingResults[index];
-    const detail = result.evidence_text.match(
-      /\[(?:Decisions|Action items|Analysis)\]:\s*([^\n]+)/i,
-    )?.[1];
-    if (!detail?.trim()) return [];
-    return [
-      {
-        title: meeting.title || 'Untitled meeting',
+  const noteUpdatesSinceSnapshot = recentNotes.flatMap(
+    ({ meeting, document, excerpt }, index) => {
+      const occurredAt = Date.parse(
+        meeting.started_at || meeting.created_at || '',
+      );
+      const updatedAt = Math.max(
         occurredAt,
-        detail: truncateAtThoughtBoundary(
-          detail
-            .trim()
-            .replace(
-              /^\[(?:Summary|Overview|Analysis|Decisions|Action items)\]:\s*/i,
+        Date.parse(meeting.analysis_generated_at || '') || 0,
+      );
+      if (
+        workspaceRefreshedTimestamp &&
+        updatedAt <= workspaceRefreshedTimestamp
+      )
+        return [];
+      const detail = [document.decisionsText, document.actionItemsText, excerpt]
+        .filter(Boolean)
+        .join(' ');
+      if (!detail.trim()) return [];
+      return [
+        {
+          title: document.title,
+          occurredAt: updatedAt,
+          detail: truncateAtThoughtBoundary(
+            detail.replace(
+              /\[(?:Summary|Overview|Analysis|Decisions|Action items|Meeting notes)\]:\s*/gi,
               '',
             ),
-          280,
-        ),
-        source: `[Source ${index + 2}]`,
-      },
-    ];
-  });
+            800,
+          ),
+          source: `[Source ${index + 2}]`,
+        },
+      ];
+    },
+  );
   if (workspaceRefreshedAt) {
     sections.push(`[Workspace refreshed]: ${workspaceRefreshedAt}`);
+  }
+  if (globalSnapshot) {
+    sections.push(
+      `[Workspace snapshot freshness]: ${globalSnapshot.freshness || 'unknown'}`,
+    );
   }
   if (noteUpdatesSinceSnapshot.length > 0) {
     const latestUpdate = Math.max(
@@ -2418,31 +2456,25 @@ export const buildWorkspaceIntelligenceRecall = (input: {
     sections.push(`[Active Projects & Focus]:\n${projectLines.join('\n')}`);
   }
 
-  if (recentMeetings.length > 0) {
-    const meetingLines = recentMeetings.map((m) => {
-      const dateStr = m.started_at || m.created_at;
-      const formattedDate = dateStr
-        ? new Date(dateStr).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-          })
-        : 'recent';
-      const mid = parseMid(m.mid_json);
-      const decisions = mid?.decisions?.map((d) => d.description).slice(0, 2);
-      const decisionsStr = decisions?.length
-        ? ` | Decisions: ${decisions.join('; ')}`
-        : '';
-      const notes = m.enhanced_notes || m.user_notes || '';
-      const summaryMatch = notes.match(
-        /\[(?:Analysis|Overview|Summary)\]:\s*([^\n]+)/i,
+  if (recentNotes.length > 0) {
+    const meetingLines = recentNotes.map(({ meeting, document }, index) => {
+      const date = meeting.started_at || meeting.created_at;
+      const detail = truncateAtThoughtBoundary(
+        [document.decisionsText, document.actionItemsText, document.notesText]
+          .filter(Boolean)
+          .join(' '),
+        500,
       );
-      const summaryText = summaryMatch?.[1]
-        ? ` — ${summaryMatch[1].trim().slice(0, 140)}`
-        : '';
-      return `- Meeting "${m.title || 'Untitled'}" (${formattedDate})${summaryText}${decisionsStr}`;
+      return `- Meeting "${document.title}" (${date}) — ${detail} [Source ${index + 2}]`;
     });
     sections.push(
+      `[Recent Saved Notes]: newest ${recentNotes.length} usable meetings within 14 days; up to eight note sections per source. Read the separate current-note sources for details beyond these short previews.`,
+    );
+    sections.push(
       `[Recent Meetings & Key Decisions]:\n${meetingLines.join('\n')}`,
+    );
+    sections.push(
+      '[Evidence freshness]: Current saved notes supersede older workspace descriptions when they differ. A snapshot alone does not confirm that work remains open.',
     );
   }
 
@@ -2982,9 +3014,15 @@ export const retrieveContext = async (
   // Sanitize keywords for SQLite FTS MATCH syntax to prevent SQL crashes
   const sanitizeForFts = (str: string) =>
     str.replace(/["*()\[\]{}^:~?!,.\-]/g, ' ').trim();
-  const allKeywords = [...parsed.keywords, ...(parsed.expanded_keywords || [])]
-    .map(sanitizeForFts)
-    .filter((k) => k.length > 0);
+  const allKeywords = [
+    ...new Set(
+      [...parsed.keywords, ...(parsed.expanded_keywords || [])]
+        .map(sanitizeForFts)
+        .map((term) => term.toLowerCase())
+        .filter((term) => term.length > 0),
+    ),
+  ].slice(0, 12);
+  const facetCandidateIds = new Set<string>();
 
   const ftsQueryStr = allKeywords
     .map((k) => {
@@ -3068,12 +3106,78 @@ export const retrieveContext = async (
     // Search note-level evidence as well as sections. A database can be only
     // partially backfilled, so one section match must not hide other matching
     // meetings that currently exist only in the notes index.
-    const meetings = searchMeetingNotesFts(ftsQueryStr, { limit: 20 }).filter(
-      (meeting) =>
-        (!options.meetingIds?.length ||
-          options.meetingIds.includes(String(meeting.id))) &&
-        !resultsMap[String(meeting.id)],
+    // A global OR query can fill its limit with one common topic. Give each
+    // requested term a bounded discovery window; prefix matches cover inflection
+    // such as profile/profiles without inventing semantic aliases.
+    const facetMeetings = allKeywords.flatMap((keyword) => {
+      const parts = keyword.split(/\s+/).filter(Boolean);
+      const query = parts.map((part) => `"${part}"*`).join(' AND ');
+      const matches = searchMeetingNotesFts(query, { limit: 40 }).filter(
+        (meeting) => {
+          if (
+            options.meetingIds?.length &&
+            !options.meetingIds.includes(String(meeting.id))
+          )
+            return false;
+          if (!parsed.temporal_range) return true;
+          const occurredAt = Date.parse(
+            meeting.started_at || meeting.created_at || '',
+          );
+          return (
+            occurredAt >=
+              (parsed.temporal_range.from
+                ? Date.parse(parsed.temporal_range.from)
+                : Number.NEGATIVE_INFINITY) &&
+            occurredAt <
+              (parsed.temporal_range.to
+                ? Date.parse(parsed.temporal_range.to)
+                : Number.POSITIVE_INFINITY)
+          );
+        },
+      );
+      const cutoff = recentNotesCutoff(
+        options.query || '',
+        matches.map((meeting) =>
+          Date.parse(meeting.started_at || meeting.created_at || ''),
+        ),
+      );
+      const eligible =
+        cutoff === null
+          ? matches
+          : matches.filter(
+              (meeting) =>
+                Date.parse(meeting.started_at || meeting.created_at || '') >=
+                cutoff,
+            );
+      const newest = [...eligible].sort(
+        (left, right) =>
+          (Date.parse(right.started_at || right.created_at || '') || 0) -
+          (Date.parse(left.started_at || left.created_at || '') || 0),
+      );
+      // Preserve strong lexical hits and a recent slice: BM25 alone can bury a
+      // short new update beneath many long historical notes on the same topic.
+      return [
+        ...new Map(
+          [...eligible.slice(0, 3), ...newest.slice(0, 3)].map(
+            (meeting) => [String(meeting.id), meeting] as const,
+          ),
+        ).values(),
+      ];
+    });
+    facetMeetings.forEach((meeting) =>
+      facetCandidateIds.add(String(meeting.id)),
     );
+    const meetings = [
+      ...new Map(
+        [...facetMeetings, ...searchMeetingNotesFts(ftsQueryStr, { limit: 20 })]
+          .filter(
+            (meeting) =>
+              !options.meetingIds?.length ||
+              options.meetingIds.includes(String(meeting.id)),
+          )
+          .map((meeting) => [String(meeting.id), meeting] as const),
+      ).values(),
+    ];
     for (const [idx, m] of meetings.entries()) {
       // rank is an implicit SQLite FTS score, we mock it via idx if it's not exposed
       // Assuming return order is rank order
@@ -3090,6 +3194,41 @@ export const retrieveContext = async (
         },
       };
     }
+  }
+
+  // Titles may have been renamed after the notes index was generated. Discover
+  // only title matches for original requested terms, using safe metadata headers.
+  const titleTerms = [
+    ...new Set(
+      parsed.keywords.map(sanitizeForFts).map((term) => term.toLowerCase()),
+    ),
+  ]
+    .map((term) => term.match(/[\p{L}\p{N}]+/gu) || [])
+    .filter((parts) => parts.length > 0);
+  const titleHeaders = dbModule
+    .getAskPlutoMeetingHeaders()
+    .filter((meeting) => {
+      if (
+        options.meetingIds?.length &&
+        !options.meetingIds.includes(String(meeting.id))
+      )
+        return false;
+      const words =
+        (meeting.title || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+      return titleTerms.some((parts) =>
+        parts.every((part) => words.some((word) => word.startsWith(part))),
+      );
+    })
+    .sort(
+      (left, right) =>
+        (Date.parse(right.started_at || right.created_at || '') || 0) -
+        (Date.parse(left.started_at || left.created_at || '') || 0),
+    )
+    .slice(0, 20);
+  for (const meeting of titleHeaders) {
+    const id = String(meeting.id);
+    facetCandidateIds.add(id);
+    resultsMap[id] ||= buildMeetingRetrievalResult(meeting, 'Title candidate');
   }
 
   const walkedMeetingCount = new Map<
@@ -3187,33 +3326,152 @@ export const retrieveContext = async (
     resultsMap[pinnedResult.meeting_id] ||= pinnedResult;
   }
 
-  // 6. Result Fusion & Final Scoring
-  const finalResults = Object.values(resultsMap).map((res) => {
-    // Composite weights from design spec:
-    // fts: 0.4, graph: 0.3, recency: 0.2, mentions: 0.1
-    res.score =
-      res.score_breakdown.fts_rank * 0.4 +
-      res.score_breakdown.graph_proximity * 0.3 +
-      res.score_breakdown.recency_decay * 0.2 +
-      res.score_breakdown.mention_weight * 0.1;
-
-    return res;
+  // Hydrate at most eighty candidates before scoring: index ordering and stale
+  // section text must not determine which requested topics reach the answer.
+  const pinnedIds = new Set(pinnedResults.map((result) => result.meeting_id));
+  const currentWords = new Map<string, Set<string>>();
+  const currentTitleWords = new Map<string, Set<string>>();
+  const currentDates = new Map<string, number>();
+  const candidateIds = [
+    ...new Set([
+      ...titleHeaders.map((meeting) => String(meeting.id)),
+      ...facetCandidateIds,
+      ...Object.keys(resultsMap),
+    ]),
+  ]
+    .filter((id) => !pinnedIds.has(id))
+    .slice(0, 80);
+  const currentResults = candidateIds.flatMap((id) => {
+    const result = resultsMap[id];
+    if (!result) return [];
+    const meeting = dbModule.getAskPlutoMeeting(result.meeting_id);
+    if (!meeting) return [];
+    if (parsed.temporal_range) {
+      const occurredAt = Date.parse(
+        meeting.started_at || meeting.created_at || '',
+      );
+      if (
+        !(
+          occurredAt >=
+            (parsed.temporal_range.from
+              ? Date.parse(parsed.temporal_range.from)
+              : Number.NEGATIVE_INFINITY) &&
+          occurredAt <
+            (parsed.temporal_range.to
+              ? Date.parse(parsed.temporal_range.to)
+              : Number.POSITIVE_INFINITY)
+        )
+      )
+        return [];
+    }
+    const document = buildMeetingNotesEvidenceDocument(meeting);
+    if (!document.notesText.trim()) return [];
+    const safeSections = document.sections.filter(
+      (section) =>
+        document.notesText.includes(section.content) &&
+        !containsConfidentialAside(`${section.heading}\n${section.content}`),
+    );
+    const currentNotes = containsConfidentialAside(document.notesText)
+      ? safeSections
+          .map((section) => `[${section.heading}]: ${section.content}`)
+          .join('\n')
+      : document.notesText;
+    if (!currentNotes.trim()) return [];
+    currentDates.set(
+      result.meeting_id,
+      Date.parse(meeting.started_at || meeting.created_at || ''),
+    );
+    currentTitleWords.set(
+      result.meeting_id,
+      new Set(document.title.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []),
+    );
+    currentWords.set(
+      result.meeting_id,
+      new Set(
+        `${document.title} ${currentNotes}`
+          .toLowerCase()
+          .match(/[\p{L}\p{N}]+/gu) || [],
+      ),
+    );
+    const notes =
+      currentNotes.length <= 8000
+        ? currentNotes
+        : `${currentNotes.slice(0, 4000)}\n[Middle of long notes omitted]\n${currentNotes.slice(-4000)}`;
+    return [
+      {
+        ...result,
+        meeting_title: document.title,
+        mid: null,
+        evidence_text: [
+          `[Meeting]: ${document.title}`,
+          `[Occurred]: ${meeting.started_at || meeting.created_at || 'unknown'}`,
+          `[Notes trust]: ${document.trustStatus}`,
+          `[Current saved notes]:\n${notes}`,
+        ].join('\n'),
+        evidence_kind: 'note' as const,
+        retrieved_sections: safeSections.map((section) => ({
+          section_id: section.sectionId,
+          heading: section.heading,
+          kind: section.kind,
+          summary: section.summary.slice(0, 500),
+          source_revision: document.sourceRevision,
+          trust_status: document.trustStatus,
+        })),
+        source_revision: document.sourceRevision,
+        trust_status: document.trustStatus,
+        transcript_passages: undefined,
+      },
+    ];
   });
-
-  // Filter out low-relevance noise and return top K=6 to keep the prompt size manageable
-  const filteredResults = finalResults.filter((res) => res.score > 0.05);
-  filteredResults.sort((a, b) => b.score - a.score);
-
-  const selected = !pinnedResults.length
-    ? filteredResults.slice(0, 6)
-    : [
-        ...pinnedResults,
-        ...filteredResults.filter(
-          (result) =>
-            !new Set(pinnedResults.map((pinned) => pinned.meeting_id)).has(
-              result.meeting_id,
-            ),
-        ),
-      ].slice(0, 6);
-  return selected;
+  const queryTerms = allKeywords
+    .map((keyword) => keyword.match(/[\p{L}\p{N}]+/gu) || [])
+    .filter((parts) => parts.length > 0);
+  const matchesTerm = (words: Set<string>, parts: string[]) =>
+    parts.every((part) => [...words].some((word) => word.startsWith(part)));
+  const weights = queryTerms.map((parts) => {
+    const frequency = [...currentWords.values()].filter((words) =>
+      matchesTerm(words, parts),
+    ).length;
+    return (
+      (1 + Math.log((currentResults.length + 1) / (frequency + 1))) *
+      (parts.length > 1 ? 1.5 : 1)
+    );
+  });
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  for (const result of currentResults) {
+    const words = currentWords.get(result.meeting_id)!;
+    const coverage =
+      queryTerms.reduce(
+        (sum, parts, index) =>
+          sum + (matchesTerm(words, parts) ? weights[index] : 0),
+        0,
+      ) / totalWeight;
+    const titleWords = currentTitleWords.get(result.meeting_id)!;
+    const titleCoverage =
+      queryTerms.reduce(
+        (sum, parts, index) =>
+          sum + (matchesTerm(titleWords, parts) ? weights[index] : 0),
+        0,
+      ) / totalWeight;
+    result.score_breakdown.fts_rank = coverage;
+    result.score =
+      coverage * 0.55 +
+      titleCoverage * 0.15 +
+      result.score_breakdown.recency_decay * 0.2 +
+      result.score_breakdown.graph_proximity * 0.08 +
+      result.score_breakdown.mention_weight * 0.02;
+  }
+  currentResults.sort((left, right) => right.score - left.score);
+  const recentCutoff = parsed.temporal_range
+    ? null
+    : recentNotesCutoff(options.query || '', [...currentDates.values()]);
+  return [
+    ...pinnedResults,
+    ...currentResults.filter(
+      (result) =>
+        result.score > 0.05 &&
+        (recentCutoff === null ||
+          (currentDates.get(result.meeting_id) || 0) >= recentCutoff),
+    ),
+  ].slice(0, 12);
 };

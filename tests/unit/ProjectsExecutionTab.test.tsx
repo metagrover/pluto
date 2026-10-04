@@ -928,31 +928,34 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     });
   });
 
-  it('waits and retries when synthesis is deferred by foreground work', async () => {
-    vi.useFakeTimers();
-    try {
-      discoverProjectInitiativeMock
-        .mockResolvedValueOnce({
-          discovered: 0,
-          remaining: 1,
-          failed: 0,
-          deferred: true,
-        })
-        .mockResolvedValueOnce({
-          discovered: 0,
-          remaining: 0,
-          failed: 0,
-          deferred: false,
-        });
-      await act(async () => root.render(<ProjectsExecutionTab />));
-      expect(container.textContent).toContain('resume when Pluto is free');
-      await act(async () => vi.advanceTimersByTimeAsync(5000));
-      expect(discoverProjectInitiativeMock).toHaveBeenCalledTimes(2);
-      expect(reviewProjectScopeMock).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+  it.each([0, 1])(
+    'continues a deferred reconciliation queue with %i failed candidates',
+    async (failed) => {
+      vi.useFakeTimers();
+      try {
+        discoverProjectInitiativeMock
+          .mockResolvedValueOnce({
+            discovered: 0,
+            remaining: 1,
+            failed,
+            deferred: true,
+          })
+          .mockResolvedValueOnce({
+            discovered: 0,
+            remaining: 0,
+            failed: 0,
+            deferred: false,
+          });
+        await act(async () => root.render(<ProjectsExecutionTab />));
+        expect(container.textContent).toContain('resume when Pluto is free');
+        await act(async () => vi.advanceTimersByTimeAsync(5000));
+        expect(discoverProjectInitiativeMock).toHaveBeenCalledTimes(2);
+        expect(reviewProjectScopeMock).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('describes a synthesis failure without hiding saved context', async () => {
     discoverProjectInitiativeMock.mockRejectedValue(new Error('offline'));

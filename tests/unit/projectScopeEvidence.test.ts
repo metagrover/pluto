@@ -145,3 +145,24 @@ it('bounds the serialized evidence payload even when transcript text needs JSON 
     'Aurora outcome with migration and invoice work.',
   );
 });
+
+it('supports a smaller routing budget while retaining relevant evidence', () => {
+  const sources = Array.from({ length: 6 }, (_, index) => ({
+    id: `source-${index}`,
+    text: `${'Routine context. '.repeat(300)} Archive permission validation continues the searchable collection pilot. ${'Closing context. '.repeat(300)}`,
+  }));
+  const selected = selectProjectReviewSources(
+    sources,
+    'Archive permission validation',
+    { maxSources: 2, maxChars: 2000 },
+  );
+  expect(selected).toHaveLength(2);
+  expect(
+    JSON.stringify(selected.map(({ id, text }) => ({ id, text }))).length,
+  ).toBeLessThanOrEqual(2000);
+  expect(
+    selected.every((source) =>
+      source.text.includes('Archive permission validation continues'),
+    ),
+  ).toBe(true);
+});

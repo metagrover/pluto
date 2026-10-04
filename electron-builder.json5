@@ -15,6 +15,11 @@
   ],
   "extraResources": [
     {
+      "from": "resources/mcp",
+      "to": "mcp",
+      "filter": ["**/*.mjs"]
+    },
+    {
       "from": "resources/bin",
       "to": "bin",
       "filter": ["**/*", "!recorder"]

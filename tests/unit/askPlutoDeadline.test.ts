@@ -90,11 +90,60 @@ describe('Ask Pluto request deadline', () => {
     expect(controller.signal.aborted).toBe(false);
   });
 
-  it('uses 90 seconds for local providers except in deep mode', () => {
-    expect(askPlutoTimeoutMs(undefined, { isLocal: true })).toBe(90_000);
-    expect(askPlutoTimeoutMs('auto', { isLocal: true })).toBe(90_000);
+  it('allows local auto to select a deep model while keeping explicit fast bounded', () => {
+    expect(askPlutoTimeoutMs(undefined, { isLocal: true })).toBe(120_000);
+    expect(askPlutoTimeoutMs('auto', { isLocal: true })).toBe(120_000);
     expect(askPlutoTimeoutMs('fast', { isLocal: true })).toBe(90_000);
     expect(askPlutoTimeoutMs('deep', { isLocal: true })).toBe(120_000);
+  });
+
+  it('does not shorten local startup allowance when the model starts before a slow first token', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    let progress: ((phase?: 'started' | 'token') => void) | undefined;
+    const work = new Promise<string>((resolve) => {
+      setTimeout(() => progress?.('started'), 2_000);
+      setTimeout(() => progress?.('token'), 75_000);
+      setTimeout(() => resolve('complete answer'), 100_000);
+    });
+    const response = runAskPlutoWithDeadline(
+      work,
+      controller,
+      askPlutoTimeoutMs('auto', { isLocal: true }),
+      {
+        onProgressSetup: (fn) => {
+          progress = fn;
+        },
+        idleTimeoutMs: 60_000,
+      },
+    );
+    await vi.advanceTimersByTimeAsync(62_000);
+    expect(controller.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(38_000);
+    await expect(response).resolves.toBe('complete answer');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('still times out a local model that starts but never produces output', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const response = runAskPlutoWithDeadline(
+      new Promise(() => undefined),
+      controller,
+      120_000,
+      {
+        onProgressSetup: (progress) => {
+          progress('started');
+        },
+        idleTimeoutMs: 60_000,
+      },
+    );
+    const rejection = expect(response).rejects.toMatchObject({
+      name: 'TimeoutError',
+    });
+    await vi.advanceTimersByTimeAsync(120_000);
+    await rejection;
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('extends the deadline when streaming tokens make active progress beyond initial timeout', async () => {

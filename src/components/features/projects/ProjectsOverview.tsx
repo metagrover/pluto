@@ -245,8 +245,11 @@ export function ProjectsOverview({
         });
         if (cancelled) return;
         if (result.discovered > 0) await refresh();
-        if (result.failed > 0) setSynthesisState('incomplete');
-        else if (result.deferred || result.remaining > 0) {
+        if (result.deferred) {
+          setSynthesisState('paused');
+          timer = setTimeout(synthesize, 5000);
+        } else if (result.failed > 0) setSynthesisState('incomplete');
+        else if (result.remaining > 0) {
           setSynthesisState('paused');
           timer = setTimeout(synthesize, 5000);
         } else setSynthesisState('idle');
@@ -1585,7 +1588,7 @@ export function ProjectsOverview({
                       ? 'Theme synthesis needs another attempt. Existing project context is unchanged.'
                       : synthesisState === 'paused'
                         ? 'Theme synthesis will resume when Pluto is free.'
-                        : 'Reviewing structured notes for durable themes.'}
+                        : 'Reconciling topics with existing projects and reviewing new themes.'}
                 </span>
               </div>
               {(synthesisState === 'failed' ||

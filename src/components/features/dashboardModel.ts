@@ -734,20 +734,26 @@ const buildCommitmentSourceSynthesis = (
   sourceMeeting: Meeting | null,
 ): DashboardCommitmentSourceSynthesis | null => {
   if (!sourceMeeting) return null;
+  const metadata = parseActionMetadata(action.metadata);
+  const sourceEvidence = getTrimmedString(metadata.source_evidence);
   const analysis = parseJsonObject<MeetingAnalysisSource>(
     sourceMeeting.analysis_json,
   );
   if (!analysis) {
     const overview = getTrimmedString(sourceMeeting.dashboard_detail);
-    return overview
-      ? { overview, topicTitle: null, topicSummary: null, evidence: null }
+    return overview || sourceEvidence
+      ? {
+          overview,
+          topicTitle: null,
+          topicSummary: null,
+          evidence: sourceEvidence,
+        }
       : null;
   }
 
   const overview =
     getTrimmedString(analysis.overview) ??
     getLegacyAnalysisSummary(analysis.summary);
-  const metadata = parseActionMetadata(action.metadata);
   const fullDescription = getTrimmedString(metadata.full_description);
   const originalDescription = getTrimmedString(metadata.original_description);
   const actionTexts = [
@@ -788,6 +794,7 @@ const buildCommitmentSourceSynthesis = (
   const topicTitle = getTrimmedString(matchedTopic?.title) ?? rollupTopicTitle;
   const topicSummary = getTrimmedString(matchedTopic?.summary);
   const evidence =
+    sourceEvidence ??
     getTrimmedString(rollupMatch?.evidence) ??
     getTrimmedString(topicActionMatch?.evidence);
 
@@ -812,8 +819,10 @@ const actionToInsightItem = (
   const assigneeName =
     typeof metadata.assignee_name === 'string' ? metadata.assignee_name : null;
   const title =
-    canonicalizeActionText(action.name, assigneeName ?? undefined) ||
-    action.name;
+    canonicalizeActionText(
+      getTrimmedString(metadata.full_description) ?? action.name,
+      assigneeName ?? undefined,
+    ) || action.name;
   const attentionContext = getDashboardActionAttentionContext(linkedAttention);
   const dueLabel = formatDueLabel(action.due_date);
   const sourceLabel = titleCase(action.domain_tag || 'workspace');

@@ -2,6 +2,7 @@ import type { AskPlutoConversationContext } from '../../src/types/askPlutoQuery'
 import type { AskPlutoResearchTask } from './askPlutoConversation';
 import type { ConversationTurnMode } from './conversationController';
 import type { RetrievalResult } from './intelligenceTypes';
+import { excerptQueryEvidence } from './queryEvidenceExcerpt';
 
 export const getIntentClassificationPrompt = (query: string): string => {
   return `Analyze the following user query sent to an AI meeting assistant.
@@ -120,7 +121,20 @@ export const getAskPlutoPrompt = (
       query,
     );
   const conciseDraft =
-    task === 'draft' && /\b(?:brief|concise|short)\b/i.test(query);
+    task === 'draft' &&
+    /\b(?:brief|briefer|concise|short|shorter|tighter)\b/i.test(query);
+  const shorteningDraft =
+    task === 'draft' &&
+    /\b(?:shorter|briefer|tighter|shorten|condense)\b/i.test(query);
+  const priorDraftWords = [...priorTurns]
+    .reverse()
+    .find((turn) => turn.role === 'assistant')
+    ?.content.trim()
+    .split(/\s+/).length;
+  const conciseDraftWords =
+    shorteningDraft && priorDraftWords
+      ? Math.min(80, Math.max(20, Math.floor(priorDraftWords * 0.7)))
+      : 80;
   const personExpectationQuestion =
     /\bwhat\s+do\s+you\s+think\s+(?:will|would)\s+satisfy\b|\b(?:their|his|her|[\p{L}'-]+(?:'s|’s))\s+expectations?\b/iu.test(
       query,
@@ -129,22 +143,49 @@ export const getAskPlutoPrompt = (
     /\bwhat(?:'s|\s+is)\s+.+?\s+(?:working\s+on|focused\s+on|doing)\b|\bwhat\s+does\s+.+?\s+(?:work\s+on|focus\s+on|do)\b/i.test(
       query,
     );
-  const evidenceBudget =
-    context.length === 1
+  const isPlanningQuery =
+    Boolean(options.isPlanningQuery) ||
+    /\b(?:what\s+(?:should|do)\s+(?:i|we)\s+(?:need\s+to\s+)?(?:be\s+)?(?:focus|focusing|working|work|do|prioritize)|what\s+(?:are|is)\s+(?:my|our|the\s+team(?:'s)?)\s+(?:top\s+)?(?:priorit(?:y|ies)|focus|deliverables?|next\s+steps?)|what(?:'s|\s+is)\s+(?:on\s+(?:my|our)\s+plate|(?:my|our)\s+(?:top\s+)?priorit(?:y|ies)|(?:my|our)\s+focus)|what\s+am\s+i\s+supposed\s+to\s+(?:be\s+)?(?:working|work|focus|do)|where\s+should\s+(?:i|we)\s+start|what\s+to\s+focus\s+on|next\s+steps?\s+for\s+(?:me|us)|current\s+priorities|active\s+streams|workspace\s+(?:overview|summary|update))\b/i.test(
+      query,
+    );
+
+  const expandedEvidence =
+    Boolean(options.projectContext) ||
+    context.some((source) => source.evidence_kind === 'note') ||
+    (isPlanningQuery && task !== 'draft');
+  const evidenceBudget = expandedEvidence
+    ? Math.min(6000, Math.floor(24_000 / Math.max(1, context.length)))
+    : context.length === 1
       ? 2000
       : personExpectationQuestion
         ? Math.max(600, Math.floor(4000 / context.length))
         : largeScope
           ? Math.max(200, Math.floor(5200 / context.length))
-          : options.projectContext
-            ? context.length <= 2
-              ? 1400
-              : 900
-            : multiMeetingSynthesis
-              ? 1800
-              : context.length >= 3
-                ? Math.floor(4200 / context.length)
-                : 1200;
+          : multiMeetingSynthesis
+            ? 1800
+            : context.length >= 3
+              ? Math.floor(4200 / context.length)
+              : 1200;
+  // Give short notes their full text before dividing the remaining allowance.
+  const evidenceBudgets = context.map(() => evidenceBudget);
+  if (expandedEvidence) {
+    let remaining = 24_000;
+    const shortestFirst = context
+      .map((source, index) => ({
+        index,
+        length: source.evidence_text.length,
+      }))
+      .sort((a, b) => a.length - b.length);
+    shortestFirst.forEach(({ index, length }, rank) => {
+      const allocation = Math.min(
+        length,
+        6000,
+        Math.floor(remaining / (context.length - rank)),
+      );
+      evidenceBudgets[index] = allocation;
+      remaining -= allocation;
+    });
+  }
   const structuredFieldBudget = largeScope
     ? 60
     : personExpectationQuestion
@@ -174,9 +215,11 @@ export const getAskPlutoPrompt = (
                 ?.map((a) => a.description)
                 .join('; ')
                 .slice(0, structuredFieldBudget) || 'None';
-            const evidence = anchorRelativeSourceDates(
-              c.evidence_text.slice(0, evidenceBudget),
-            );
+            const sourceBudget = evidenceBudgets[i];
+            const sourceEvidence = expandedEvidence
+              ? excerptQueryEvidence(c.evidence_text, query, sourceBudget)
+              : c.evidence_text.slice(0, sourceBudget);
+            const evidence = anchorRelativeSourceDates(sourceEvidence);
             const details = [`Evidence: ${evidence}`];
             if (!largeScope && topicNames !== 'None') {
               details.push(`Topics: ${topicNames}`);
@@ -197,16 +240,10 @@ ${details.join('\n')}`;
           })
           .join('\n\n---\n\n');
 
-  const isPlanningQuery =
-    Boolean(options.isPlanningQuery) ||
-    /\b(?:what\s+(?:should|do)\s+(?:i|we)\s+(?:need\s+to\s+)?(?:be\s+)?(?:focus|focusing|working|work|do|prioritize)|what\s+(?:are|is)\s+(?:my|our|the\s+team(?:'s)?)\s+(?:top\s+)?(?:priorit(?:y|ies)|focus|deliverables?|next\s+steps?)|what(?:'s|\s+is)\s+(?:on\s+(?:my|our)\s+plate|(?:my|our)\s+(?:top\s+)?priorit(?:y|ies)|(?:my|our)\s+focus)|what\s+am\s+i\s+supposed\s+to\s+(?:be\s+)?(?:working|work|focus|do)|where\s+should\s+(?:i|we)\s+start|what\s+to\s+focus\s+on|next\s+steps?\s+for\s+(?:me|us)|current\s+priorities|active\s+streams|workspace\s+(?:overview|summary|update))\b/i.test(
-      query,
-    );
-
   const taskGuidance = omissionReview
     ? 'Answer the follow-up with only additional details that this fresh context directly supports. Name the person and the concrete contribution in each point. A participant list or calendar invitation does not prove who spoke; attribute a contribution only when the synthesized notes explicitly support it. Do not add suggestions, speculate about rejected draft statements, or repeat the previous answer.'
     : task === 'draft'
-      ? 'Write only the requested copy-ready draft. Return exactly one draft unless the user explicitly asks for alternatives. Do not add a preface, commentary, options, or headings. Use the recent conversation for audience, goal, and tone, but take every factual detail from the provided context. Do not present inferred urgency, shifted priorities, or dated plans as current facts; ask the recipient for an update instead. Do not include evidence-policy narration, context labels, or a sources section.'
+      ? 'Write only the requested copy-ready draft. Return exactly one draft unless the user explicitly asks for alternatives. Do not add a preface, commentary, options, or headings. Use the recent conversation for audience, goal, and tone, but take every factual detail from the provided context. Carry the specific relevant decisions or questions into the draft; do not replace them with a generic request for alignment. Do not present inferred urgency, shifted priorities, or dated plans as current facts; ask the recipient for an update instead. Do not include evidence-policy narration, context labels, or a sources section.'
       : expansionReview && isPlanningQuery && task === 'analysis'
         ? 'Answer the user’s current question about the earlier priority briefing instead of generating another workspace summary. Use the prior answer to preserve the active priorities and the synthesized Context to reason about them. Give candid, constructive feedback in a warm human voice when the user asks for judgment or coaching. Separate observations from recommendations, explain why each recommendation matters, and do not invent performance claims or personal traits.'
         : expansionReview
@@ -218,7 +255,7 @@ ${details.join('\n')}`;
               : attributionQuestion
                 ? 'Answer the attribution question directly. Name a speaker, requester, or assigner only when the same synthesized context passage explicitly attributes the statement or assignment to that person. An action item addressed to “you” does not identify who created or assigned it. If no explicit attribution is present, say that the synthesized note records the requirement but does not identify who said or assigned it.'
                 : isPlanningQuery
-                  ? 'Act as an executive Chief of Staff and strategic partner. Synthesize the user’s immediate focus and priorities across their commitments, active work streams, open loops, and project foci. Never quote conversational chit-chat, side discussions, or casual meeting banter as work directives (e.g., do not advise focusing on client personality just because someone mentioned it in passing). Group the synthesis clearly: (1) Immediate Priorities & Commitments (approaching deadlines, assigned tasks, or unblocking work); (2) Active Work Streams & Projects (ongoing initiatives and their current focus); (3) Open Loops & Attention Items (blockers, risks, or pending follow-ups). If no formal commitments are assigned, orient around active projects and open threads from recent meetings. Prefix actionable recommendations with “Suggestion:”.'
+                  ? 'Answer the user’s planning question naturally. Recommend what to focus on first and explain why, using the freshest relevant notes, explicit ownership, deadlines, and dependencies. Ignore incidental chatter. Distinguish recorded status from your inferred recommendation; an old open item does not prove it remains unfinished. If current ownership or completion is unknown, say so. Use headings or bullets only when they help the answer.'
                   : task === 'analysis'
                     ? 'Provide a thoughtful evidence-grounded analysis. Separate direct observations from interpretation. Call something a recurring pattern only when at least two sources support it. When asked what someone is most concerned about or prioritizing, identify one primary theme only when multiple explicit signals converge; otherwise present the distinct concerns without inventing a ranking. Identify strengths as well as opportunities. Prefix each recommendation with “Suggestion:” and do not introduce new factual details in it. Never diagnose personality, motivation, or performance from thin evidence.'
                     : task === 'comparison'
@@ -246,7 +283,7 @@ ${details.join('\n')}`;
     ? 'Use up to 220 words to cover the additional supported details. If there are none, briefly state that this search did not confirm anything new.'
     : task === 'draft'
       ? conciseDraft
-        ? 'Keep the entire draft under 80 words. Use a greeting and one compact paragraph. Omit a sign-off for a chat message unless the user requests one; include one only when the requested format clearly needs it, such as an email. Do not use labels, sections, or bullets.'
+        ? `Keep the entire draft under ${conciseDraftWords} words. Preserve its concrete questions and requested uncertainty. Use a greeting and one compact paragraph. Omit a sign-off for a chat message unless the user requests one; include one only when the requested format clearly needs it, such as an email. Do not use labels, sections, or bullets.`
         : 'Keep the draft under 140 words unless the user explicitly asks for a longer format. Prefer a single connected message over sections or bullets.'
       : expansionReview && isPlanningQuery && task === 'analysis'
         ? 'Use up to 260 words. Prefer two or three specific observations and practical next moves over a broad inventory of projects.'
@@ -255,7 +292,7 @@ ${details.join('\n')}`;
           : options.projectContext && task === 'analysis'
             ? 'Use up to 360 words when the evidence supports that depth. Prefer a coherent project picture over one bullet per fact.'
             : isPlanningQuery
-              ? 'Use up to 260 words. Keep the synthesis tight, executive, and actionable.'
+              ? 'Use up to 260 words. Give specific priorities and reasoning rather than an inventory of every project.'
               : task === 'analysis'
                 ? 'Use up to 300 words. Prefer a small number of well-supported observations and useful recommendations over a long speculative review.'
                 : task === 'comparison'
@@ -271,7 +308,7 @@ ${details.join('\n')}`;
     ? conversationTurns
         .map(
           (turn) =>
-            `${turn.role === 'user' ? 'User' : 'Pluto'}: ${turn.content.slice(0, turn.role === 'user' ? 350 : 550)}`,
+            `${turn.role === 'user' ? 'User' : 'Pluto'}: ${turn.content.slice(0, turn.role === 'user' ? 700 : 2000)}`,
         )
         .join('\n')
     : 'None';
@@ -313,9 +350,8 @@ ATTRIBUTION DISPUTE:
     );
     projectSection = `
 PROJECT CONTEXT & GROUNDING:
-- The user is asking about the project "${projectTitle}".
-- Ground claims about the project on the Project context provided below (status, current focus, milestones, and open tasks).
-- Keep every detail within the selected project's scope. Omit unrelated agenda topics even when they came from the same contributing meeting.
+- Context includes the project "${projectTitle}". This is a retrieval hint, not a restriction on the user's question.
+- Answer all requested parts using the supplied notes. Keep facts attributed to their own projects; do not transfer status or commitments between workstreams.
 - Clearly distinguish delivered milestones from in-progress or planned milestones.
 - A past target date does not prove a release slipped, is blocked, or remains incomplete. A recorded issue does not prove it caused a delay. Describe only the status explicitly recorded, and mark current completion or causality unknown when no newer update confirms it.
 - Mention owners/assignees of project tasks only when explicitly stated in the evidence.${
@@ -390,14 +426,12 @@ RULES:
       : options.projectContext
         ? 'If structure helps, use at most two short bold labels that describe the project content; do not use markdown headings (#, ##, ###) or source/context markers.'
         : isPlanningQuery
-          ? 'Use bold labels like **Immediate Priorities:** or **Active Projects:** rather than markdown headings (do not use #, ##, or ### headings). Do not include source or context markers in the answer.'
+          ? 'Use short paragraphs, with bullets or brief bold labels only if they make the priorities easier to follow. Do not fill a fixed template or include source/context markers.'
           : 'Do not add headings unless the user asks for a detailed breakdown. Do not include source or context markers in the answer.'
   }
 8. Preserve source boundaries: do not transfer a fact between people, projects, or initiatives merely because both appear in Context or conversation. Attribute speech, decisions, requests, expectations, and ownership only when the same synthesized passage explicitly names the person. Participation or second-person wording does not prove ownership. For inferred expectations, say “My interpretation is…” rather than “they expect”.
 9. Treat source dates as the age of the information, not proof that an old status is still current. Relative deadlines such as “next Tuesday” are relative to the source's occurrence date, not today; if that target is already past, call it an earlier target or omit it. For priorities and recommendations, separate Pluto's judgment from recorded facts and prefer fresher matching updates.
 10. User corrections constrain what the user says is wrong. Never cite a user correction as meeting evidence. When the user asks for advice, distinguish your judgment from recorded facts in natural language; do not imply the source discussed your recommendation.
-
-Question: ${query}${personQuestionFraming}
 
 ${confirmedSelfName ? `Conversation identity: The user has confirmed that their name is ${confirmedSelfName}. Address supported facts about this person as "you" and "your". This identity is for address and search resolution only; it does not prove who spoke, attended, owned a task, or made a decision. Ground each such claim in the meeting Context.\n\n` : ''}Recent conversation:
 ${conversation}
@@ -445,6 +479,7 @@ CITATION RULES:
 - Prefer the smallest set of directly supporting sources; do not append every source to a claim.`;
   }
 
+  prompt += `\n\nUser Query: ${query}${personQuestionFraming}`;
   return prompt;
 };
 

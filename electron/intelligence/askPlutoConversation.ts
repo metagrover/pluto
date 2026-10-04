@@ -378,6 +378,34 @@ export const resolveAskPlutoConversation = (
     .reverse()
     .find((turn) => turn.role === 'user')?.content;
   const previousAssistant = latestAssistantTurn(turns);
+  const previousDraftRequest = [
+    latestUserQuestion,
+    previousAssistant?.conversationAnchor,
+    previousAssistant?.conversationContext?.anchor,
+  ].find(
+    (candidate) => candidate && resolveResearchTask(candidate) === 'draft',
+  );
+  const isDraftRevision = Boolean(
+    previousAssistant &&
+      previousDraftRequest &&
+      /^(?:make|keep|leave|remove|omit|add|include|revise|rewrite|shorten|expand|change|adjust|tighten|polish)\b/i.test(
+        trimmedQuery,
+      ) &&
+      /\b(?:it|that|this|draft|message|email|shorter|longer|warmer|tone|formal|concise|brief|uncertainty|leave out|remove|omit|revise|rewrite|shorten|polish)\b/i.test(
+        trimmedQuery,
+      ),
+  );
+  if (isDraftRevision) {
+    return {
+      relation: 'follow_up',
+      task: 'draft',
+      turnMode: 'draft',
+      retrievalPolicy: 'reuse',
+      retrievalQuery: `${previousDraftRequest?.slice(0, 700)}\n${trimmedQuery}`,
+      answerQuery: `Revise the previous draft and return the complete revised draft. ${trimmedQuery}`,
+      priorQuestion: latestUserQuestion,
+    };
+  }
   const referencesPriorConversation =
     queryReferencesPriorConversation(trimmedQuery) ||
     (previousAssistant?.conversationContext?.topic?.kind === 'person' &&
@@ -440,14 +468,43 @@ export const resolveAskPlutoConversation = (
     trimmedQuery,
     dispute?.disputedEntity,
   ).some((subject) => priorSubjects.has(subject));
+  const priorWorkItems =
+    `${priorQuestion || ''}\n${previousAssistant?.content || ''}`
+      .toLocaleLowerCase()
+      .replace(/\bdependencies\b/g, 'dependency')
+      .replace(/\b(owners|decisions|proposals|blockers)\b/g, (word) =>
+        word.slice(0, -1),
+      );
+  const referencesPriorWorkItem = [
+    ...trimmedQuery.matchAll(
+      /\b(?:each|these|those|the)\s+(dependenc(?:y|ies)|owners?|decisions?|proposals?|blockers?)\b/gi,
+    ),
+  ].some((match) => {
+    const item = match[1]
+      .toLocaleLowerCase()
+      .replace(/dependencies$/, 'dependency')
+      .replace(/s$/, '');
+    return new RegExp(`\\b${item}\\b`).test(priorWorkItems);
+  });
   const contextDependentFollowUp =
     ELLIPTICAL_FOLLOW_UP_PATTERN.test(trimmedQuery) ||
+    (Boolean(previousAssistant) && referencesPriorWorkItem) ||
     (task === 'analysis' &&
       Boolean(previousAssistant) &&
       !hasStandaloneAnalysisSubject(trimmedQuery)) ||
     (task === 'draft' &&
       /\b(?:follow-up|follow up|that|this|them|those|above)\b/i.test(
         trimmedQuery,
+      )) ||
+    (task === 'draft' &&
+      previousAssistant?.conversationContext?.topic?.kind === 'project' &&
+      turns.some(
+        (turn) =>
+          turn.role === 'assistant' &&
+          turn.conversationContext?.topic?.kind === 'project' &&
+          turn.conversationContext.topic.id ===
+            previousAssistant.conversationContext?.topic?.id &&
+          Boolean(extractReferencedPriorContext(trimmedQuery, turn.content)),
       ));
   const referencedPriorContext =
     task !== 'draft' && previousAssistant?.content
@@ -522,7 +579,9 @@ export const resolveAskPlutoConversation = (
       task: isExpansionRequest(trimmedQuery) ? 'analysis' : task,
       turnMode: turnDecision.mode,
       retrievalPolicy: turnDecision.retrieval,
-      retrievalQuery: trimmedQuery,
+      retrievalQuery: referencesPriorWorkItem
+        ? `${previousAssistant?.conversationContext?.anchor || priorQuestion}\n${trimmedQuery}`
+        : trimmedQuery,
       answerQuery: trimmedQuery,
       priorQuestion,
     };

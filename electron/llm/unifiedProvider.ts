@@ -3,6 +3,7 @@ import {
   OLLAMA_GENERAL_MODEL,
   OLLAMA_QUICK_CHAT_MODEL,
 } from '../../src/utils/ollamaModels';
+import { askPlutoTimeoutMs } from '../intelligence/askPlutoDeadline';
 import { knowledgeSynthesisPause } from '../knowledgeSynthesisPause';
 import { isSerializedTaskPreemption } from '../serializedTaskGate';
 import {
@@ -406,28 +407,32 @@ const normalizeOllamaModelName = (value: unknown): string | null => {
 };
 
 export const getOllamaTimeoutMs = (task: string): number =>
-  task === 'dreaming'
-    ? OLLAMA_DREAMING_CAPACITY_TIMEOUT_MS
-    : task === 'knowledgeDoc'
-      ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS
-      : task === 'projectScopeReview'
-        ? OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS
-        : task === 'askPlutoLive'
-          ? OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS
-          : task === 'structuredAnalysis' ||
-              task === 'notesWriter' ||
-              task === 'notesAudit' ||
-              task === 'notesMerge' ||
-              task === 'analysisEditorial' ||
-              task === 'topicSegmentation' ||
-              task === 'terminologyReconciliation' ||
-              task === 'topicAnalysis' ||
-              task === 'entities' ||
-              task === 'valueSignals'
-            ? OLLAMA_ANALYSIS_TIMEOUT_MS
-            : OLLAMA_TIMEOUT_MS;
+  task === 'askPlutoDeep'
+    ? askPlutoTimeoutMs('deep', { isLocal: true })
+    : task === 'dreaming'
+      ? OLLAMA_DREAMING_CAPACITY_TIMEOUT_MS
+      : task === 'knowledgeDoc'
+        ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS
+        : task === 'projectScopeReview'
+          ? OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS
+          : task === 'askPlutoLive'
+            ? OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS
+            : task === 'structuredAnalysis' ||
+                task === 'notesWriter' ||
+                task === 'notesAudit' ||
+                task === 'notesMerge' ||
+                task === 'analysisEditorial' ||
+                task === 'topicSegmentation' ||
+                task === 'terminologyReconciliation' ||
+                task === 'topicAnalysis' ||
+                task === 'entities' ||
+                task === 'valueSignals'
+              ? OLLAMA_ANALYSIS_TIMEOUT_MS
+              : OLLAMA_TIMEOUT_MS;
 
 const usesProgressAwareOllamaDeadline = (task: LLMTask): boolean =>
+  task === 'askPluto' ||
+  task === 'askPlutoDeep' ||
   task === 'dreaming' ||
   task === 'commitmentReconciliation' ||
   task === 'projectScopeReview' ||
@@ -2113,9 +2118,9 @@ export function calculateOllamaContextBudget(
         : task === 'askPlutoLive'
           ? 768
           : task === 'askPluto'
-            ? 384
+            ? 768
             : task === 'askPlutoDeep'
-              ? 512
+              ? 1024
               : task === 'analysisEditorial'
                 ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
                 : task === 'terminologyReconciliation'
@@ -2130,13 +2135,11 @@ export function calculateOllamaContextBudget(
   const maxCap =
     task === 'askPlutoLive'
       ? 8192
-      : task === 'askPluto'
-        ? 8192
-        : task === 'askPlutoDeep'
-          ? 12288
-          : task === 'knowledgeDoc' || task === 'analysisEditorial'
-            ? OLLAMA_EDITORIAL_CONTEXT_TOKENS
-            : 16384;
+      : task === 'askPluto' || task === 'askPlutoDeep'
+        ? 12288
+        : task === 'knowledgeDoc' || task === 'analysisEditorial'
+          ? OLLAMA_EDITORIAL_CONTEXT_TOKENS
+          : 16384;
   const minimumContext =
     task === 'askPlutoLive'
       ? 4096

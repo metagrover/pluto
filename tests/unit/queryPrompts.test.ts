@@ -4,6 +4,7 @@ import {
   anchorRelativeSourceDates,
   getAskPlutoPrompt,
 } from '../../electron/intelligence/queryPrompts';
+import { calculateOllamaContextBudget } from '../../electron/llm/unifiedProvider';
 
 describe('getAskPlutoPrompt', () => {
   it('treats an older person profile as a dated picture for coaching', () => {
@@ -519,7 +520,7 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt.length).toBeLessThan(8_000);
   });
 
-  it('includes executive chief of staff guidance for planning queries', () => {
+  it('asks for natural prioritization grounded in fresh evidence', () => {
     const prompt = getAskPlutoPrompt(
       'what should i focus on?',
       [],
@@ -530,11 +531,160 @@ describe('getAskPlutoPrompt', () => {
       { isPlanningQuery: true },
     );
 
-    expect(prompt).toContain('Act as an executive Chief of Staff');
-    expect(prompt).toContain('Immediate Priorities & Commitments');
-    expect(prompt).toContain('Active Work Streams & Projects');
-    expect(prompt).toContain('Open Loops & Attention Items');
-    expect(prompt).toContain('Never quote conversational chit-chat');
+    expect(prompt).toContain(
+      'Recommend what to focus on first and explain why',
+    );
+    expect(prompt).toContain(
+      'freshest relevant notes, explicit ownership, deadlines',
+    );
+    expect(prompt).toContain('Ignore incidental chatter');
+    expect(prompt).toContain(
+      'Distinguish recorded status from your inferred recommendation',
+    );
+    expect(prompt).not.toContain('Chief of Staff');
+    expect(prompt).not.toContain('Immediate Priorities & Commitments');
+    expect(prompt).not.toContain('**Immediate Priorities:**');
+    expect(prompt).not.toContain('**Active Projects:**');
+    expect(prompt).not.toContain('Suggestion:');
+  });
+
+  it('retains meaningful recent note details and final actions across a bounded planning scope', () => {
+    const context = Array.from({ length: 9 }, (_, index) => ({
+      meeting_id: `meeting-${index}`,
+      meeting_title: `Project review ${index}`,
+      evidence_text: `[Meeting date]: 2026-09-29\n${'Background detail. '.repeat(65)}HEAD_OWNER_${index}: Rowan owns the rollout.\n${'Supporting context. '.repeat(180)}TAIL_DEADLINE_${index}: Review access by October 5.`,
+      mid: null,
+      score: 1,
+      score_breakdown: {
+        fts_rank: 0,
+        graph_proximity: 0,
+        recency_decay: 1,
+        mention_weight: 0,
+      },
+    }));
+    const prompt = getAskPlutoPrompt(
+      'What should I focus on?',
+      context,
+      'factual',
+      [],
+      'None',
+      'analysis',
+    );
+    for (let index = 0; index < context.length; index++) {
+      expect(prompt).toContain(`HEAD_OWNER_${index}`);
+      expect(prompt).toContain(`TAIL_DEADLINE_${index}`);
+    }
+    expect(prompt).toContain('[Text omitted]');
+    const evidenceBodies = [
+      ...prompt.matchAll(
+        /Evidence: ([\s\S]*?)(?=\n\n---\n\n|\n\nUser Query:|$)/g,
+      ),
+    ];
+    // Context stays bounded even though each saved note exceeds its allocation.
+    expect(prompt.length).toBeLessThan(32_000);
+    expect(evidenceBodies).toHaveLength(9);
+    const budget = calculateOllamaContextBudget(prompt, 'askPlutoDeep');
+    expect(budget.num_ctx).toBeLessThanOrEqual(12_288);
+    expect(budget.num_predict).toBe(1024);
+    expect(
+      Math.ceil(prompt.length / 3) + budget.num_predict,
+    ).toBeLessThanOrEqual(budget.num_ctx);
+  });
+
+  it('does not turn one matched project into an answer-wide scope restriction', () => {
+    const prompt = getAskPlutoPrompt(
+      'Compare Orion delivery with the separate observatory calibration schedule.',
+      [],
+      'comparative',
+      [],
+      'None',
+      'analysis',
+      { projectContext: { name: 'Orion' } },
+    );
+    expect(prompt).toContain('Answer all requested parts');
+    expect(prompt).toContain('Keep facts attributed to their own projects');
+    expect(prompt.trim()).toMatch(
+      /User Query: Compare Orion delivery with the separate observatory calibration schedule\.$/,
+    );
+    expect(prompt).not.toContain(
+      "Keep every detail within the selected project's scope",
+    );
+  });
+
+  it('preserves complete project notes and late assignments for lookup and draft follow-ups', () => {
+    const context = [900, 1900, 3200, 5100, 5800].map((length, index) => ({
+      meeting_id: `meeting-${index}`,
+      meeting_title: `Orion review ${index}`,
+      evidence_text: `${'x'.repeat(length)} OWNER_${index}: Rowan coordinates access; approval is pending.`,
+      mid: null,
+      score: 1,
+      score_breakdown: {
+        fts_rank: 0,
+        graph_proximity: 0,
+        recency_decay: 1,
+        mention_weight: 0,
+      },
+    }));
+    for (const task of ['lookup', 'draft'] as const) {
+      const prompt = getAskPlutoPrompt(
+        'Who is assigned to each dependency?',
+        context,
+        'factual',
+        [],
+        'None',
+        task,
+        { projectContext: { name: 'Orion' } },
+      );
+      for (const source of context)
+        expect(prompt).toContain(source.evidence_text);
+      expect(prompt).not.toContain('[Text omitted]');
+      expect(prompt.length).toBeLessThan(26_000);
+    }
+  });
+
+  it('preserves late facts in ordinary saved-note search results', () => {
+    const context = Array.from({ length: 5 }, (_, index) => ({
+      meeting_id: `meeting-${index}`,
+      meeting_title: `Review ${index}`,
+      evidence_kind: 'note' as const,
+      evidence_text: `${'Background. '.repeat(200)} LATE_FACT_${index}: Three of five profiles were ready; completion is unknown.`,
+      mid: null,
+      score: 1,
+      score_breakdown: {
+        fts_rank: 0,
+        graph_proximity: 0,
+        recency_decay: 1,
+        mention_weight: 0,
+      },
+    }));
+    const prompt = getAskPlutoPrompt(
+      'What do the notes establish?',
+      context,
+      'factual',
+    );
+    for (const source of context)
+      expect(prompt).toContain(source.evidence_text);
+  });
+
+  it('budgets a draft revision below the previous draft length', () => {
+    const prompt = getAskPlutoPrompt(
+      'Make it shorter and warmer.',
+      [],
+      'factual',
+      [
+        {
+          role: 'user',
+          content: 'Draft a message about these project questions.',
+        },
+        { role: 'assistant', content: 'word '.repeat(70).trim() },
+      ],
+      'None',
+      'draft',
+    );
+    expect(prompt).toContain('Keep the entire draft under 49 words');
+    expect(prompt).toContain(
+      'Preserve its concrete questions and requested uncertainty',
+    );
   });
 
   it('includes attribution dispute instructions when user objects to attributed entity', () => {
@@ -662,9 +812,7 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).toContain('do not fill a fixed template');
     expect(prompt).toContain('thoughtful collaborator');
     expect(prompt).toContain('Use up to 360 words');
-    expect(prompt).toContain(
-      'Omit unrelated agenda topics even when they came from the same contributing meeting',
-    );
+    expect(prompt).toContain('Keep facts attributed to their own projects');
     expect(prompt).toContain(
       'If structure helps, use at most two short bold labels',
     );

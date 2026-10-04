@@ -42,6 +42,7 @@ import {
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
 import { CalendarSettings } from './CalendarSettings';
+import { ChatGptConnectionSettings } from './ChatGptConnectionSettings';
 import { IdentitySettings } from './IdentitySettings';
 
 interface SettingsTabProps {
@@ -1322,6 +1323,7 @@ export const SettingsTab = ({
           role="tabpanel"
           aria-labelledby="settings-tab-advanced"
         >
+          <ChatGptConnectionSettings />
           <Section title="Application updates">
             <SettingsRow
               label="Pluto Version"

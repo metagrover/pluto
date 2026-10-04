@@ -117,6 +117,113 @@ afterEach(() => {
 });
 
 describe('Dashboard interactions', () => {
+  it('lets remaining suggestions show full details, open their source, and persist dismissal', async () => {
+    const fullDescription =
+      'Share the complete launch checklist with the review group once the final approval is recorded, including every dependency and the agreed delivery conditions';
+    const sourceEvidence =
+      'I will share the checklist after approval, with dependencies and conditions included.';
+    let actions = [
+      ...['first', 'second', 'third'].map((id) =>
+        makeAction({
+          id,
+          name: id,
+          metadata: JSON.stringify({ commitment_state: 'confirmed' }),
+        }),
+      ),
+      makeAction({
+        id: 'remaining',
+        name: fullDescription.slice(0, 100),
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          full_description: fullDescription,
+          source_meeting_id: 'meeting-1',
+          source_evidence: sourceEvidence,
+        }),
+      }),
+    ];
+    const buildModel = () =>
+      buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [makeMeeting()],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: actions,
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+      });
+    const setSelectedMeetingId = vi.fn();
+    const handleReviewCommitment = vi.fn(
+      async (id: string, state: 'confirmed' | 'rejected') => {
+        actions = actions.map((action) =>
+          action.id === id
+            ? {
+                ...action,
+                metadata: JSON.stringify({
+                  ...JSON.parse(action.metadata ?? '{}'),
+                  commitment_state: state,
+                }),
+              }
+            : action,
+        );
+        root.render(
+          <Dashboard
+            model={buildModel()}
+            loading={false}
+            isRecording={false}
+            setSelectedMeetingId={setSelectedMeetingId}
+            setActiveTab={vi.fn()}
+            updatingTaskIds={new Set()}
+            actionError={null}
+            handleCompleteTask={vi.fn(async () => {})}
+            handleReviewCommitment={handleReviewCommitment}
+          />,
+        );
+      },
+    );
+    const { container, root } = renderDashboard({
+      model: buildModel(),
+      setSelectedMeetingId,
+      handleReviewCommitment,
+    });
+    const row = container.querySelector(
+      '[data-testid="dashboard-backlog-row"]',
+    );
+    expect(row?.textContent).toContain(fullDescription);
+    expect(row?.querySelector('span.truncate')).toBeNull();
+    expect(row?.textContent).not.toContain('Prioritize');
+    expect(row?.textContent).toContain('Add to commitments');
+    await act(async () =>
+      row?.querySelector<HTMLButtonElement>('button[aria-expanded]')?.click(),
+    );
+    expect(row?.textContent).toContain(sourceEvidence);
+    expect(row?.textContent).toContain('Owner not confirmed');
+    await act(async () =>
+      row
+        ?.querySelector<HTMLButtonElement>(
+          'button[aria-label^="Open source meeting"]',
+        )
+        ?.click(),
+    );
+    expect(setSelectedMeetingId).toHaveBeenCalledWith('meeting-1');
+    await act(async () =>
+      row
+        ?.querySelector<HTMLButtonElement>(
+          'button[aria-label^="Dismiss suggestion"]',
+        )
+        ?.click(),
+    );
+    expect(handleReviewCommitment).toHaveBeenCalledWith(
+      'remaining',
+      'rejected',
+    );
+    expect(
+      container.querySelector('[data-testid="dashboard-backlog-row"]'),
+    ).toBeNull();
+    expect(buildModel().commitments.backlog).toEqual([]);
+    act(() => root.unmount());
+  });
+
   it('keeps secondary commitment actions in a keyboard-accessible menu', async () => {
     const handleUpdateAttentionStatus = vi.fn(async () => {});
     const model = buildDashboardHomeModel({
@@ -316,7 +423,7 @@ describe('Dashboard interactions', () => {
     const synthesis = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Open source meeting for Send the launch recap"]',
     );
-    expect(synthesis?.textContent).toContain(
+    expect(container.textContent).toContain(
       'Launch readiness depends on privacy review.',
     );
     expect(
@@ -324,9 +431,9 @@ describe('Dashboard interactions', () => {
         'button[aria-label="Open source meeting for Assign the customer recap"]',
       ),
     ).toBeNull();
-    expect(container.textContent).not.toContain('Open full meeting');
+    expect(synthesis?.textContent).toContain('Open full meeting');
 
-    expect(synthesis?.className).toContain('line-clamp-1');
+    expect(synthesis?.className).not.toContain('line-clamp-1');
     await act(async () => synthesis?.click());
     expect(setSelectedMeetingId).toHaveBeenCalledWith('meeting-1');
 

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../electron/db';
 import {
-  buildAgedProjectAnswer,
   buildAssigneeActionRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
@@ -58,6 +57,7 @@ vi.mock('../../electron/db', () => ({
   getMeetingsForEntity: vi.fn().mockReturnValue([]),
   getMeeting: vi.fn(),
   getAskPlutoMeeting: vi.fn(),
+  getAskPlutoMeetingHeaders: vi.fn().mockReturnValue([]),
   getEntity: vi.fn(),
   findEntity: vi.fn(),
   getCanonicalPersonCommitments: vi.fn(),
@@ -97,6 +97,9 @@ describe('Query Engine', () => {
       delivered: [],
       candidates: [],
     });
+    vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue([]);
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
+    vi.mocked(dbModule.getMeetingsForEntity).mockReturnValue([]);
   });
 
   it('uses only synthesized live notes for current-meeting retrieval', () => {
@@ -150,6 +153,64 @@ describe('Query Engine', () => {
       expect(result.keywords).toContain('discuss');
       expect(result.keywords).toContain('backend');
       expect(result.keywords).toContain('migration');
+    });
+
+    it('excludes function words and request framing from deterministic topic searches', async () => {
+      vi.mocked(dbModule.searchEntitiesWithMeetingContext).mockReturnValue([]);
+      const result = await parseQuery(
+        'What are the concrete next steps for the Orion work and release testing, who is actually named, and which dates are confirmed versus conditional?',
+        { useModelClassification: false },
+      );
+      expect(result.keywords).toEqual([
+        'Orion',
+        'release',
+        'testing',
+        'named',
+        'dates',
+        'confirmed',
+        'conditional',
+      ]);
+      const entityQuery = vi
+        .mocked(dbModule.searchEntitiesWithMeetingContext)
+        .mock.calls.at(-1)?.[0];
+      expect(entityQuery).not.toMatch(
+        /"(?:and|who|which|work|steps|actually|concrete|versus)"/,
+      );
+      await retrieveContext(result);
+      expect(dbModule.searchMeetingNotesFts).toHaveBeenCalledWith(
+        '"orion" OR "release" OR "testing" OR "named" OR "dates" OR "confirmed" OR "conditional"',
+        { limit: 20 },
+      );
+      expect(factoryModule.getProvider).not.toHaveBeenCalled();
+    });
+
+    it('keeps preparation requests focused on their substantive topics', async () => {
+      vi.mocked(dbModule.searchEntitiesWithMeetingContext).mockReturnValue([]);
+      const result = await parseQuery(
+        'Help me prepare a focused Orion session. Clarify what is still open and what to carry into the room.',
+        { useModelClassification: false },
+      );
+      expect(result.keywords).toEqual(['Orion', 'open']);
+      const review = await parseQuery(
+        'What do Orion notes say carefully, and whether we can conclude approval?',
+        { useModelClassification: false },
+      );
+      expect(review.keywords).toEqual(['Orion', 'approval']);
+    });
+
+    it('deduplicates requested keywords case-insensitively without losing substantive words', async () => {
+      vi.mocked(dbModule.searchEntitiesWithMeetingContext).mockReturnValue([]);
+      const result = await parseQuery(
+        'Compare Orion and ORION testing with testing dates',
+        { useModelClassification: false },
+      );
+      expect(
+        result.keywords.filter((word) => word.toLowerCase() === 'orion'),
+      ).toEqual(['Orion']);
+      expect(result.keywords.filter((word) => word === 'testing')).toEqual([
+        'testing',
+      ]);
+      expect(result.keywords).toContain('dates');
     });
 
     it('extracts entity mentions from DB mock', async () => {
@@ -334,6 +395,13 @@ describe('Query Engine', () => {
         } as FtsRow,
       ]);
 
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
+        id: 'm1',
+        title: 'Meeting 1',
+        started_at: '2026-01-01T00:00:00Z',
+        enhanced_notes: 'GraphQL was selected for the API.',
+      } as dbModule.PersistedMeeting);
+
       // Mock DB Entity resolution & Walk
       vi.mocked(dbModule.searchEntitiesWithMeetingContext).mockReturnValue([
         { id: 'e1' } as EntitySearchRow,
@@ -364,7 +432,9 @@ describe('Query Engine', () => {
         id: 'section-meeting',
         title: 'Launch review',
         started_at: '2026-09-01T10:00:00.000Z',
+        enhanced_notes: 'The release moved to Friday after final QA.',
       } as dbModule.PersistedMeeting;
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
       vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([
         {
           meeting,
@@ -404,9 +474,9 @@ describe('Query Engine', () => {
 
       expect(result[0]).toMatchObject({
         meeting_id: 'section-meeting',
-        evidence_kind: 'section',
+        evidence_kind: 'note',
         retrieved_sections: [
-          { section_id: 'topic:release', heading: 'Release timing' },
+          { section_id: 'meeting-notes', heading: 'Meeting notes' },
         ],
       });
       expect(dbModule.searchMeetingNotesFts).toHaveBeenCalled();
@@ -422,7 +492,40 @@ describe('Query Engine', () => {
         id: 'mixed-meeting',
         title: 'Weekly review',
         started_at: '2026-09-01T10:00:00.000Z',
+        enhanced_notes: 'The release moved to Friday after final QA.',
       } as dbModule.PersistedMeeting;
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
+      meeting.analysis_json = JSON.stringify({
+        analysis_schema_version: 3,
+        overview: 'The review covered release readiness.',
+        topics: [
+          {
+            title: 'Release timing',
+            summary: 'The release checklist is ready for review.',
+            key_points: [],
+            decisions: [],
+            action_items: [],
+            open_questions: [],
+          },
+          {
+            title: 'Personal aside',
+            summary: 'Keep this discussion confidential between us.',
+            key_points: [],
+            decisions: [],
+            action_items: [],
+            open_questions: [],
+          },
+        ],
+        all_decisions: [],
+        all_action_items: [],
+        meeting_type: 'general',
+        quality: {
+          format_pass: true,
+          retry_count: 0,
+          fallback_used: false,
+          issues: [],
+        },
+      });
       const section = {
         id: 1,
         meeting_id: 'mixed-meeting',
@@ -466,7 +569,7 @@ describe('Query Engine', () => {
       expect(result).toHaveLength(1);
       expect(
         result[0].retrieved_sections?.map((item) => item.section_id),
-      ).toEqual(['topic:release']);
+      ).toEqual(expect.arrayContaining(['topic-0']));
       expect(result[0].evidence_text).not.toContain('confidential');
     });
 
@@ -475,7 +578,9 @@ describe('Query Engine', () => {
         id: 'section-meeting',
         title: 'Launch review',
         started_at: '2026-09-01T10:00:00.000Z',
+        enhanced_notes: 'The release moved to Friday after final QA.',
       } as dbModule.PersistedMeeting;
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(sectionMeeting);
       const noteOnlyMeeting = {
         id: 'note-only-meeting',
         title: 'Customer readiness',
@@ -508,6 +613,9 @@ describe('Query Engine', () => {
       vi.mocked(dbModule.searchMeetingNotesFts).mockReturnValue([
         noteOnlyMeeting,
       ]);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        id === 'section-meeting' ? sectionMeeting : noteOnlyMeeting,
+      );
 
       const result = await retrieveContext(
         {
@@ -529,11 +637,386 @@ describe('Query Engine', () => {
       ).toContain('customer readiness review');
     });
 
+    it('hydrates selected notes completely and reflects corrections instead of cached index text', async () => {
+      const indexed = {
+        id: 'current',
+        title: 'Old title',
+        enhanced_notes: 'Obsolete approval.',
+        started_at: '2026-09-01T00:00:00Z',
+      } as FtsRow;
+      vi.mocked(dbModule.searchMeetingNotesFts).mockReturnValue([indexed]);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
+        ...indexed,
+        title: 'Current title',
+        analysis_format_pass: 0,
+        enhanced_notes: `Release review. ${'Supporting context. '.repeat(500)} Morgan owns testing; the date follows review.`,
+        mid_json: JSON.stringify({
+          decisions: [{ description: 'STALE_MID_APPROVAL' }],
+        }),
+        transcript_json: 'PRIVATE_TRANSCRIPT',
+      } as dbModule.PersistedMeeting);
+      const result = await retrieveContext({
+        keywords: ['release'],
+        entity_mentions: [],
+        temporal_range: null,
+        intent: 'factual',
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        meeting_title: 'Current title',
+        mid: null,
+        evidence_kind: 'note',
+        trust_status: 'needs_review',
+      });
+      expect(result[0].evidence_text).toContain(
+        'Morgan owns testing; the date follows review.',
+      );
+      expect(result[0].evidence_text).toContain(
+        '[Middle of long notes omitted]',
+      );
+      expect(result[0].evidence_text.length).toBeLessThan(8500);
+      expect(result[0].evidence_text).not.toMatch(
+        /Obsolete approval|STALE_MID_APPROVAL|PRIVATE_TRANSCRIPT/,
+      );
+      expect(result[0].source_revision).toHaveLength(64);
+    });
+
+    it('discovers a rarer requested topic beyond a crowded global result window', async () => {
+      const common = Array.from(
+        { length: 20 },
+        (_, index) =>
+          ({
+            id: `common-${index}`,
+            title: 'Orion work',
+            started_at: '2026-09-20T00:00:00Z',
+            enhanced_notes: 'Orion implementation remains underway.',
+          }) as FtsRow,
+      );
+      const weekly = {
+        id: 'weekly',
+        title: 'Weekly review',
+        started_at: '2026-09-25T00:00:00Z',
+        enhanced_notes:
+          'Orion priorities were reviewed. Customer-events testing starts after owner review.',
+      } as FtsRow;
+      vi.mocked(dbModule.searchMeetingNotesFts).mockImplementation((query) =>
+        query === '"customer"* AND "events"*' ? [weekly] : common,
+      );
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        id === weekly.id ? weekly : common.find((meeting) => meeting.id === id),
+      );
+      const result = await retrieveContext({
+        keywords: ['Orion', 'customer-events', 'testing'],
+        entity_mentions: [],
+        temporal_range: null,
+        intent: 'factual',
+      });
+      expect(result[0].meeting_id).toBe('weekly');
+      expect(result[0].evidence_text).toContain(
+        'testing starts after owner review',
+      );
+      expect(result).toHaveLength(12);
+      expect(dbModule.searchMeetingNotesFts).toHaveBeenCalledWith(
+        '"customer"* AND "events"*',
+        { limit: 40 },
+      );
+    });
+
+    it('retains short recent updates buried behind historical facet ranks', async () => {
+      const historical = Array.from(
+        { length: 39 },
+        (_, index) =>
+          ({
+            id: `history-${index}`,
+            title: 'Profile history',
+            started_at: '2020-08-01T00:00:00Z',
+            enhanced_notes:
+              'Profiles were reviewed in a long historical process.',
+          }) as FtsRow,
+      );
+      const newest = {
+        id: 'recent-counts',
+        title: 'Weekly review',
+        started_at: '2020-09-25T00:00:00Z',
+        enhanced_notes:
+          'Fifteen profiles were inspected; six clients are viable.',
+      } as FtsRow;
+      vi.mocked(dbModule.searchMeetingNotesFts).mockImplementation((query) =>
+        query.includes(' OR ')
+          ? historical.slice(0, 20)
+          : [...historical, newest],
+      );
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        id === newest.id
+          ? newest
+          : historical.find((meeting) => meeting.id === id),
+      );
+      const result = await retrieveContext({
+        keywords: ['profile', 'client'],
+        entity_mentions: [],
+        temporal_range: null,
+        intent: 'factual',
+      });
+      expect(result[0].meeting_id).toBe('recent-counts');
+      expect(result[0].evidence_text).toContain(
+        'Fifteen profiles were inspected; six clients are viable.',
+      );
+      const recent = await retrieveContext(
+        {
+          keywords: ['profile', 'client'],
+          entity_mentions: [],
+          temporal_range: null,
+          intent: 'factual',
+        },
+        { query: 'Compare recent profiles and clients' },
+      );
+      expect(recent.map((source) => source.meeting_id)).toEqual([
+        'recent-counts',
+      ]);
+      const explicit = await retrieveContext({
+        keywords: ['profile', 'client'],
+        entity_mentions: [],
+        temporal_range: {
+          from: '2020-09-20T00:00:00Z',
+          to: '2020-09-30T00:00:00Z',
+        },
+        intent: 'factual',
+      });
+      expect(explicit.map((source) => source.meeting_id)).toEqual([
+        'recent-counts',
+      ]);
+    });
+
+    it('uses prefix discovery and current topic coverage while honoring meeting restrictions', async () => {
+      const eligible = {
+        id: 'eligible',
+        title: 'Weekly review',
+        started_at: '2026-09-25T00:00:00Z',
+        enhanced_notes:
+          'Fifteen profiles were checked; six are viable clients.',
+      } as FtsRow;
+      const excluded = {
+        id: 'excluded',
+        title: 'Profiles and clients',
+        enhanced_notes: 'Unrelated private customer result.',
+      } as FtsRow;
+      vi.mocked(dbModule.searchMeetingNotesFts).mockReturnValue([
+        excluded,
+        eligible,
+      ]);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        id === eligible.id ? eligible : excluded,
+      );
+      const result = await retrieveContext(
+        {
+          keywords: ['profile', 'client'],
+          entity_mentions: [],
+          temporal_range: null,
+          intent: 'factual',
+        },
+        { meetingIds: ['eligible'] },
+      );
+      expect(result.map((item) => item.meeting_id)).toEqual(['eligible']);
+      expect(result[0].score_breakdown.fts_rank).toBe(1);
+      expect(dbModule.searchMeetingNotesFts).toHaveBeenCalledWith(
+        '"profile"*',
+        { limit: 40 },
+      );
+      expect(dbModule.getAskPlutoMeeting).not.toHaveBeenCalledWith('excluded');
+    });
+
+    it('discovers renamed current titles and ranks them above incidental note mentions', async () => {
+      const renamed = {
+        id: 'renamed',
+        title: 'Orion version review',
+        started_at: '2026-10-01T00:00:00Z',
+        enhanced_notes:
+          'The team chose version three; the portal dependency remains open.',
+      } as FtsRow;
+      const incidental = {
+        id: 'incidental',
+        title: 'Unrelated implementation review',
+        started_at: '2026-09-01T00:00:00Z',
+        enhanced_notes: 'Orion was mentioned in passing.',
+      } as FtsRow;
+      vi.mocked(dbModule.searchMeetingNotesFts).mockReturnValue([incidental]);
+      vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue([renamed]);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        id === 'renamed' ? renamed : incidental,
+      );
+      const result = await retrieveContext({
+        keywords: ['Orion'],
+        entity_mentions: [],
+        temporal_range: null,
+        intent: 'factual',
+      });
+      expect(result[0]).toMatchObject({
+        meeting_id: 'renamed',
+        meeting_title: 'Orion version review',
+        evidence_kind: 'note',
+      });
+      expect(result[0].evidence_text).toContain('The team chose version three');
+      const restricted = await retrieveContext(
+        {
+          keywords: ['Orion'],
+          entity_mentions: [],
+          temporal_range: null,
+          intent: 'factual',
+        },
+        { meetingIds: ['incidental'] },
+      );
+      expect(restricted.map((item) => item.meeting_id)).toEqual(['incidental']);
+    });
+
+    it('limits recent questions to fourteen days ending at the newest available source', async () => {
+      const old = {
+        id: 'old-profile',
+        title: 'Profile review',
+        started_at: '2020-08-01T00:00:00Z',
+        enhanced_notes: 'Old profiles were reviewed.',
+      } as FtsRow;
+      const newest = {
+        id: 'new-profile',
+        title: 'Profile review',
+        started_at: '2020-09-25T00:00:00Z',
+        enhanced_notes: 'Newest profiles were reviewed.',
+      } as FtsRow;
+      vi.mocked(dbModule.searchMeetingNotesFts).mockReturnValue([old, newest]);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        id === old.id ? old : newest,
+      );
+      const parsed = {
+        keywords: ['profile'],
+        entity_mentions: [],
+        temporal_range: null,
+        intent: 'factual' as const,
+      };
+      const recent = await retrieveContext(parsed, {
+        query: 'Compare recent profiles',
+      });
+      expect(recent.map((source) => source.meeting_id)).toEqual([
+        'new-profile',
+      ]);
+      const explicit = await retrieveContext(parsed, {
+        query: 'Compare recent profiles with 2020-08-01',
+      });
+      expect(explicit.map((source) => source.meeting_id)).toEqual(
+        expect.arrayContaining(['old-profile', 'new-profile']),
+      );
+      const pinned = buildMeetingRetrievalResult(old);
+      const withPinned = await retrieveContext(parsed, {
+        query: 'Compare recent profiles',
+        pinnedResults: [pinned],
+      });
+      expect(withPinned.map((source) => source.meeting_id)).toEqual([
+        'old-profile',
+        'new-profile',
+      ]);
+    });
+
+    it('bounds current-title discovery to twenty newest matching headers', async () => {
+      const meetings = Array.from(
+        { length: 30 },
+        (_, index) =>
+          ({
+            id: `title-${index}`,
+            title: 'Orion review',
+            started_at: new Date(2026, 8, index + 1).toISOString(),
+            enhanced_notes: 'The review remains open.',
+          }) as FtsRow,
+      );
+      vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue(meetings);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        meetings.find((meeting) => meeting.id === id),
+      );
+      await retrieveContext({
+        keywords: ['Orion'],
+        entity_mentions: [],
+        temporal_range: null,
+        intent: 'factual',
+      });
+      expect(dbModule.getAskPlutoMeeting).toHaveBeenCalledTimes(20);
+      expect(dbModule.getAskPlutoMeeting).not.toHaveBeenCalledWith('title-0');
+      expect(dbModule.getAskPlutoMeeting).toHaveBeenCalledWith('title-29');
+    });
+
+    it('bounds facet searches and current-note hydration with oversized keyword input', async () => {
+      const meetings = Array.from(
+        { length: 120 },
+        (_, index) =>
+          ({
+            id: `bounded-${index}`,
+            title: 'Review',
+            enhanced_notes: 'topic profiles',
+          }) as FtsRow,
+      );
+      vi.mocked(dbModule.searchMeetingNotesFts).mockReturnValue(meetings);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        meetings.find((meeting) => meeting.id === id),
+      );
+      await retrieveContext({
+        keywords: Array.from({ length: 40 }, (_, index) => `topic${index}`),
+        entity_mentions: [],
+        temporal_range: null,
+        intent: 'factual',
+      });
+      expect(dbModule.searchMeetingNotesFts).toHaveBeenCalledTimes(13);
+      expect(dbModule.getAskPlutoMeeting).toHaveBeenCalledTimes(80);
+    });
+
+    it('does not resurrect deleted or empty sources from the notes index', async () => {
+      vi.mocked(dbModule.searchMeetingNotesFts).mockReturnValue([
+        { id: 'deleted', enhanced_notes: 'Old release approval.' },
+        { id: 'empty', enhanced_notes: 'Old release owner.' },
+      ] as FtsRow[]);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        id === 'empty'
+          ? ({
+              id,
+              title: 'Empty notes',
+              enhanced_notes: '',
+            } as dbModule.PersistedMeeting)
+          : undefined,
+      );
+      expect(
+        await retrieveContext({
+          keywords: ['release'],
+          entity_mentions: [],
+          temporal_range: null,
+          intent: 'factual',
+        }),
+      ).toEqual([]);
+    });
+
+    it('preserves deliberately scoped pinned evidence instead of expanding its meeting', async () => {
+      const pinned = buildMeetingRetrievalResult({
+        id: 'pinned',
+        title: 'Scoped meeting',
+        enhanced_notes: 'Project Orion scoped detail.',
+      } as dbModule.PersistedMeeting);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
+        id: 'pinned',
+        enhanced_notes: 'Unrelated workstream secret.',
+      } as dbModule.PersistedMeeting);
+      const result = await retrieveContext(
+        {
+          keywords: [],
+          entity_mentions: [],
+          temporal_range: null,
+          intent: 'factual',
+        },
+        { pinnedResults: [pinned] },
+      );
+      expect(result).toEqual([pinned]);
+      expect(dbModule.getAskPlutoMeeting).not.toHaveBeenCalled();
+    });
+
     it('never deepens matching note sections into raw transcript passages', async () => {
       const meeting = {
         id: 'transcript-meeting',
         title: 'Release review',
         started_at: '2026-09-01T10:00:00.000Z',
+        enhanced_notes: 'The release moved to Friday after final QA.',
         transcript_status: 'validated',
         transcript_json: JSON.stringify({
           segments: [
@@ -548,6 +1031,7 @@ describe('Query Engine', () => {
           ],
         }),
       } as dbModule.PersistedMeeting;
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
       vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
       vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([
         {
@@ -583,7 +1067,7 @@ describe('Query Engine', () => {
         { query: 'Quote exactly why the release moved to Friday.' },
       );
 
-      expect(result[0].evidence_kind).toBe('section');
+      expect(result[0].evidence_kind).toBe('note');
       expect(result[0].transcript_passages).toBeUndefined();
       expect(result[0].evidence_text).not.toContain('Final QA is complete');
       expect(dbModule.searchMeetingsFts).not.toHaveBeenCalled();
@@ -594,6 +1078,7 @@ describe('Query Engine', () => {
         id: 'transcript-meeting',
         title: 'Release review',
         started_at: '2026-09-01T10:00:00.000Z',
+        enhanced_notes: 'The release moved to Friday after final QA.',
         transcript_status: 'validated',
         transcript_json: JSON.stringify({
           segments: [
@@ -606,6 +1091,7 @@ describe('Query Engine', () => {
           ],
         }),
       } as dbModule.PersistedMeeting;
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
       vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
       vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([
         {
@@ -641,7 +1127,7 @@ describe('Query Engine', () => {
         { query: 'Quote exactly why the release moved to Friday.' },
       );
 
-      expect(result[0].evidence_kind).toBe('section');
+      expect(result[0].evidence_kind).toBe('note');
       expect(result[0].transcript_passages).toBeUndefined();
       expect(result[0].evidence_text).not.toContain('[Transcript passage');
       expect(result[0].evidence_text).toContain(
@@ -654,6 +1140,7 @@ describe('Query Engine', () => {
         id: 'transcript-meeting',
         title: 'Release review',
         started_at: '2026-09-01T10:00:00.000Z',
+        enhanced_notes: 'The release moved to Friday after final QA.',
         transcript_status: 'validated',
         transcript_json: JSON.stringify({
           segments: [
@@ -666,6 +1153,7 @@ describe('Query Engine', () => {
           ],
         }),
       } as dbModule.PersistedMeeting;
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
       vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
       vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([
         {
@@ -704,7 +1192,7 @@ describe('Query Engine', () => {
         },
       );
 
-      expect(result[0].evidence_kind).toBe('section');
+      expect(result[0].evidence_kind).toBe('note');
       expect(result[0].transcript_passages).toBeUndefined();
       expect(result[0].evidence_text).not.toContain('[Transcript passage');
     });
@@ -1733,6 +2221,41 @@ describe('Query Engine', () => {
       expect(match?.displayTitle).toBe('Project Atlas');
     });
 
+    it('prefers a literal project name over duplicate display aliases regardless of row order', () => {
+      const alias = {
+        id: 'delivery-project',
+        type: 'project',
+        name: 'Orion Delivery',
+        metadata: JSON.stringify({ projectDisplayTitle: 'Orion' }),
+      };
+      const literal = {
+        id: 'orion-project',
+        type: 'project',
+        name: 'Orion',
+        metadata: JSON.stringify({ projectDisplayTitle: 'Orion' }),
+      };
+      vi.mocked(dbModule.resolveProjectIdentityId).mockImplementation(
+        (id) => id,
+      );
+      for (const projects of [
+        [alias, literal],
+        [literal, alias],
+      ]) {
+        vi.mocked(dbModule.getEntitiesByType).mockReturnValue(projects as any);
+        expect(matchProjectEntity('Review Orion')).toMatchObject({
+          id: 'orion-project',
+          canonicalId: 'orion-project',
+          name: 'Orion',
+          matchKind: 'explicit_label',
+        });
+        expect(matchProjectEntity('Review Orion Delivery')).toMatchObject({
+          id: 'delivery-project',
+          name: 'Orion Delivery',
+        });
+        expect(matchProjectEntity('Review Project Nebula')).toBeNull();
+      }
+    });
+
     it('does not let a generic Project entity override the named Pluto project', () => {
       vi.mocked(dbModule.getEntitiesByType).mockReturnValue([
         {
@@ -1754,6 +2277,333 @@ describe('Query Engine', () => {
       ).toMatchObject({ id: 'pluto-project', displayTitle: 'Pluto' });
       expect(matchProjectEntity('Give me a current read on the project.')).toBe(
         null,
+      );
+    });
+
+    it('retrieves complete current notes from stable project titles without inferred aliases or question facet words', () => {
+      const project = {
+        id: 'orion-project',
+        type: 'project',
+        name: 'Project Orion',
+        metadata: JSON.stringify({
+          projectDisplayTitle: 'ORB Launchpad',
+          aliases: ['Orbital Employee Portal'],
+        }),
+      };
+      vi.mocked(dbModule.getEntitiesByType).mockReturnValue([project] as any);
+      vi.mocked(dbModule.resolveProjectIdentityId).mockImplementation(
+        (id) => id,
+      );
+      vi.mocked(dbModule.getEntity).mockReturnValue(project as any);
+      vi.mocked(dbModule.getProjectBrief).mockReturnValue(null);
+      vi.mocked(dbModule.getWorkingMemorySnapshot).mockReturnValue({
+        source_doc_last_synthesized_at: '2025-01-01T00:00:00Z',
+        trust_status: 'grounded',
+        payload: {
+          current_read: {
+            headline: 'Separate calendar testing determines the launch date.',
+            supporting_bullets: [],
+          },
+        },
+      } as any);
+      const notes = Array.from({ length: 10 }, (_, index) => ({
+        id: `orb-${index}`,
+        title:
+          index === 9 ? 'Orbital Employee Portal scope' : `ORB design ${index}`,
+        started_at: new Date(
+          Date.parse('2026-09-27T00:00:00Z') + index * 60 * 60 * 1000,
+        ).toISOString(),
+        enhanced_notes: `${'Guided employee onboarding supports account conversations. '.repeat(70)}\nMorgan will determine the final date after platform access is confirmed.`,
+        transcript_json: 'PRIVATE_TRANSCRIPT_SENTINEL',
+      }));
+      vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue(
+        notes as any,
+      );
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation(
+        (id) => notes.find((meeting) => meeting.id === id) as any,
+      );
+      const recall = buildProjectRecall(
+        'Give me a detailed ORB Launchpad deep dive: ownership, deadlines, boundaries, and what remains uncertain.',
+      );
+      expect(recall?.context).toHaveLength(8);
+      expect(recall?.context.map((source) => source.meeting_id)).toEqual([
+        'orb-8',
+        'orb-7',
+        'orb-6',
+        'orb-5',
+        'orb-4',
+        'orb-3',
+        'orb-2',
+        'orb-1',
+      ]);
+      expect(recall?.context[0].evidence_text).toContain(
+        notes[8].enhanced_notes,
+      );
+      expect(recall?.context[0].evidence_text).toContain(
+        'Morgan will determine the final date after platform access is confirmed.',
+      );
+      expect(recall?.context[0].mid).toBeNull();
+      expect(recall?.context[0].source_revision).toMatch(/^[a-f0-9]{64}$/);
+      expect(recall?.latestNoteAt).toBe(notes[8].started_at);
+      expect(JSON.stringify(recall?.context)).not.toContain(
+        'PRIVATE_TRANSCRIPT_SENTINEL',
+      );
+      expect(JSON.stringify(recall?.context)).not.toContain(
+        'Separate calendar testing',
+      );
+      expect(dbModule.getMeeting).not.toHaveBeenCalled();
+    });
+
+    it('keeps explicit project identity when canonical reconciliation points at another project', () => {
+      const matched = { id: 'ctx-project', name: 'CTX', type: 'project' };
+      const canonical = {
+        id: 'orion-project',
+        name: 'Project Orion',
+        type: 'project',
+        metadata: JSON.stringify({ aliases: ['Orion'] }),
+      };
+      vi.mocked(dbModule.getEntitiesByType).mockReturnValue([matched] as any);
+      vi.mocked(dbModule.resolveProjectIdentityId).mockReturnValue(
+        'orion-project',
+      );
+      vi.mocked(dbModule.getEntity).mockReturnValue(canonical as any);
+      vi.mocked(dbModule.getWorkingMemorySnapshot).mockReturnValue(null);
+      vi.mocked(dbModule.getProjectBrief).mockReturnValue({
+        project: {
+          displayTitle: 'Project Orion',
+          detectedTitle: 'Orion',
+          metadata: JSON.stringify({ aliases: ['Orion'] }),
+        },
+        meetings: [],
+      } as any);
+      const older = {
+        id: 'ctx-old',
+        title: 'CTX review',
+        started_at: '2020-08-01T00:00:00Z',
+        enhanced_notes: 'Old cohort has ten clients.',
+      };
+      const current = {
+        id: 'ctx-current',
+        title: 'CTX profile review',
+        started_at: '2020-09-25T00:00:00Z',
+        enhanced_notes: 'Current cohort has five clients.',
+      };
+      const unrelated = {
+        id: 'orion-current',
+        title: 'Project Orion kickoff',
+        started_at: '2020-10-01T00:00:00Z',
+        enhanced_notes: 'Orion portal release is approved.',
+      };
+      vi.mocked(dbModule.getMeetingsForEntity).mockReturnValue([
+        { meeting_id: unrelated.id, mention_count: 1, context: null },
+      ]);
+      vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue([
+        older,
+        current,
+        unrelated,
+      ]);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        [older, current, unrelated].find((meeting) => meeting.id === id),
+      );
+      const recall = buildProjectRecall('Compare recent CTX client profiles');
+      expect(recall?.displayTitle).toBe('CTX');
+      expect(recall?.context.map((source) => source.meeting_id)).toEqual([
+        'ctx-current',
+      ]);
+      expect(JSON.stringify(recall?.context)).not.toMatch(/Orion|ten clients/);
+      vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue([]);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
+      expect(buildProjectRecall('Describe CTX')?.context).toEqual([]);
+    });
+
+    it('rehydrates linked mixed meetings and excludes obsolete indexed claims, removals, and unrelated sections', () => {
+      const project = {
+        id: 'orion-project',
+        type: 'project',
+        name: 'Project Orion',
+        metadata: JSON.stringify({
+          labels: [
+            'Weekly portfolio conversation',
+            'Separate customer portfolio',
+          ],
+        }),
+      };
+      vi.mocked(dbModule.getEntitiesByType).mockReturnValue([project] as any);
+      vi.mocked(dbModule.resolveProjectIdentityId).mockImplementation(
+        (id) => id,
+      );
+      vi.mocked(dbModule.getEntity).mockReturnValue(project as any);
+      vi.mocked(dbModule.getProjectBrief).mockReturnValue(null);
+      vi.mocked(dbModule.getWorkingMemorySnapshot).mockReturnValue(null);
+      vi.mocked(dbModule.getMeetingsForEntity).mockReturnValue([
+        { meeting_id: 'mixed', mention_count: 1, context: null },
+        { meeting_id: 'deleted', mention_count: 1, context: null },
+        { meeting_id: 'private', mention_count: 1, context: null },
+      ]);
+      const meeting = {
+        id: 'mixed',
+        title: 'Weekly portfolio conversation',
+        started_at: '2026-09-27T18:00:00Z',
+        analysis_format_pass: 0,
+        enhanced_notes: 'Obsolete Project Orion launch date is confirmed.',
+        analysis_json: JSON.stringify({
+          analysis_schema_version: 3,
+          overview: 'Project Orion ownership remains unassigned.',
+          topics: [
+            {
+              title: 'Customer readiness',
+              summary:
+                'Project Orion profile review is underway. Fifteen profiles were inspected; six are viable.',
+              key_points: [],
+              decisions: [],
+              action_items: [],
+              open_questions: [],
+            },
+            {
+              title: 'Separate customer portfolio',
+              summary: 'Unrelated vendor contract is approved.',
+              key_points: [],
+              decisions: [],
+              action_items: [],
+              open_questions: [],
+            },
+          ],
+          all_decisions: [{ text: 'Project Orion launch date is confirmed.' }],
+          all_action_items: [],
+          meeting_type: 'general',
+          quality: {
+            format_pass: true,
+            retry_count: 0,
+            fallback_used: false,
+            issues: [],
+          },
+        }),
+        user_edits_json: JSON.stringify({
+          overview: {
+            original: 'Project Orion ownership remains unassigned.',
+            edited:
+              'Project Orion ownership is with Morgan; the final date is not confirmed.',
+            edited_at: '2026-09-28T00:00:00Z',
+          },
+          'all_decisions:0': {
+            original: 'Project Orion launch date is confirmed.',
+            edited: '',
+            edited_at: '2026-09-28T00:00:00Z',
+          },
+        }),
+        mid_json: JSON.stringify({
+          decisions: [
+            { description: 'Obsolete Project Orion launch date is confirmed.' },
+          ],
+        }),
+        transcript_json: 'PRIVATE_TRANSCRIPT_SENTINEL',
+      };
+      vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue([
+        meeting,
+        {
+          id: 'deleted',
+          title: 'Project Orion deleted',
+          started_at: '2026-09-28T00:00:00Z',
+        },
+        {
+          id: 'private',
+          title: 'Project Orion personal check-in',
+          started_at: '2026-09-28T01:00:00Z',
+        },
+      ] as any);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        id === 'mixed'
+          ? (meeting as any)
+          : id === 'private'
+            ? {
+                id,
+                title: 'Project Orion personal check-in',
+                enhanced_notes:
+                  'Keep the travel option confidential between us.',
+              }
+            : undefined,
+      );
+      vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([
+        {
+          meeting: {
+            id: 'mixed',
+            title: 'Weekly portfolio conversation',
+            started_at: meeting.started_at,
+          },
+          section: {
+            heading: 'Project Orion launch',
+            summary: 'Project Orion launch date is confirmed.',
+            content: 'Project Orion launch date is confirmed.',
+            source_revision: 'stale-index-revision',
+          },
+        },
+      ] as any);
+      const recall = buildProjectRecall(
+        'Who owns the next Project Orion steps and which dates are confirmed?',
+      );
+      expect(recall?.context).toHaveLength(1);
+      expect(recall?.context[0]).toMatchObject({
+        meeting_id: 'mixed',
+        trust_status: 'needs_review',
+        mid: null,
+      });
+      expect(recall?.context[0].evidence_text).toContain(
+        'Project Orion ownership is with Morgan; the final date is not confirmed.',
+      );
+      expect(recall?.context[0].evidence_text).toContain(
+        'Fifteen profiles were inspected; six are viable.',
+      );
+      expect(JSON.stringify(recall?.context)).not.toMatch(
+        /Obsolete|remains unassigned|vendor contract|launch date is confirmed|PRIVATE_TRANSCRIPT|stale-index-revision/,
+      );
+      expect(
+        recall?.context[0].retrieved_sections?.every(
+          (section) =>
+            section.source_revision === recall.context[0].source_revision,
+        ),
+      ).toBe(true);
+      expect(dbModule.getMeeting).not.toHaveBeenCalled();
+    });
+
+    it('does not trust an indexed project section when current notes no longer concern the project', () => {
+      const project = {
+        id: 'orion-project',
+        type: 'project',
+        name: 'Project Orion',
+      };
+      vi.mocked(dbModule.getEntitiesByType).mockReturnValue([project] as any);
+      vi.mocked(dbModule.resolveProjectIdentityId).mockImplementation(
+        (id) => id,
+      );
+      vi.mocked(dbModule.getEntity).mockReturnValue(project as any);
+      vi.mocked(dbModule.getProjectBrief).mockReturnValue(null);
+      vi.mocked(dbModule.getWorkingMemorySnapshot).mockReturnValue(null);
+      vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([
+        {
+          meeting: {
+            id: 'removed-topic',
+            title: 'Team review',
+            started_at: '2026-09-27T18:00:00Z',
+          },
+          section: {
+            heading: 'Project Orion ownership',
+            summary: 'Project Orion was assigned to Morgan.',
+            content: 'Old indexed assignment.',
+          },
+        },
+      ] as any);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
+        id: 'removed-topic',
+        title: 'Team review',
+        enhanced_notes: 'Only the separate customer portfolio was discussed.',
+      });
+      const recall = buildProjectRecall(
+        'What is the current Project Orion ownership?',
+      );
+      expect(recall?.context).toHaveLength(1);
+      expect(recall?.latestNoteAt).toBeUndefined();
+      expect(JSON.stringify(recall?.context)).not.toContain(
+        'assigned to Morgan',
       );
     });
 
@@ -1936,6 +2786,24 @@ describe('Query Engine', () => {
         } satisfies SectionFtsRow,
       ]);
 
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        id === 'meet-1'
+          ? {
+              id: 'meet-1',
+              title: 'Email Pipeline Sync',
+              started_at: '2026-09-20T10:00:00Z',
+              enhanced_notes:
+                'The Client Email Automation pipeline completed sandbox testing and is preparing for production deployment. Unrelated USCIS certification planning.',
+            }
+          : id === 'meet-old'
+            ? {
+                id: 'meet-old',
+                title: 'Older Email Pipeline Sync',
+                started_at: '2026-08-20T10:00:00Z',
+                enhanced_notes: 'Discussed the initial pilot.',
+              }
+            : undefined,
+      );
       const recall = buildProjectRecall(
         'How is the Client Email Automation production rollout doing?',
       );
@@ -1943,7 +2811,15 @@ describe('Query Engine', () => {
       expect(recall?.displayTitle).toBe('Client Email Automation');
       expect(recall?.context.length).toBeGreaterThan(0);
 
-      const projectEvidence = recall?.context[0].evidence_text;
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
+      const fallback = buildProjectRecall(
+        'How is the Client Email Automation production rollout doing?',
+      );
+      const projectEvidence = fallback?.context[0].evidence_text;
+      expect(fallback?.context[0].source_type).toBe('artifact');
+      expect(
+        recall?.context.every((source) => source.source_type !== 'artifact'),
+      ).toBe(true);
       expect(projectEvidence).toContain('[Project: Client Email Automation]');
       expect(projectEvidence).toContain(
         '[Desired Outcome]: Automate client email generation',
@@ -1960,95 +2836,13 @@ describe('Query Engine', () => {
       );
       expect(projectEvidence).toContain('Verify SMTP TLS');
       expect(projectEvidence).not.toContain('Recent Contributing Meetings');
-      expect(recall?.context[1].evidence_text).toContain(
+      expect(recall?.context[0].evidence_text).toContain(
         'preparing for production deployment',
       );
-      expect(recall?.context[1].evidence_text).not.toContain('USCIS');
-      expect(recall?.context[1].meeting_id).toBe('meet-1');
+      expect(recall?.context[0].evidence_text).not.toContain('USCIS');
+      expect(recall?.context[0].meeting_id).toBe('meet-1');
       expect(recall?.latestNoteAt).toBe('2026-09-20T10:00:00Z');
-      expect(
-        buildAgedProjectAnswer(
-          'What changed most recently, and what should I do next?',
-          recall!,
-          new Date('2026-09-28T12:00:00Z'),
-        ),
-      ).toContain('wouldn’t assume an older target is still pending');
-      expect(
-        buildAgedProjectAnswer(
-          'Give me the current read on Client Email Automation.',
-          recall!,
-          new Date('2026-09-28T12:00:00Z'),
-        ),
-      ).toContain('said: Security compliance review');
-      const mixedSummaryRecall = {
-        ...recall!,
-        context: recall!.context.map((source, index) =>
-          index === 1
-            ? {
-                ...source,
-                retrieved_sections: source.retrieved_sections?.map(
-                  (section) => ({
-                    ...section,
-                    summary:
-                      'An unrelated initiative needs a review. The Client Email Automation pipeline is being prepared for release. Send the unrelated update tomorrow.',
-                  }),
-                ),
-              }
-            : source,
-        ),
-      };
-      const agedFollowUp = buildAgedProjectAnswer(
-        'What would you do first?',
-        mixedSummaryRecall,
-        new Date('2026-09-28T12:00:00Z'),
-      );
-      expect(agedFollowUp).toContain('confirm the release status');
-      expect(agedFollowUp).toContain('Client Email Automation');
-      expect(agedFollowUp).not.toContain('unrelated initiative');
-      expect(agedFollowUp).not.toContain('unrelated update');
-      expect(
-        buildAgedProjectAnswer(
-          'Tell me what we know versus what needs checking about the pipeline.',
-          mixedSummaryRecall,
-          new Date('2026-09-28T12:00:00Z'),
-        ),
-      ).toContain('The newest project information I found is from');
-      expect(
-        buildAgedProjectAnswer(
-          'Tell me what we know versus what needs checking about the pipeline.',
-          mixedSummaryRecall,
-          new Date('2026-09-28T12:00:00Z'),
-          'The Client Email Automation pipeline is being prepared for release.',
-        ),
-      ).toContain("I don't have a newer confirmed pipeline update");
-      expect(
-        buildAgedProjectAnswer(
-          'Explain the pipeline architecture in detail.',
-          recall!,
-          new Date('2026-09-28T12:00:00Z'),
-        ),
-      ).toBeNull();
-      expect(
-        buildAgedProjectAnswer(
-          'What do you mean by that?',
-          recall!,
-          new Date('2026-09-28T12:00:00Z'),
-          '',
-          true,
-          'clarify',
-        ),
-      ).toContain("I wouldn't call that a live project status");
-      expect(
-        buildAgedProjectAnswer(
-          'That does not sound current.',
-          recall!,
-          new Date('2026-09-28T12:00:00Z'),
-          '',
-          false,
-          'challenge',
-        ),
-      ).toContain("You're right to question the freshness");
-      expect(recall?.context).toHaveLength(2);
+      expect(recall?.context).toHaveLength(1);
       expect(dbModule.searchMeetingContextSectionsFts).toHaveBeenCalledWith(
         expect.any(String),
         { limit: 40 },
@@ -2125,11 +2919,30 @@ describe('Query Engine', () => {
         },
       ] as any);
 
+      vi.mocked(dbModule.getAskPlutoMeeting).mockImplementation((id) =>
+        id === 'fresh-release'
+          ? {
+              id,
+              title: 'Release review',
+              started_at: '2026-09-26T10:00:00Z',
+              enhanced_notes:
+                'Project Atlas pipeline completed the release check.',
+            }
+          : id === 'newer-project-update'
+            ? {
+                id,
+                title: 'Project review',
+                started_at: '2026-09-27T12:00:00Z',
+                enhanced_notes: 'Project Atlas owners discussed the handoff.',
+              }
+            : undefined,
+      );
       const recall = buildProjectRecall(
         'What changed in the Project Atlas pipeline?',
       );
 
       expect(recall?.context).toHaveLength(2);
+      expect(recall?.context[0].meeting_id).toBe('newer-project-update');
       expect(recall?.context[1].meeting_id).toBe('fresh-release');
       expect(recall?.latestNoteAt).toBe('2026-09-27T12:00:00Z');
       expect(recall?.context[1].evidence_text).toContain(
@@ -2381,6 +3194,187 @@ describe('Query Engine', () => {
   });
 
   describe('buildWorkspaceIntelligenceRecall', () => {
+    it('includes newer saved notes without priority keywords and preserves later topic evidence', () => {
+      vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(null);
+      vi.mocked(dbModule.getPersonBriefing).mockReturnValue(null);
+      vi.mocked(dbModule.getProjectPortfolio).mockReturnValue([]);
+      vi.mocked(dbModule.getWorkingMemorySnapshot).mockReturnValue({
+        freshness: 'stale',
+        source_doc_last_synthesized_at: '2026-09-01T08:00:00Z',
+        payload: {
+          current_read: { headline: 'Old standing focus', freshness: 'stale' },
+          active_streams: [],
+          open_loops: [],
+          risks_and_unknowns: [],
+        },
+      } as any);
+      const recall = buildWorkspaceIntelligenceRecall({
+        query: 'What needs my attention across my work?',
+        now: Date.parse('2026-09-28T00:00:00Z'),
+        persistedMeetings: [
+          {
+            id: 'new-account',
+            title: 'Customer conversation',
+            started_at: '2026-09-27T18:00:00Z',
+            enhanced_notes: 'People exchanged greetings.',
+            analysis_json: JSON.stringify({
+              analysis_schema_version: 3,
+              overview: 'People exchanged greetings. '.repeat(160),
+              topics: [
+                {
+                  title: 'Account ownership',
+                  summary:
+                    'Customer conversations now sit with the Horizon team.',
+                  key_points: [],
+                  decisions: [],
+                  action_items: [],
+                  open_questions: [],
+                },
+              ],
+              all_decisions: [],
+              all_action_items: [],
+              meeting_type: 'general',
+              quality: {
+                format_pass: true,
+                retry_count: 0,
+                fallback_used: false,
+                issues: [],
+              },
+            }),
+            transcript_json: 'PRIVATE_TRANSCRIPT_SENTINEL',
+          } as any,
+        ],
+      });
+      expect(recall.summary.recentMeetingCount).toBe(1);
+      expect(recall.context[1].evidence_text).toContain(
+        'Customer conversations now sit with the Horizon team.',
+      );
+      expect(recall.context[1].evidence_text).toContain('[Account ownership]');
+      expect(recall.context[0].evidence_text).toContain(
+        '[Workspace refreshed]: 2026-09-01',
+      );
+      expect(recall.context[0].evidence_text).toContain(
+        '[Workspace snapshot freshness]: stale',
+      );
+      expect(recall.context[0].evidence_text).toContain(
+        'Current saved notes supersede older workspace descriptions',
+      );
+      expect(JSON.stringify(recall.context)).not.toContain(
+        'PRIVATE_TRANSCRIPT_SENTINEL',
+      );
+      expect(recall.context[1].evidence_text.length).toBeLessThan(5000);
+    });
+
+    it('uses current note edits and removals while preserving review trust and excluding stale MID claims', () => {
+      vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(null);
+      vi.mocked(dbModule.getPersonBriefing).mockReturnValue(null);
+      vi.mocked(dbModule.getProjectPortfolio).mockReturnValue([]);
+      vi.mocked(dbModule.getWorkingMemorySnapshot).mockReturnValue(null);
+      const recall = buildWorkspaceIntelligenceRecall({
+        query: 'What should I focus on?',
+        now: Date.parse('2026-09-28T00:00:00Z'),
+        persistedMeetings: [
+          {
+            id: 'edited-account',
+            title: 'Account conversation',
+            started_at: '2026-09-27T18:00:00Z',
+            enhanced_notes: 'Obsolete account wording.',
+            analysis_format_pass: 0,
+            analysis_json: JSON.stringify({
+              analysis_schema_version: 3,
+              overview: 'Obsolete account wording.',
+              topics: [],
+              all_decisions: [{ text: 'Obsolete budget remains confirmed.' }],
+              all_action_items: [],
+              meeting_type: 'general',
+              quality: {
+                format_pass: true,
+                retry_count: 0,
+                fallback_used: false,
+                issues: [],
+              },
+            }),
+            user_edits_json: JSON.stringify({
+              overview: {
+                original: 'Obsolete account wording.',
+                edited: 'Customer conversations now sit with the Horizon team.',
+                edited_at: '2026-09-27T20:00:00Z',
+              },
+              'all_decisions:0': {
+                original: 'Obsolete budget remains confirmed.',
+                edited: '',
+                edited_at: '2026-09-27T20:00:00Z',
+              },
+            }),
+            mid_json: JSON.stringify({
+              decisions: [
+                { description: 'Obsolete budget remains confirmed.' },
+              ],
+            }),
+            transcript_json: 'PRIVATE_TRANSCRIPT_SENTINEL',
+          } as any,
+        ],
+      });
+      const result = recall.context[1];
+      expect(result.trust_status).toBe('needs_review');
+      expect(result.mid).toBeNull();
+      expect(result.source_revision).toMatch(/^[a-f0-9]{64}$/);
+      expect(result.evidence_text).toContain(
+        'Customer conversations now sit with the Horizon team.',
+      );
+      expect(result.evidence_text).toContain('[Notes trust]: needs_review');
+      expect(JSON.stringify(recall.context)).not.toContain('Obsolete');
+      expect(JSON.stringify(recall.context)).not.toContain(
+        'PRIVATE_TRANSCRIPT_SENTINEL',
+      );
+    });
+
+    it('bounds broad recent-note coverage by recency while retaining sources without MID or matching words', () => {
+      vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(null);
+      vi.mocked(dbModule.getPersonBriefing).mockReturnValue(null);
+      vi.mocked(dbModule.getProjectPortfolio).mockReturnValue([]);
+      vi.mocked(dbModule.getWorkingMemorySnapshot).mockReturnValue(null);
+      const meetings = Array.from({ length: 12 }, (_, index) => ({
+        id: `recent-${index}`,
+        title: `Customer conversation ${index}`,
+        started_at: new Date(
+          Date.parse('2026-09-27T00:00:00Z') + index * 60 * 60 * 1000,
+        ).toISOString(),
+        enhanced_notes: `Customer account ${index} now belongs to the Horizon team.`,
+      }));
+      const recall = buildWorkspaceIntelligenceRecall({
+        query: 'What concerns should I watch?',
+        mode: 'risks',
+        now: Date.parse('2026-09-28T00:00:00Z'),
+        persistedMeetings: [
+          ...meetings,
+          {
+            id: 'old',
+            title: 'Older note',
+            started_at: '2026-08-01T00:00:00Z',
+            enhanced_notes: 'Older account context.',
+          },
+        ] as any,
+      });
+      expect(recall.summary.recentMeetingCount).toBe(8);
+      expect(recall.context).toHaveLength(9);
+      expect(
+        recall.context.slice(1).map((result) => result.meeting_id),
+      ).toEqual([
+        'recent-11',
+        'recent-10',
+        'recent-9',
+        'recent-8',
+        'recent-7',
+        'recent-6',
+        'recent-5',
+        'recent-4',
+      ]);
+      expect(recall.context[0].evidence_text).toContain(
+        'newest 8 usable meetings within 14 days',
+      );
+    });
+
     it('synthesizes working memory, personal commitments, and active projects', () => {
       vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(
         'self-id',
@@ -2694,7 +3688,7 @@ describe('Query Engine', () => {
       expect(recall.answer).not.toContain('travel option');
     });
 
-    it('keeps conversational notes out of a recent-work priority overlay', () => {
+    it('keeps recent conversational notes available alongside work notes for model reasoning', () => {
       vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(null);
       vi.mocked(dbModule.getPersonBriefing).mockReturnValue(null);
       vi.mocked(dbModule.getProjectPortfolio).mockReturnValue([]);
@@ -2726,8 +3720,13 @@ describe('Query Engine', () => {
       });
 
       expect(recall.answer).toContain('Release review');
-      expect(recall.answer).not.toContain('Introduction');
-      expect(recall.context).toHaveLength(2);
+      expect(recall.context[1].evidence_text).toContain(
+        'Everyone exchanged greetings.',
+      );
+      expect(recall.context[2].evidence_text).toContain(
+        'The release blocker needs a fix.',
+      );
+      expect(recall.context).toHaveLength(3);
     });
 
     it('puts newer note updates ahead of standing priorities from an aging snapshot', () => {
@@ -2859,7 +3858,7 @@ describe('Query Engine', () => {
           risks_and_unknowns: [],
         },
       } as any);
-      const longUpdate = `${'Complete release planning context '.repeat(16)}unfinishedtail`;
+      const longUpdate = `${'Complete release planning context '.repeat(64)}unfinishedtail`;
 
       const recall = buildWorkspaceIntelligenceRecall({
         query: 'what should i focus on?',

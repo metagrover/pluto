@@ -718,7 +718,7 @@ describe('UnifiedLLMProvider', () => {
     });
     expect(requestBodies[0].options).toMatchObject({
       num_ctx: 4096,
-      num_predict: 384,
+      num_predict: 768,
     });
     expect(requestBodies[1]).toMatchObject({
       model: 'qwen3.5:9b',
@@ -726,7 +726,7 @@ describe('UnifiedLLMProvider', () => {
     });
     expect(requestBodies[1].options).toMatchObject({
       num_ctx: 4096,
-      num_predict: 512,
+      num_predict: 1024,
       top_k: 40,
       top_p: 1,
     });
@@ -805,6 +805,130 @@ describe('UnifiedLLMProvider', () => {
     ).resolves.toBe('Complete answer.');
     expect(onToken).toHaveBeenCalledWith('Complete answer.');
     expect(streamCancelled).toBe(true);
+  });
+
+  describe('local Ask Pluto streaming deadlines', () => {
+    function delayedStream(
+      packets: Array<{ at: number; response: string; done?: boolean }>,
+    ) {
+      const encoder = new TextEncoder();
+      installFetchMock(
+        (_url, init) =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                const timers = packets.map((packet) =>
+                  setTimeout(() => {
+                    controller.enqueue(
+                      encoder.encode(
+                        `${JSON.stringify({ response: packet.response, done: packet.done === true })}\n`,
+                      ),
+                    );
+                    if (packet.done) controller.close();
+                  }, packet.at),
+                );
+                const abort = () => {
+                  timers.forEach(clearTimeout);
+                  controller.error(init?.signal?.reason);
+                };
+                init?.signal?.addEventListener('abort', abort, { once: true });
+              },
+            }),
+            { status: 200 },
+          ),
+      );
+      return new UnifiedLLMProvider('ollama', { ollama_model: 'qwen3.5:9b' });
+    }
+
+    it.each(['fast', 'deep'] as const)(
+      'keeps a progressing %s answer alive beyond 90 seconds',
+      async (mode) => {
+        vi.useFakeTimers();
+        const provider = delayedStream([
+          { at: 75_000, response: 'First ' },
+          { at: 95_000, response: 'second ' },
+          { at: 110_000, response: 'complete.', done: true },
+        ]);
+        const onToken = vi.fn();
+        const outcome = provider
+          .answerAskPluto('Fictional evidence question', { mode, onToken })
+          .then(
+            (value) => ({ value }),
+            (error: unknown) => ({ error }),
+          );
+        await vi.advanceTimersByTimeAsync(75_000);
+        expect(onToken).toHaveBeenCalledWith('First ');
+        await vi.advanceTimersByTimeAsync(35_000);
+        await expect(outcome).resolves.toEqual({
+          value: 'First second complete.',
+        });
+      },
+    );
+
+    it('times out deep generation that remains silent during the startup allowance', async () => {
+      vi.useFakeTimers();
+      const provider = delayedStream([]);
+      const outcome = provider
+        .answerAskPluto('Fictional evidence question', {
+          mode: 'deep',
+          onToken: vi.fn(),
+        })
+        .then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error }),
+        );
+      await vi.advanceTimersByTimeAsync(120_000);
+      await expect(outcome).resolves.toMatchObject({
+        error: expect.objectContaining({ name: 'TimeoutError' }),
+      });
+    });
+
+    it('times out a deep stream that becomes silent after a token', async () => {
+      vi.useFakeTimers();
+      const provider = delayedStream([{ at: 75_000, response: 'First ' }]);
+      const onToken = vi.fn();
+      const outcome = provider
+        .answerAskPluto('Fictional evidence question', {
+          mode: 'deep',
+          onToken,
+        })
+        .then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error }),
+        );
+      await vi.advanceTimersByTimeAsync(75_000);
+      expect(onToken).toHaveBeenCalledWith('First ');
+      await vi.advanceTimersByTimeAsync(60_000);
+      await expect(outcome).resolves.toMatchObject({
+        error: expect.objectContaining({ name: 'TimeoutError' }),
+      });
+    });
+
+    it('preserves caller cancellation after deep streaming starts', async () => {
+      vi.useFakeTimers();
+      const provider = delayedStream([{ at: 75_000, response: 'First ' }]);
+      const controller = new AbortController();
+      const onToken = vi.fn();
+      const outcome = provider
+        .answerAskPluto('Fictional evidence question', {
+          mode: 'deep',
+          signal: controller.signal,
+          onToken,
+        })
+        .then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error }),
+        );
+      await vi.advanceTimersByTimeAsync(75_000);
+      expect(onToken).toHaveBeenCalledWith('First ');
+      controller.abort(new DOMException('cancelled', 'AbortError'));
+      await expect(outcome).resolves.toMatchObject({
+        error: expect.objectContaining({
+          name: 'AbortError',
+          message: 'cancelled',
+        }),
+      });
+    });
   });
 
   it('reports when an Ask Pluto request is admitted to the provider', async () => {
@@ -1626,13 +1750,28 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
     });
     expect(calculateOllamaContextBudget('question', 'askPluto')).toEqual({
       num_ctx: 4096,
-      num_predict: 384,
+      num_predict: 768,
     });
     expect(calculateOllamaContextBudget('question', 'askPlutoDeep')).toEqual({
       num_ctx: 4096,
-      num_predict: 512,
+      num_predict: 1024,
     });
   });
+
+  it.each(['askPluto', 'askPlutoDeep'])(
+    'fits full project notes and a complete answer within the %s context budget',
+    (task) => {
+      const prompt = 'Evidence and instructions. '
+        .repeat(1200)
+        .slice(0, 32_000);
+      const budget = calculateOllamaContextBudget(prompt, task);
+      expect(budget.num_ctx).toBeLessThanOrEqual(12288);
+      expect(budget.num_ctx).toBeGreaterThanOrEqual(
+        Math.ceil(prompt.length / 3) + budget.num_predict,
+      );
+      expect(budget.num_predict).toBe(task === 'askPluto' ? 768 : 1024);
+    },
+  );
 
   it('sliceTranscriptWindows slices transcript into overlapping windows when line count exceeds maxLinesPerWindow', () => {
     const lines = Array.from(

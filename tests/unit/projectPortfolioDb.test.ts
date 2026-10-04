@@ -6,6 +6,67 @@ const fixture = vi.hoisted(() => ({
 vi.mock('electron', () => ({ app: { getPath: () => fixture.directory } }));
 import * as db from '../../electron/db';
 afterAll(() => fs.rmSync(fixture.directory, { recursive: true, force: true }));
+it('counts established speakers instead of mentioned people and deduplicates merged identities', () => {
+  const project = db.upsertEntity({
+    type: 'project',
+    name: 'Participant roster regression',
+  });
+  const people = Array.from({ length: 68 }, (_, index) =>
+    db.upsertEntity({
+      type: 'person',
+      name: `Roster person ${index}`,
+      dedupe_by_name: false,
+    }),
+  );
+  const meetingId = 'project-roster-source';
+  db.saveMeeting({
+    id: meetingId,
+    title: 'Roster review',
+    transcript_json: JSON.stringify({
+      segments: people.slice(0, 12).map((_, index) => ({
+        speaker: `Speaker ${index}`,
+        text: 'Review the project.',
+      })),
+    }),
+    mid_json: JSON.stringify({
+      participants: people.map((person) => ({
+        entity_id: person.id,
+        name: person.name,
+      })),
+    }),
+  });
+  db.addMeetingEntity({ meeting_id: meetingId, entity_id: project.id });
+  people.slice(0, 13).forEach((person, index) =>
+    db.identityStore.setBinding(meetingId, {
+      speaker: `Speaker ${index}`,
+      personId: person.id,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'fixture',
+      evidence: [],
+    }),
+  );
+  expect(db.getProjectBrief(project.id)?.meetings[0].participants).toHaveLength(
+    12,
+  );
+  db.mergePerson(people[1].id, people[0].id);
+  expect(db.getProjectBrief(project.id)?.meetings[0].participants).toHaveLength(
+    11,
+  );
+  db.identityStore.setBinding(meetingId, {
+    speaker: 'Speaker 2',
+    personId: null,
+    individual: true,
+    source: 'user',
+    sourceRevision: 'fixture',
+    evidence: [],
+  });
+  const roster = db.getProjectBrief(project.id)?.meetings[0].participants;
+  expect(roster).toHaveLength(10);
+  expect(roster?.some((person) => person.entity_id === people[2].id)).toBe(
+    false,
+  );
+});
 describe('evidence-backed routing to an existing pinned project', () => {
   function routingFixture(suffix: string) {
     const qualification = {
@@ -74,6 +135,66 @@ describe('evidence-backed routing to an existing pinned project', () => {
       metadata: parent.metadata,
     });
   });
+  it('accepts parent evidence linked through a reversible alias', () => {
+    const { parent, membership } = routingFixture('alias-source');
+    const alias = db.upsertEntity({
+      type: 'project',
+      name: 'Archive former name',
+    });
+    const sourceId = 'routing-parent-alias-only';
+    db.saveMeeting({
+      id: sourceId,
+      title: 'Archive planning',
+      user_notes: membership.parentEvidenceQuote,
+    });
+    db.addMeetingEntity({
+      meeting_id: sourceId,
+      entity_id: alias.id,
+      context: membership.parentEvidenceQuote,
+    });
+    db.mergeProject(alias.id, parent.id);
+    expect(
+      db.saveProjectRoutingMembership({
+        ...membership,
+        parentSourceMeetingId: sourceId,
+      }),
+    ).toBe(true);
+  });
+
+  it('accepts parent evidence from an already filed workstream', () => {
+    const { parent, membership } = routingFixture('workstream-source');
+    const member = db.upsertEntity({
+      type: 'project',
+      name: 'Archive access work',
+      metadata: {
+        projectQualification: {
+          version: 1,
+          state: 'subordinate',
+          source: 'review',
+          reason: 'Filed',
+          assessedAt: '2026-09-01',
+          parentProjectId: parent.id,
+        },
+      },
+    });
+    const sourceId = 'routing-parent-workstream-only';
+    db.saveMeeting({
+      id: sourceId,
+      title: 'Access planning',
+      user_notes: membership.parentEvidenceQuote,
+    });
+    db.addMeetingEntity({
+      meeting_id: sourceId,
+      entity_id: member.id,
+      context: membership.parentEvidenceQuote,
+    });
+    expect(
+      db.saveProjectRoutingMembership({
+        ...membership,
+        parentSourceMeetingId: sourceId,
+      }),
+    ).toBe(true);
+  });
   it('rejects a source quote changed after inference without adding parent history', () => {
     const { parent, candidate, membership } = routingFixture('stale');
     db.saveMeeting({
@@ -114,6 +235,80 @@ describe('evidence-backed routing to an existing pinned project', () => {
   });
 });
 describe('project portfolio source summaries', () => {
+  it('shares identity projections within a portfolio read and re-reads user corrections on the next read', () => {
+    const projects = ['Shared portfolio A', 'Shared portfolio B'].map((name) =>
+      db.upsertEntity({
+        type: 'project',
+        name,
+        metadata: {
+          projectQualification: {
+            version: 1,
+            state: 'qualified',
+            source: 'user',
+            reason: 'Fictional scope',
+            assessedAt: '2026-10-01',
+          },
+        },
+      }),
+    );
+    const person = db.upsertEntity({
+      type: 'person',
+      name: 'Casey Example',
+      dedupe_by_name: false,
+    });
+    const meetingId = 'shared-portfolio-projection';
+    db.saveMeeting({
+      id: meetingId,
+      title: 'Fictional shared source',
+      transcript_json: JSON.stringify({
+        segments: [
+          { speaker: 'Speaker 1', text: 'Review the fictional work.' },
+        ],
+      }),
+    });
+    for (const project of projects)
+      db.addMeetingEntity({ meeting_id: meetingId, entity_id: project.id });
+    db.identityStore.setBinding(meetingId, {
+      speaker: 'Speaker 1',
+      personId: person.id,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'fixture',
+      evidence: [],
+    });
+    const bindings = vi.spyOn(db.identityStore, 'getBindings');
+    try {
+      const rows = db.getProjectPortfolio();
+      expect(
+        rows
+          .filter((row) => projects.some((project) => project.id === row.id))
+          .every((row) => row.typical_participant_count === 1),
+      ).toBe(true);
+      expect(
+        bindings.mock.calls.filter(([id]) => id === meetingId),
+      ).toHaveLength(2);
+      db.identityStore.setBinding(meetingId, {
+        speaker: 'Speaker 1',
+        personId: null,
+        individual: true,
+        source: 'user',
+        sourceRevision: 'corrected-fixture',
+        evidence: [],
+      });
+      bindings.mockClear();
+      const corrected = db.getProjectPortfolio();
+      expect(
+        corrected
+          .filter((row) => projects.some((project) => project.id === row.id))
+          .every((row) => row.typical_participant_count === null),
+      ).toBe(true);
+      expect(
+        bindings.mock.calls.filter(([id]) => id === meetingId),
+      ).toHaveLength(2);
+    } finally {
+      bindings.mockRestore();
+    }
+  });
   it('returns source activity without requiring tasks and keeps unsourced entries', () => {
     const project = db.upsertEntity({ type: 'project', name: 'Aurora' });
     const other = db.upsertEntity({
@@ -159,6 +354,13 @@ describe('project portfolio source summaries', () => {
       name: 'A very long automatically detected archive modernization initiative',
     });
     db.updateProjectDisplayTitle(project.id, 'Archive modernization');
+    db.upsertEntity({
+      id: 'person:alex',
+      type: 'person',
+      name: 'Alex',
+      metadata: { role: 'Engineering lead' },
+    });
+    db.upsertEntity({ id: 'person:sam', type: 'person', name: 'Sam' });
     const task = db.upsertEntity({
       type: 'action_item',
       name: 'Complete migration review',
@@ -180,6 +382,12 @@ describe('project portfolio source summaries', () => {
         id: meetingId,
         title: 'Archive weekly review',
         started_at: `2026-08-${String(day).padStart(2, '0')}T10:00:00Z`,
+        transcript_json: JSON.stringify({
+          segments: [
+            { speaker: 'Speaker 1', text: 'Review the archive.' },
+            { speaker: 'Speaker 2', text: 'Agreed.' },
+          ],
+        }),
         mid_json: JSON.stringify({
           participants: [
             {
@@ -192,6 +400,19 @@ describe('project portfolio source summaries', () => {
           ],
         }),
       });
+      for (const [speaker, personId] of [
+        ['Speaker 1', 'person:alex'],
+        ['Speaker 2', 'person:sam'],
+      ]) {
+        db.identityStore.setBinding(meetingId, {
+          speaker,
+          personId,
+          individual: true,
+          source: 'user',
+          sourceRevision: 'fixture',
+          evidence: [],
+        });
+      }
       db.addMeetingEntity({
         meeting_id: meetingId,
         entity_id: project.id,

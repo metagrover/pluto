@@ -175,9 +175,9 @@ const DashboardSuggestionReview = ({
   const decisionActions = actions.filter((action) => action.kind !== 'source');
   const panelId = `dashboard-suggestion-panel-${item.id}`;
   const sourceExcerpt =
+    item.sourceSynthesis?.evidence ??
     item.sourceSynthesis?.topicSummary ??
     item.sourceSynthesis?.overview ??
-    item.sourceSynthesis?.evidence ??
     null;
 
   return (
@@ -218,7 +218,7 @@ const DashboardSuggestionReview = ({
           aria-expanded={expanded}
           aria-controls={panelId}
           onClick={onToggle}
-          className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] font-medium text-pro-text-muted/60 transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+          className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] font-medium text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
         >
           <span>{expanded ? 'Hide details' : 'Details'}</span>
           <ChevronRight
@@ -230,16 +230,28 @@ const DashboardSuggestionReview = ({
 
       {expanded ? (
         <div id={panelId} className="mt-1.5 w-full">
+          <p className="mt-1 text-[11px] leading-5 text-pro-text-muted">
+            {item.assigneeName
+              ? `Suggested owner: ${item.assigneeName}`
+              : 'Owner not confirmed'}
+            {item.dueDate ? ` · ${item.dueLabel}` : ' · Due date not confirmed'}
+          </p>
           {sourceAction ? (
-            <button
-              type="button"
-              aria-label={`Open source meeting for ${item.title}`}
-              disabled={isUpdating}
-              onClick={sourceAction.onClick}
-              className="line-clamp-1 block w-full text-left text-[11px] font-medium text-pro-text-muted/75 transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
-            >
-              {sourceExcerpt ?? 'Source context is available in the meeting.'}
-            </button>
+            <>
+              <p className="mt-2 whitespace-pre-wrap break-words text-[12px] leading-5 text-pro-text-muted">
+                {sourceExcerpt ?? 'Source context is available in the meeting.'}
+              </p>
+              <button
+                type="button"
+                aria-label={`Open source meeting for ${item.title}`}
+                disabled={isUpdating}
+                onClick={sourceAction.onClick}
+                className="mt-1 block text-left text-[11px] font-medium text-pro-accent transition-colors hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+              >
+                Open full meeting
+                {item.sourceMeetingTitle ? ` · ${item.sourceMeetingTitle}` : ''}
+              </button>
+            </>
           ) : (
             <p className="text-[11px] font-medium leading-5 text-pro-text-muted/80">
               No source context is available for this suggestion.
@@ -1390,33 +1402,72 @@ export const Dashboard = ({
                 {backlogItems.map((item) => (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between gap-4 py-3"
+                    data-testid="dashboard-backlog-row"
+                    className="py-3"
                   >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="min-w-0 truncate text-[13px] font-normal text-pro-text-main/80">
-                        {item.title}
-                      </span>
-                      {item.commitmentState === 'possible' ? (
-                        <span className="shrink-0 rounded bg-pro-warning/10 px-1.5 py-0.5 text-[9px] font-semibold text-pro-warning">
-                          Needs review
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="flex min-w-0 flex-wrap items-baseline gap-2">
+                        <span className="min-w-0 whitespace-pre-wrap break-words text-[13px] font-normal leading-6 text-pro-text-main">
+                          {item.title}
                         </span>
+                        {item.commitmentState === 'possible' ? (
+                          <span className="shrink-0 rounded bg-pro-warning/10 px-1.5 py-0.5 text-[9px] font-semibold text-pro-warning">
+                            Needs review
+                          </span>
+                        ) : null}
+                      </span>
+                      {item.canComplete ? (
+                        <button
+                          type="button"
+                          aria-label={`Add ${item.title} to today's three`}
+                          disabled={
+                            isSavingDailyOrder || updatingTaskIds.has(item.id)
+                          }
+                          onClick={() => {
+                            const nextIds =
+                              orderedCommitmentIds.length < 3
+                                ? [...orderedCommitmentIds, item.id]
+                                : [
+                                    ...orderedCommitmentIds.slice(0, 2),
+                                    item.id,
+                                  ];
+                            void saveDailyOrder(nextIds);
+                          }}
+                          className="shrink-0 rounded-md px-2 py-1.5 text-[11px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+                        >
+                          Prioritize
+                        </button>
                       ) : null}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={`Add ${item.title} to today's three`}
-                      disabled={isSavingDailyOrder}
-                      onClick={() => {
-                        const nextIds =
-                          orderedCommitmentIds.length < 3
-                            ? [...orderedCommitmentIds, item.id]
-                            : [...orderedCommitmentIds.slice(0, 2), item.id];
-                        void saveDailyOrder(nextIds);
-                      }}
-                      className="shrink-0 rounded-md px-2 py-1.5 text-[11px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
-                    >
-                      Prioritize
-                    </button>
+                    </div>
+                    {!item.canComplete ? (
+                      <DashboardSuggestionReview
+                        item={item}
+                        isUpdating={updatingTaskIds.has(item.id)}
+                        expanded={reviewingSuggestionId === item.id}
+                        onToggle={() =>
+                          setReviewingSuggestionId((current) =>
+                            current === item.id ? null : item.id,
+                          )
+                        }
+                        onDecisionComplete={(state) =>
+                          finishSuggestionReview(item.id, state)
+                        }
+                        setSelectedMeetingId={setSelectedMeetingId}
+                        handleReviewCommitment={handleReviewCommitment}
+                      />
+                    ) : item.sourceMeetingId ? (
+                      <button
+                        type="button"
+                        aria-label={`Open source meeting for ${item.title}`}
+                        disabled={updatingTaskIds.has(item.id)}
+                        onClick={() =>
+                          setSelectedMeetingId(item.sourceMeetingId)
+                        }
+                        className="mt-1 rounded px-2 py-1 text-[11px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+                      >
+                        Open full meeting
+                      </button>
+                    ) : null}
                   </div>
                 ))}
               </div>

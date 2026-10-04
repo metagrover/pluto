@@ -307,6 +307,12 @@ it('keeps a large people roster compact until the user expands it', async () => 
 
   expect(host.querySelectorAll('[data-person-card]')).toHaveLength(6);
   expect(host.textContent).toContain('Show 2 more');
+  expect(
+    host
+      .querySelector('[data-person-card="Person 2"]')
+      ?.parentElement?.querySelector('p'),
+  ).toBeNull();
+  expect(host.textContent).not.toContain('Joined project discussions');
 
   await click('Show 2 more');
 
@@ -323,7 +329,7 @@ it('uses known roles in the summary when no ownership is established', async () 
     host.querySelector('[data-person-card="Alex Rivera"]')?.parentElement
       ?.textContent,
   ).toContain('Engineering lead');
-  expect(host.textContent).toContain(
+  expect(host.textContent).not.toContain(
     'Participation does not establish project ownership.',
   );
 });
@@ -700,6 +706,70 @@ it('prepares updates for the open project and reports no change accurately', asy
   expect(host.textContent).toContain('Current — no updates needed');
 });
 
+it('prepares updates directly from the empty brief and keeps its result honest', async () => {
+  api.getProjectBrief.mockResolvedValue(brief({ theme: null }));
+  await render();
+  const panel = host.querySelector('[role="tabpanel"]:not([hidden])')!;
+  const prepare = Array.from(panel.querySelectorAll('button')).find((button) =>
+    button.textContent?.includes('Prepare updates'),
+  )!;
+  expect(prepare).toBeDefined();
+  expect(panel.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+  await act(async () => prepare.click());
+  expect(api.triggerDreamingNow).toHaveBeenCalledWith({ entityId: 'p1' });
+  expect(panel.querySelector('[role="status"]')?.textContent).toContain(
+    'More connected discussion may be needed',
+  );
+  await click('Review source history');
+  expect(
+    host.querySelector('[role="tab"][aria-selected="true"]')?.textContent,
+  ).toBe('History');
+  expect(document.activeElement?.textContent).toBe('History');
+});
+
+it('keeps the empty brief action disabled during preparation and allows retry after failure', async () => {
+  let finish!: (value: { status: 'failed'; entityId: string }) => void;
+  api.getProjectBrief.mockResolvedValue(brief({ theme: null }));
+  api.triggerDreamingNow.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await render();
+  const panel = host.querySelector('[role="tabpanel"]:not([hidden])')!;
+  const prepare = Array.from(panel.querySelectorAll('button')).find((button) =>
+    button.textContent?.includes('Prepare updates'),
+  )!;
+  await act(async () => {
+    prepare.click();
+    await Promise.resolve();
+  });
+  expect(prepare.disabled).toBe(true);
+  expect(prepare.textContent).toContain('Preparing updates');
+  await act(async () => finish({ status: 'failed', entityId: 'p1' }));
+  expect(prepare.disabled).toBe(false);
+  expect(panel.querySelector('[role="status"]')?.textContent).toBe(
+    'Preparation failed',
+  );
+});
+
+it('shows the preparation action only in the empty brief and explains missing sources', async () => {
+  await render();
+  expect(
+    host.querySelector('[role="tabpanel"]:not([hidden])')?.textContent,
+  ).not.toContain('Prepare updates');
+  api.getProjectBrief.mockResolvedValue(brief({ theme: null, meetings: [] }));
+  await render({ projectId: 'p2' });
+  const panel = host.querySelector('[role="tabpanel"]:not([hidden])')!;
+  const prepare = Array.from(panel.querySelectorAll('button')).find((button) =>
+    button.textContent?.includes('Prepare updates'),
+  )!;
+  expect(prepare.disabled).toBe(true);
+  expect(panel.textContent).toContain(
+    'Connect this project to relevant meetings',
+  );
+});
+
 it('shows a failed dreaming run as a failure', async () => {
   api.triggerDreamingNow.mockResolvedValue({
     status: 'failed',
@@ -887,7 +957,13 @@ it('renders executive at a glance panel with detected meeting rhythm and no manu
     'Detected from recurring “Archive weekly review” (4 meetings)',
   );
 
-  expect(atAGlanceSection?.textContent).toContain('Complete migration review');
+  expect(atAGlanceSection?.textContent).toContain('Engineering lead');
+  expect(atAGlanceSection?.textContent).not.toContain(
+    'Complete migration review',
+  );
+  expect(
+    host.querySelector('[role="tabpanel"]:not([hidden])')?.textContent,
+  ).toContain('Complete migration review');
 
   // Verify there is NO <select> asking the user for cadence
   expect(

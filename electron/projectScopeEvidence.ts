@@ -110,7 +110,10 @@ function excerpt(
 export function selectProjectReviewSources(
   sources: Source[],
   name: string,
+  limits: { maxSources?: number; maxChars?: number } = {},
 ): Source[] {
+  const maxSources = limits.maxSources ?? MAX_SOURCES;
+  const maxChars = limits.maxChars ?? MAX_SERIALIZED_EVIDENCE_CHARS;
   const query = [
     ...new Set(
       words(name)
@@ -132,10 +135,8 @@ export function selectProjectReviewSources(
     })
     .filter((item) => item.fullText.trim())
     .sort((a, b) => b.score - a.score || a.index - b.index)
-    .slice(0, MAX_SOURCES);
-  let budget = Math.floor(
-    MAX_SERIALIZED_EVIDENCE_CHARS / Math.max(1, ranked.length),
-  );
+    .slice(0, maxSources);
+  let budget = Math.floor(maxChars / Math.max(1, ranked.length));
   const render = () =>
     ranked.map(({ source, fullText, contexts }) => ({
       ...source,
@@ -147,11 +148,8 @@ export function selectProjectReviewSources(
     const serializedLength = JSON.stringify(
       selected.map(({ id, text }) => ({ id, text })),
     ).length;
-    if (serializedLength <= MAX_SERIALIZED_EVIDENCE_CHARS) break;
-    budget = Math.max(
-      256,
-      Math.floor((budget * MAX_SERIALIZED_EVIDENCE_CHARS) / serializedLength),
-    );
+    if (serializedLength <= maxChars) break;
+    budget = Math.max(256, Math.floor((budget * maxChars) / serializedLength));
     selected = render();
   }
   return selected;

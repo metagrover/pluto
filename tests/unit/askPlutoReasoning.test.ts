@@ -73,7 +73,7 @@ describe('resolveAskPlutoReasoningMode', () => {
         task: 'analysis',
         relation: 'new_topic',
       }),
-    ).toBe('fast');
+    ).toBe('deep');
     expect(
       resolveAskPlutoReasoningMode({
         query: 'What do you think will satisfy Alpha Contact?',
@@ -98,6 +98,31 @@ describe('resolveAskPlutoReasoningMode', () => {
       }),
     ).toBe('deep');
   });
+
+  it.each([
+    'What should I focus on immediately?',
+    'What are our top priorities?',
+    'What do you think we should prioritize?',
+  ])(
+    'uses deep reasoning for broad planning while honoring fast override: %s',
+    (query) => {
+      expect(
+        resolveAskPlutoReasoningMode({
+          query,
+          intent: 'factual',
+          task: 'analysis',
+        }),
+      ).toBe('deep');
+      expect(
+        resolveAskPlutoReasoningMode({
+          query,
+          intent: 'factual',
+          task: 'analysis',
+          override: 'fast',
+        }),
+      ).toBe('fast');
+    },
+  );
 
   it('honors an explicit user override', () => {
     expect(

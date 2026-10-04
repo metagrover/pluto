@@ -10,9 +10,11 @@ vi.mock('electron', () => ({
 }));
 
 import {
+  db as database,
   getMeetingDashboardPreviews,
   getMeetingProcessingStatuses,
   getMeetingSummaries,
+  recoverExpiredTranscriptValidationRetries,
   saveMeeting,
   searchMeetingSummaries,
 } from '../../electron/db';
@@ -34,6 +36,101 @@ const detailOnlyFields = [
 ];
 
 describe('meeting summary read model', () => {
+  it('only loads retry candidates and preserves recovery for active, expired and malformed leases', () => {
+    const now = Date.now();
+    const retry = {
+      runId: 'synthetic-retry',
+      startedAt: new Date(now - 2000).toISOString(),
+      deadlineAt: new Date(now - 1000).toISOString(),
+      stage: 'saving',
+    };
+    for (const [id, integrity] of [
+      ['no-retry', '{}'],
+      ['malformed-integrity', '{'],
+      ['invalid-retry', JSON.stringify({ retry: { stage: 'unknown' } })],
+      ['expired-retry', JSON.stringify({ retry })],
+      [
+        'current-retry',
+        JSON.stringify({
+          retry: { ...retry, deadlineAt: new Date(now + 60000).toISOString() },
+        }),
+      ],
+    ]) {
+      saveMeeting({
+        id,
+        title: 'Fictional retry fixture',
+        transcript_json: JSON.stringify({
+          segments: [],
+          transcript_status: 'validating',
+        }),
+      });
+      database
+        .prepare(
+          'UPDATE meetings SET transcript_status = ?, transcript_integrity_json = ? WHERE id = ?',
+        )
+        .run(id === 'no-retry' ? 'validated' : 'validating', integrity, id);
+    }
+    const originalPrepare = database.prepare.bind(database);
+    const selectedIds: string[] = [];
+    const prepare = vi
+      .spyOn(database, 'prepare')
+      .mockImplementation((sql: string) => {
+        const statement = originalPrepare(sql);
+        if (sql.includes("transcript_status IN ('validating', 'validated')")) {
+          const originalAll = statement.all.bind(statement);
+          vi.spyOn(statement, 'all').mockImplementation(
+            (...args: unknown[]) => {
+              const rows = originalAll(...args) as Array<{ id: string }>;
+              selectedIds.push(...rows.map((row) => row.id));
+              return rows;
+            },
+          );
+        }
+        return statement;
+      });
+    try {
+      // The expired lease recovers and the current lease normalizes its
+      // transcript lifecycle, matching the existing recovery behavior.
+      expect(recoverExpiredTranscriptValidationRetries(now)).toBe(2);
+      expect(selectedIds).toEqual(
+        expect.arrayContaining([
+          'expired-retry',
+          'current-retry',
+          'invalid-retry',
+        ]),
+      );
+      expect(selectedIds).not.toContain('no-retry');
+      expect(selectedIds).not.toContain('malformed-integrity');
+      const statuses = database
+        .prepare(
+          'SELECT id, transcript_status FROM meetings WHERE id IN (?, ?, ?)',
+        )
+        .all('expired-retry', 'current-retry', 'invalid-retry') as Array<{
+        id: string;
+        transcript_status: string;
+      }>;
+      expect(
+        statuses.find((row) => row.id === 'expired-retry')?.transcript_status,
+      ).toBe('needs_attention');
+      expect(
+        statuses.find((row) => row.id === 'current-retry')?.transcript_status,
+      ).toBe('validating');
+      expect(
+        statuses.find((row) => row.id === 'invalid-retry')?.transcript_status,
+      ).toBe('validating');
+    } finally {
+      prepare.mockRestore();
+      database
+        .prepare('DELETE FROM meetings WHERE id IN (?, ?, ?, ?, ?)')
+        .run(
+          'no-retry',
+          'malformed-integrity',
+          'invalid-retry',
+          'expired-retry',
+          'current-retry',
+        );
+    }
+  });
   it('preserves newest-first list metadata while excluding private detail fields', () => {
     saveMeeting({
       id: 'summary-older',

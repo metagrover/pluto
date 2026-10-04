@@ -78,6 +78,7 @@ import {
   buildProjectMilestones,
   buildProjectMomentum,
   buildUserProjectMilestones,
+  cleanPersonRole,
   readProjectDisplayTitle,
   readProjectThemeSynthesis,
   sortProjectMilestones,
@@ -2658,7 +2659,10 @@ export const recoverExpiredTranscriptValidationRetries = (nowMs = Date.now()) =>
   db.transaction(() => {
     const rows = db
       .prepare(
-        "SELECT id, transcript_status, transcript_integrity_json, transcript_json FROM meetings WHERE transcript_status IN ('validating', 'validated')",
+        `SELECT id, transcript_status, transcript_integrity_json, transcript_json
+         FROM meetings WHERE transcript_status IN ('validating', 'validated')
+         AND json_type(CASE WHEN json_valid(transcript_integrity_json)
+           THEN transcript_integrity_json ELSE '{}' END, '$.retry') = 'object'`,
       )
       .all() as Array<{
       id: string;
@@ -7438,45 +7442,60 @@ export const restoreProjectMerge = (projectId: string): void => {
   })();
 };
 
-const parseMeetingParticipants = (
-  midJson: string | null | undefined,
+// MID participants include mentioned people, not proof of attendance.
+type ProjectPortfolioReadContext = {
+  projections: Map<
+    string,
+    ReturnType<typeof getMeetingNotesIdentityProjection>
+  >;
+  participants: Map<string, ProjectBriefingMeeting['participants']>;
+};
+
+const getProjectMeetingParticipants = (
+  meetingId: string,
+  readContext?: ProjectPortfolioReadContext,
 ): ProjectBriefingMeeting['participants'] => {
-  if (!midJson) return [];
-  try {
-    const parsed = JSON.parse(midJson) as {
-      participants?: Array<{
-        entity_id?: unknown;
-        name?: unknown;
-        role?: unknown;
-      }>;
-    };
-    return (parsed.participants ?? []).flatMap((participant) => {
-      if (
-        typeof participant.entity_id !== 'string' ||
-        typeof participant.name !== 'string' ||
-        !participant.name.trim()
-      ) {
-        return [];
-      }
-      const role =
-        typeof participant.role === 'string' &&
-        participant.role.trim() &&
-        !/^(?:undefined|null|n\/a|none|nobody|unknown)$/i.test(
-          participant.role.trim(),
-        )
-          ? participant.role.trim()
-          : undefined;
-      return [
-        {
-          entity_id: participant.entity_id.trim(),
-          name: participant.name.trim(),
-          ...(role ? { role } : {}),
-        },
-      ];
-    });
-  } catch {
-    return [];
+  const cached = readContext?.participants.get(meetingId);
+  if (cached) return cached;
+  const projection =
+    readContext?.projections.get(meetingId) ??
+    getMeetingNotesIdentityProjection(meetingId);
+  readContext?.projections.set(meetingId, projection);
+  const { speakerDisplayNames } = projection;
+  const bindings = identityStore.getBindings(meetingId);
+  const personIds = new Set(
+    bindings.flatMap((binding) =>
+      binding.individual &&
+      binding.personId &&
+      speakerDisplayNames[binding.speaker]
+        ? [resolvePersonIdentityId(binding.personId)]
+        : [],
+    ),
+  );
+  if (
+    speakerDisplayNames.Me &&
+    !bindings.some((binding) => binding.speaker === 'Me')
+  ) {
+    const selfId =
+      identityStore.getCapture(meetingId).selfPersonId ??
+      identityStore.getSelfPersonId();
+    if (selfId) personIds.add(resolvePersonIdentityId(selfId));
   }
+  const participants = [...personIds].flatMap((id) => {
+    const person = getEntity(id);
+    if (person?.type !== 'person') return [];
+    let role: string | undefined;
+    try {
+      role = cleanPersonRole(JSON.parse(person.metadata || '{}').role);
+    } catch {
+      /* No role is preferable to guessing. */
+    }
+    return [
+      { entity_id: person.id, name: person.name, ...(role ? { role } : {}) },
+    ];
+  });
+  readContext?.participants.set(meetingId, participants);
+  return participants;
 };
 
 // Both identity aliases and explicitly filed work contribute evidence to their parent.
@@ -7528,9 +7547,12 @@ const applyProjectMembership = (
     | undefined;
   if (
     !source ||
-    !getMeetingEntities(String(source.id)).some(
-      (entity) => entity.id === member.id,
-    )
+    !db
+      .prepare(`${PROJECT_FAMILY_CTE}
+      SELECT 1 FROM meeting_entities WHERE meeting_id = ?
+      AND entity_id IN (SELECT id FROM family) LIMIT 1
+    `)
+      .get(member.id, member.id, String(source.id))
   )
     return false;
   const evidence = buildMeetingNotesEvidenceDocument(
@@ -7621,9 +7643,12 @@ export const saveProjectRoutingMembership = (
       | undefined;
     if (
       !source ||
-      !getMeetingEntities(String(source.id)).some(
-        (entity) => entity.id === parent.id,
-      )
+      !db
+        .prepare(`${PROJECT_FAMILY_CTE}
+        SELECT 1 FROM meeting_entities WHERE meeting_id = ?
+        AND entity_id IN (SELECT id FROM family) LIMIT 1
+      `)
+        .get(parent.id, parent.id, String(source.id))
     )
       return false;
     const evidence = buildMeetingNotesEvidenceDocument(
@@ -7693,7 +7718,10 @@ export const saveSynthesizedProjectTheme = (
   })();
 };
 
-export const getProjectBrief = (projectId: string): ProjectBrief | null => {
+export const getProjectBrief = (
+  projectId: string,
+  readContext?: ProjectPortfolioReadContext,
+): ProjectBrief | null => {
   const canonicalId = resolveProjectIdentityId(projectId);
   const project = getEntity(canonicalId);
   if (!project || project.type !== 'project') return null;
@@ -7720,7 +7748,10 @@ export const getProjectBrief = (projectId: string): ProjectBrief | null => {
     duration_seconds: meeting.duration_seconds ?? null,
     mention_count: meeting.mention_count,
     context: meeting.context,
-    participants: parseMeetingParticipants(meeting.mid_json),
+    participants: getProjectMeetingParticipants(
+      String(meeting.id),
+      readContext,
+    ),
   }));
   const tasks = db
     .prepare(
@@ -7760,7 +7791,10 @@ export const getProjectBrief = (projectId: string): ProjectBrief | null => {
       meetings.map((meeting) => {
         const document = buildMeetingNotesEvidenceDocument(
           meeting,
-          getMeetingNotesIdentityProjection(meeting.id).speakerDisplayNames,
+          (
+            readContext?.projections.get(String(meeting.id)) ??
+            getMeetingNotesIdentityProjection(meeting.id)
+          ).speakerDisplayNames,
         );
         return [
           String(meeting.id),
@@ -7851,13 +7885,17 @@ export const getProjectPortfolio = (): ProjectPortfolioEntry[] => {
     ORDER BY datetime(COALESCE(s.activity_at, e.updated_at)) DESC, e.name
   `)
     .all() as ProjectPortfolioEntry[];
+  const readContext: ProjectPortfolioReadContext = {
+    projections: new Map(),
+    participants: new Map(),
+  };
   return rows.map((row) => {
     if (readProjectQualification(row.metadata)?.state !== 'qualified')
       return {
         ...row,
         display_title: readProjectDisplayTitle(row.metadata, row.name),
       };
-    const brief = getProjectBrief(row.id);
+    const brief = getProjectBrief(row.id, readContext);
     return brief
       ? {
           ...row,

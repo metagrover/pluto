@@ -221,6 +221,60 @@ describe('action commitment metadata', () => {
     ).toBe(false);
   });
 
+  it('filters named infinitives while retaining self and imperative follow-ups', () => {
+    for (const text of [
+      'Alex to book the venue once dates are confirmed',
+      'Alex Morgan to share the estimate',
+    ]) {
+      expect(isThirdPartyAssignee(null, text)).toBe(true);
+    }
+    for (const text of [
+      'Remember to send the recap',
+      'Reply to the customer',
+      'Send to the team',
+      'Return to the office',
+      'Me to share the estimate',
+    ]) {
+      expect(isThirdPartyAssignee(null, text)).toBe(false);
+    }
+    expect(
+      isThirdPartyAssignee(null, 'Alex to book the venue', {
+        selfNames: ['Alex'],
+      }),
+    ).toBe(false);
+    expect(
+      isThirdPartyAction({
+        name: 'Book the venue',
+        metadata: JSON.stringify({
+          original_description: 'Alex to book the venue',
+          full_description: 'Book the venue',
+        }),
+      }),
+    ).toBe(true);
+    expect(
+      isThirdPartyAction(
+        {
+          name: 'Book the venue',
+          assigned_to: 'person-self',
+          metadata: JSON.stringify({
+            original_description: 'Alex to book the venue',
+          }),
+        },
+        { selfPersonId: 'person-self' },
+      ),
+    ).toBe(false);
+    expect(
+      isThirdPartyAction({
+        name: 'Book the venue',
+        metadata: JSON.stringify({
+          original_description: 'Alex to book the venue',
+          full_description: 'Book the venue',
+          user_edited: true,
+        }),
+      }),
+    ).toBe(false);
+  });
+
   it('recognizes equivalent action items from the same meeting', () => {
     const item1 = {
       title:

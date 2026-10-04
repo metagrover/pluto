@@ -7,6 +7,66 @@ const handlerEnd = main.indexOf("'intelligence:query:cancel'", handlerStart);
 const queryHandler = main.slice(handlerStart, handlerEnd);
 
 describe('Ask Pluto query IPC boundary', () => {
+  it('keeps project recall diagnostics opt-in and model classification disabled by default', () => {
+    const debugHandler = main.slice(
+      main.indexOf("'intelligence:query:debug'"),
+      main.indexOf("'intelligence:suggested-queries'"),
+    );
+    expect(debugHandler).toContain(
+      'useModelClassification: options?.useModelClassification === true',
+    );
+    expect(debugHandler).toContain('options?.includeProjectRecall');
+    expect(debugHandler).toContain(
+      'buildProjectRecall(queryText, parsed.entity_mentions)',
+    );
+    expect(debugHandler).toContain('combinedProjectContext:');
+    expect(debugHandler).toContain('combineProjectFacetContext(');
+  });
+  it('preserves project evidence when a follow-up names a recipient or owner', () => {
+    expect(queryHandler).toMatch(
+      /enforceSynthesizedOnlyContext\(\s*restrictEvidenceToMeetingIds\(\s*effectiveProjectRecall\s*\|\|\s*multiProjectContext\s*\|\|\s*!personFocusedRequest\s*\? subjectFocusedContext\s*: selectNamedPersonAnswerContext\(/,
+    );
+  });
+  it('applies explicit meeting and date bounds before inferred project context and after supplementary merges', () => {
+    const selection = queryHandler.slice(
+      queryHandler.indexOf('const generalContext ='),
+      queryHandler.indexOf('const projectFacetKeywords ='),
+    );
+    expect(selection.indexOf('explicitResolvedScope')).toBeLessThan(
+      selection.indexOf('multiProjectContext'),
+    );
+    expect(selection.indexOf('temporalResolvedScope')).toBeLessThan(
+      selection.indexOf('effectiveProjectRecall'),
+    );
+    expect(queryHandler).toMatch(
+      /!multiProjectContext &&\s*!boundedMeetingIds/,
+    );
+    expect(queryHandler).toMatch(
+      /restrictEvidenceToMeetingIds\([\s\S]{0,600}boundedMeetingIds/,
+    );
+    expect(queryHandler).toMatch(
+      /!explicitResolvedScope &&\s*!temporalResolvedScope &&\s*!currentMeetingRequested/,
+    );
+    expect(queryHandler).toContain(
+      '!boundedMeetingIds ? assigneeRecall?.answer : undefined',
+    );
+  });
+  it('gates person recall and final filtering while preserving query facets outside one project', () => {
+    expect(queryHandler).toMatch(
+      /const personWorkRecall = personFocusedRequest\s*\? buildPersonWorkRecall/,
+    );
+    expect(queryHandler).toContain('keywords: projectFacetKeywords');
+    expect(queryHandler).toContain('expanded_keywords: []');
+    expect(queryHandler).toMatch(
+      /keywords: projectFacetKeywords,[\s\S]{0,160}\{ query: queryText \}/,
+    );
+    expect(queryHandler).toContain(
+      'combineProjectFacetContext(generalContext, projectFacetContext)',
+    );
+    expect(queryHandler).toMatch(
+      /parsed.temporal_range \|\|\s*switchesNamedProject \|\|\s*hasMultipleProjectScopes/,
+    );
+  });
   it('uses structured assignee recall before invoking the answer provider', () => {
     expect(main).toContain('buildAssigneeActionRecall');
     expect(queryHandler).toContain(
@@ -167,8 +227,8 @@ describe('Ask Pluto query IPC boundary', () => {
     expect(queryHandler).toContain('previousExpansionAnswer');
     expect(queryHandler).toContain('removeRepeatedAskPlutoClaims(');
     expect(queryHandler).toContain('go deeper');
-    expect(queryHandler).toContain(
-      'effectiveProjectRecall\n            ? effectiveProjectRecall.context',
+    expect(queryHandler).toMatch(
+      /effectiveProjectRecall\s*\? effectiveProjectRecall.context/,
     );
     expect(queryHandler).toContain(
       "conversationResolution.relation === 'expansion'",
@@ -201,14 +261,16 @@ describe('Ask Pluto query IPC boundary', () => {
     expect(queryHandler).toContain(
       'effectivePersonWorkRecall.person.id !== selfPersonId',
     );
-    expect(queryHandler).toContain('buildAgedProjectAnswer(');
+    expect(queryHandler).not.toContain('buildAgedProjectAnswer');
+    expect(queryHandler).not.toContain('preparedProjectAnswer');
+    expect(queryHandler).not.toContain('isPreparedProjectAnswer');
     expect(queryHandler).toContain(
       "previousAssistantTurn?.outcome === 'no_evidence'",
     );
     expect(queryHandler).toContain('buildNoEvidenceDraftReply(queryText)');
     expect(queryHandler).toContain("conversationResolution.task === 'draft'");
-    expect(queryHandler).toContain(
-      'personWorkSubject && personWorkAssignmentRecall\n                ? personWorkAssignmentRecall?.context || []',
+    expect(queryHandler).toMatch(
+      /personWorkSubject && personWorkAssignmentRecall\s*\? personWorkAssignmentRecall\?\.context \|\| \[\]/,
     );
     expect(queryHandler).toContain(
       "conversationResolution.relation !== 'new_topic'",
@@ -217,8 +279,8 @@ describe('Ask Pluto query IPC boundary', () => {
     expect(queryHandler).toContain(
       'const effectiveProjectRecall = inheritedProjectRecall ?? projectRecall',
     );
-    expect(queryHandler).toContain(
-      'effectiveProjectRecall\n            ? effectiveProjectRecall.context',
+    expect(queryHandler).toMatch(
+      /effectiveProjectRecall\s*\? effectiveProjectRecall.context/,
     );
     expect(queryHandler).toContain(
       'activeConversationContext?.meetingIds.slice(0, 3)',
@@ -226,9 +288,6 @@ describe('Ask Pluto query IPC boundary', () => {
     expect(queryHandler).toContain('activeConversationContext:');
     expect(queryHandler).toContain(
       'conversationContext: nextConversationContext',
-    );
-    expect(queryHandler).toContain(
-      "conversationResolution.relation !== 'follow_up'",
     );
     expect(queryHandler).toContain('enforceSynthesizedOnlyContext(');
     expect(queryHandler).toContain('const effectivePersonWorkRecall');

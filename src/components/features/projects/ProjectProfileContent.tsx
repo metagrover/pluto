@@ -1,9 +1,18 @@
-import { ArrowUpRight, ChevronDown } from 'lucide-react';
+import {
+  ArrowUpRight,
+  ChevronDown,
+  ChevronRight,
+  RefreshCw,
+} from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import {
   getCommitmentState,
   parseActionMetadata,
 } from '../../../utils/actionCommitment';
+import {
+  DREAMING_STATUS_LABEL,
+  type DreamingUiStatus,
+} from '../../../utils/dreamingStatus';
 import {
   type ProjectBrief,
   type ProjectProfileEvidence,
@@ -35,6 +44,8 @@ export function ProjectProfileContent({
   onOpenRelatedWork,
   onDetachWork,
   milestones,
+  onPrepareUpdates,
+  preparationState,
 }: {
   brief: ProjectBrief;
   relatedWork: ProjectPortfolioEntry[];
@@ -43,6 +54,8 @@ export function ProjectProfileContent({
   onOpenRelatedWork?: (id: string) => void;
   onDetachWork: (id: string) => Promise<void>;
   milestones: ReactNode;
+  onPrepareUpdates: () => void;
+  preparationState: DreamingUiStatus;
 }) {
   const prefix = useId();
   const [tab, setTab] = useState<'brief' | 'prepare' | 'history'>('brief');
@@ -144,7 +157,7 @@ export function ProjectProfileContent({
           <ChevronDown aria-hidden="true" className="h-3 w-3" />
           {date(meeting.started_at || meeting.created_at)} · Source
         </summary>
-        <div className="mt-2 border-l border-pro-rule pl-4">
+        <div className="mt-2 border-l border-pro-border pl-4">
           <blockquote className="max-w-[65ch] text-sm leading-6 text-pro-text-main">
             {item.evidenceQuote}
           </blockquote>
@@ -165,7 +178,7 @@ export function ProjectProfileContent({
 
   const commitments = (tasks = pending) =>
     tasks.length ? (
-      <ul className="divide-y divide-pro-rule/40">
+      <ul className="divide-y divide-pro-border/40">
         {tasks.map((task) => (
           <li key={task.id} className="py-3">
             <p className="text-sm leading-6">{task.name}</p>
@@ -207,7 +220,7 @@ export function ProjectProfileContent({
       <div
         role="tablist"
         aria-label="Project context"
-        className="mb-7 flex flex-wrap gap-6 border-b border-pro-rule/60"
+        className="mb-7 flex flex-wrap gap-6 border-b border-pro-border/60"
       >
         {(
           [
@@ -273,15 +286,112 @@ export function ProjectProfileContent({
                 )}
               </>
             ) : (
-              <div>
-                <h3 className="text-lg font-medium">
+              <div className="flex flex-col items-center rounded-xl border border-dashed border-pro-border/70 bg-pro-surface/50 dark:border-solid px-5 py-9 text-center sm:px-8 sm:py-12">
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 200 112"
+                  fill="none"
+                  className="mb-6 h-28 w-48 max-w-full text-pro-accent"
+                >
+                  <g stroke="currentColor" strokeWidth="1.5">
+                    <path d="M44 32h20l20 24m-40 24h20l20-24" opacity=".35" />
+                    <rect
+                      x="16"
+                      y="18"
+                      width="28"
+                      height="28"
+                      rx="8"
+                      opacity=".5"
+                    />
+                    <rect
+                      x="16"
+                      y="66"
+                      width="28"
+                      height="28"
+                      rx="8"
+                      opacity=".5"
+                    />
+                    <path
+                      d="M25 28h10m-10 7h6m-6 41h10m-10 7h6"
+                      strokeLinecap="round"
+                      opacity=".65"
+                    />
+                    <rect
+                      x="84"
+                      y="8"
+                      width="100"
+                      height="96"
+                      rx="10"
+                      className="fill-pro-surface"
+                      opacity=".7"
+                    />
+                    <path
+                      d="M102 30h36"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      opacity=".65"
+                    />
+                    <path
+                      d="M102 48h64m-64 12h52m-52 12h58"
+                      strokeLinecap="round"
+                      strokeDasharray="3 5"
+                      opacity=".3"
+                    />
+                    <path d="M102 88h18" strokeLinecap="round" opacity=".5" />
+                  </g>
+                </svg>
+                <h3 className="max-w-[28ch] text-xl font-medium leading-snug text-pro-text-main">
                   A project brief is still taking shape
                 </h3>
-                <p className="mt-2 max-w-[65ch] text-sm leading-6 text-pro-text-muted">
+                <p className="mt-3 max-w-[46ch] text-sm leading-6 text-pro-text-muted">
                   {brief.meetings.length > 0
-                    ? "Pluto needs enough connected discussion to explain this project's direction. Review its source history or add an agreed milestone."
+                    ? 'Prepare updates from connected meetings to bring this project’s direction, decisions, and next steps into focus.'
                     : 'Connect this project to relevant meetings or add an agreed milestone to begin.'}
                 </p>
+                <div className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+                  <button
+                    type="button"
+                    onClick={onPrepareUpdates}
+                    disabled={
+                      preparationState === 'running' ||
+                      brief.meetings.length === 0
+                    }
+                    className="inline-flex min-h-10 items-center gap-2 rounded-md bg-pro-accent px-4 text-sm font-medium text-pro-bg hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:opacity-50"
+                  >
+                    <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
+                    {preparationState === 'running'
+                      ? 'Preparing updates…'
+                      : 'Prepare updates'}
+                  </button>
+                  {brief.meetings.length > 0 && (
+                    <button
+                      type="button"
+                      className={link}
+                      onClick={() => {
+                        setTab('history');
+                        document
+                          .getElementById(`${prefix}-history-tab`)
+                          ?.focus();
+                      }}
+                    >
+                      Review source history{' '}
+                      <ArrowUpRight
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5"
+                      />
+                    </button>
+                  )}
+                </div>
+                {preparationState !== 'idle' && (
+                  <p
+                    role="status"
+                    className="mt-4 max-w-[46ch] text-sm leading-6 text-pro-text-muted"
+                  >
+                    {preparationState === 'no_change'
+                      ? 'No new updates were found. More connected discussion may be needed to build this brief.'
+                      : DREAMING_STATUS_LABEL[preparationState]}
+                  </p>
+                )}
               </div>
             )}
             {newerEvidence && (
@@ -294,7 +404,7 @@ export function ProjectProfileContent({
               </p>
             )}
             {changes.length > 0 && (
-              <section className="mt-8 border-t border-pro-rule/50 pt-6">
+              <section className="mt-8 border-t border-pro-border/50 pt-6">
                 <h2 className="project-dossier-section-title mb-4">
                   What changed
                 </h2>
@@ -309,7 +419,7 @@ export function ProjectProfileContent({
               </section>
             )}
             {(workstreams.length > 0 || relatedWork.length > 0) && (
-              <section className="mt-8 border-t border-pro-rule/50 pt-6">
+              <section className="mt-8 border-t border-pro-border/50 pt-6">
                 <h2 className="project-dossier-section-title mb-4">
                   Work within this project
                 </h2>
@@ -329,7 +439,7 @@ export function ProjectProfileContent({
                     <summary className={`${link} cursor-pointer`}>
                       Grouped work and topics
                     </summary>
-                    <ul className="mt-2 divide-y divide-pro-rule/40">
+                    <ul className="mt-2 divide-y divide-pro-border/40">
                       {relatedWork.map((work) => (
                         <li key={work.id} className="py-3">
                           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -382,7 +492,7 @@ export function ProjectProfileContent({
                 )}
               </section>
             )}
-            <section className="mt-8 border-t border-pro-rule/50 pt-6">
+            <section className="mt-8 border-t border-pro-border/50 pt-6">
               <h2 className="project-dossier-section-title mb-3">
                 Open questions and actions
               </h2>
@@ -408,7 +518,7 @@ export function ProjectProfileContent({
                 </p>
               )}
             </section>
-            <section className="mt-8 border-t border-pro-rule/50 pt-6">
+            <section className="mt-8 border-t border-pro-border/50 pt-6">
               <h2 className="project-dossier-section-title mb-3">
                 Confirmed commitments
               </h2>
@@ -432,7 +542,7 @@ export function ProjectProfileContent({
                 </details>
               )}
             </section>
-            <div className="mt-8 border-t border-pro-rule/50 pt-6">
+            <div className="mt-8 border-t border-pro-border/50 pt-6">
               {milestones}
             </div>
           </section>
@@ -461,7 +571,7 @@ export function ProjectProfileContent({
             <p className="mt-4 text-xs text-pro-text-muted">
               Review the last discussion and confirm what needs attention next.
             </p>
-            <section className="mt-8 border-t border-pro-rule/50 pt-6">
+            <section className="mt-8 border-t border-pro-border/50 pt-6">
               <h2 className="project-dossier-section-title mb-3">
                 My commitments
               </h2>
@@ -480,7 +590,7 @@ export function ProjectProfileContent({
                 </p>
               )}
             </section>
-            <section className="mt-8 border-t border-pro-rule/50 pt-6">
+            <section className="mt-8 border-t border-pro-border/50 pt-6">
               <h2 className="project-dossier-section-title mb-4">
                 Resolve with the team
               </h2>
@@ -501,7 +611,7 @@ export function ProjectProfileContent({
               )}
             </section>
             {decisions.length > 0 && (
-              <section className="mt-8 border-t border-pro-rule/50 pt-6">
+              <section className="mt-8 border-t border-pro-border/50 pt-6">
                 <h2 className="project-dossier-section-title mb-4">
                   Keep earlier decisions in view
                 </h2>
@@ -526,7 +636,7 @@ export function ProjectProfileContent({
               How the project evolved
             </h2>
             {history.length ? (
-              <div className="divide-y divide-pro-rule/50">
+              <div className="divide-y divide-pro-border/50">
                 {history.map((item, index) => (
                   <article key={index} className="py-4">
                     <p className="mb-1 text-xs text-pro-text-muted">
@@ -543,11 +653,11 @@ export function ProjectProfileContent({
                 source history is available below.
               </p>
             )}
-            <section className="mt-8 border-t border-pro-rule/50 pt-6">
+            <section className="mt-8 border-t border-pro-border/50 pt-6">
               <h2 className="project-dossier-section-title mb-4">
                 Meeting history
               </h2>
-              <div className="divide-y divide-pro-rule/40">
+              <div className="divide-y divide-pro-border/40">
                 {brief.meetings.map((meeting) => (
                   <article key={meeting.id} className="py-4">
                     <p className="text-xs text-pro-text-muted">
@@ -572,7 +682,7 @@ export function ProjectProfileContent({
               </div>
             </section>
             {brief.meetingStats.recurringSeries.length > 0 && (
-              <section className="mt-8 border-t border-pro-rule/50 pt-6">
+              <section className="mt-8 border-t border-pro-border/50 pt-6">
                 <h2 className="project-dossier-section-title mb-4">
                   Regular meetings
                 </h2>
@@ -590,7 +700,7 @@ export function ProjectProfileContent({
             )}
           </section>
         </div>
-        <aside className="min-w-0 border-t border-pro-rule/50 pt-6 min-[850px]:border-l min-[850px]:border-t-0 min-[850px]:pl-6 min-[850px]:pt-0">
+        <aside className="min-w-0 border-t border-pro-border/50 pt-6 min-[850px]:border-l min-[850px]:border-t-0 min-[850px]:pl-6 min-[850px]:pt-0">
           <section>
             <h2 className="mb-3 text-sm font-medium">Next decision</h2>
             <p className="text-sm leading-6 text-pro-text-muted">
@@ -611,29 +721,37 @@ export function ProjectProfileContent({
             </button>
           </section>
           <section className="mt-7">
-            <h2 className="mb-3 text-sm font-medium">People involved</h2>
-            <div className="space-y-4">
+            <h2 className="mb-2 text-sm font-medium">People involved</h2>
+            <div className="space-y-1">
               {(allPeople ? people : people.slice(0, 6)).map((person) => (
-                <div key={person.entity_id}>
+                <div key={person.entity_id} className="min-w-0">
                   <button
                     type="button"
                     data-person-card={person.name}
                     disabled={!onOpenPerson}
-                    className={`${link} text-sm text-pro-text-main disabled:no-underline`}
+                    className="group flex min-h-7 w-full items-center justify-between gap-2 rounded text-left text-sm leading-5 text-pro-accent hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:text-pro-text-main"
                     onClick={() => onOpenPerson?.(person.entity_id)}
                   >
-                    {person.entity_id === brief.selfPersonId
-                      ? `${person.name} (you)`
-                      : person.name}
+                    <span className="min-w-0 break-words underline decoration-pro-accent/40 underline-offset-4 group-hover:decoration-pro-accent group-disabled:no-underline">
+                      {person.entity_id === brief.selfPersonId
+                        ? `${person.name} (you)`
+                        : person.name}
+                    </span>
+                    {onOpenPerson && (
+                      <ChevronRight
+                        aria-hidden="true"
+                        className="h-3 w-3 shrink-0"
+                      />
+                    )}
                   </button>
-                  <p className="text-xs leading-5 text-pro-text-muted">
-                    {pending
-                      .filter((task) => task.assigned_to === person.entity_id)
-                      .map((task) => task.name)
-                      .join('; ') ||
-                      person.role ||
-                      'Joined project discussions'}
-                  </p>
+                  {person.role && (
+                    <p
+                      title={person.role}
+                      className="truncate text-xs leading-4 text-pro-text-muted"
+                    >
+                      {person.role}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
@@ -653,9 +771,6 @@ export function ProjectProfileContent({
                   : `Show ${people.length - 6} more`}
               </button>
             )}
-            <p className="mt-3 text-xs leading-5 text-pro-text-muted">
-              Participation does not establish project ownership.
-            </p>
           </section>
           <section className="mt-7">
             <h2 className="mb-3 text-sm font-medium">Meeting rhythm</h2>
