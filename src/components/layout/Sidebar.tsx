@@ -73,6 +73,10 @@ export const Sidebar = ({
     recordingState ?? (isRecordingActive ? 'recording' : 'idle');
   const captureAction = resolveCaptureAction({ state: resolvedRecordingState });
   const recordingBusy = captureAction.command !== 'start';
+  const goToDashboard = () => {
+    setActiveTab('hub');
+    setSelectedMeetingId(null);
+  };
   return (
     <aside
       className={`
@@ -82,20 +86,27 @@ export const Sidebar = ({
             `}
     >
       <div className="pt-[60px] pb-6 px-6 flex items-center">
-        <Logo
-          size={24}
-          showText
-          variant={
-            theme === 'aubergine' ||
-            theme === 'slack' ||
-            theme === 'dark' ||
-            theme === 'pluto-site' ||
-            theme === 'airbnb' ||
-            theme === 'coral'
-              ? 'light'
-              : 'default'
-          }
-        />
+        <button
+          type="button"
+          aria-label="Pluto, go to Dashboard"
+          onClick={goToDashboard}
+          className="rounded-md text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+        >
+          <Logo
+            size={24}
+            showText
+            variant={
+              theme === 'aubergine' ||
+              theme === 'slack' ||
+              theme === 'dark' ||
+              theme === 'pluto-site' ||
+              theme === 'airbnb' ||
+              theme === 'coral'
+                ? 'light'
+                : 'default'
+            }
+          />
+        </button>
       </div>
 
       <div className="px-3 pb-3 space-y-0.5">
@@ -161,10 +172,7 @@ export const Sidebar = ({
             data-active={
               activeTab === 'hub' && !selectedMeetingId ? 'true' : undefined
             }
-            onClick={() => {
-              setActiveTab('hub');
-              setSelectedMeetingId(null);
-            }}
+            onClick={goToDashboard}
             className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'hub' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
             <Home
