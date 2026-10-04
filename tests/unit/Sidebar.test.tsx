@@ -63,6 +63,36 @@ describe('Sidebar navigation', () => {
     expect(buttonTexts.some((text) => text.includes('Settings'))).toBe(true);
   });
 
+  it('navigates home when the Pluto brand is clicked from a meeting', () => {
+    const setActiveTab = vi.fn();
+    const setSelectedMeetingId = vi.fn();
+    act(() =>
+      root.render(
+        <Sidebar
+          sidebarVisible
+          activeTab="meetings"
+          setActiveTab={setActiveTab}
+          selectedMeetingId="meeting-1"
+          setSelectedMeetingId={setSelectedMeetingId}
+          safeMeetings={[]}
+          onStartRecording={vi.fn()}
+          onOpenSearch={vi.fn()}
+          onOpenPeopleHome={vi.fn()}
+          theme="dark"
+          setTheme={vi.fn()}
+        />,
+      ),
+    );
+
+    const brand = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Pluto, go to Dashboard"]',
+    );
+    expect(brand?.textContent).toContain('Pluto');
+    act(() => brand?.click());
+    expect(setActiveTab).toHaveBeenCalledWith('hub');
+    expect(setSelectedMeetingId).toHaveBeenCalledWith(null);
+  });
+
   it('keeps recent meeting rows free of inline delete controls', () => {
     const meeting: Meeting = {
       id: 'meeting-1',

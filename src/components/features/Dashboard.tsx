@@ -901,44 +901,48 @@ export const Dashboard = ({
                   cancelCommitmentCreation();
                 }
               }}
-              className="mt-4 flex flex-col gap-3 border-b border-pro-border/70 pb-4 sm:flex-row"
+              className="mt-4 flex min-w-0 flex-col gap-3 border-b border-pro-border/70 pb-4"
             >
-              <input
-                ref={newCommitmentInputRef}
-                disabled={isCreatingCommitment}
-                value={commitmentText}
-                onChange={(event) => setCommitmentText(event.target.value)}
-                placeholder="Commitment"
-                aria-label="Commitment"
-                className="min-h-10 flex-1 rounded-md border border-pro-border bg-pro-bg px-3 text-[13px] font-medium text-pro-text-main outline-none focus:border-pro-accent"
-              />
-              <input
-                type="date"
-                value={commitmentDueDate}
-                onChange={(event) => setCommitmentDueDate(event.target.value)}
-                aria-label="Optional due date"
-                disabled={isCreatingCommitment}
-                className="min-h-10 rounded-md border border-pro-border bg-pro-bg px-3 text-[13px] font-medium text-pro-text-main outline-none focus:border-pro-accent"
-              />
-              <button
-                type="submit"
-                disabled={!commitmentText.trim() || isCreatingCommitment}
-                className="inline-flex min-h-10 items-center justify-center rounded-md bg-pro-accent px-4 text-[12px] font-semibold text-white hover:bg-pro-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isCreatingCommitment ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  'Add'
-                )}
-              </button>
-              <button
-                type="button"
-                disabled={isCreatingCommitment}
-                onClick={cancelCommitmentCreation}
-                className="inline-flex min-h-10 items-center justify-center rounded-md px-3 text-[12px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
-              >
-                Cancel
-              </button>
+              <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_9rem]">
+                <input
+                  ref={newCommitmentInputRef}
+                  disabled={isCreatingCommitment}
+                  value={commitmentText}
+                  onChange={(event) => setCommitmentText(event.target.value)}
+                  placeholder="Commitment"
+                  aria-label="Commitment"
+                  className="min-h-10 min-w-0 w-full rounded-md border border-pro-border bg-pro-bg px-3 text-[13px] font-medium text-pro-text-main outline-none focus:border-pro-accent"
+                />
+                <input
+                  type="date"
+                  value={commitmentDueDate}
+                  onChange={(event) => setCommitmentDueDate(event.target.value)}
+                  aria-label="Optional due date"
+                  disabled={isCreatingCommitment}
+                  className="min-h-10 min-w-0 w-full rounded-md border border-pro-border bg-pro-bg px-3 text-[13px] font-medium text-pro-text-main outline-none focus:border-pro-accent"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="submit"
+                  disabled={!commitmentText.trim() || isCreatingCommitment}
+                  className="inline-flex min-h-10 items-center justify-center rounded-md bg-pro-accent px-4 text-[12px] font-semibold text-white hover:bg-pro-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isCreatingCommitment ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    'Add'
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={isCreatingCommitment}
+                  onClick={cancelCommitmentCreation}
+                  className="inline-flex min-h-10 items-center justify-center rounded-md px-3 text-[12px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
             </form>
           ) : null}
 
