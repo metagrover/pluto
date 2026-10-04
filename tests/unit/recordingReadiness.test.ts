@@ -61,6 +61,7 @@ describe('recordingReadiness', () => {
       parakeetFinalClient: mockParakeetClient,
       parakeetModelRoot,
       audiocapPath,
+      systemAudioPermission: true,
     });
 
   it('reads prepared capability without starting model preparation', async () => {
@@ -87,6 +88,7 @@ describe('recordingReadiness', () => {
       parakeetFinalClient: null,
       parakeetModelRoot,
       audiocapPath,
+      systemAudioPermission: true,
     });
     expect(result.blockers).toContain('parakeet_client_missing');
     expect(result.blockers).toContain('parakeet_eou_unavailable');
@@ -124,12 +126,33 @@ describe('recordingReadiness', () => {
     expect(result.blockers).toContain('mic_permission_missing');
   });
 
+  it('accepts verified audio-only access when screen recording is denied', async () => {
+    vi.mocked(systemPreferences.getMediaAccessStatus).mockImplementation(
+      (kind) => (kind === 'microphone' ? 'granted' : 'denied'),
+    );
+    expect((await status()).ready).toBe(true);
+    expect(systemPreferences.getMediaAccessStatus).not.toHaveBeenCalledWith(
+      'screen',
+    );
+  });
+
+  it('does not infer tap access from screen recording permission', async () => {
+    const result = await getRecordingReadinessStatus({
+      parakeetFinalClient: mockParakeetClient,
+      parakeetModelRoot,
+      audiocapPath,
+      systemAudioPermission: false,
+    });
+    expect(result.blockers).toContain('system_audio_permission_missing');
+  });
+
   it('prepares the verified Parakeet bundle exactly once', async () => {
     vi.mocked(mockParakeetClient.getPreparedCapability).mockReturnValue(null);
     const result = await prepareRecordingReadiness({
       parakeetFinalClient: mockParakeetClient,
       parakeetModelRoot,
       audiocapPath,
+      systemAudioPermission: true,
     });
     expect(result.ready).toBe(true);
     expect(mockParakeetClient.prepare).toHaveBeenCalledTimes(1);
@@ -154,6 +177,7 @@ describe('recordingReadiness', () => {
         parakeetFinalClient: mockParakeetClient,
         parakeetModelRoot,
         audiocapPath,
+        systemAudioPermission: true,
       },
       onProgress,
     );

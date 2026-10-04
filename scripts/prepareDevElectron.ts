@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -17,7 +17,7 @@ export function prepareDevElectron(): string {
   const executableStats = fs.statSync(electronExecutable);
   const fingerprint = createHash('sha256')
     .update(
-      `${sourceApp}:${sourceStats.mtimeMs}:${executableStats.size}:pluto-dev-v1`,
+      `${sourceApp}:${sourceStats.mtimeMs}:${executableStats.size}:pluto-dev-v2-calendar-permissions`,
     )
     .digest('hex')
     .slice(0, 12);
@@ -47,6 +47,32 @@ export function prepareDevElectron(): string {
         fs.rmSync(stagingApp, { recursive: true, force: true });
         fs.cpSync(sourceApp, stagingApp, { recursive: true });
       }
+      // Some npm/archive installs expand framework symlinks into duplicate
+      // directories. Restore the versioned layout in our copy before signing.
+      const frameworks = path.join(stagingApp, 'Contents', 'Frameworks');
+      for (const name of fs
+        .readdirSync(frameworks)
+        .filter((name) => name.endsWith('.framework'))) {
+        const framework = path.join(frameworks, name);
+        const versions = path.join(framework, 'Versions');
+        if (!fs.existsSync(versions)) continue;
+        const current = path.join(versions, 'Current');
+        if (fs.lstatSync(current).isSymbolicLink()) continue;
+        const candidates = fs
+          .readdirSync(versions)
+          .filter((version) => version !== 'Current');
+        if (candidates.length !== 1)
+          throw new Error(`Cannot resolve framework version: ${name}`);
+        const version = candidates[0];
+        fs.rmSync(current, { recursive: true });
+        fs.symlinkSync(version, current);
+        for (const member of fs.readdirSync(path.join(versions, version))) {
+          if (member === '_CodeSignature') continue;
+          const target = path.join(framework, member);
+          fs.rmSync(target, { recursive: true, force: true });
+          fs.symlinkSync(path.join('Versions', 'Current', member), target);
+        }
+      }
       const plist = path.join(stagingApp, 'Contents', 'Info.plist');
       for (const key of ['CFBundleName', 'CFBundleDisplayName']) {
         execFileSync('/usr/libexec/PlistBuddy', [
@@ -55,19 +81,43 @@ export function prepareDevElectron(): string {
           plist,
         ]);
       }
-      // npm's development Electron.app may itself have an unverifiable signature.
-      // Re-sign only when its original bundle verifies; always leave it untouched.
-      if (spawnSync('codesign', ['--verify', sourceApp]).status === 0) {
-        execFileSync('codesign', [
-          '--force',
-          '--deep',
-          '--sign',
-          '-',
-          '--preserve-metadata=entitlements',
-          stagingApp,
+      const purposes: Record<string, string> = {
+        NSMicrophoneUsageDescription:
+          'Pluto records your voice for meeting transcription.',
+        NSAudioCaptureUsageDescription:
+          'Pluto records system audio for meeting transcription.',
+        NSCalendarsFullAccessUsageDescription:
+          'Pluto reads local meeting titles, times, and participants.',
+        NSCalendarsUsageDescription:
+          'Pluto reads local meeting titles, times, and participants.',
+      };
+      for (const [key, value] of Object.entries(purposes)) {
+        // Add absent keys and replace Electron's generic descriptions.
+        try {
+          execFileSync(
+            '/usr/libexec/PlistBuddy',
+            ['-c', `Delete :${key}`, plist],
+            { stdio: 'ignore' },
+          );
+        } catch {}
+        execFileSync('/usr/libexec/PlistBuddy', [
+          '-c',
+          `Add :${key} string ${value}`,
+          plist,
         ]);
-        execFileSync('codesign', ['--verify', '--deep', stagingApp]);
       }
+      // Sign the copy after changing metadata, even if npm's original signature
+      // is invalid. Never modify the original Electron bundle.
+      execFileSync('codesign', [
+        '--force',
+        '--deep',
+        '--sign',
+        '-',
+        '--entitlements',
+        path.resolve('build/entitlements.mac.plist'),
+        stagingApp,
+      ]);
+      execFileSync('codesign', ['--verify', '--deep', '--strict', stagingApp]);
       fs.renameSync(stagingApp, brandedApp);
     } catch (error) {
       fs.rmSync(stagingApp, { recursive: true, force: true });

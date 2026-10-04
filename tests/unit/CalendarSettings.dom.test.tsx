@@ -89,6 +89,35 @@ describe('CalendarSettings', () => {
     act(() => root.unmount());
   });
 
+  it('preserves a saved selection without calling it missing before access is granted', () => {
+    const { container, root } = render(
+      snapshot({
+        enabled: true,
+        selectedCalendar: workCalendar,
+        selectedCalendars: [workCalendar],
+      }),
+    );
+    expect(container.textContent).toContain(
+      'selection is saved in this profile',
+    );
+    expect(container.textContent).not.toContain('Missing');
+    expect(container.textContent).not.toContain('Choose calendars');
+    expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+    act(() => root.unmount());
+  });
+
+  it('explains a missing permission request without assuming a Settings entry exists', async () => {
+    api.connectCalendar.mockResolvedValue(snapshot());
+    const { container, root } = render(snapshot());
+    const connect = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Connect Calendar'),
+    );
+    await act(async () => connect?.click());
+    expect(container.textContent).toContain('reopen the updated app');
+    expect(container.textContent).toContain('after macOS handles the request');
+    act(() => root.unmount());
+  });
+
   it('provides grouped multi-selection with staged changes and Save changes', async () => {
     const selected = snapshot({
       state: 'ready',

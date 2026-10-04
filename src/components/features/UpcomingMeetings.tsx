@@ -264,11 +264,26 @@ export const UpcomingMeetings = ({
             <button
               type="button"
               aria-label="Connect Calendar"
-              onClick={() => void onConnect()}
+              onClick={() => {
+                setSelectionError(null);
+                void onConnect().catch(() =>
+                  setSelectionError(
+                    'Calendar access could not be requested. Quit Pluto, reopen the updated app, and try connecting again.',
+                  ),
+                );
+              }}
               className="mt-2 inline-flex min-h-8 items-center justify-center rounded-md border border-pro-border/60 bg-pro-surface/70 px-3 text-[11px] font-semibold text-pro-text-muted transition-colors hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
             >
               Connect calendar
             </button>
+            {selectionError ? (
+              <p
+                role="alert"
+                className="mt-2 text-[11px] leading-5 text-pro-warning"
+              >
+                {selectionError}
+              </p>
+            ) : null}
           </div>
         ) : snapshot.state === 'denied' || snapshot.state === 'restricted' ? (
           <RecoveryAction

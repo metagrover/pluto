@@ -618,6 +618,7 @@ export const AudioManager = ({
     try {
       const readiness = (await window.ipcRenderer.invoke(
         'RECORDING_READINESS_PREPARE',
+        { verifyPermissions: true },
       )) as { ready: boolean; blockers: string[] };
       if (!readiness.ready) {
         console.warn('[Pluto] Recording readiness failed:', readiness.blockers);
@@ -1555,6 +1556,9 @@ export const AudioManager = ({
       return { admitted: true, meetingId };
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
+      alert(
+        'Recording could not start. Check microphone and system audio access in Settings, then try again. If it keeps failing, restart Pluto.',
+      );
       silenceWatchdogRef.current?.disarm();
       silenceWatchdogRef.current = null;
       cancelSystemAudioHealthTimeoutRef.current?.();

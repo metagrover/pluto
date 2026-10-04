@@ -2694,20 +2694,32 @@ app.whenReady().then(async () => {
     return { cancelled: true };
   });
 
+  let systemAudioPermissionVerified = false;
+
   ipcMain.handle('RECORDING_READINESS_STATUS', async () => {
     return await getRecordingReadinessStatus({
       parakeetFinalClient,
       parakeetModelRoot,
       audiocapPath: getAudioCapExecPath(),
+      systemAudioPermission: systemAudioPermissionVerified,
     });
   });
 
-  ipcMain.handle('RECORDING_READINESS_PREPARE', async (event) => {
+  ipcMain.handle('RECORDING_READINESS_PREPARE', async (event, options = {}) => {
+    if (options.verifyPermissions === true) {
+      systemAudioPermissionVerified = await runAudioProbe({
+        allowSilent: true,
+        includeSelf: true,
+        silentProbe: true,
+        permissionRequest: true,
+      });
+    }
     return await prepareRecordingReadiness(
       {
         parakeetFinalClient,
         parakeetModelRoot,
         audiocapPath: getAudioCapExecPath(),
+        systemAudioPermission: systemAudioPermissionVerified,
       },
       (progress) => {
         if (!event.sender.isDestroyed()) {
@@ -3124,12 +3136,14 @@ app.whenReady().then(async () => {
     includeSelf = true,
     targetPids,
     silentProbe = false,
+    permissionRequest = false,
   }: {
     durationMs?: number;
     allowSilent?: boolean;
     includeSelf?: boolean;
     targetPids?: number[];
     silentProbe?: boolean;
+    permissionRequest?: boolean;
   } = {}) => {
     if (
       canReuseRunningCaptureForProbe(Boolean(nativeAudioProcess), targetPids)
@@ -3174,7 +3188,9 @@ app.whenReady().then(async () => {
           probe.kill('SIGKILL');
           resolve(false);
         },
-        Math.max(3000, Math.floor(durationMs + 1500)),
+        permissionRequest
+          ? 120_000
+          : Math.max(3000, Math.floor(durationMs + 1500)),
       );
 
       probe.stderr.on('data', (chunk) => {
@@ -3209,12 +3225,15 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'SYSTEM_AUDIO_PROBE',
     async (_event, { durationMs, allowSilent, silentProbe } = {}) => {
-      return await runAudioProbe({
+      const permitted = await runAudioProbe({
         durationMs,
         allowSilent: Boolean(allowSilent),
         includeSelf: true,
         silentProbe: Boolean(silentProbe),
+        permissionRequest: true,
       });
+      systemAudioPermissionVerified = permitted;
+      return permitted;
     },
   );
 
@@ -8822,6 +8841,14 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('REQUEST_MICROPHONE_PERMISSION', async () => {
     if (process.platform !== 'darwin') return true;
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    if (status === 'granted') return true;
+    if (status === 'denied' || status === 'restricted') {
+      await shell.openExternal(
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+      );
+      return false;
+    }
     return await systemPreferences.askForMediaAccess('microphone');
   });
 

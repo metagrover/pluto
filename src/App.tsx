@@ -478,6 +478,9 @@ function App() {
         snapshot = await selectCalendar(snapshot.calendars[0]);
       }
       await loadCalendarAgenda(snapshot);
+      if (snapshot.authorization === 'not_determined') {
+        throw new Error('calendar_access_not_requested');
+      }
     } finally {
       setCalendarLoading(false);
     }
@@ -1970,7 +1973,36 @@ function App() {
   }, [permissionStatus]);
 
   useEffect(() => {
-    const handleReadinessFailed = () => setSetupNeeded(true);
+    const handleReadinessFailed = async (event: Event) => {
+      setZenVisible(false);
+      const details = (event as CustomEvent).detail?.details;
+      if (
+        details &&
+        (!details.micPermission || !details.systemAudioPermission)
+      ) {
+        setPermissionStatus({
+          mic: details.micPermission ? 'granted' : 'denied',
+          systemAudio: details.systemAudioPermission ? 'granted' : 'denied',
+        });
+        setPermissionsVisible(true);
+        return;
+      }
+      try {
+        await window.ipcRenderer.invoke('SET_SETTING', {
+          key: 'setup_step',
+          value: '2',
+        });
+        await window.ipcRenderer.invoke('SET_SETTING', {
+          key: 'setup_complete',
+          value: 'false',
+        });
+        setSetupNeeded(true);
+      } catch {
+        alert(
+          'Local transcription needs repair. Open Settings and prepare the recording models again.',
+        );
+      }
+    };
     window.addEventListener(
       'RECORDING_READINESS_FAILED' as any,
       handleReadinessFailed,

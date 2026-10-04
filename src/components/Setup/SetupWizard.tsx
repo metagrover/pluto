@@ -169,6 +169,28 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
     await checkReadiness();
   };
 
+  const requestSystemAudio = async () => {
+    setSetupError('');
+    setRequirements((current) => ({ ...current, systemAudio: 'checking' }));
+    try {
+      const permitted = await window.ipcRenderer.invoke('SYSTEM_AUDIO_PROBE', {
+        durationMs: 1500,
+        allowSilent: true,
+      });
+      await checkReadiness();
+      if (!permitted) {
+        setSetupError(
+          'Allow Pluto in System Settings → Privacy & Security → Screen & System Audio Recording, then restart Pluto and check again.',
+        );
+      }
+    } catch {
+      setRequirements((current) => ({ ...current, systemAudio: 'blocked' }));
+      setSetupError(
+        'Could not verify system audio access. Check permissions and try again.',
+      );
+    }
+  };
+
   const openSystemAudioSettings = async () => {
     await window.ipcRenderer.invoke(
       'OPEN_SYSTEM_SETTINGS_PRIVACY',
@@ -373,17 +395,17 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                       <div className="flex flex-wrap justify-end gap-2">
                         <button
                           type="button"
-                          onClick={() => void openSystemAudioSettings()}
+                          onClick={() => void requestSystemAudio()}
                           className="rounded-md border border-[oklch(0.82_0.015_85)] bg-[oklch(0.985_0.005_85)] px-4 py-2 text-xs font-semibold transition-colors hover:bg-[oklch(0.93_0.01_85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)]"
                         >
-                          Open Settings
+                          Allow system audio
                         </button>
                         <button
                           type="button"
-                          onClick={() => void checkReadiness()}
+                          onClick={() => void openSystemAudioSettings()}
                           className="rounded-md px-3 py-2 text-xs font-semibold text-[oklch(0.5_0.018_258)] transition-colors hover:bg-[oklch(0.93_0.01_85)] hover:text-[oklch(0.25_0.02_258)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)]"
                         >
-                          Check again
+                          Open Settings
                         </button>
                       </div>
                     ) : undefined

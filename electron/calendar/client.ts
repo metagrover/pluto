@@ -52,6 +52,7 @@ export class CalendarHelperClient {
       executablePath: string;
       spawn?: SpawnHelper;
       timeoutMs?: number;
+      permissionTimeoutMs?: number;
     },
   ) {}
 
@@ -130,9 +131,14 @@ export class CalendarHelperClient {
     const id = randomUUID();
     const payload = buildCalendarRequest(method, id, params);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.failChild(child, 'calendar_request_timeout');
-      }, this.options.timeoutMs ?? 15_000);
+      const timer = setTimeout(
+        () => {
+          this.failChild(child, 'calendar_request_timeout');
+        },
+        method === 'request_access'
+          ? (this.options.permissionTimeoutMs ?? 120_000)
+          : (this.options.timeoutMs ?? 15_000),
+      );
       this.pending.set(id, { resolve, reject, timer });
       try {
         child.stdin.write(`${JSON.stringify(payload)}\n`);

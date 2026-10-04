@@ -152,6 +152,45 @@ describe('SetupWizard', () => {
     );
   });
 
+  it('requests and verifies the native system audio permission before continuing', async () => {
+    let verified = false;
+    const original = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (channel: string, key?: string) => {
+      if (channel === 'GET_SETTING' && key === 'setup_step') return '2';
+      if (channel === 'SYSTEM_AUDIO_PROBE') {
+        verified = true;
+        return true;
+      }
+      const result = await original(channel, key);
+      if (channel.startsWith('RECORDING_READINESS')) {
+        return {
+          ...result,
+          ready: verified,
+          details: { ...result.details, systemAudioPermission: verified },
+        };
+      }
+      return result;
+    });
+    act(() => root.render(<SetupWizard onComplete={vi.fn()} />));
+    await flush();
+    const allow = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Allow system audio'),
+    );
+    expect(allow).toBeTruthy();
+    await act(async () => allow?.click());
+    await flush();
+    expect(invoke).toHaveBeenCalledWith('SYSTEM_AUDIO_PROBE', {
+      durationMs: 1500,
+      allowSilent: true,
+    });
+    expect(container.textContent).toContain('Everything is ready.');
+    expect(
+      [...container.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Continue'),
+      )?.disabled,
+    ).toBe(false);
+  });
+
   it('offers a retry when local model preparation fails', async () => {
     invoke.mockImplementation(async (channel: string, key?: string) => {
       if (channel === 'GET_SETTING') return key === 'setup_step' ? '2' : null;

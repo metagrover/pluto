@@ -79,6 +79,14 @@ export const CalendarSettings = ({
       const next = await action();
       onSnapshotChange(next);
       setChoosing(false);
+      if (
+        action === connectCalendar &&
+        next.authorization === 'not_determined'
+      ) {
+        setError(
+          'Calendar access was not requested successfully. Quit Pluto, reopen the updated app, and connect again. Pluto appears in Calendar privacy settings after macOS handles the request.',
+        );
+      }
     } catch {
       setError('Calendar couldn’t be updated. Try again.');
     } finally {
@@ -142,10 +150,12 @@ export const CalendarSettings = ({
     return run(() => selectCalendars(chosen));
   };
 
+  const hasCalendarAccess = snapshot?.authorization === 'full_access';
   const needsChoice =
-    snapshot?.state === 'needs_selection' ||
-    snapshot?.state === 'selected_calendar_missing' ||
-    choosing;
+    hasCalendarAccess &&
+    (snapshot?.state === 'needs_selection' ||
+      snapshot?.state === 'selected_calendar_missing' ||
+      choosing);
 
   return (
     <section className="mb-10" aria-labelledby="calendar-context-title">
@@ -310,7 +320,17 @@ export const CalendarSettings = ({
           </div>
         ) : null}
 
-        {snapshot?.enabled && selectedList.length > 0 && !needsChoice ? (
+        {!hasCalendarAccess && selectedList.length > 0 ? (
+          <p className="border-t border-pro-border/40 px-5 py-4 text-[12px] leading-5 text-pro-text-muted">
+            Your calendar selection is saved in this profile. Connect Calendar
+            to verify access from this app.
+          </p>
+        ) : null}
+
+        {hasCalendarAccess &&
+        snapshot?.enabled &&
+        selectedList.length > 0 &&
+        !needsChoice ? (
           <div className="border-t border-pro-border/40 px-5 py-4">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">

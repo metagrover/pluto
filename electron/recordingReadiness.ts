@@ -24,6 +24,7 @@ type ReadinessOptions = {
   parakeetFinalClient: ParakeetFinalClient | null;
   parakeetModelRoot: string;
   audiocapPath: string;
+  systemAudioPermission?: boolean;
 };
 
 const evaluateRecordingReadiness = (
@@ -80,16 +81,12 @@ const evaluateRecordingReadiness = (
     blockers.push('mic_permission_missing');
   }
 
-  // System audio
-  if (process.platform !== 'darwin') {
-    details.systemAudioPermission = true;
-  } else {
-    const systemAudioStatus = systemPreferences.getMediaAccessStatus('screen');
-    if (systemAudioStatus === 'granted') {
-      details.systemAudioPermission = true;
-    } else {
-      blockers.push('system_audio_permission_missing');
-    }
+  // Core Audio tap permission is distinct from screen recording permission.
+  // Only a successful native capture probe establishes audio-only access.
+  details.systemAudioPermission =
+    process.platform !== 'darwin' || options.systemAudioPermission === true;
+  if (!details.systemAudioPermission) {
+    blockers.push('system_audio_permission_missing');
   }
 
   void options.parakeetModelRoot;

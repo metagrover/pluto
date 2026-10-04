@@ -27,15 +27,16 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   throw err;
 });
 
-initializeElectronLogging({ isPackaged: app.isPackaged });
-const log = createLogger('Bootstrap');
-
 let focusPrimaryWindow: (() => void) | null = null;
-const developmentUserDataDir = resolveUserDataArgument(process.argv);
-if (!app.isPackaged && developmentUserDataDir) {
-  app.setPath('userData', developmentUserDataDir);
+const explicitUserDataDir =
+  resolveUserDataArgument(process.argv) ||
+  process.env.PLUTO_USER_DATA_DIR?.trim();
+if (explicitUserDataDir) {
+  app.setPath('userData', explicitUserDataDir);
 }
 app.setName(PLUTO_PRODUCT_NAME);
+initializeElectronLogging({ isPackaged: app.isPackaged });
+const log = createLogger('Bootstrap');
 const productionSignature = app.isPackaged
   ? probeSignedMacBuild(process.execPath, {
       expectedIdentifier: PLUTO_BUNDLE_IDENTIFIER,

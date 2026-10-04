@@ -117,21 +117,33 @@ describe('packaged runtime resources', () => {
     }
   });
 
-  it.each(['valid', 'missing', 'unlaunchable', 'intel'])(
+  it.each(['valid', 'missing', 'unlaunchable', 'intel', 'missing-microphone'])(
     'checks executable media tools with an explicit app path (tools: %s)',
     async (mediaToolState) => {
       const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'pluto-app-'));
       const appPath = path.join(temporaryRoot, 'Pluto.app');
       const binPath = path.join(appPath, 'Contents', 'Resources', 'bin');
-      await mkdir(path.dirname(binPath), { recursive: true });
-      await writeFile(
-        path.join(appPath, 'Contents', 'Info.plist'),
-        '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIconFile</key><string>icon.icns</string></dict></plist>',
-      );
+      const contents = path.join(appPath, 'Contents');
+      await mkdir(path.join(contents, 'MacOS'), { recursive: true });
+      await mkdir(path.join(contents, 'Resources'), { recursive: true });
+      await copyFile('/usr/bin/true', path.join(contents, 'MacOS', 'Pluto'));
       await copyFile(
-        path.join(projectRoot, 'build', 'pluto.icns'),
-        path.join(appPath, 'Contents', 'Resources', 'icon.icns'),
+        path.join(projectRoot, 'build/pluto.icns'),
+        path.join(contents, 'Resources/icon.icns'),
       );
+      await writeFile(
+        path.join(contents, 'Info.plist'),
+        `<?xml version="1.0"?><plist version="1.0"><dict>
+        <key>CFBundleExecutable</key><string>Pluto</string>
+        <key>CFBundleIdentifier</key><string>com.pluto.fixture</string>
+        <key>CFBundlePackageType</key><string>APPL</string>
+        <key>CFBundleIconFile</key><string>icon.icns</string>
+        <key>NSMicrophoneUsageDescription</key><string>Fixture audio</string>
+        <key>NSAudioCaptureUsageDescription</key><string>Fixture system audio</string>
+        <key>NSCalendarsFullAccessUsageDescription</key><string>Fixture calendar</string>
+      </dict></plist>`,
+      );
+
       for (const relativePath of [
         'audiocap',
         'parakeet-runtime',
@@ -140,7 +152,7 @@ describe('packaged runtime resources', () => {
       ]) {
         const executable = path.join(binPath, relativePath);
         await mkdir(path.dirname(executable), { recursive: true });
-        await writeFile(executable, 'fixture');
+        await copyFile('/usr/bin/true', executable);
         await chmod(executable, 0o755);
       }
       const helperInfoPath = path.join(
@@ -150,7 +162,7 @@ describe('packaged runtime resources', () => {
       await mkdir(path.dirname(helperInfoPath), { recursive: true });
       await writeFile(
         helperInfoPath,
-        '<key>NSCalendarsFullAccessUsageDescription</key>',
+        '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>PlutoCalendarHelper</string><key>CFBundleIdentifier</key><string>com.pluto.fixture.calendar</string><key>CFBundlePackageType</key><string>APPL</string><key>NSCalendarsFullAccessUsageDescription</key><string>Fixture calendar</string></dict></plist>',
       );
 
       const nodeModules = path.join(
@@ -177,7 +189,10 @@ describe('packaged runtime resources', () => {
         ]) {
           const destination = path.join(nodeModules, relative);
           await mkdir(path.dirname(destination), { recursive: true });
-          if (mediaToolState === 'valid')
+          if (
+            mediaToolState === 'valid' ||
+            mediaToolState === 'missing-microphone'
+          )
             await copyFile(installed, destination);
           else {
             const header = Buffer.alloc(32);
@@ -193,6 +208,30 @@ describe('packaged runtime resources', () => {
           }
         }
       }
+      await execFileAsync('codesign', [
+        '--force',
+        '--sign',
+        '-',
+        path.join(binPath, 'PlutoCalendarHelper.app'),
+      ]);
+      const entitlementPath =
+        mediaToolState === 'missing-microphone'
+          ? path.join(temporaryRoot, 'empty-entitlements.plist')
+          : path.join(projectRoot, 'build/entitlements.mac.plist');
+      if (mediaToolState === 'missing-microphone') {
+        await writeFile(
+          entitlementPath,
+          '<?xml version="1.0"?><plist version="1.0"><dict/></plist>',
+        );
+      }
+      await execFileAsync('codesign', [
+        '--force',
+        '--sign',
+        '-',
+        '--entitlements',
+        entitlementPath,
+        appPath,
+      ]);
       try {
         const verification = execFileAsync(process.execPath, [
           path.join(projectRoot, 'scripts/verify_packaged_runtime.mjs'),
@@ -203,6 +242,10 @@ describe('packaged runtime resources', () => {
           await expect(verification).resolves.toMatchObject({
             stdout: 'Verified Pluto icon and 6 packaged runtimes.\n',
           });
+        else if (mediaToolState === 'missing-microphone')
+          await expect(verification).rejects.toThrow(
+            'lacks microphone entitlement',
+          );
         else if (mediaToolState === 'intel')
           await expect(verification).rejects.toThrow('architecture mismatch');
         else await expect(verification).rejects.toThrow();

@@ -1,6 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { constants, existsSync, readFileSync, statSync } from 'node:fs';
 import { access } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { verifyMediaExecutable } from './verify_media_executable.mjs';
@@ -8,11 +8,38 @@ import { verifyMediaExecutable } from './verify_media_executable.mjs';
 const requestedPath = process.argv
   .slice(2)
   .find((argument) => argument !== '--');
+const packageVersion = JSON.parse(readFileSync('package.json', 'utf8')).version;
 const appPath = path.resolve(
-  requestedPath ?? 'release/0.1.0/mac-arm64/Pluto.app',
+  requestedPath ?? `release/${packageVersion}/mac-arm64/Pluto.app`,
 );
 const resourcesRoot = path.join(appPath, 'Contents', 'Resources');
 const resourcesPath = path.join(resourcesRoot, 'bin');
+const plistValue = (plist, key) =>
+  execFileSync('plutil', ['-extract', key, 'raw', '-o', '-', plist], {
+    encoding: 'utf8',
+  }).trim();
+const appInfo = path.join(appPath, 'Contents', 'Info.plist');
+for (const key of [
+  'NSMicrophoneUsageDescription',
+  'NSAudioCaptureUsageDescription',
+  'NSCalendarsFullAccessUsageDescription',
+]) {
+  if (!plistValue(appInfo, key))
+    throw new Error(`Missing permission purpose: ${key}`);
+}
+execFileSync('codesign', ['--verify', '--deep', '--strict', appPath]);
+const entitlements = execFileSync(
+  'codesign',
+  ['--display', '--entitlements', ':-', appPath],
+  { encoding: 'utf8' },
+);
+if (
+  !/<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\s*\/>/.test(
+    entitlements,
+  )
+) {
+  throw new Error('Packaged app lacks microphone entitlement.');
+}
 const iconName = execFileSync(
   'plutil',
   [

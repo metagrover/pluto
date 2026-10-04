@@ -213,7 +213,17 @@ private func runBridge() async {
         outputLock.unlock()
     }
 
-    while let line = readLine(strippingNewline: true) {
+    // Blocking stdin must not occupy the main actor: EventKit authorization
+    // and store-change delivery need it while the client is idle.
+    let lines = AsyncStream<String> { continuation in
+        DispatchQueue.global(qos: .userInitiated).async {
+            while let line = readLine(strippingNewline: true) {
+                continuation.yield(line)
+            }
+            continuation.finish()
+        }
+    }
+    for await line in lines {
         guard let data = line.data(using: .utf8) else { continue }
         var requestID: String?
         do {
@@ -243,4 +253,4 @@ Task { @MainActor in
     await runBridge()
     exit(EXIT_SUCCESS)
 }
-dispatchMain()
+RunLoop.main.run()

@@ -88,7 +88,9 @@ chosen model.
 
 1. Follow the setup screen to download and verify the local transcription
    models. Wait for setup to finish before recording.
-2. Grant **Microphone** and **System Audio Recording** access when prompted.
+2. Click **Allow microphone** and **Allow system audio** during setup. The
+   system audio check briefly plays a test sound and requests macOS access.
+   Grant **Microphone** and **System Audio Recording** access when prompted.
    Calendar access is optional. See [macOS permissions](#macos-permissions).
 3. Open **Settings → Intelligence** and choose a provider for notes and chat:
    use Ollama with installed local models, or enter your own cloud API key.
@@ -109,6 +111,11 @@ Speech models and Ollama models are separate downloads. For provider setup, see
 | Microphone | Capture your microphone input. |
 | System Audio Recording | Capture audio playing through your Mac. The settings category may be called **Screen & System Audio Recording**, depending on macOS. |
 | Calendar, optional | Read local calendar events for upcoming meetings and preparation. Pluto does not write calendar events. |
+
+Calendar reads the accounts already configured in the macOS Calendar app; an
+Apple ID is only needed for iCloud calendars, not for microphone or system audio
+access. Local, Google, and Exchange calendars can also be used. Allow time to
+answer the calendar permission dialog.
 
 Review permissions in **System Settings → Privacy & Security**. Restart Pluto
 after changing them. The capture path records audio; it does not record screen
@@ -210,12 +217,20 @@ choice of intelligence provider determines whether meeting text leaves your Mac.
 ### Local profiles
 
 `pnpm dev` and `pnpm start` share the default macOS profile at
-`~/Library/Application Support/pluto`. To keep development recordings separate
-from your regular meeting history, run:
+`~/Library/Application Support/pluto`, also used by the installed app. Saved
+meetings and calendar selections belong to that profile. macOS permissions
+belong to the running app and may need to be granted again when switching
+between source and packaged builds. A saved calendar selection does not grant
+Calendar access to another build.
+
+To keep test recordings separate from your regular meeting history, run:
 
 ```bash
 PLUTO_USER_DATA_DIR="$HOME/Library/Application Support/pluto-sandbox" pnpm dev
 ```
+
+Packaged builds also honor `PLUTO_USER_DATA_DIR` or `--user-data-dir=/absolute/path`
+when launching the app executable. Profile overrides do not copy or merge data.
 
 A fresh profile chooses its database setup before the database is created.
 The choice is fixed for that profile and shown in Advanced settings. Only
