@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-macos:
     name: Build & Verify macOS DMG
@@ -52,6 +56,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test before packaging
+        run: |
+          pnpm run changelog:check
+          pnpm run test:release-workflow
+          pnpm exec vitest run
+
       - name: Build Native Runtimes
         run: pnpm run build-native
 
@@ -73,6 +83,13 @@ jobs:
           test -s "$DMG"
           mkdir -p dist-release
           cp "$DMG" dist-release/
+          NOTES="docs/releases/${GITHUB_REF_NAME}.md"
+          if [[ -s "$NOTES" ]]; then
+            cp "$NOTES" dist-release/release-notes.md
+          elif [[ "${GITHUB_REF}" == refs/tags/* && "${GITHUB_REF_NAME}" != *.rc.* ]]; then
+            echo "Missing release notes: $NOTES. Use pnpm release." >&2
+            exit 1
+          fi
           cd dist-release
           shasum -a 256 *.dmg > SHA256SUMS.txt
           cat SHA256SUMS.txt
@@ -111,9 +128,24 @@ jobs:
           RELEASE_VERSION="${RELEASE_TAG#v}"
           RELEASE_FLAGS=()
           if [[ "${RELEASE_VERSION}" == *-* || "${RELEASE_VERSION}" == *.rc.* ]]; then
-            RELEASE_FLAGS+=(--prerelease)
+            RELEASE_FLAGS+=(--prerelease --latest=false)
           fi
-          gh release create "${RELEASE_TAG}" dist-release/* \
+          if [[ -s dist-release/release-notes.md ]]; then
+            RELEASE_FLAGS+=(--notes-file dist-release/release-notes.md)
+          else
+            # Compatibility for historical tags created before pnpm release.
+            RELEASE_FLAGS+=(--generate-notes)
+          fi
+          if gh release view "${RELEASE_TAG}" --json isDraft >/dev/null 2>&1; then
+            if [[ "$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)" == false ]]; then
+              echo "Release ${RELEASE_TAG} is already published."
+              exit 0
+            fi
+            gh release upload "${RELEASE_TAG}" dist-release/*.dmg dist-release/SHA256SUMS.txt --clobber
+            gh release edit "${RELEASE_TAG}" --draft=false
+            exit 0
+          fi
+          gh release create "${RELEASE_TAG}" dist-release/*.dmg dist-release/SHA256SUMS.txt \
             --verify-tag \
             --title "Pluto ${RELEASE_TAG}" \
-            --generate-notes "${RELEASE_FLAGS[@]}"
+            "${RELEASE_FLAGS[@]}"

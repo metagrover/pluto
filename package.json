@@ -25,6 +25,8 @@
     "build:calendar-helper": "./scripts/build_calendar_helper.sh",
     "ensure:media-tools": "node scripts/verify_media_runtime.mjs",
     "package:verify-runtime": "node scripts/verify_packaged_runtime.mjs",
+    "release": "node scripts/release.mjs",
+    "test:release-workflow": "node --test scripts/release.test.mjs",
     "lint": "biome lint .",
     "format": "biome format . --write",
     "check": "biome check .",
