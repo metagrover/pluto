@@ -37,15 +37,25 @@ public actor ModelStore {
             throw RuntimeFailure.modelPreparationFailed
         }
 
-        if try activeVersion() == manifest.version {
-            let active = versionDirectory(for: manifest.version)
-            if fileManager.fileExists(atPath: active.path) {
-                do {
-                    try await installer.validate(manifest: manifest, at: active)
-                    return active
-                } catch {
-                    // Reinstall below. Model bundles are rebuildable cache data.
+        let installed = versionDirectory(for: manifest.version)
+        if fileManager.fileExists(atPath: installed.path) {
+            progressHandler?(ModelPreparationProgress(
+                phase: .verifying, downloadedBytes: 0, totalBytes: 0
+            ))
+            var valid = false
+            do {
+                // The pinned bundle is authoritative. A missing/stale activation
+                // pointer must not force another download of a valid install.
+                try await installer.validate(manifest: manifest, at: installed)
+                valid = true
+            } catch {
+                // Reinstall below only when the cached bundle fails validation.
+            }
+            if valid {
+                if (try? activeVersion()) != manifest.version {
+                    try writeActivation(version: manifest.version)
                 }
+                return installed
             }
         }
 

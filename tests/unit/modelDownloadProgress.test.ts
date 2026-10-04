@@ -44,6 +44,24 @@ describe('model download progress', () => {
     ).toBe('986 MB downloaded · Verifying models');
   });
 
+  it.each(['verifying', 'loading'] as const)(
+    'labels cached %s without invented transfer bytes',
+    (phase) => {
+      expect(
+        formatDownloadProgress({
+          phase,
+          downloadedBytes: 0,
+          totalBytes: 0,
+          bytesPerSecond: null,
+        }),
+      ).toBe(
+        phase === 'verifying'
+          ? 'Verifying installed models'
+          : 'Loading installed models',
+      );
+    },
+  );
+
   it('uses a short rolling window and resets when bytes move backward', () => {
     const tracker = new DownloadSpeedTracker(3_000);
 

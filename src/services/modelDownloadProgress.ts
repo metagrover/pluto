@@ -83,6 +83,10 @@ export const formatDownloadProgress = (
   progress: ModelDownloadProgress,
 ): string => {
   if (progress.phase === 'sizing') return 'Calculating download size';
+  if (progress.totalBytes === 0 && progress.phase === 'verifying')
+    return 'Verifying installed models';
+  if (progress.totalBytes === 0 && progress.phase === 'loading')
+    return 'Loading installed models';
   if (progress.phase === 'loading') {
     return `${formatBytes(progress.downloadedBytes)} of ${formatBytes(progress.totalBytes)} downloaded · Loading models`;
   }

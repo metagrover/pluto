@@ -68,6 +68,46 @@ final class ModelStoreTests: XCTestCase {
         XCTAssertEqual(installedVersions, ["same-version"])
     }
 
+    func testRestartReusesValidInstalledModelsWithoutDownloading() async throws {
+        let root = try makeRoot()
+        let manifest = ModelManifest.fixture(version: "same-version")
+        let initialInstaller = FakeModelInstaller()
+        let store = ModelStore(root: root, installer: initialInstaller)
+        let installed = try await store.prepare(manifest: manifest)
+
+        let restartedInstaller = FakeModelInstaller()
+        await restartedInstaller.setShouldFail(true) // Downloads are unavailable.
+        let restarted = ModelStore(root: root, installer: restartedInstaller)
+        let reused = try await restarted.prepare(manifest: manifest)
+        XCTAssertEqual(reused, installed)
+        let downloads = await restartedInstaller.installedVersions
+        XCTAssertTrue(downloads.isEmpty)
+    }
+
+    func testLostStaleOrMalformedActivationReusesValidInstalledModels() async throws {
+        for activation in [nil, "{\"version\":\"older-version\"}", "invalid"] as [String?] {
+            let root = try makeRoot()
+            let manifest = ModelManifest.fixture(version: "same-version")
+            let installer = FakeModelInstaller()
+            let store = ModelStore(root: root, installer: installer)
+            let installed = try await store.prepare(manifest: manifest)
+            let state = root.appendingPathComponent("active.json")
+            if let activation {
+                try Data(activation.utf8).write(to: state)
+            } else {
+                try FileManager.default.removeItem(at: state)
+            }
+            await installer.setShouldFail(true)
+            let restarted = ModelStore(root: root, installer: installer)
+            let reused = try await restarted.prepare(manifest: manifest)
+            XCTAssertEqual(reused, installed)
+            let activeVersion = try await restarted.activeVersion()
+            XCTAssertEqual(activeVersion, manifest.version)
+            let downloads = await installer.installedVersions
+            XCTAssertEqual(downloads, [manifest.version])
+        }
+    }
+
     func testPreparingSameVersionRepairsAnIncompleteActiveInstall() async throws {
         let root = try makeRoot()
         let installer = FakeModelInstaller()

@@ -94,7 +94,8 @@ describe('RuntimeReadinessGate', () => {
     );
     await act(async () => await Promise.resolve());
 
-    expect(container.textContent).toContain('Preparing local transcription');
+    expect(container.textContent).toContain('Checking local transcription');
+    expect(container.textContent).not.toContain('Downloading or repairing');
     expect(container.textContent).not.toContain('Pluto workspace');
     expect(invoke).toHaveBeenCalledWith('RECORDING_READINESS_PREPARE');
 
@@ -105,6 +106,7 @@ describe('RuntimeReadinessGate', () => {
         totalBytes: 986_000_000,
       });
     });
+    expect(container.textContent).toContain('Downloading local transcription');
     expect(container.textContent).toContain('438 MB of 986 MB');
     expect(
       container
@@ -115,6 +117,41 @@ describe('RuntimeReadinessGate', () => {
     await act(async () => finishPreparation(readiness(true)));
 
     expect(container.textContent).toContain('Pluto workspace');
+  });
+
+  it('shows local verification on restart without claiming a download', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    invoke.mockImplementation((channel: string) =>
+      channel === 'RECORDING_READINESS_STATUS'
+        ? Promise.resolve(readiness(false))
+        : new Promise((resolve) => {
+            finish = resolve;
+          }),
+    );
+    act(() =>
+      root.render(
+        <RuntimeReadinessGate>
+          <div>Workspace</div>
+        </RuntimeReadinessGate>,
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() =>
+      listeners.get('RECORDING_READINESS_PROGRESS')?.(undefined, {
+        phase: 'verifying',
+        downloadedBytes: 0,
+        totalBytes: 0,
+      }),
+    );
+    expect(container.textContent).toContain('Verifying installed models');
+    expect(container.textContent).not.toContain(
+      'Downloading local transcription',
+    );
+    expect(container.textContent).not.toContain('KB downloaded');
+    await act(async () => finish(readiness(true)));
+    expect(container.textContent).toContain('Workspace');
   });
 
   it('ends in an explicit retry state when automatic repair fails', async () => {

@@ -61,16 +61,26 @@ export const RuntimeReadinessGate = ({
   if (phase === 'ready') return children;
 
   const failed = phase === 'error';
+  const downloading =
+    phase === 'preparing' &&
+    (modelDownloadProgress?.phase === 'sizing' ||
+      modelDownloadProgress?.phase === 'downloading');
+  const loading =
+    phase === 'preparing' && modelDownloadProgress?.phase === 'loading';
   const title = failed
     ? 'Local transcription needs attention'
-    : phase === 'preparing'
-      ? 'Preparing local transcription'
-      : 'Checking local transcription';
+    : downloading
+      ? 'Downloading local transcription'
+      : loading
+        ? 'Loading local transcription'
+        : 'Checking local transcription';
   const description = failed
     ? "Pluto couldn't prepare the English transcription models. Check your connection, then try again."
-    : phase === 'preparing'
-      ? 'Downloading or repairing the local models. Keep Pluto open.'
-      : 'Verifying the English Parakeet models on this Mac.';
+    : downloading
+      ? 'Downloading missing or damaged models. Keep Pluto open.'
+      : loading
+        ? 'Loading the verified models from this Mac.'
+        : 'Verifying the English Parakeet models on this Mac. Valid installed models are reused without downloading.';
 
   return (
     <main className="app-init-drag flex h-screen w-screen items-center justify-center bg-pro-bg px-8 text-pro-text-main">
