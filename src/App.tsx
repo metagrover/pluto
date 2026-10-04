@@ -192,6 +192,7 @@ export const resolveMeetingRetryRoute = (
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
+  const [setupRecoveryMode, setSetupRecoveryMode] = useState(false);
   const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
   const [selectedMeetingDetail, setSelectedMeetingDetail] =
     useState<Meeting | null>(meetingPreviewEnabled ? previewMeeting : null);
@@ -380,6 +381,9 @@ function App() {
   const [meetingCalendarContext, setMeetingCalendarContext] =
     useState<MeetingCalendarContext | null>(null);
   const [calendarLoading, setCalendarLoading] = useState(true);
+  const [calendarConnectError, setCalendarConnectError] = useState<
+    string | null
+  >(null);
   const [preMeetingBriefVisible, setPreMeetingBriefVisible] = useState(false);
   const [preMeetingBriefEvent, setPreMeetingBriefEvent] =
     useState<CalendarEvent | null>(null);
@@ -469,8 +473,14 @@ function App() {
 
   const handleCalendarConnect = async () => {
     setCalendarLoading(true);
+    setCalendarConnectError(null);
     try {
       let snapshot = await connectCalendar();
+      if (snapshot.state === 'not_determined') {
+        setCalendarConnectError(
+          'macOS did not show a Calendar access prompt. Check Privacy & Security → Calendars in System Settings, then try again.',
+        );
+      }
       if (
         snapshot.state === 'needs_selection' &&
         snapshot.calendars.length === 1
@@ -478,6 +488,11 @@ function App() {
         snapshot = await selectCalendar(snapshot.calendars[0]);
       }
       await loadCalendarAgenda(snapshot);
+    } catch (error) {
+      console.error('[Calendar] Failed to connect', error);
+      setCalendarConnectError(
+        'Calendar access could not be requested. Open Calendar privacy settings, then try again.',
+      );
     } finally {
       setCalendarLoading(false);
     }
@@ -1970,7 +1985,10 @@ function App() {
   }, [permissionStatus]);
 
   useEffect(() => {
-    const handleReadinessFailed = () => setSetupNeeded(true);
+    const handleReadinessFailed = () => {
+      setSetupRecoveryMode(true);
+      setSetupNeeded(true);
+    };
     window.addEventListener(
       'RECORDING_READINESS_FAILED' as any,
       handleReadinessFailed,
@@ -2029,7 +2047,15 @@ function App() {
       </div>
     );
   if (setupNeeded)
-    return <SetupWizard onComplete={() => setSetupNeeded(false)} />;
+    return (
+      <SetupWizard
+        recoveryMode={setupRecoveryMode}
+        onComplete={() => {
+          setSetupRecoveryMode(false);
+          setSetupNeeded(false);
+        }}
+      />
+    );
 
   const workspace = (
     <div className="flex h-screen w-screen bg-pro-bg text-pro-text-main font-sans overflow-hidden hover:cursor-default selection:bg-pro-accent/20">
@@ -2322,7 +2348,11 @@ function App() {
                   calendarSnapshot={calendarSnapshot}
                   calendarEvents={calendarEvents}
                   calendarLoading={calendarLoading}
+                  calendarConnectError={calendarConnectError}
                   onCalendarConnect={handleCalendarConnect}
+                  onCalendarOpenPrivacy={() => {
+                    void openCalendarSystemSettings('privacy');
+                  }}
                   onCalendarSelect={handleCalendarSelect}
                   onCalendarSelectCalendars={handleCalendarSelectCalendars}
                   onCalendarRefresh={handleCalendarRefresh}

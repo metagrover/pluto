@@ -184,6 +184,123 @@ describe('SetupWizard', () => {
     expect(container.textContent).toContain('Try again');
   });
 
+  it('opens Microphone settings when access was already denied', async () => {
+    invoke.mockImplementation(async (channel: string, key?: string) => {
+      if (channel === 'GET_SETTING') return key === 'setup_step' ? '2' : null;
+      if (channel === 'CHECK_MICROPHONE_PERMISSION') return 'denied';
+      if (channel === 'RECORDING_READINESS_STATUS') {
+        return {
+          details: {
+            parakeetClient: true,
+            parakeetModel: true,
+            parakeetEouReady: true,
+            audiocapExists: true,
+            audiocapExecutable: true,
+            micPermission: false,
+            systemAudioPermission: true,
+          },
+        };
+      }
+      return true;
+    });
+
+    act(() => root.render(<SetupWizard onComplete={vi.fn()} />));
+    await flush();
+
+    expect(container.textContent).toContain(
+      'Enable Pluto in Microphone settings',
+    );
+    const openSettings = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.includes('Open Settings'),
+    );
+    expect(openSettings).toBeTruthy();
+
+    await act(async () => openSettings?.click());
+
+    expect(invoke).toHaveBeenCalledWith(
+      'OPEN_SYSTEM_SETTINGS_PRIVACY',
+      'microphone',
+    );
+    expect(invoke).not.toHaveBeenCalledWith('REQUEST_MICROPHONE_PERMISSION');
+  });
+
+  it('requests microphone access when the decision is not determined', async () => {
+    invoke.mockImplementation(async (channel: string, key?: string) => {
+      if (channel === 'GET_SETTING') return key === 'setup_step' ? '2' : null;
+      if (channel === 'CHECK_MICROPHONE_PERMISSION') return 'not-determined';
+      if (channel === 'RECORDING_READINESS_STATUS') {
+        return {
+          details: {
+            parakeetClient: true,
+            parakeetModel: true,
+            parakeetEouReady: true,
+            audiocapExists: true,
+            audiocapExecutable: true,
+            micPermission: false,
+            systemAudioPermission: true,
+          },
+        };
+      }
+      return true;
+    });
+
+    act(() => root.render(<SetupWizard onComplete={vi.fn()} />));
+    await flush();
+
+    const allow = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Allow microphone'),
+    );
+    expect(allow).toBeTruthy();
+
+    await act(async () => allow?.click());
+
+    expect(invoke).toHaveBeenCalledWith('REQUEST_MICROPHONE_PERMISSION');
+    expect(invoke).not.toHaveBeenCalledWith(
+      'OPEN_SYSTEM_SETTINGS_PRIVACY',
+      'microphone',
+    );
+  });
+
+  it('keeps the readiness screen open after a completed setup fails recording readiness', async () => {
+    const onComplete = vi.fn();
+    invoke.mockImplementation(async (channel: string, key?: string) => {
+      if (channel === 'GET_SETTING') {
+        if (key === 'setup_complete') return 'true';
+        if (key === 'setup_step') return '3';
+      }
+      if (channel === 'CHECK_MICROPHONE_PERMISSION') return 'denied';
+      if (channel === 'RECORDING_READINESS_STATUS') {
+        return {
+          details: {
+            parakeetClient: true,
+            parakeetModel: true,
+            parakeetEouReady: true,
+            audiocapExists: true,
+            audiocapExecutable: true,
+            micPermission: false,
+            systemAudioPermission: true,
+          },
+        };
+      }
+      return true;
+    });
+
+    act(() =>
+      root.render(<SetupWizard recoveryMode onComplete={onComplete} />),
+    );
+    await flush();
+
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Getting Pluto ready');
+    expect(container.textContent).toContain('Open Settings');
+    expect(container.textContent).toContain('Return to Pluto');
+    expect(
+      [...container.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Return to Pluto'),
+      )?.disabled,
+    ).toBe(true);
+  });
+
   it('shows model size, downloaded bytes, speed, and determinate progress', async () => {
     let finishPreparation: (value: unknown) => void = () => undefined;
     invoke.mockImplementation((channel: string, key?: string) => {

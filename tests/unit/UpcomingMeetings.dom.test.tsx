@@ -138,6 +138,32 @@ afterEach(() => {
 });
 
 describe('UpcomingMeetings', () => {
+  it('shows a recovery action when Calendar does not show a permission prompt', () => {
+    const onOpenPrivacy = vi.fn();
+    const agenda = render({
+      snapshot: snapshot({
+        state: 'not_determined',
+        authorization: 'not_determined',
+        enabled: false,
+        selectedCalendar: null,
+        selectedCalendars: [],
+      }),
+      events: [],
+      connectError: 'macOS did not show a Calendar access prompt.',
+      onOpenPrivacy,
+    });
+
+    expect(
+      agenda.container.querySelector('[role="alert"]')?.textContent,
+    ).toContain('macOS did not show a Calendar access prompt.');
+    const openSettings = [...agenda.container.querySelectorAll('button')].find(
+      (button) => button.textContent?.includes('Open Calendar settings'),
+    );
+    act(() => openSettings?.click());
+    expect(onOpenPrivacy).toHaveBeenCalledOnce();
+    act(() => agenda.root.unmount());
+  });
+
   it('formats durations in minutes below an hour and hours with remaining minutes', () => {
     const durations = [30, 60, 115, 120, 500];
     const events = durations.map((minutes, index) => ({

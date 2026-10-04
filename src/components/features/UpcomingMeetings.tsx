@@ -11,7 +11,9 @@ interface UpcomingMeetingsProps {
   snapshot: CalendarIntegrationSnapshot | null;
   events: CalendarEvent[];
   loading: boolean;
+  connectError?: string | null;
   onConnect: () => Promise<void>;
+  onOpenPrivacy?: () => void;
   onSelectCalendar?: (calendar: CalendarDescriptor) => Promise<void>;
   onSelectCalendars?: (calendars: CalendarDescriptor[]) => Promise<void>;
   onRefreshCalendar: () => Promise<void>;
@@ -99,7 +101,9 @@ export const UpcomingMeetings = ({
   snapshot,
   events,
   loading,
+  connectError = null,
   onConnect,
+  onOpenPrivacy = () => {},
   onSelectCalendar,
   onSelectCalendars,
   onRefreshCalendar,
@@ -269,6 +273,21 @@ export const UpcomingMeetings = ({
             >
               Connect calendar
             </button>
+            {connectError && (
+              <div
+                role="alert"
+                className="mt-2 text-[11px] leading-5 text-rose-700"
+              >
+                <p>{connectError}</p>
+                <button
+                  type="button"
+                  onClick={onOpenPrivacy}
+                  className="mt-1 font-semibold underline"
+                >
+                  Open Calendar settings
+                </button>
+              </div>
+            )}
           </div>
         ) : snapshot.state === 'denied' || snapshot.state === 'restricted' ? (
           <RecoveryAction

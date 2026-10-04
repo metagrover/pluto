@@ -276,6 +276,29 @@ describe('App recording navigation', () => {
     window.__PLUTO_BROWSER_PREVIEW__ = undefined;
   });
 
+  it('reopens readiness recovery after setup was completed', async () => {
+    const { default: App } = await import('../../src/App');
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<App />);
+      await flushPromises();
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('RECORDING_READINESS_FAILED', {
+          detail: { ready: false, blockers: ['mic_permission_missing'] },
+        }),
+      );
+      await flushPromises();
+    });
+
+    expect(container.textContent).toContain('Getting Pluto ready');
+    expect(container.textContent).toContain('Return to Pluto');
+    expect(container.textContent).not.toContain('Daily briefing');
+    await act(async () => root.unmount());
+  });
+
   it('commits the calendar heading and prep notes before starting the selected occurrence', async () => {
     calendarForTest = makeCalendarEvent();
     const { default: App } = await import('../../src/App');

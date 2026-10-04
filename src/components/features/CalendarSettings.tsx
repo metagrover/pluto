@@ -72,13 +72,21 @@ export const CalendarSettings = ({
     setStagedIds(new Set(selectedList.map((c) => c.identifier)));
   }
 
-  const run = async (action: () => Promise<CalendarIntegrationSnapshot>) => {
+  const run = async (
+    action: () => Promise<CalendarIntegrationSnapshot>,
+    requestingAccess = false,
+  ) => {
     setBusy(true);
     setError(null);
     try {
       const next = await action();
       onSnapshotChange(next);
       setChoosing(false);
+      if (requestingAccess && next.state === 'not_determined') {
+        setError(
+          'macOS did not show a Calendar access prompt. Check Privacy & Security → Calendars in System Settings, then try again.',
+        );
+      }
     } catch {
       setError('Calendar couldn’t be updated. Try again.');
     } finally {
@@ -183,7 +191,7 @@ export const CalendarSettings = ({
             <button
               type="button"
               disabled={busy}
-              onClick={() => void run(connectCalendar)}
+              onClick={() => void run(connectCalendar, true)}
               className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg bg-pro-accent px-4 text-[12px] font-semibold text-white transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
             >
               {busy ? 'Connecting…' : 'Connect Calendar'}
@@ -378,12 +386,19 @@ export const CalendarSettings = ({
         ) : null}
 
         {error ? (
-          <p
+          <div
             role="alert"
             className="border-t border-pro-border/40 px-5 py-3 text-[11px] font-semibold text-pro-urgent"
           >
-            {error}
-          </p>
+            <p>{error}</p>
+            <button
+              type="button"
+              onClick={() => void openCalendarSystemSettings('privacy')}
+              className="mt-1 underline"
+            >
+              Open Calendar settings
+            </button>
+          </div>
         ) : null}
       </div>
     </section>

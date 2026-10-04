@@ -78,6 +78,26 @@ afterEach(() => {
 });
 
 describe('CalendarSettings', () => {
+  it('explains when a Calendar permission request leaves access undecided', async () => {
+    api.connectCalendar.mockResolvedValue(snapshot());
+    const { container, root } = render(snapshot());
+
+    const connect = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Connect Calendar'),
+    );
+    await act(async () => connect?.click());
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'macOS did not show a Calendar access prompt',
+    );
+    const openSettings = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.includes('Open Calendar settings'),
+    );
+    await act(async () => openSettings?.click());
+    expect(api.openCalendarSystemSettings).toHaveBeenCalledWith('privacy');
+    act(() => root.unmount());
+  });
+
   it('explains the native full-access boundary before connecting', () => {
     const { container, root } = render(snapshot());
     expect(container.textContent).toContain('Calendar context');

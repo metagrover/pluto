@@ -27,7 +27,15 @@ import { WindowDragRegion } from '../layout/WindowDragRegion';
 
 interface SetupWizardProps {
   onComplete: () => void;
+  recoveryMode?: boolean;
 }
+
+type MicrophoneAccessStatus =
+  | 'not-determined'
+  | 'granted'
+  | 'denied'
+  | 'restricted'
+  | 'unknown';
 
 const requirementTone = (ready: boolean, blocked = false) =>
   ready
@@ -36,9 +44,16 @@ const requirementTone = (ready: boolean, blocked = false) =>
       ? 'text-rose-700'
       : 'text-[oklch(0.53_0.12_255)]';
 
-export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
+export const SetupWizard = ({
+  onComplete,
+  recoveryMode = false,
+}: SetupWizardProps) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [setupError, setSetupError] = useState('');
+  const [microphoneError, setMicrophoneError] = useState('');
+  const [microphoneAccessStatus, setMicrophoneAccessStatus] =
+    useState<MicrophoneAccessStatus>('unknown');
+  const [microphoneBusy, setMicrophoneBusy] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [typedSetupQualifier, setTypedSetupQualifier] = useState('');
@@ -56,9 +71,13 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   );
 
   const checkReadiness = useCallback(async () => {
-    const status = await window.ipcRenderer.invoke(
-      'RECORDING_READINESS_STATUS',
-    );
+    const [status, microphoneStatus] = await Promise.all([
+      window.ipcRenderer.invoke('RECORDING_READINESS_STATUS'),
+      window.ipcRenderer.invoke(
+        'CHECK_MICROPHONE_PERMISSION',
+      ) as Promise<MicrophoneAccessStatus>,
+    ]);
+    setMicrophoneAccessStatus(microphoneStatus);
     setRequirements((current) => {
       const isTranscriptionReady =
         status.details.parakeetClient &&
@@ -114,15 +133,17 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         window.ipcRenderer.invoke('GET_SETTING', 'setup_complete'),
         window.ipcRenderer.invoke('GET_SETTING', 'setup_step'),
       ]);
-      if (setupComplete === 'true') {
+      if (setupComplete === 'true' && !recoveryMode) {
         onComplete();
         return;
       }
-      setStep(savedStep === '3' ? 3 : savedStep === '2' ? 2 : 1);
+      setStep(
+        recoveryMode ? 2 : savedStep === '3' ? 3 : savedStep === '2' ? 2 : 1,
+      );
       setHydrated(true);
     };
     void load();
-  }, [onComplete]);
+  }, [onComplete, recoveryMode]);
 
   useEffect(() => {
     if (!hydrated || step !== 2) return;
@@ -165,8 +186,33 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   };
 
   const requestMicrophone = async () => {
-    await window.ipcRenderer.invoke('REQUEST_MICROPHONE_PERMISSION');
-    await checkReadiness();
+    setMicrophoneBusy(true);
+    setMicrophoneError('');
+    try {
+      const status = (await window.ipcRenderer.invoke(
+        'CHECK_MICROPHONE_PERMISSION',
+      )) as MicrophoneAccessStatus;
+      if (status === 'denied' || status === 'restricted') {
+        const opened = await window.ipcRenderer.invoke(
+          'OPEN_SYSTEM_SETTINGS_PRIVACY',
+          'microphone',
+        );
+        if (!opened) {
+          setMicrophoneError(
+            'Open System Settings → Privacy & Security → Microphone and enable Pluto.',
+          );
+        }
+      } else if (status !== 'granted') {
+        await window.ipcRenderer.invoke('REQUEST_MICROPHONE_PERMISSION');
+      }
+      await checkReadiness();
+    } catch {
+      setMicrophoneError(
+        'Could not request microphone access. Open System Settings → Privacy & Security → Microphone and enable Pluto.',
+      );
+    } finally {
+      setMicrophoneBusy(false);
+    }
   };
 
   const openSystemAudioSettings = async () => {
@@ -178,6 +224,10 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
   const continueToProfile = async () => {
     if (!readiness.canComplete) return;
+    if (recoveryMode) {
+      onComplete();
+      return;
+    }
     setFinishing(true);
     setSetupError('');
     try {
@@ -349,20 +399,46 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 <RequirementRow
                   icon={<Mic size={20} />}
                   title="Microphone"
-                  detail="Records your voice"
+                  detail={
+                    microphoneAccessStatus === 'denied'
+                      ? 'Access is off. Enable Pluto in Microphone settings.'
+                      : microphoneAccessStatus === 'restricted'
+                        ? 'Microphone access is restricted by macOS.'
+                        : 'Records your voice'
+                  }
                   state={requirements.microphone}
                   action={
                     requirements.microphone === 'blocked' ? (
-                      <button
-                        type="button"
-                        onClick={() => void requestMicrophone()}
-                        className="rounded-md border border-[oklch(0.82_0.015_85)] bg-[oklch(0.985_0.005_85)] px-4 py-2 text-xs font-semibold transition-colors hover:bg-[oklch(0.93_0.01_85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)]"
-                      >
-                        Allow microphone
-                      </button>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          disabled={microphoneBusy}
+                          onClick={() => void requestMicrophone()}
+                          className="rounded-md border border-[oklch(0.82_0.015_85)] bg-[oklch(0.985_0.005_85)] px-4 py-2 text-xs font-semibold transition-colors hover:bg-[oklch(0.93_0.01_85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] disabled:opacity-50"
+                        >
+                          {microphoneBusy
+                            ? 'Checking…'
+                            : microphoneAccessStatus === 'denied' ||
+                                microphoneAccessStatus === 'restricted'
+                              ? 'Open Settings'
+                              : 'Allow microphone'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void checkReadiness()}
+                          className="rounded-md px-3 py-2 text-xs font-semibold text-[oklch(0.5_0.018_258)] hover:text-[oklch(0.25_0.02_258)]"
+                        >
+                          Check again
+                        </button>
+                      </div>
                     ) : undefined
                   }
                 />
+                {microphoneError && (
+                  <p role="alert" className="py-2 text-xs text-rose-700">
+                    {microphoneError}
+                  </p>
+                )}
                 <RequirementRow
                   icon={<MonitorSpeaker size={20} />}
                   title="System audio"
@@ -397,7 +473,11 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 disabled={!readiness.canComplete || finishing}
                 className="mt-8 inline-flex min-h-12 min-w-48 items-center justify-center rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold tracking-[0.01em] text-[oklch(0.965_0.008_85)] shadow-sm transition-[background-color,transform,opacity] duration-200 ease-out hover:bg-[oklch(0.31_0.045_258)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] focus-visible:ring-offset-2 focus-visible:ring-offset-[oklch(0.965_0.008_85)] disabled:cursor-not-allowed disabled:opacity-30"
               >
-                {finishing ? 'Continuing…' : 'Continue'}
+                {finishing
+                  ? 'Continuing…'
+                  : recoveryMode
+                    ? 'Return to Pluto'
+                    : 'Continue'}
               </button>
               {setupError && (
                 <p role="alert" className="mt-3 text-sm text-pro-text-muted">

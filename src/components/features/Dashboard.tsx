@@ -76,7 +76,9 @@ interface DashboardProps {
   calendarSnapshot?: CalendarIntegrationSnapshot | null;
   calendarEvents?: CalendarEvent[];
   calendarLoading?: boolean;
+  calendarConnectError?: string | null;
   onCalendarConnect?: () => Promise<void>;
+  onCalendarOpenPrivacy?: () => void;
   onCalendarSelect?: (calendar: CalendarDescriptor) => Promise<void>;
   onCalendarSelectCalendars?: (
     calendars: CalendarDescriptor[],
@@ -505,7 +507,9 @@ export const Dashboard = ({
   calendarSnapshot = null,
   calendarEvents = [],
   calendarLoading = false,
+  calendarConnectError = null,
   onCalendarConnect = async () => {},
+  onCalendarOpenPrivacy = () => {},
   onCalendarSelect = async () => {},
   onCalendarSelectCalendars = async () => {},
   onCalendarRefresh = async () => {},
@@ -1480,7 +1484,9 @@ export const Dashboard = ({
             snapshot={calendarSnapshot}
             events={calendarEvents}
             loading={calendarLoading}
+            connectError={calendarConnectError}
             onConnect={onCalendarConnect}
+            onOpenPrivacy={onCalendarOpenPrivacy}
             onSelectCalendar={onCalendarSelect}
             onSelectCalendars={onCalendarSelectCalendars}
             onRefreshCalendar={onCalendarRefresh}
