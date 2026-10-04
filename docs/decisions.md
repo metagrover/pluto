@@ -1466,3 +1466,9 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Suggestions and drafts:** Use checked transcript wording in a usable follow-up message or explicitly proposed next steps. Generated prose and small-model self-approval cannot authorize new owners, dates or promises. This deliberately limits stylistic rewriting and open-ended coaching; factual correctness takes priority over fluency.
 - **Provider:** Use Ollama chat with system/user separation, JSON output, zero temperature, and bounded context expansion. Buffer structured responses until source validation completes. Malformed output or provider failure produces an unavailable response rather than unrelated snapshot content.
 - **Limits:** Exact-source validation proves wording exists, not perfect relevance, completeness, speaker identity or transcription accuracy. Live evidence remains provisional; focused tests and fictional provider replays do not replace fresh real-meeting acceptance.
+
+## 2026-10-04 - Offer an archived fresh start for locked encrypted profiles
+
+- **Supersedes:** The absolute stop on missing or rejected encrypted-database keys in “2026-09-30 - Use one persistent profile for source startup.” Automatic replacement remains prohibited.
+- **Decision:** When an existing encrypted database cannot be unlocked, an explicit, confirmed startup action moves the entire profile to a sibling archive directory and creates a new Standard profile at the original path. The archive retains the database, key envelope, recordings, settings, and other files without decrypting or editing them. Retry and Quit remain available.
+- **Failure behavior:** Archive only after the encrypted database is identified and before creating the Standard database. If archiving fails, do not create a new database. Keep the archived profile available for later recovery; Standard setup does not unlock or import it.

@@ -11,6 +11,7 @@ import {
   initializeApplicationDatabase,
   resolveApplicationDatabasePath,
 } from './database/applicationDatabase';
+import { archiveLockedProfile } from './database/archiveLockedProfile';
 import {
   DatabaseLifecycleError,
   describeDatabaseStartupError,
@@ -94,11 +95,16 @@ if (!canOpenDatabase) {
       return productionKeyStore;
     };
     let initialized = false;
+    let startStandard = false;
     while (!initialized) {
       try {
         const mode = initializeDatabaseStorageSetup({
           databasePath,
           chooseMode: () => {
+            if (startStandard) {
+              startStandard = false;
+              return 'standard';
+            }
             const choice = dialog.showMessageBoxSync({
               type: 'question',
               title: 'Welcome to Pluto',
@@ -156,7 +162,8 @@ if (!canOpenDatabase) {
             : isKeyLocked || isKeyRejected
               ? 'Could not unlock existing database'
               : 'Pluto could not start';
-        const detail = `${describeDatabaseStartupError(error)}\n\nYour data is preserved safely. Pluto will never replace or overwrite your encrypted database without your explicit action.`;
+        const isEncryptedKeyIssue = isKeyLocked || isKeyRejected;
+        const detail = `${describeDatabaseStartupError(error)}\n\nYour data is preserved safely. Pluto will never replace or overwrite your encrypted database without your explicit action.${isEncryptedKeyIssue ? '\n\nTo start fresh, Pluto can archive the entire encrypted profile beside the current data folder and create a new Standard database. Old meetings will not appear in the new profile.' : ''}`;
 
         const choice = dialog.showMessageBoxSync({
           type: 'error',
@@ -167,11 +174,21 @@ if (!canOpenDatabase) {
             ? ['Choose setup again', 'Quit Pluto']
             : isIdentityMismatch
               ? ['Open Data Folder', 'Quit Pluto']
-              : isKeyLocked
-                ? ['Retry', 'Open Data Folder', 'Quit Pluto']
+              : isEncryptedKeyIssue
+                ? [
+                    'Retry',
+                    'Archive encrypted data and start Standard',
+                    'Open Data Folder',
+                    'Quit Pluto',
+                  ]
                 : ['Retry', 'Open Data Folder', 'Quit Pluto'],
           defaultId: isIdentityMismatch ? 1 : 0,
-          cancelId: isSetupKeyUnavailable || isIdentityMismatch ? 1 : 2,
+          cancelId:
+            isSetupKeyUnavailable || isIdentityMismatch
+              ? 1
+              : isEncryptedKeyIssue
+                ? 3
+                : 2,
         });
 
         if (isSetupKeyUnavailable) {
@@ -184,10 +201,47 @@ if (!canOpenDatabase) {
           app.quit();
           break;
         }
+        if (isEncryptedKeyIssue && choice === 1) {
+          const confirmed = dialog.showMessageBoxSync({
+            type: 'warning',
+            title: 'Start a new Standard profile?',
+            message: 'Archive the encrypted profile and start fresh?',
+            detail:
+              'Pluto will move the entire current profile to a sibling archive folder, including its database, key envelope, recordings, and settings. It will then create a new Standard database. The archived data will remain on disk, but its meetings will not appear in the new profile.',
+            buttons: ['Cancel', 'Archive and start Standard'],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+          });
+          if (confirmed !== 1) continue;
+          try {
+            const archivePath = archiveLockedProfile(app.getPath('userData'));
+            log.info('Encrypted profile archived before Standard setup');
+            dialog.showMessageBoxSync({
+              type: 'info',
+              title: 'Previous profile archived',
+              message: 'Your encrypted profile is preserved.',
+              detail: `Archive folder: ${archivePath}\n\nPluto will now create a new Standard database.`,
+              buttons: ['Continue'],
+            });
+            startStandard = true;
+          } catch (archiveError) {
+            log.error('Could not archive encrypted profile:', archiveError);
+            dialog.showMessageBoxSync({
+              type: 'error',
+              title: 'Could not start fresh',
+              message: 'Pluto could not archive the encrypted profile.',
+              detail:
+                'No new database was created. Check that the data folder is writable and try again. The encrypted profile remains available for recovery.',
+              buttons: ['OK'],
+            });
+          }
+          continue;
+        }
         if (choice === 0) {
           continue;
         }
-        if (choice === 1) {
+        if (choice === (isEncryptedKeyIssue ? 2 : 1)) {
           void shell.openPath(app.getPath('userData'));
           continue;
         }

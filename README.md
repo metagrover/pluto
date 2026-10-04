@@ -318,7 +318,8 @@ This type-checks and builds the app, builds the native runtimes, and packages an
 **arm64** DMG under `release/<version>/`. The configured filename is
 `Pluto-Mac-<version>-Installer.dmg`. A local package build does not establish
 Apple signing or notarization; the current release workflow disables signing
-identity discovery. See [packaging configuration](electron-builder.json5) and
+identity discovery and applies an ad-hoc signature, which macOS still treats as
+untrusted. See [packaging configuration](electron-builder.json5) and
 [release workflow](.github/workflows/release.yml).
 
 ## Troubleshooting
@@ -341,7 +342,9 @@ to launch but does not grant Keychain access. An ad-hoc signed update may need
 renewed Keychain permission. If no prompt appears, the recovery dialog
 distinguishes Keychain unavailability from a failed key decryption. Keep the
 database and key envelope together; see [docs/dev.md](docs/dev.md) for recovery
-guidance.
+guidance. If you no longer need the locked history, the startup dialog can
+archive the entire encrypted profile and start a new Standard database. The old
+files stay in the archive and are not imported into the new profile.
 
 ## Contributing
 

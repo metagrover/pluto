@@ -108,7 +108,14 @@ const getOwner = (options: InitializeApplicationDatabaseOptions = {}) => {
 export const initializeApplicationDatabase = (
   options: InitializeApplicationDatabaseOptions = {},
 ): Database.Database => {
-  return getOwner(options).initialize();
+  try {
+    return getOwner(options).initialize();
+  } catch (error) {
+    // A failed encrypted open must not retain its key store if the user
+    // explicitly archives that profile and starts a Standard one.
+    closeApplicationDatabase();
+    throw error;
+  }
 };
 
 export const getApplicationDatabase = (): Database.Database =>

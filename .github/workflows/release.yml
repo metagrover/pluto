@@ -57,20 +57,29 @@ jobs:
 
       - name: Build and Package DMG
         env:
-          # In unsigned mode, electron-builder packages an ad-hoc / unsigned DMG
+          # Use an explicit ad-hoc signature until Developer ID is available.
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: |
           pnpm run prebuild
           pnpm exec tsc
           pnpm exec vite build
-          pnpm exec electron-builder --mac --publish never
+          pnpm exec electron-builder --mac --publish never -c.mac.identity=-
 
       - name: Verify package and generate checksums
         run: |
           APP="release/${PACKAGE_VERSION}/mac-arm64/Pluto.app"
           DMG="release/${PACKAGE_VERSION}/Pluto-Mac-${PACKAGE_VERSION}-Installer.dmg"
           pnpm run package:verify-runtime -- "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
           test -s "$DMG"
+          hdiutil verify "$DMG"
+          MOUNT_POINT="$RUNNER_TEMP/pluto-dmg-verify"
+          mkdir -p "$MOUNT_POINT"
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG"
+          trap 'hdiutil detach "$MOUNT_POINT"' EXIT
+          codesign --verify --deep --strict --verbose=2 "$MOUNT_POINT/Pluto.app"
+          hdiutil detach "$MOUNT_POINT"
+          trap - EXIT
           mkdir -p dist-release
           cp "$DMG" dist-release/
           cd dist-release

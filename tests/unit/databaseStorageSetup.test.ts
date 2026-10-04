@@ -7,6 +7,7 @@ import {
   type ApplicationDatabase,
   createApplicationDatabase,
 } from '../../electron/database/applicationDatabase';
+import { archiveLockedProfile } from '../../electron/database/archiveLockedProfile';
 import { isPlaintextSqliteDatabase } from '../../electron/database/encryptionMigration';
 import {
   type DatabaseStorageMode,
@@ -18,6 +19,7 @@ describe('one-time database storage setup', () => {
   let root: string;
   let databasePath: string;
   const owners: ApplicationDatabase[] = [];
+  const archives: string[] = [];
   const backend = {
     isEncryptionAvailable: vi.fn(() => true),
     encryptString: vi.fn((value: string) => Buffer.from(`wrapped:${value}`)),
@@ -34,6 +36,9 @@ describe('one-time database storage setup', () => {
   afterEach(() => {
     for (const owner of owners.splice(0)) owner.close();
     fs.rmSync(root, { recursive: true, force: true });
+    for (const archive of archives.splice(0)) {
+      fs.rmSync(archive, { recursive: true, force: true });
+    }
   });
 
   const keyStore = () => new ApplicationKeyStore({ storageDir: root, backend });
@@ -104,6 +109,76 @@ describe('one-time database storage setup', () => {
       envelope,
     );
     expect(backend.encryptString).toHaveBeenCalledOnce();
+  });
+
+  it('archives a locked encrypted profile intact and starts a new Standard database', () => {
+    const encrypted = open('encrypted');
+    encrypted
+      .prepare(
+        "INSERT INTO meetings (id, title) VALUES ('archived', 'Old meeting')",
+      )
+      .run();
+    owners.pop()!.close();
+    fs.mkdirSync(path.join(root, 'meetings'));
+    fs.writeFileSync(
+      path.join(root, 'meetings', 'recording.wav'),
+      'old audio',
+      {
+        flag: 'wx',
+      },
+    );
+    const oldDatabase = fs.readFileSync(databasePath);
+    const oldEnvelope = fs.readFileSync(
+      path.join(root, 'app-key-envelope.json'),
+    );
+
+    const archive = archiveLockedProfile(root);
+    archives.push(archive);
+    expect(fs.readFileSync(path.join(archive, 'pluto.db'))).toEqual(
+      oldDatabase,
+    );
+    expect(
+      fs.readFileSync(path.join(archive, 'app-key-envelope.json')),
+    ).toEqual(oldEnvelope);
+    expect(
+      fs.readFileSync(path.join(archive, 'meetings', 'recording.wav'), 'utf8'),
+    ).toBe('old audio');
+    expect(fs.readdirSync(root)).toEqual([]);
+
+    backend.isEncryptionAvailable.mockClear();
+    expect(setup(() => 'standard')).toBe('standard');
+    expect(isPlaintextSqliteDatabase(databasePath)).toBe(true);
+    expect(backend.isEncryptionAvailable).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(root, 'app-key-envelope.json'))).toBe(false);
+    expect(fs.readFileSync(path.join(archive, 'pluto.db'))).toEqual(
+      oldDatabase,
+    );
+  });
+
+  it('refuses to archive a Standard profile', () => {
+    open('standard');
+    owners.pop()!.close();
+    const oldDatabase = fs.readFileSync(databasePath);
+    expect(() => archiveLockedProfile(root)).toThrow(/encrypted profile/);
+    expect(fs.readFileSync(databasePath)).toEqual(oldDatabase);
+  });
+
+  it('restores the original profile if creating the fresh directory fails', () => {
+    open('encrypted');
+    owners.pop()!.close();
+    const oldDatabase = fs.readFileSync(databasePath);
+    const mkdir = vi.spyOn(fs, 'mkdirSync').mockImplementationOnce(() => {
+      throw new Error('simulated directory failure');
+    });
+    try {
+      expect(() => archiveLockedProfile(root)).toThrow(
+        'simulated directory failure',
+      );
+    } finally {
+      mkdir.mockRestore();
+    }
+    expect(fs.readFileSync(databasePath)).toEqual(oldDatabase);
+    expect(fs.existsSync(path.join(root, 'app-key-envelope.json'))).toBe(true);
   });
 
   it('does not commit or create a database when key permission is denied, allowing standard setup', () => {
