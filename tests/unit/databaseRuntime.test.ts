@@ -110,7 +110,10 @@ describe('database runtime', () => {
       }),
     });
     expect(() => locked.initialize()).toThrowError(
-      expect.objectContaining({ code: 'database_key_unavailable' }),
+      expect.objectContaining({
+        code: 'database_key_unavailable',
+        details: { keyAccessStage: 'keychain_decrypt_failed' },
+      }),
     );
     expect(fs.readFileSync(databasePath)).toEqual(databaseBefore);
     expect(fs.readFileSync(envelopePath)).toEqual(envelopeBefore);
@@ -143,7 +146,10 @@ describe('database runtime', () => {
       }),
     });
     expect(() => missing.initialize()).toThrowError(
-      expect.objectContaining({ code: 'database_key_unavailable' }),
+      expect.objectContaining({
+        code: 'database_key_unavailable',
+        details: { keyAccessStage: 'missing_envelope' },
+      }),
     );
     expect(fs.existsSync(envelopePath)).toBe(false);
     expect(fs.readFileSync(databasePath)).toEqual(databaseBefore);
@@ -639,6 +645,7 @@ describe('createDatabaseRuntime with encryption', () => {
     expect(() => runtime.initialize()).toThrowError(
       expect.objectContaining({
         code: 'database_key_unavailable',
+        details: { keyAccessStage: 'keychain_unavailable' },
       }),
     );
   });

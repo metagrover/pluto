@@ -4,6 +4,7 @@ import Database from 'better-sqlite3-multiple-ciphers';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import {
+  ApplicationKeyAccessError,
   ApplicationKeyBindingMismatchError,
   type ApplicationKeyStore,
 } from '../crypto/applicationKeyStore';
@@ -284,6 +285,7 @@ export const createDatabaseRuntime = (
           throw new DatabaseLifecycleError(
             'database_key_unavailable',
             'Database encryption key envelope is missing beside existing database.',
+            { keyAccessStage: 'missing_envelope' },
           );
         }
         return deriveDatabaseKey(master.key, master.salt).toString('hex');
@@ -294,6 +296,14 @@ export const createDatabaseRuntime = (
             'database_key_identity_mismatch',
             'Database key belongs to a legacy or differently signed application identity.',
             {},
+            { cause: error },
+          );
+        }
+        if (error instanceof ApplicationKeyAccessError) {
+          throw new DatabaseLifecycleError(
+            'database_key_unavailable',
+            'Database encryption key cannot be accessed.',
+            { keyAccessStage: error.stage },
             { cause: error },
           );
         }

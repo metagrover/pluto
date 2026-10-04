@@ -20,6 +20,11 @@ export type DatabaseErrorCode =
 export interface DatabaseErrorDetails {
   migrationId?: string;
   sqliteCode?: string;
+  keyAccessStage?:
+    | 'keychain_unavailable'
+    | 'envelope_unreadable'
+    | 'keychain_decrypt_failed'
+    | 'missing_envelope';
 }
 
 export class DatabaseLifecycleError extends Error {
@@ -69,6 +74,18 @@ export const describeDatabaseStartupError = (error: unknown): string => {
     case 'database_closed':
       return 'Database is closed.';
     case 'database_key_unavailable':
+      if (error.details.keyAccessStage === 'keychain_unavailable') {
+        return 'macOS Keychain is unavailable. Unlock the login Keychain, then retry Pluto.';
+      }
+      if (error.details.keyAccessStage === 'keychain_decrypt_failed') {
+        return 'Pluto could not decrypt the existing database key. Allow Keychain access for this Pluto build if macOS asks. Ad-hoc signed builds may need permission again after an update.';
+      }
+      if (error.details.keyAccessStage === 'envelope_unreadable') {
+        return 'The saved database key envelope could not be read. Keep it with the encrypted database for recovery.';
+      }
+      if (error.details.keyAccessStage === 'missing_envelope') {
+        return 'The database key envelope is missing. Keep the encrypted database and restore its original envelope or recovery key.';
+      }
       return 'Database encryption key is unavailable or locked in macOS Keychain.';
     case 'database_setup_key_unavailable':
       return 'Encrypted setup could not obtain key-storage permission. No database was created. Choose setup again to retry encryption or use Standard setup.';
