@@ -193,6 +193,9 @@ export const resolveMeetingRetryRoute = (
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
   const [setupRecoveryMode, setSetupRecoveryMode] = useState(false);
+  const [captureStartError, setCaptureStartError] = useState<string | null>(
+    null,
+  );
   const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
   const [selectedMeetingDetail, setSelectedMeetingDetail] =
     useState<Meeting | null>(meetingPreviewEnabled ? previewMeeting : null);
@@ -993,7 +996,7 @@ function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
         e.preventDefault();
         if (startSessionRef.current && captureLifecycle.state === 'idle') {
-          void startSessionRef.current();
+          void startManualMeeting();
         }
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -2039,6 +2042,36 @@ function App() {
     await window.ipcRenderer.invoke('APP_RELAUNCH');
   };
 
+  const startManualMeeting = async () => {
+    const start = startSessionRef.current;
+    if (!start) {
+      setCaptureStartError(
+        'Recording is still initializing. Try again shortly.',
+      );
+      return;
+    }
+    setCaptureStartError(null);
+    try {
+      const result = await start();
+      if (result.admitted || result.reason === 'capture_not_idle') return;
+      if (result.reason === 'recording_not_ready') {
+        setSetupRecoveryMode(true);
+        setSetupNeeded(true);
+        return;
+      }
+      setCaptureStartError(
+        result.reason === 'microphone_unavailable'
+          ? 'Pluto could not open the microphone. Check Microphone access in System Settings and try again.'
+          : 'Pluto could not start recording. Please try again.',
+      );
+    } catch (error) {
+      console.error('[Pluto] New meeting failed', error);
+      setCaptureStartError(
+        'Pluto could not start recording. Please try again.',
+      );
+    }
+  };
+
   if (setupNeeded === null)
     return (
       <div className="app-init-drag h-screen w-screen bg-pro-bg flex flex-col gap-4 items-center justify-center text-pro-text-muted/40 font-medium animate-pulse text-xs">
@@ -2136,9 +2169,7 @@ function App() {
             }}
             safeMeetings={safeMeetings}
             onStartRecording={() => {
-              if (startSessionRef.current) {
-                void startSessionRef.current();
-              }
+              void startManualMeeting();
             }}
             isRecordingActive={activeRecording}
             recordingState={captureLifecycle.state}
@@ -2507,10 +2538,7 @@ function App() {
                 <div className="pt-10 flex flex-col items-center gap-6 relative z-10">
                   <button
                     type="button"
-                    onClick={() => {
-                      if (startSessionRef.current)
-                        void startSessionRef.current();
-                    }}
+                    onClick={() => void startManualMeeting()}
                     className="h-16 px-12 rounded-lg bg-pro-text-main dark:bg-pro-accent text-white font-semibold text-xs font-medium shadow-2xl hover:bg-pro-accent hover:scale-[1.02] transition-all "
                   >
                     Initialize Capture
@@ -2526,6 +2554,21 @@ function App() {
       )}
 
       {/* Global Overlays */}
+      {captureStartError && (
+        <div
+          role="alert"
+          className="fixed bottom-6 left-1/2 z-[1100] flex max-w-[min(90vw,32rem)] -translate-x-1/2 items-center gap-4 rounded-lg border border-rose-300 bg-pro-surface px-4 py-3 text-sm text-pro-text-main shadow-xl"
+        >
+          <span>{captureStartError}</span>
+          <button
+            type="button"
+            onClick={() => setCaptureStartError(null)}
+            className="shrink-0 font-semibold text-pro-accent"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <SearchOverlay
         searchVisible={searchVisible}
         setSearchVisible={setSearchVisible}

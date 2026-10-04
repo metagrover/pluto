@@ -54,6 +54,8 @@ export const SetupWizard = ({
   const [microphoneAccessStatus, setMicrophoneAccessStatus] =
     useState<MicrophoneAccessStatus>('unknown');
   const [microphoneBusy, setMicrophoneBusy] = useState(false);
+  const [microphonePromptUnavailable, setMicrophonePromptUnavailable] =
+    useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [typedSetupQualifier, setTypedSetupQualifier] = useState('');
@@ -78,6 +80,7 @@ export const SetupWizard = ({
       ) as Promise<MicrophoneAccessStatus>,
     ]);
     setMicrophoneAccessStatus(microphoneStatus);
+    if (microphoneStatus === 'granted') setMicrophonePromptUnavailable(false);
     setRequirements((current) => {
       const isTranscriptionReady =
         status.details.parakeetClient &&
@@ -192,7 +195,11 @@ export const SetupWizard = ({
       const status = (await window.ipcRenderer.invoke(
         'CHECK_MICROPHONE_PERMISSION',
       )) as MicrophoneAccessStatus;
-      if (status === 'denied' || status === 'restricted') {
+      if (
+        status === 'denied' ||
+        status === 'restricted' ||
+        microphonePromptUnavailable
+      ) {
         const opened = await window.ipcRenderer.invoke(
           'OPEN_SYSTEM_SETTINGS_PRIVACY',
           'microphone',
@@ -203,7 +210,18 @@ export const SetupWizard = ({
           );
         }
       } else if (status !== 'granted') {
-        await window.ipcRenderer.invoke('REQUEST_MICROPHONE_PERMISSION');
+        const granted = await window.ipcRenderer.invoke(
+          'REQUEST_MICROPHONE_PERMISSION',
+        );
+        const updatedStatus = await window.ipcRenderer.invoke(
+          'CHECK_MICROPHONE_PERMISSION',
+        );
+        if (!granted && updatedStatus === 'not-determined') {
+          setMicrophonePromptUnavailable(true);
+          setMicrophoneError(
+            'macOS did not show a microphone permission prompt. Open Microphone settings and enable Pluto.',
+          );
+        }
       }
       await checkReadiness();
     } catch {
@@ -419,7 +437,8 @@ export const SetupWizard = ({
                           {microphoneBusy
                             ? 'Checking…'
                             : microphoneAccessStatus === 'denied' ||
-                                microphoneAccessStatus === 'restricted'
+                                microphoneAccessStatus === 'restricted' ||
+                                microphonePromptUnavailable
                               ? 'Open Settings'
                               : 'Allow microphone'}
                         </button>

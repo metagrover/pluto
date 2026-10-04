@@ -261,6 +261,47 @@ describe('SetupWizard', () => {
     );
   });
 
+  it('offers settings when macOS leaves a microphone request undecided', async () => {
+    invoke.mockImplementation(async (channel: string, key?: string) => {
+      if (channel === 'GET_SETTING') return key === 'setup_step' ? '2' : null;
+      if (channel === 'CHECK_MICROPHONE_PERMISSION') return 'not-determined';
+      if (channel === 'REQUEST_MICROPHONE_PERMISSION') return false;
+      if (channel === 'RECORDING_READINESS_STATUS') {
+        return {
+          details: {
+            parakeetClient: true,
+            parakeetModel: true,
+            parakeetEouReady: true,
+            audiocapExists: true,
+            audiocapExecutable: true,
+            micPermission: false,
+            systemAudioPermission: true,
+          },
+        };
+      }
+      return true;
+    });
+
+    act(() => root.render(<SetupWizard onComplete={vi.fn()} />));
+    await flush();
+    const allow = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Allow microphone'),
+    );
+    await act(async () => allow?.click());
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'macOS did not show a microphone permission prompt',
+    );
+    const openSettings = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.includes('Open Settings'),
+    );
+    await act(async () => openSettings?.click());
+    expect(invoke).toHaveBeenCalledWith(
+      'OPEN_SYSTEM_SETTINGS_PRIVACY',
+      'microphone',
+    );
+  });
+
   it('keeps the readiness screen open after a completed setup fails recording readiness', async () => {
     const onComplete = vi.fn();
     invoke.mockImplementation(async (channel: string, key?: string) => {

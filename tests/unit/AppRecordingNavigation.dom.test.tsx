@@ -15,6 +15,7 @@ let completePendingStart: (() => void) | null = null;
 let completePendingStop: (() => void) | null = null;
 let startAdmissionCount = 0;
 let rejectCalendarStart = false;
+let rejectManualReadiness = false;
 let titleAtCalendarStart: string | null = null;
 let notesAtCalendarStart: string | null = null;
 let notesAtManualStart: string | null = null;
@@ -74,6 +75,12 @@ vi.mock('../../src/components/AudioManager', () => ({
           startAdmissionCount += 1;
           if (event && rejectCalendarStart)
             return { admitted: false, state: 'idle' };
+          if (!event && rejectManualReadiness)
+            return {
+              admitted: false,
+              state: 'starting',
+              reason: 'recording_not_ready',
+            };
           onCaptureLifecycleChange?.({ state: 'starting' });
           onStartingChange?.(true);
           const complete = () => {
@@ -169,6 +176,7 @@ describe('App recording navigation', () => {
     completePendingStop = null;
     startAdmissionCount = 0;
     rejectCalendarStart = false;
+    rejectManualReadiness = false;
     titleAtCalendarStart = null;
     notesAtCalendarStart = null;
     notesAtManualStart = null;
@@ -296,6 +304,29 @@ describe('App recording navigation', () => {
     expect(container.textContent).toContain('Getting Pluto ready');
     expect(container.textContent).toContain('Return to Pluto');
     expect(container.textContent).not.toContain('Daily briefing');
+    await act(async () => root.unmount());
+  });
+
+  it('keeps recovery visible when New meeting returns a readiness failure', async () => {
+    rejectManualReadiness = true;
+    const { default: App } = await import('../../src/App');
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<App />);
+      await flushPromises();
+    });
+
+    const newMeeting = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.includes('New meeting'),
+    );
+    await act(async () => {
+      newMeeting?.click();
+      await flushPromises();
+    });
+
+    expect(startAdmissionCount).toBe(1);
+    expect(container.textContent).toContain('Getting Pluto ready');
+    expect(container.textContent).toContain('Return to Pluto');
     await act(async () => root.unmount());
   });
 
