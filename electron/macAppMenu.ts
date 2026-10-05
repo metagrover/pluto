@@ -48,7 +48,7 @@ export const updateResultDialog = (status: UpdateInfo): MessageBoxOptions => {
       title: 'Pluto Update Available',
       message: `${status.latestVersion ?? 'A new version'} of Pluto is available.`,
       detail: `You are using Pluto ${status.currentVersion}.`,
-      buttons: ['Open Release Page', 'Later'],
+      buttons: ['Update & Restart', 'Later'],
       defaultId: 0,
       cancelId: 1,
     };

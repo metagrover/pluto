@@ -8,9 +8,9 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAppUpdate } from '../../api/updater';
+import { INSTALL_COMMAND } from '../../utils/plutoInstaller';
 
-const INSTALL_CMD =
-  'curl -fsSL https://raw.githubusercontent.com/metagrover/pluto/main/scripts/install.sh | bash';
+const INSTALL_CMD = INSTALL_COMMAND;
 
 export const SidebarUpdateBadge = () => {
   const { status, isUpdating, applyUpdate, openReleaseUrl } = useAppUpdate();

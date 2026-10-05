@@ -156,6 +156,20 @@ after changing them. The capture path records audio; it does not record screen
 video. Tell participants when you are recording and obtain the permission
 required for your conversation.
 
+### Updating Pluto
+
+Pluto checks GitHub after startup and every four hours. When a complete newer Mac
+release is available (including RCs), choose **Update & Restart** in the sidebar
+or **Pluto → Check for Updates**. Stop recording and let it finish saving first.
+
+Updates use the same verified installer as first installation: the selected
+release is pinned, its checksum and app identity/version/signature are checked,
+and only Pluto’s quarantine is removed. Your installation location, profile, and
+models are preserved. Ad-hoc signed updates may request macOS permissions again.
+If installation fails, Pluto reopens with an error and the update log location.
+You can also quit Pluto and rerun the install command. Older builds with the
+obsolete updater need this one-time manual upgrade to receive the fixed updater.
+
 ## AI models
 
 Transcription uses Pluto's local native runtime. Meeting notes, preparation, and

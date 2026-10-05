@@ -64,7 +64,7 @@ while [[ $# -gt 0 ]]; do
  esac
 done
 case "$url" in
- *api.github.com*) printf '[{"tag_name":"v1.0.0-rc.6"}]' > "$target" ;;
+ *api.github.com*) printf '[{"tag_name":"%s"}]' "\${TEST_LATEST_TAG:-v1.0.0-rc.6}" > "$target" ;;
  *) cp "$TEST_ASSET/\${url##*/}" "$target" ;;
 esac`,
     );
@@ -112,6 +112,9 @@ exec /bin/mv "$@"`,
         encoding: 'utf8',
       });
     try {
+      const invalidTag = run({}, ['--tag', 'v1.0.0;touch bad']);
+      assert.match(invalidTag.stderr, /Invalid release tag/);
+      assert.equal(existsSync(app), false);
       const profile = join(root, 'existing-profile');
       writeFileSync(profile, 'preserve meeting data');
       let result = run({ TEST_SIGNATURE: '1' });
@@ -142,7 +145,10 @@ exec /bin/mv "$@"`,
       result = run({ TEST_RUNNING: '0' });
       assert.match(result.stderr, /Quit Pluto/);
       assert.equal(readFileSync(join(app, 'old'), 'utf8'), 'previous app');
-      result = run({ TEST_PUBLIC: '1' });
+      result = run({ TEST_PUBLIC: '1', TEST_LATEST_TAG: 'v1.0.0-rc.99' }, [
+        '--tag',
+        'v1.0.0-rc.6',
+      ]);
       assert.equal(result.status, 0, result.stderr);
       assert.equal(existsSync(join(app, 'old')), false);
       assert.match(

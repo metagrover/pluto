@@ -323,6 +323,7 @@ let win: BrowserWindow | null;
 let tray: Tray | null = null;
 let updateChecker: UpdateChecker | null = null;
 let checkingFromMenu = false;
+let isCaptureActive = () => false;
 const settingsMenuNavigation = createNativeSettingsNavigation({
   getWindow: () => win,
   createWindow: () => createWindow(),
@@ -348,10 +349,7 @@ const checkForUpdatesFromMenu = async (): Promise<void> => {
       ? await dialog.showMessageBox(owner, options)
       : await dialog.showMessageBox(options);
     if (status.hasUpdate && result.response === 0) {
-      await shell.openExternal(
-        status.releaseUrl ??
-          'https://github.com/metagrover/pluto/releases/latest',
-      );
+      await updateChecker.applyUpdate();
     }
   } catch (error) {
     plutoLog.warn('Native update check failed:', error);
@@ -526,7 +524,7 @@ function createWindow() {
   }
 
   if (!updateChecker) {
-    updateChecker = new UpdateChecker(() => win);
+    updateChecker = new UpdateChecker(() => win, () => !isCaptureActive());
     updateChecker.start();
   }
 }
@@ -2306,6 +2304,7 @@ app.whenReady().then(async () => {
   let nativeAudioOwner: WebContents | null = null;
   let nativeAudioReadiness: Promise<boolean> | null = null;
   const captureSessionLease = createCaptureSessionLeaseRegistry();
+  isCaptureActive = () => captureSessionLease.current() !== null;
   const watchedCaptureOwners = new Set<number>();
   type CaptureIncrementalNotesOffer = IncrementalMeetingNotesOffer & {
     ownerId: number;

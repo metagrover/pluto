@@ -57,7 +57,7 @@ describe('macOS application menu', () => {
       updateResultDialog({ ...base, hasUpdate: true, latestVersion: 'v0.2.0' }),
     ).toMatchObject({
       title: 'Pluto Update Available',
-      buttons: ['Open Release Page', 'Later'],
+      buttons: ['Update & Restart', 'Later'],
     });
     expect(
       updateResultDialog({ ...base, hasUpdate: false, error: 'Offline' }),

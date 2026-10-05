@@ -6,14 +6,17 @@ main() {
   applications=/Applications
   verify_only=false
   fresh_profile=false
+  requested_tag=''
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --tag) [[ $# -ge 2 ]] || fail 'Missing release tag.'; requested_tag=$2; shift 2 ;;
       --verify-only) verify_only=true; shift ;;
       --fresh-profile) fresh_profile=true; shift ;;
       --directory) [[ $# -ge 2 ]] || fail 'Missing installation directory.'; applications=$2; shift 2 ;;
       *) fail "Unknown option: $1" ;;
     esac
   done
+  [[ -z $requested_tag || $requested_tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+|\.rc\.[0-9]+)?$ ]] || fail 'Invalid release tag.'
   [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || fail 'An Apple Silicon Mac is required. Run Terminal without Rosetta.'
   os_version=$(sw_vers -productVersion)
   os_major=${os_version%%.*}
@@ -52,6 +55,7 @@ main() {
     command -v gh >/dev/null || fail 'Releases are not publicly accessible yet. GitHub CLI with repository access is required during private testing.'
     tag=$(gh release list --repo metagrover/pluto --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName')
   fi
+  tag=${requested_tag:-$tag}
   [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+|\.rc\.[0-9]+)?$ ]] || fail 'No supported published release found.'
   version=${tag#v}; version=${version/.rc./-rc.}
   filename="Pluto-Mac-${version}-Installer.dmg"
