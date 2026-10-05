@@ -3,6 +3,17 @@
 set -euo pipefail
 main() {
   fail() { printf 'Pluto: %s\n' "$*" >&2; exit 1; }
+  require_pluto_closed() {
+    local pid command
+    for pid in $(pgrep -x Pluto || true); do
+      command=$(ps -ww -p "$pid" -o args=) || continue
+      # ChatGPT runs the bundled bridge using Pluto's executable as Node.
+      case "$command" in
+        */Contents/MacOS/Pluto\ */Contents/Resources/mcp/pluto-mcp-bridge.mjs\ --connection\ *) continue ;;
+      esac
+      fail 'Quit Pluto before upgrading, then run this command again.'
+    done
+  }
   applications=/Applications
   verify_only=false
   fresh_profile=false
@@ -23,7 +34,7 @@ main() {
   os_minor=${os_version#*.}; os_minor=${os_minor%%.*}
   (( os_major > 14 || (os_major == 14 && os_minor >= 2) )) || fail 'macOS 14.2 or later is required.'
   if ! "$verify_only"; then
-    ! pgrep -x Pluto >/dev/null || fail 'Quit Pluto before upgrading, then run this command again.'
+    require_pluto_closed
     if [[ $applications == /Applications && ! -w $applications && ! -e $applications/Pluto.app ]]; then applications="$HOME/Applications"; fi
     mkdir -p "$applications"
     [[ -w $applications ]] || fail "Cannot write to $applications. Use --directory with a writable Applications folder."
@@ -91,6 +102,7 @@ main() {
   ditto "$app" "$staging/Pluto.app"
   codesign --verify --deep --strict "$staging/Pluto.app"
   xattr -dr com.apple.quarantine "$staging/Pluto.app"
+  require_pluto_closed
   if [[ -e $destination ]]; then mv "$destination" "$staging/previous.app"; fi
   mv "$staging/Pluto.app" "$destination"
   installed=true

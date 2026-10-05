@@ -52,7 +52,17 @@ test(
       });
     stub('uname', 'if [[ $1 == -s ]]; then echo Darwin; else echo arm64; fi');
     stub('sw_vers', 'echo 26.5.2');
-    stub('pgrep', 'exit "${TEST_RUNNING:-1}"');
+    stub('pgrep', 'printf "%s" "${TEST_PLUTO_PIDS:-}"');
+    stub(
+      'ps',
+      `case "$3" in
+  100) echo '/Applications/Pluto.app/Contents/MacOS/Pluto' ;;
+  101) echo '/Applications/Pluto.app/Contents/MacOS/Pluto /Applications/Pluto.app/Contents/Resources/mcp/pluto-mcp-bridge.mjs --connection /Users/test/Library/Application Support/pluto/chatgpt-connection/connection.json' ;;
+  102) echo '/Users/test/Custom Apps/Pluto.app/Contents/MacOS/Pluto /Users/test/Custom Apps/Pluto.app/Contents/Resources/mcp/pluto-mcp-bridge.mjs --connection /Users/test/profile/connection.json' ;;
+  103) exit 1 ;;
+  *) exit 2 ;;
+esac`,
+    );
     stub(
       'curl',
       `[[ \${TEST_PUBLIC:-0} == 1 ]] || exit 22
@@ -93,7 +103,13 @@ cp -R "$TEST_ASSET/Pluto.app" "$target/"`,
     );
     stub('tccutil', 'printf "tccutil %s\\n" "$*" >> "$TEST_LOG"');
     stub('open', 'printf "open %s\\n" "$*" >> "$TEST_LOG"');
-    stub('xattr', 'printf "xattr %s\\n" "$*" >> "$TEST_LOG"');
+    stub(
+      'xattr',
+      `printf "xattr %s\\n" "$*" >> "$TEST_LOG"
+if [[ \${TEST_START_DURING_INSTALL:-0} == 1 ]]; then
+  printf '#!/bin/bash\\necho 100\\n' > "$TEST_BIN/pgrep"
+fi`,
+    );
     stub(
       'mv',
       `if [[ \${TEST_SWAP_FAIL:-0} == 1 && $1 == */.pluto-install.*/Pluto.app ]]; then exit 42; fi
@@ -107,6 +123,7 @@ exec /bin/mv "$@"`,
           PATH: `${bin}:${process.env.PATH}`,
           TEST_ASSET: asset,
           TEST_LOG: log,
+          TEST_BIN: bin,
           ...options,
         },
         encoding: 'utf8',
@@ -142,13 +159,23 @@ exec /bin/mv "$@"`,
       result = run({ TEST_SWAP_FAIL: '1', TEST_PUBLIC: '1' });
       assert.notEqual(result.status, 0);
       assert.equal(readFileSync(join(app, 'old'), 'utf8'), 'previous app');
-      result = run({ TEST_RUNNING: '0' });
+      for (const pids of ['100', '101\n100\n102']) {
+        result = run({ TEST_PLUTO_PIDS: pids });
+        assert.match(result.stderr, /Quit Pluto/);
+        assert.equal(readFileSync(join(app, 'old'), 'utf8'), 'previous app');
+      }
+      result = run({ TEST_START_DURING_INSTALL: '1' });
       assert.match(result.stderr, /Quit Pluto/);
       assert.equal(readFileSync(join(app, 'old'), 'utf8'), 'previous app');
-      result = run({ TEST_PUBLIC: '1', TEST_LATEST_TAG: 'v1.0.0-rc.99' }, [
-        '--tag',
-        'v1.0.0-rc.6',
-      ]);
+      stub('pgrep', 'printf "%s" "${TEST_PLUTO_PIDS:-}"');
+      result = run(
+        {
+          TEST_PLUTO_PIDS: '101\n102\n103',
+          TEST_PUBLIC: '1',
+          TEST_LATEST_TAG: 'v1.0.0-rc.99',
+        },
+        ['--tag', 'v1.0.0-rc.6'],
+      );
       assert.equal(result.status, 0, result.stderr);
       assert.equal(existsSync(join(app, 'old')), false);
       assert.match(
