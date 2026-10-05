@@ -42,7 +42,7 @@ export function releaseNotes(version, previousTag, commits, repository) {
         )
         .join('\n')
     : `- Promotes [${previousTag}](${url}/releases/tag/${previousTag}) to stable with no additional code changes.`;
-  return `# Pluto ${version}\n\n${version.includes('-rc.') ? 'Release candidate for testing.\n\n' : ''}## Changes\n\n${changes}\n\n## Installation\n\nDownload the Apple Silicon macOS installer attached to this release. SHA256SUMS.txt contains its checksum. The current build is ad-hoc signed and is not notarized. Existing profiles are preserved; keep a backup before upgrading.\n${previousTag ? `\n[Full comparison](${url}/compare/${previousTag}...v${version})\n` : ''}`;
+  return `# Pluto ${version}\n\n${version.includes('-rc.') ? 'Release candidate for testing.\n\n' : ''}## Changes\n\n${changes}\n\n## Installation\n\nDownload the Apple Silicon macOS installer attached to this release and drag Pluto.app into Applications. SHA256SUMS.txt contains its checksum. If you trust this release, open it with one Terminal command:\n\n\`\`\`sh\nxattr -dr com.apple.quarantine "/Applications/Pluto.app" && open "/Applications/Pluto.app"\n\`\`\`\n\nThis removes only Pluto\'s quarantine attribute, leaving system-wide Gatekeeper protection, permissions, and user data unchanged. The current build is ad-hoc signed and is not notarized. Existing profiles are preserved; keep a backup before upgrading.\n${previousTag ? `\n[Full comparison](${url}/compare/${previousTag}...v${version})\n` : ''}`;
 }
 
 export async function main(args = process.argv.slice(2)) {

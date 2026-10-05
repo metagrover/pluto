@@ -75,3 +75,19 @@ signing; it does not claim Developer ID signing or notarization.
 Verify without publishing: `pnpm run test:release-workflow`. A workflow-only
 change can additionally be exercised on a PR with the `release-test` label; that
 builds and verifies an installer without publishing a release.
+
+## Unnotarized installation
+
+The README and generated release notes provide one copyable command after the
+user drags Pluto into Applications:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Pluto.app" && open "/Applications/Pluto.app"
+```
+
+This is an explicit, app-specific trust workaround, not notarization. Clear only
+`com.apple.quarantine`; do not use `xattr -cr` or disable Gatekeeper globally.
+Users may need to repeat it for a new quarantined download. Do not remove
+quarantine automatically during download or claim that macOS has approved the app.
+The repository is private, so anonymous raw-GitHub/curl installation is not a
+working public distribution path. Do not make source or assets public implicitly.

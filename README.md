@@ -9,7 +9,7 @@
 </p>
 
 <h3 align="center">
-  <a href="https://github.com/metagrover/pluto/releases/download/v1.0.0.rc.3/Pluto-Mac-1.0.0-rc.3-Installer.dmg">⬇ Download RC3 DMG</a>
+  <a href="https://github.com/metagrover/pluto/releases">⬇ Download Pluto</a>
 </h3>
 
 <p align="center">Apple Silicon · macOS 14.2 or later</p>
@@ -60,7 +60,7 @@ on them.
 For people who want to use the app, the packaged Mac installer is the simplest
 path. You do not need Node.js, pnpm, Xcode, or Python to use a packaged installer.
 
-**[Download the RC3 Mac DMG](https://github.com/metagrover/pluto/releases/download/v1.0.0.rc.3/Pluto-Mac-1.0.0-rc.3-Installer.dmg)** · [Release notes](https://github.com/metagrover/pluto/releases/tag/v1.0.0.rc.3)
+**[Download the Mac DMG](https://github.com/metagrover/pluto/releases)** · [Release notes](https://github.com/metagrover/pluto/releases)
 
 ### What you need
 
@@ -75,14 +75,28 @@ chosen model.
 
 ### Download and install
 
-1. **[Download the RC3 installer](https://github.com/metagrover/pluto/releases/download/v1.0.0.rc.3/Pluto-Mac-1.0.0-rc.3-Installer.dmg).**
-   Read the [release notes](https://github.com/metagrover/pluto/releases/tag/v1.0.0.rc.3) for known limitations.
+1. **[Download the installer from the newest release](https://github.com/metagrover/pluto/releases).**
    GitHub's **Source code** archives contain the project source, not an installable app.
-2. Open the `.dmg` and drag **Pluto** into **Applications**.
-3. Eject the installer disk, then open **Pluto** from Applications or Spotlight.
-   This build is not Developer ID signed or notarized. If macOS blocks launch
-   and you trust the download, open **System Settings → Privacy & Security**,
-   scroll down, and click **Open Anyway**. Confirm **Open** when prompted.
+2. Open the `.dmg` and drag **Pluto** into **Applications**. Eject the installer disk.
+
+### Open with one command
+
+The current build is ad-hoc signed and is not notarized. After installing it in
+Applications, paste this single command into Terminal if you trust this release:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Pluto.app" && open "/Applications/Pluto.app"
+```
+
+This removes only Pluto's download-quarantine attribute and opens it. It does not
+clear other extended attributes, disable Gatekeeper globally, or change your
+microphone, audio, or calendar permissions. It does not delete meetings, settings,
+or downloaded models. Repeat for a new download if macOS blocks it again.
+No Apple account, Homebrew, Node, or Xcode is required. This is an explicit trust
+workaround; it does not provide Apple's notarization review.
+
+For the GUI alternative, open **System Settings → Privacy & Security**, click
+**Open Anyway** for Pluto, and confirm **Open** when prompted.
 
 ### First launch and your first recording
 
