@@ -9,7 +9,7 @@
 </p>
 
 <h3 align="center">
-  <a href="https://github.com/metagrover/pluto/releases">⬇ Download Pluto</a>
+  <a href="#install-pluto">Install Pluto</a>
 </h3>
 
 <p align="center">Apple Silicon · macOS 14.2 or later</p>
@@ -57,10 +57,11 @@ on them.
 
 ## Install Pluto
 
-For people who want to use the app, the packaged Mac installer is the simplest
-path. You do not need Node.js, pnpm, Xcode, or Python to use a packaged installer.
+Use the one-command installer below. It installs and opens Pluto without a manual
+DMG download, dragging the app, or a separate Open Anyway step. You do not need
+Homebrew, Node.js, pnpm, Xcode, or Python.
 
-**[Download the Mac DMG](https://github.com/metagrover/pluto/releases)** · [Release notes](https://github.com/metagrover/pluto/releases)
+[Getting started with local AI](#local-intelligence-with-ollama) · [Release notes](https://github.com/metagrover/pluto/releases)
 
 ### What you need
 
@@ -75,17 +76,23 @@ chosen model.
 
 ### Install with one command
 
-During private testing, with GitHub CLI already signed in and access to this repo:
+Open Terminal, paste this command, and press Return once this repository and its
+releases are public:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/metagrover/pluto/master/scripts/install-macos.sh | bash
+```
+
+<details>
+<summary>Installing during private testing</summary>
+
+With GitHub CLI signed in and access to this repository:
 
 ```sh
 gh api -H 'Accept: application/vnd.github.raw+json' repos/metagrover/pluto/contents/scripts/install-macos.sh | bash
 ```
 
-Once this repository and its releases are public, anyone can use:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/metagrover/pluto/master/scripts/install-macos.sh | bash
-```
+</details>
 
 Both commands download the newest published release (including RCs), verify its
 SHA-256 checksum and app identity/version/signature, install Pluto into
@@ -110,16 +117,6 @@ Running the installer explicitly trusts this repository and Pluto's unnotarized
 release. It does not disable Gatekeeper globally or grant microphone, audio, or
 calendar permissions. Checksums and ad-hoc signatures verify integrity, not
 Apple's malware review. You can [inspect the installer](scripts/install-macos.sh).
-
-### Install manually
-
-Download the DMG from the [release listing](https://github.com/metagrover/pluto/releases)
-and drag Pluto into Applications. If macOS blocks it, use **System Settings →
-Privacy & Security → Open Anyway**, or explicitly trust the installed app with:
-
-```sh
-xattr -dr com.apple.quarantine "/Applications/Pluto.app" && open "/Applications/Pluto.app"
-```
 
 ### First launch and your first recording
 
@@ -394,6 +391,17 @@ renewed Keychain permission. If no prompt appears, the recovery dialog
 distinguishes Keychain unavailability from a failed key decryption. Keep the
 database and key envelope together; see [docs/dev.md](docs/dev.md) for recovery
 guidance.
+
+## Install manually
+
+The one-command installer is recommended. If you prefer to handle the package
+yourself, download the DMG from the [release listing](https://github.com/metagrover/pluto/releases)
+and drag Pluto into Applications. If macOS blocks it, use **System Settings →
+Privacy & Security → Open Anyway**, or explicitly trust the installed app with:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Pluto.app" && open "/Applications/Pluto.app"
+```
 
 ## Contributing
 
