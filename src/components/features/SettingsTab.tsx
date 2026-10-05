@@ -337,6 +337,13 @@ export const SettingsTab = ({
   const [speakerModelsState, setSpeakerModelsState] = useState<
     'idle' | 'preparing' | 'ready' | 'error'
   >('idle');
+  const [browserCallDetectionEnabled, setBrowserCallDetectionEnabled] =
+    useState(false);
+  useEffect(() => {
+    void window.ipcRenderer
+      .invoke('GET_SETTING', 'browser_call_detection_enabled')
+      .then((value) => setBrowserCallDetectionEnabled(value === 'true'));
+  }, []);
   const [audioRetention, setAudioRetention] =
     useState<AudioRetentionSnapshot | null>(null);
   const [audioRetentionError, setAudioRetentionError] = useState(false);
@@ -965,6 +972,24 @@ export const SettingsTab = ({
                   const next = !autoEndEnabled;
                   setAutoEndEnabled(next);
                   persistSetting('auto_end_enabled', next ? 'true' : 'false');
+                }}
+              />
+            </SettingsRow>
+
+            <SettingsRow
+              label="Detect calls in browser tabs"
+              helper="Use browser tabs to recognize meetings and detect when they end. Enabling this asks macOS for permission to control your browser."
+              actionControl
+            >
+              <Toggle
+                checked={browserCallDetectionEnabled}
+                onChange={() => {
+                  const next = !browserCallDetectionEnabled;
+                  setBrowserCallDetectionEnabled(next);
+                  persistSetting(
+                    'browser_call_detection_enabled',
+                    next ? 'true' : 'false',
+                  );
                 }}
               />
             </SettingsRow>

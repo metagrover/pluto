@@ -6,6 +6,23 @@ import {
 } from '../../src/autoEnd/decision';
 
 describe('autoEndDecision', () => {
+  it.each([false, true])(
+    'does not end a browser recording when inspection is unavailable (grace=%s)',
+    (graceActive) => {
+      expect(
+        autoEndDecision({
+          poll: {
+            active: false,
+            appName: 'Chrome',
+            confidence: 'low',
+            reason: 'browser-tab-inspection-unavailable',
+          },
+          trackedApp: 'Google Meet',
+          graceActive,
+        }),
+      ).toEqual({ type: graceActive ? 'cancel_grace' : 'no_op' });
+    },
+  );
   // =============================================
   // Phase 1: No tracked app yet
   // =============================================

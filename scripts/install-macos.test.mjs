@@ -99,6 +99,7 @@ exec /bin/mv "$@"`,
       spawnSync('/bin/bash', [script, '--directory', applications, ...args], {
         env: {
           ...process.env,
+          HOME: root,
           PATH: `${bin}:${process.env.PATH}`,
           TEST_ASSET: asset,
           TEST_LOG: log,
@@ -140,6 +141,14 @@ exec /bin/mv "$@"`,
       result = run({ TEST_PUBLIC: '1' });
       assert.equal(result.status, 0, result.stderr);
       assert.equal(existsSync(join(app, 'old')), false);
+      assert.equal(readFileSync(profile, 'utf8'), 'preserve meeting data');
+      result = run({}, ['--fresh-profile']);
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /separate empty profile/);
+      assert.match(
+        readFileSync(log, 'utf8'),
+        /open -na .*--args --user-data-dir=.*pluto-first-run\./,
+      );
       assert.equal(readFileSync(profile, 'utf8'), 'preserve meeting data');
     } finally {
       rmSync(root, { recursive: true, force: true });

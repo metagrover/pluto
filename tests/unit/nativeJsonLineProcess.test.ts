@@ -92,6 +92,7 @@ describe('NativeJsonLineProcess live events', () => {
     { downloadedBytes: 11, totalBytes: 10 },
     { downloadedBytes: 1.5, totalBytes: 10 },
     { downloadedBytes: 1, totalBytes: 0 },
+    { downloadedBytes: 0, totalBytes: 0 },
   ])('rejects malformed prepare byte progress %#', async (bytes) => {
     const child = new FakeChild();
     const process = makeProcess(child);
@@ -109,6 +110,30 @@ describe('NativeJsonLineProcess live events', () => {
     );
 
     await expect(request).rejects.toThrow('parakeet_protocol_invalid');
+  });
+
+  it('accepts verification of a cached install without download byte counts', async () => {
+    const child = new FakeChild();
+    const process = makeProcess(child);
+    const events: NativeEvent[] = [];
+    process.onEvent((event) => events.push(event));
+    const request = process.request({ schemaVersion: 1, id: 'prepare-1' });
+    const progress = {
+      schemaVersion: 1,
+      kind: 'event',
+      event: 'prepare_progress',
+      requestId: 'prepare-1',
+      phase: 'verifying',
+      downloadedBytes: 0,
+      totalBytes: 0,
+    } as const;
+    child.stdout.write(`${JSON.stringify(progress)}\n`);
+    child.stdout.write(
+      `${JSON.stringify({ schemaVersion: 1, id: 'prepare-1', ok: true, result: { modelVersion: 'cached-model' } })}\n`,
+    );
+    await expect(request).resolves.toMatchObject({ ok: true });
+    expect(events).toEqual([progress]);
+    expect(child.kill).not.toHaveBeenCalled();
   });
 
   it('ignores a stale exit after timeout restart', async () => {

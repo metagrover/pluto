@@ -38,22 +38,40 @@ export async function installInChatGptDesktop({
       'Could not prepare the local ChatGPT connection. Try connecting again.',
     );
   }
-  let appPath: string;
+  let appPath = '';
   try {
     const located = await runCommand(
-      '/usr/bin/osascript',
-      ['-e', 'POSIX path of (path to application id "com.openai.codex")'],
+      '/usr/bin/mdfind',
+      ['kMDItemCFBundleIdentifier == "com.openai.codex"'],
       commandOptions,
     );
-    appPath = located.stdout.trim();
-    if (
-      !path.isAbsolute(appPath) ||
-      !appPath.replace(/\/$/, '').endsWith('.app')
-    )
-      throw new Error('invalid_app_path');
+    appPath =
+      located.stdout
+        .split('\n')
+        .map((entry) => entry.trim())
+        .find(
+          (entry) =>
+            path.isAbsolute(entry) && entry.replace(/\/$/, '').endsWith('.app'),
+        ) ?? '';
   } catch {
-    throw new Error('Install ChatGPT Desktop, then try connecting again.');
+    // Spotlight may be unavailable or still indexing a newly installed app.
   }
+  if (!appPath) {
+    for (const candidate of [
+      '/Applications/ChatGPT.app',
+      path.join(homeDirectory, '..', 'Applications', 'ChatGPT.app'),
+    ]) {
+      try {
+        await accessFile(candidate, constants.F_OK);
+        appPath = candidate;
+        break;
+      } catch {
+        // Try the next standard installation location without Apple Events.
+      }
+    }
+  }
+  if (!appPath)
+    throw new Error('Install ChatGPT Desktop, then try connecting again.');
   const cliPath = path.join(
     appPath,
     'Contents',

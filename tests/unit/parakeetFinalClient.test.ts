@@ -80,6 +80,33 @@ const speakerEvidenceSuccess = (id: string) => ({
 });
 
 describe('ParakeetFinalClient', () => {
+  it('prepares a verified cached model through the real IPC validator', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+    const progress = vi.fn();
+    const ready = client.prepare(progress);
+    const requestId = String(child.writes[0].id);
+    child.respond({
+      schemaVersion: 1,
+      kind: 'event',
+      event: 'prepare_progress',
+      requestId,
+      phase: 'verifying',
+      downloadedBytes: 0,
+      totalBytes: 0,
+    });
+    child.respond(prepared(requestId));
+    await expect(ready).resolves.toMatchObject({
+      ready: true,
+      modelVersion: 'test-model-v1',
+    });
+    expect(progress).toHaveBeenCalledWith({
+      phase: 'verifying',
+      downloadedBytes: 0,
+      totalBytes: 0,
+    });
+    expect(child.kill).not.toHaveBeenCalled();
+  });
   it('bounds speaker cancellation and grants a fresh live worker after a stuck inference', async () => {
     vi.useFakeTimers();
     const child = new FakeChild();

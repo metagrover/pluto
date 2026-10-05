@@ -28,6 +28,7 @@ const createDetector = ({
   browserProviders?: Map<string, 'google-meet' | 'zoom' | 'teams' | 'slack'>;
 }) => {
   return createActiveCallDetector({
+    browserInspectionEnabled: () => true,
     runAudioProbe,
     getRunningProcesses: async () => processes,
     detectBrowserCallProviders: async () => browserProviders ?? new Map(),
@@ -41,6 +42,28 @@ afterEach(() => {
 });
 
 describe('createActiveCallDetector', () => {
+  it('does not inspect browser tabs or request Automation access without opt-in', async () => {
+    setPlatform('darwin');
+    const inspect = vi.fn(async () => new Map());
+    const detector = createActiveCallDetector({
+      runAudioProbe: vi.fn(async () => true),
+      getRunningProcesses: async () => [
+        {
+          pid: 101,
+          ppid: 1,
+          name: 'google chrome',
+          command:
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        },
+      ],
+      detectBrowserCallProviders: inspect,
+    });
+    expect(await detector()).toMatchObject({
+      active: false,
+      reason: 'browser-tab-inspection-unavailable',
+    });
+    expect(inspect).not.toHaveBeenCalled();
+  });
   it('ignores browser-only audio when no supported meeting tab is detected', async () => {
     setPlatform('darwin');
     const runAudioProbe = vi.fn(async () => true);
@@ -221,6 +244,7 @@ describe('createActiveCallDetector', () => {
     setPlatform('darwin');
     const runAudioProbe = vi.fn(async () => true);
     const detector = createActiveCallDetector({
+      browserInspectionEnabled: () => true,
       runAudioProbe,
       getRunningProcesses: async () => [
         {

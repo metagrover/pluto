@@ -446,7 +446,7 @@ function parseNativeEvent(value: Record<string, unknown>): NativeEvent | null {
     if (value.phase === 'sizing') {
       if (value.downloadedBytes !== 0 || value.totalBytes !== 0) return null;
     } else if (
-      value.totalBytes === 0 ||
+      (value.totalBytes === 0 && value.phase !== 'verifying') ||
       value.downloadedBytes > value.totalBytes ||
       (value.phase === 'verifying' &&
         value.downloadedBytes !== value.totalBytes)

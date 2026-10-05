@@ -10,7 +10,7 @@ function fixture() {
       _options: { encoding: 'utf8'; timeout: number; maxBuffer: number },
     ) => ({
       stdout:
-        _command === '/usr/bin/osascript'
+        _command === '/usr/bin/mdfind'
           ? '/Applications/ChatGPT.app/\n'
           : JSON.stringify({
               installed: [
@@ -46,8 +46,8 @@ describe('ChatGPT Desktop local plugin installer', () => {
     };
     expect(runCommand).toHaveBeenNthCalledWith(
       1,
-      '/usr/bin/osascript',
-      ['-e', 'POSIX path of (path to application id "com.openai.codex")'],
+      '/usr/bin/mdfind',
+      ['kMDItemCFBundleIdentifier == "com.openai.codex"'],
       commandOptions,
     );
     const cliPath =
@@ -111,10 +111,11 @@ describe('ChatGPT Desktop local plugin installer', () => {
   it('reports a missing app without leaking command output or personal paths', async () => {
     const { options, runCommand, accessFile } = fixture();
     runCommand.mockRejectedValueOnce(new Error('private path and credentials'));
+    accessFile.mockRejectedValue(new Error('missing'));
     await expect(installInChatGptDesktop(options)).rejects.toThrow(
       'Install ChatGPT Desktop',
     );
-    expect(accessFile).not.toHaveBeenCalled();
+    expect(accessFile).toHaveBeenCalledTimes(2);
     expect(runCommand).toHaveBeenCalledTimes(1);
   });
   it('rejects unsupported installations before invoking the plugin command', async () => {
@@ -144,10 +145,11 @@ describe('ChatGPT Desktop local plugin installer', () => {
       stdout: 'not/an/application',
       stderr: '',
     });
+    accessFile.mockRejectedValue(new Error('missing'));
     await expect(installInChatGptDesktop(options)).rejects.toThrow(
       'Install ChatGPT Desktop',
     );
-    expect(accessFile).not.toHaveBeenCalled();
+    expect(accessFile).toHaveBeenCalledTimes(2);
     runCommand.mockClear();
     await expect(
       installInChatGptDesktop({
@@ -159,5 +161,19 @@ describe('ChatGPT Desktop local plugin installer', () => {
       installInChatGptDesktop({ ...options, homeDirectory: 'relative' }),
     ).rejects.toThrow('Could not prepare');
     expect(runCommand).not.toHaveBeenCalled();
+  });
+  it('finds a newly installed standard app when Spotlight has no result', async () => {
+    const { options, runCommand, accessFile } = fixture();
+    runCommand.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    await installInChatGptDesktop(options);
+    expect(accessFile).toHaveBeenCalledWith(
+      '/Applications/ChatGPT.app',
+      constants.F_OK,
+    );
+    expect(
+      runCommand.mock.calls.some(
+        ([command]) => command === '/usr/bin/osascript',
+      ),
+    ).toBe(false);
   });
 });

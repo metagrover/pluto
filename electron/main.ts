@@ -3220,7 +3220,11 @@ app.whenReady().then(async () => {
     });
   };
 
-  const detectActiveCall = createActiveCallDetector({ runAudioProbe });
+  const detectActiveCall = createActiveCallDetector({
+    runAudioProbe,
+    browserInspectionEnabled: () =>
+      db.getSetting('browser_call_detection_enabled') === 'true',
+  });
 
   ipcMain.handle(
     'SYSTEM_AUDIO_PROBE',

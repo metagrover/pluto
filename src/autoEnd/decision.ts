@@ -22,6 +22,10 @@ export type AutoEndAction =
 
 export function autoEndDecision(input: AutoEndInput): AutoEndAction {
   const { poll, trackedApp, graceActive } = input;
+  // Unavailable inspection is not evidence that a browser meeting ended.
+  if (poll.reason === 'browser-tab-inspection-unavailable') {
+    return graceActive ? { type: 'cancel_grace' } : { type: 'no_op' };
+  }
   const hasAttachedCallEvidence =
     poll.confidence === 'medium' &&
     (poll.reason === 'call-app-running-silent-fallback' ||

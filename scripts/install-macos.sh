@@ -5,9 +5,11 @@ main() {
   fail() { printf 'Pluto: %s\n' "$*" >&2; exit 1; }
   applications=/Applications
   verify_only=false
+  fresh_profile=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --verify-only) verify_only=true; shift ;;
+      --fresh-profile) fresh_profile=true; shift ;;
       --directory) [[ $# -ge 2 ]] || fail 'Missing installation directory.'; applications=$2; shift 2 ;;
       *) fail "Unknown option: $1" ;;
     esac
@@ -87,6 +89,13 @@ main() {
   mv "$staging/Pluto.app" "$destination"
   installed=true
   printf 'Installed Pluto %s at %s. Existing meetings, settings, and models are preserved.\n' "$version" "$destination"
-  open "$destination"
+  if "$fresh_profile"; then
+    mkdir -p "$HOME/Library/Application Support"
+    profile=$(mktemp -d "$HOME/Library/Application Support/pluto-first-run.XXXXXX")
+    printf 'Launching first-run onboarding with a separate empty profile: %s\nYour normal profile is preserved.\n' "$profile"
+    open -na "$destination" --args "--user-data-dir=$profile"
+  else
+    open "$destination"
+  fi
 }
 main "$@"

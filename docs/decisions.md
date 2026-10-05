@@ -1466,3 +1466,11 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Suggestions and drafts:** Use checked transcript wording in a usable follow-up message or explicitly proposed next steps. Generated prose and small-model self-approval cannot authorize new owners, dates or promises. This deliberately limits stylistic rewriting and open-ended coaching; factual correctness takes priority over fluency.
 - **Provider:** Use Ollama chat with system/user separation, JSON output, zero temperature, and bounded context expansion. Buffer structured responses until source validation completes. Malformed output or provider failure produces an unavailable response rather than unrelated snapshot content.
 - **Limits:** Exact-source validation proves wording exists, not perfect relevance, completeness, speaker identity or transcription accuracy. Live evidence remains provisional; focused tests and fictional provider replays do not replace fresh real-meeting acceptance.
+
+## 2026-10-04 - Require explicit browser inspection opt-in and verify setup through app IPC
+
+- **Status:** Accepted
+- **Decision:** Browser tab inspection defaults off for all profiles and can be enabled in Meetings settings with a clear Automation permission explanation. ChatGPT discovery uses filesystem metadata and standard installation locations, without Apple Events. Packaged model setup checks use the actual application client and strict JSONL validator for both empty-cache preparation and a separate cached restart.
+- **Supersedes:** The browser detection portion of “2026-08-10 - Split live, final transcript, and analysis latency on Apple Silicon” now runs only after opt-in. Its explicit closed-tab evidence remains valid after successful inspection; unavailable inspection cancels rather than starts auto-end grace.
+- **Rationale:** A real RC6 installation exposed unsolicited Automation prompts and rejection of valid cached-model verification events despite passing a separate native smoke parser.
+- **Continuity:** Upgrades preserve existing profiles and models. Installer `--fresh-profile` launches an isolated empty profile for first-run testing without deleting or resetting existing data.

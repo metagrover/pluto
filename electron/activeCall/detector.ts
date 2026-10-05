@@ -56,6 +56,7 @@ type RunAudioProbeOptions = {
 };
 
 type CreateActiveCallDetectorArgs = {
+  browserInspectionEnabled?: () => boolean;
   runAudioProbe: (options: RunAudioProbeOptions) => Promise<boolean>;
   getRunningProcesses?: () => Promise<RunningProcessInfo[]>;
   detectBrowserCallProviders?: (
@@ -394,6 +395,7 @@ const getMatchedDisplayName = (
 
 export const createActiveCallDetector = ({
   runAudioProbe,
+  browserInspectionEnabled = () => false,
   getRunningProcesses: getRunningProcessesOverride,
   detectBrowserCallProviders: detectBrowserCallProvidersOverride,
 }: CreateActiveCallDetectorArgs) => {
@@ -459,9 +461,18 @@ export const createActiveCallDetector = ({
       };
     }).filter((entry) => entry.pids.length > 0);
     const browserDetection = normalizeBrowserProviderDetection(
-      await (detectBrowserCallProvidersOverride ?? detectBrowserCallProviders)(
-        matchedApps,
-      ),
+      browserInspectionEnabled()
+        ? await (
+            detectBrowserCallProvidersOverride ?? detectBrowserCallProviders
+          )(matchedApps)
+        : {
+            providerByLabel: new Map(),
+            inspectionFailures: new Set(
+              matchedApps
+                .filter((app) => app.browserId)
+                .map((app) => app.label),
+            ),
+          },
     );
     const browserCallProviderByLabel = browserDetection.providerByLabel;
 
