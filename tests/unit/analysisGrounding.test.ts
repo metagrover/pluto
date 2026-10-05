@@ -1302,3 +1302,51 @@ describe('analysis grounding', () => {
     expect(result.errorCategories).toContain('unsupported_action_item');
   });
 });
+
+describe('ordinary source-reviewed promise wording', () => {
+  const check = (evidence: string, due: string | null = null) =>
+    groundSourceReviewedItem(
+      {
+        kind: 'action',
+        text: 'Prepare the launch checklist',
+        owner: 'Alex',
+        due,
+      },
+      {
+        evidence,
+        quotedEvidence: evidence,
+        sourceLine: `Alex: ${evidence}`,
+        sourceLines: [`Alex: ${evidence}`],
+        lineIndex: 0,
+      },
+    );
+  it.each([
+    'I promise to prepare the launch checklist.',
+    'Alex promised to prepare the launch checklist.',
+    'Alex committed to preparing the launch checklist.',
+  ])('retains the supported owner: %s', (evidence) => {
+    expect(check(evidence)?.owner).toBe('Alex');
+  });
+  it.each([
+    "I'll prepare the launch checklist Friday.",
+    'Alex promised to prepare the launch checklist Friday.',
+  ])(
+    'retains a bare deadline attached to the promised task: %s',
+    (evidence) => {
+      expect(check(evidence, 'Friday')?.due).toBe('Friday');
+    },
+  );
+  it('does not borrow a date from unrelated discussion', () => {
+    expect(
+      check(
+        'I will prepare the launch checklist. The office closes Friday.',
+        'Friday',
+      )?.due,
+    ).toBeNull();
+  });
+  it('keeps a conditional promise from becoming an unconditional action', () => {
+    expect(
+      check('If legal approves, I promise to prepare the launch checklist.'),
+    ).toBeNull();
+  });
+});

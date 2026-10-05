@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import {
+  containsEvidencePhrase,
+  normalizeEvidenceText as normalizeSourceText,
+} from '../../src/utils/evidenceText';
 import { parseRawDreamingProposal } from './proposalParser';
 import type {
   DreamingInputPackage,
@@ -44,26 +48,48 @@ const normalizeEvidenceText = (text: string): string =>
     .trim();
 
 const EXPLICIT_COMMITMENT_CUE =
-  /\b(?:agreed (?:to|that|on)|committed (?:to|that)|promised (?:to|that)|must|needs? to|assigned (?:to|that)|(?:is |are |was |were )?required to|action items?(?: is| are)?|owns? the task of|responsible for|tasked with|decided (?:to|that))\b/;
+  /\b(?:will|i'll|we'll|agreed (?:to|that|on)|committed (?:to|that)|promised (?:to|that)|must|needs? to|assigned (?:to|that)|(?:is |are |was |were )?required to|action items?(?: is| are)?|owns? the task of|responsible for|tasked with|decided (?:to|that))\b/;
 const TENTATIVE_COMMITMENT_CUE =
-  /\b(?:propos(?:e|es|ed|ing|als?)|suggest(?:s|ed|ing|ions?)?|consider(?:s|ed|ing|ation)?|might|may|could|options?|alternatives?|aim(?:s|ed|ing)? to|aspirations?)\b/;
+  /\b(?:propos(?:e|es|ed|ing|als?)|suggest(?:s|ed|ing|ions?)?|consider(?:s|ed|ing|ation)?|might|may|could|aim(?:s|ed|ing)? to|aspirations?|likely|probably|possibly|as long as)\b/;
 const NEGATED_COMMITMENT_CUE =
   /\b(?:not|never|no longer|(?:is|was|are|were|has|have|had|does|do|did|will|would|should|could|can)n't|cannot|declined to|refused to|withdrawn?|cancel(?:led|ed)|no action item)\b/;
 const CONDITIONAL_COMMITMENT_CUE =
   /\b(?:if|unless|once|when|until|upon approval|after approval|subject to|pending|provided that|assuming|depending on|contingent (?:on|upon))\b/;
 
-const hasExplicitCommitmentEvidence = (
-  proposal: RawDreamingProposal,
-): boolean =>
-  proposal.evidence.some((reference) => {
-    const excerpt = normalizeEvidenceText(reference.excerpt);
-    return (
-      EXPLICIT_COMMITMENT_CUE.test(excerpt) &&
-      !TENTATIVE_COMMITMENT_CUE.test(excerpt) &&
-      !NEGATED_COMMITMENT_CUE.test(excerpt) &&
-      !CONDITIONAL_COMMITMENT_CUE.test(excerpt)
+const supportedCommitmentTask = (
+  proposal: Extract<RawDreamingProposal, { kind: 'project_commitment' }>,
+  pkg: DreamingInputPackage,
+): string | null => {
+  for (const reference of proposal.evidence) {
+    const meeting = pkg.recentMeetingNotes.find(
+      (item) => item.meetingId === reference.meetingId,
     );
-  });
+    // A saved action retains its classification. Do not infer a new owner or
+    // obligation from a prose fragment, or revive an action removed from notes.
+    const saved = meeting?.actionItems?.find(
+      (task) =>
+        normalizeSourceText(task).replace(/[.!?]+$/, '') ===
+          normalizeSourceText(proposal.payload.task).replace(/[.!?]+$/, '') &&
+        normalizeSourceText(meeting.notesContent).includes(
+          normalizeSourceText(task),
+        ) &&
+        containsEvidencePhrase(reference.excerpt, task),
+    );
+    if (saved) return saved;
+    for (const sentence of reference.excerpt.match(/[^.!?]+[.!?]?/g) ?? []) {
+      const excerpt = normalizeEvidenceText(sentence);
+      if (
+        containsEvidencePhrase(excerpt, proposal.payload.task) &&
+        EXPLICIT_COMMITMENT_CUE.test(excerpt) &&
+        !TENTATIVE_COMMITMENT_CUE.test(excerpt) &&
+        !NEGATED_COMMITMENT_CUE.test(excerpt) &&
+        !CONDITIONAL_COMMITMENT_CUE.test(excerpt)
+      )
+        return proposal.payload.task;
+    }
+  }
+  return null;
+};
 
 const canonicalPayload = (proposal: RawDreamingProposal): unknown => {
   switch (proposal.kind) {
@@ -177,7 +203,7 @@ export const validateDreamingOutput = (
   let firstRejectionError: string | null = null;
 
   for (const value of parsed.proposals) {
-    const proposal = parseRawDreamingProposal(value, pkg.entityType);
+    let proposal = parseRawDreamingProposal(value, pkg.entityType);
     if (!proposal) {
       firstRejectionError ??= 'invalid_proposal_shape';
       continue;
@@ -202,15 +228,13 @@ export const validateDreamingOutput = (
       firstRejectionError ??= 'insufficient_summary_evidence';
       continue;
     }
-    if (
-      proposal.kind === 'project_commitment' &&
-      !hasExplicitCommitmentEvidence(proposal)
-    ) {
-      console.warn(
-        `[Dreaming] Dropping ungrounded commitment proposal: "${proposal.payload.task}"`,
-      );
-      firstRejectionError ??= 'unsupported_project_commitment';
-      continue;
+    if (proposal.kind === 'project_commitment') {
+      const task = supportedCommitmentTask(proposal, pkg);
+      if (!task) {
+        firstRejectionError ??= 'unsupported_project_commitment';
+        continue;
+      }
+      proposal = { ...proposal, payload: { task } };
     }
 
     const fingerprint = generateProposalFingerprint(proposal, pkg);

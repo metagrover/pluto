@@ -356,21 +356,25 @@ describe('person briefing database read model', () => {
       },
     });
 
-    // For non-self individuals (isSelf === false), extracted commitments automatically show up in open commitments
+    // Name-matched extraction remains a candidate for peers too.
     const peerBriefing = db.getPersonBriefing(person.id);
     expect(
       db
         .getPeopleBriefingSummaries()
         .find((summary) => summary.id === person.id),
     ).toMatchObject({
-      openCommitmentCount: 2,
-      candidateCommitmentCount: 0,
+      openCommitmentCount: 1,
+      candidateCommitmentCount: 1,
     });
     expect(peerBriefing?.commitments.open.map((item) => item.id)).toEqual([
       'verified-action',
-      'name-only-action',
     ]);
-    expect(peerBriefing?.commitments.candidates).toEqual([]);
+    expect(peerBriefing?.commitments.candidates).toEqual([
+      expect.objectContaining({
+        id: 'name-only-action',
+        suggestedOwnerName: 'Jordan Vale',
+      }),
+    ]);
 
     // For the active workspace user (isSelf === true), friction is preserved:
     // extracted commitments require confirmation before entering open commitments
@@ -448,24 +452,24 @@ describe('person briefing database read model', () => {
       evidence: [],
     });
 
-    // For non-self peer: binding Speaker 1 automatically promotes the commitment to open
+    // A speaker binding suggests ownership; it does not confirm the obligation.
     expect(
       db
         .getPeopleBriefingSummaries()
         .find((summary) => summary.id === person.id),
     ).toMatchObject({
-      openCommitmentCount: 1,
-      candidateCommitmentCount: 0,
+      openCommitmentCount: 0,
+      candidateCommitmentCount: 1,
     });
 
     const peerBriefing = db.getPersonBriefing(person.id);
-    expect(peerBriefing?.commitments.open).toEqual([
+    expect(peerBriefing?.commitments.open).toEqual([]);
+    expect(peerBriefing?.commitments.candidates).toEqual([
       expect.objectContaining({
         id: 'action-speaker-1',
         sourceMeetingTitle: 'Roadmap Planning',
       }),
     ]);
-    expect(peerBriefing?.commitments.candidates).toEqual([]);
 
     // For the active user (isSelf === true): candidate commitments require confirmation
     db.identityStore.setSelfPersonId(person.id);

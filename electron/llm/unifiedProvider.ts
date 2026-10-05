@@ -1512,6 +1512,8 @@ export class UnifiedLLMProvider implements LLMProvider {
           : [{ role: 'user', content: prompt }];
     }
 
+    const isAskPluto =
+      task === 'askPluto' || task === 'askPlutoDeep' || task === 'askPlutoLive';
     const start = Date.now();
     try {
       console.log(
@@ -1550,6 +1552,8 @@ export class UnifiedLLMProvider implements LLMProvider {
           const packet = JSON.parse(line) as Record<string, unknown>;
           const isDone = packet.done === true;
           if (isDone) completed = true;
+          if (isAskPluto && isDone && packet.done_reason === 'length')
+            throw new Error('ask_pluto_response_incomplete');
           if (task === 'projectScopeReview' && packet.done === true) {
             if (packet.done_reason === 'length')
               throw new Error('project_scope_response_incomplete');
@@ -1618,6 +1622,8 @@ export class UnifiedLLMProvider implements LLMProvider {
             );
           throw new Error(`Ollama API error: ${response.statusText}`);
         }
+        if (isAskPluto && !completed)
+          throw new Error('ask_pluto_response_incomplete');
         if (notesBudget && !completed)
           throw new MeetingNotesError('notes_output_incomplete');
         if (task === 'projectScopeReview' && !completed)
@@ -1679,6 +1685,8 @@ export class UnifiedLLMProvider implements LLMProvider {
     }
 
     const data = await response.json();
+    if (isAskPluto && (data.done !== true || data.done_reason === 'length'))
+      throw new Error('ask_pluto_response_incomplete');
     const duration = Date.now() - start;
     try {
       console.log(`[Ollama] Generation complete in ${duration}ms (${task})`);

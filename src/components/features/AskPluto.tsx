@@ -222,6 +222,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   );
   const messageCounterRef = useRef(0);
   const activeRequestIdRef = useRef<string | null>(null);
+  const latestRequestIdRef = useRef<string | null>(null);
   const workspaceThreadIdRef = useRef<string | null>(null);
   const workspaceThreadPromiseRef = useRef<Promise<string> | null>(null);
   const workspaceHydratedRef = useRef(false);
@@ -265,6 +266,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         ...(message.payload as WorkspaceChatMessagePayload),
         citations: message.payload.citations as CitationChain[] | undefined,
       }));
+      workspaceThreadPromiseRef.current = null;
       workspaceThreadIdRef.current = threadId;
       setWorkspaceThreadId(threadId);
       setAnchoredUserMessageId(null);
@@ -279,10 +281,12 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     if (workspaceThreadIdRef.current) return workspaceThreadIdRef.current;
     if (workspaceThreadPromiseRef.current)
       return workspaceThreadPromiseRef.current;
-    workspaceThreadPromiseRef.current = createWorkspaceChatThread()
+    const threadPromise = createWorkspaceChatThread()
       .then((thread) => {
-        workspaceThreadIdRef.current = thread.id;
-        setWorkspaceThreadId(thread.id);
+        if (workspaceThreadPromiseRef.current === threadPromise) {
+          workspaceThreadIdRef.current = thread.id;
+          setWorkspaceThreadId(thread.id);
+        }
         setWorkspaceThreads((current) => [
           thread,
           ...current.filter((candidate) => candidate.id !== thread.id),
@@ -290,9 +294,11 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         return thread.id;
       })
       .finally(() => {
-        workspaceThreadPromiseRef.current = null;
+        if (workspaceThreadPromiseRef.current === threadPromise)
+          workspaceThreadPromiseRef.current = null;
       });
-    return workspaceThreadPromiseRef.current;
+    workspaceThreadPromiseRef.current = threadPromise;
+    return threadPromise;
   }, []);
 
   useEffect(() => {
@@ -416,10 +422,25 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     retryMessageId?: string,
   ) => {
     e?.preventDefault();
-    const submitQuery = presetQuery || query;
+    let submitQuery = presetQuery || query;
+    let effectiveRetryMessageId = retryMessageId;
     if (!submitQuery.trim()) return;
-    const retryIndex = retryMessageId
-      ? messages.findIndex((message) => message.id === retryMessageId)
+    // A failed answer is not conversation evidence, but its request is still
+    // the subject of a typed retry. Use the same path as the Retry button.
+    if (
+      !effectiveRetryMessageId &&
+      /^(?:please\s+)?(?:try again|retry|try once more)[?.!]*$/i.test(
+        submitQuery.trim(),
+      )
+    ) {
+      const last = messages.at(-1);
+      if (last?.role === 'assistant' && last.retryQuery) {
+        submitQuery = last.retryQuery;
+        effectiveRetryMessageId = last.id;
+      }
+    }
+    const retryIndex = effectiveRetryMessageId
+      ? messages.findIndex((message) => message.id === effectiveRetryMessageId)
       : -1;
     const history =
       retryIndex >= 0
@@ -501,18 +522,25 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       ? `ask-pluto-${Date.now()}-${messageCounterRef.current}`
       : null;
     activeRequestIdRef.current = requestId;
+    latestRequestIdRef.current = requestId;
 
     try {
       if (window.ipcRenderer && requestId) {
-        const targetWorkspaceThreadId = await workspaceThreadPromise;
-        if (targetWorkspaceThreadId) {
-          await appendWorkspaceChatMessage({
-            id: userMessageId,
-            threadId: targetWorkspaceThreadId,
-            role: 'user',
-            content: submitQuery.trim(),
-          }).catch(() => undefined);
-        }
+        const targetWorkspaceThreadId = workspaceThreadIdRef.current;
+        // Saving the conversation must not block dispatch or the Stop button.
+        const savedUserMessage = workspaceThreadPromise.then(
+          async (threadId) => {
+            if (threadId)
+              await appendWorkspaceChatMessage({
+                id: userMessageId,
+                threadId,
+                role: 'user',
+                content: submitQuery.trim(),
+              }).catch(() => undefined);
+            return threadId;
+          },
+        );
+        if (activeRequestIdRef.current !== requestId) return;
         const priorTurns: AskPlutoConversationTurn[] = validHistory
           .slice(-6)
           .map((message) => ({
@@ -566,7 +594,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           query: submitQuery.trim(),
           modeOverride,
           priorTurns,
-          ...(!retryMessageId &&
+          ...(!effectiveRetryMessageId &&
           failedTurnIndexes.size === 0 &&
           workspaceThreads.find(
             (thread) => thread.id === targetWorkspaceThreadId,
@@ -664,52 +692,58 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           newMsg.push(assistantMessage);
           return newMsg;
         });
-        if (targetWorkspaceThreadId) {
-          await appendWorkspaceChatMessage({
-            id: assistantMessage.id,
-            threadId: targetWorkspaceThreadId,
-            role: 'assistant',
-            content: assistantMessage.content,
-            payload: toWorkspacePayload(assistantMessage),
-          }).catch(() => undefined);
-          const currentThread = workspaceThreads.find(
-            (thread) => thread.id === targetWorkspaceThreadId,
-          );
-          const previousMemory: WorkspaceChatMemory = currentThread?.memory ?? {
-            corrections: [],
-            unresolvedQuestions: [],
-          };
-          if (
-            !assistantMessage.retryQuery &&
-            assistantMessage.outcome !== 'cancelled' &&
-            assistantMessage.outcome !== 'failed' &&
-            assistantMessage.outcome !== 'unavailable'
-          )
-            await updateWorkspaceChatMemory({
+        void savedUserMessage
+          .then(async (targetWorkspaceThreadId) => {
+            if (!targetWorkspaceThreadId) return;
+            await appendWorkspaceChatMessage({
+              id: assistantMessage.id,
               threadId: targetWorkspaceThreadId,
-              memory: {
-                ...previousMemory,
-                activeTopic:
-                  assistantMessage.conversationContext?.topic ??
-                  previousMemory.activeTopic,
-                currentGoal:
-                  assistantMessage.retrievalPolicy === 'fresh'
-                    ? submitQuery.trim().slice(0, 500)
-                    : previousMemory.currentGoal ||
-                      submitQuery.trim().slice(0, 500),
-                lastAnswerSummary: summarizeAnswer(assistantMessage.content),
-                corrections:
-                  assistantMessage.turnMode === 'challenge'
-                    ? [
-                        ...previousMemory.corrections.slice(-4),
-                        submitQuery.trim().slice(0, 500),
-                      ]
-                    : previousMemory.corrections,
-                unresolvedQuestions: previousMemory.unresolvedQuestions,
-              },
+              role: 'assistant',
+              content: assistantMessage.content,
+              payload: toWorkspacePayload(assistantMessage),
             }).catch(() => undefined);
-          void refreshWorkspaceThreads().catch(() => undefined);
-        }
+            const currentThread = workspaceThreads.find(
+              (thread) => thread.id === targetWorkspaceThreadId,
+            );
+            const previousMemory: WorkspaceChatMemory =
+              currentThread?.memory ?? {
+                corrections: [],
+                unresolvedQuestions: [],
+              };
+            if (
+              latestRequestIdRef.current === requestId &&
+              workspaceThreadIdRef.current === targetWorkspaceThreadId &&
+              !assistantMessage.retryQuery &&
+              assistantMessage.outcome !== 'cancelled' &&
+              assistantMessage.outcome !== 'failed' &&
+              assistantMessage.outcome !== 'unavailable'
+            )
+              await updateWorkspaceChatMemory({
+                threadId: targetWorkspaceThreadId,
+                memory: {
+                  ...previousMemory,
+                  activeTopic:
+                    assistantMessage.conversationContext?.topic ??
+                    previousMemory.activeTopic,
+                  currentGoal:
+                    assistantMessage.retrievalPolicy === 'fresh'
+                      ? submitQuery.trim().slice(0, 500)
+                      : previousMemory.currentGoal ||
+                        submitQuery.trim().slice(0, 500),
+                  lastAnswerSummary: summarizeAnswer(assistantMessage.content),
+                  corrections:
+                    assistantMessage.turnMode === 'challenge'
+                      ? [
+                          ...previousMemory.corrections.slice(-4),
+                          submitQuery.trim().slice(0, 500),
+                        ]
+                      : previousMemory.corrections,
+                  unresolvedQuestions: previousMemory.unresolvedQuestions,
+                },
+              }).catch(() => undefined);
+            void refreshWorkspaceThreads().catch(() => undefined);
+          })
+          .catch(() => undefined);
       } else {
         setMessages((prev) => {
           const newMsg = [...prev];
@@ -768,8 +802,26 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   const handleCancel = async () => {
     const requestId = activeRequestIdRef.current;
     if (!requestId || !window.ipcRenderer) return;
-    setRequestPhase('cancelling');
-    await window.ipcRenderer.invoke('intelligence:query:cancel', requestId);
+    activeRequestIdRef.current = null;
+    setIsProcessing(false);
+    setRequestPhase('cancelled');
+    setMessages((current) =>
+      current.map((message) =>
+        message.isLoading
+          ? {
+              ...message,
+              isLoading: false,
+              content: message.content
+                ? `${message.content}\n\nStopped.`
+                : 'Stopped.',
+              outcome: 'cancelled' as const,
+            }
+          : message,
+      ),
+    );
+    await window.ipcRenderer
+      .invoke('intelligence:query:cancel', requestId)
+      .catch(() => undefined);
   };
 
   const confirmAction = async (message: AskPlutoMessage) => {
@@ -831,6 +883,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       ?.invoke('intelligence:query:new-conversation')
       .catch(() => undefined);
     workspaceThreadIdRef.current = null;
+    workspaceThreadPromiseRef.current = null;
     setWorkspaceThreadId(null);
     setAnchoredUserMessageId(null);
     setHistoryOpen(false);
@@ -1243,6 +1296,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                       (msg.outcome === 'no_evidence' ||
                         msg.outcome === 'partial' ||
                         msg.evidenceState === 'provisional' ||
+                        msg.trustStatus === 'inferred' ||
                         msg.trustStatus === 'needs_review') && (
                         <div
                           className={`px-1 text-[11px] font-medium ${
@@ -1262,9 +1316,11 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                               ? `Partial answer${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} draft ${msg.unsupportedClaimCount === 1 ? 'statement needs' : 'statements need'} a closer check` : ''}`
                               : msg.evidenceState === 'provisional'
                                 ? 'Provisional live answer'
-                                : msg.trustStatus === 'needs_review'
-                                  ? `Needs review${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} ${msg.unsupportedClaimCount === 1 ? 'detail could' : 'details could'} not be verified` : ''}`
-                                  : ''}
+                                : msg.trustStatus === 'inferred'
+                                  ? 'Based on saved notes · Check sources'
+                                  : msg.trustStatus === 'needs_review'
+                                    ? `Needs review${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} ${msg.unsupportedClaimCount === 1 ? 'detail could' : 'details could'} not be verified` : ''}`
+                                    : ''}
                         </div>
                       )}
 

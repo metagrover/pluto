@@ -76,3 +76,12 @@ test('no-match fallback remains explicitly truncated and bounded', () => {
   assert.equal(result.length, 200);
   assert.match(result, /\[Text omitted\]/);
 });
+
+it('retains authoritative task state before selecting relevant note excerpts', () => {
+  const state =
+    '[Canonical commitment state — overrides older notes]:\nMorgan — rejected: Send the obsolete report.';
+  const text = `${state}\n[Meeting]: Review\n${'Morgan discussed reports. '.repeat(100)}\nMorgan owns a new acceptance report.`;
+  const excerpt = excerptQueryEvidence(text, 'Morgan report', 500);
+  expect(excerpt).toContain('Morgan — rejected: Send the obsolete report.');
+  expect(excerpt.length).toBeLessThanOrEqual(500);
+});

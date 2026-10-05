@@ -339,6 +339,35 @@ describe('filing new work under established projects', () => {
     expect(await routeProjectCandidate(deps)).toMatchObject({ deferred: true });
     expect(deps.generate).not.toHaveBeenCalled();
   });
+  it('reports foreground preemption without recording a routing failure', async () => {
+    const { deps } = fixture();
+    deps.generate.mockRejectedValue(
+      new Error('aborted', {
+        cause: new DOMException('foreground_preempted', 'AbortError'),
+      }),
+    );
+    const onDeferred = vi.fn();
+    expect(await routeProjectCandidate({ ...deps, onDeferred })).toMatchObject({
+      deferred: true,
+      failed: 0,
+    });
+    expect(onDeferred).toHaveBeenCalledWith('foreground_preempted');
+  });
+  it('reports remaining queue work separately from failure', async () => {
+    const { deps, projects, sources } = fixture();
+    projects.push({ ...projects[1], id: 'next' });
+    sources.push({
+      ...sources[1],
+      id: 'next-source',
+      candidateProjects: [{ id: 'next', name: 'Next work' }],
+    });
+    const onDeferred = vi.fn();
+    expect(await routeProjectCandidate({ ...deps, onDeferred })).toMatchObject({
+      deferred: true,
+      failed: 0,
+    });
+    expect(onDeferred).toHaveBeenCalledWith('routing_queue_remaining');
+  });
   it('retains failures for explicit retry while allowing the queue to progress', async () => {
     const { deps } = fixture();
     deps.generate.mockResolvedValue('invalid');

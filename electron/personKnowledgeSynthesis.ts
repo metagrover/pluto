@@ -1,3 +1,4 @@
+import { containsPersonReference } from '../src/utils/evidenceText';
 import { parsePersonProfile } from '../src/utils/personProfile';
 import type { KnowledgeChunkSourceMeeting } from './knowledgeChunking';
 import {
@@ -26,8 +27,8 @@ Rules:
 - evolution explains dated changes, preserving historical decisions and naming a replacement only when stated. Do not resolve contradictions silently.
 - next_conversation may suggest returning to an evidenced unresolved question. Label suggestions as suggestions; do not invent a scheduled meeting, deadline, or new commitment.
 - unknowns names evidenced unresolved issues, not a checklist of missing personal information. Never infer private or sensitive attributes.
-- Each profile claim needs exact person-specific citations. Every cited quote begins with ${name} or their first name; use multiple citations for claims spanning conversations.
-- Every topic needs a quote that begins with ${name} or their first name. Copy quotes verbatim.
+- Each profile claim needs exact person-specific citations. Every cited quote must explicitly refer to ${name} or their first name, including possessive forms; use multiple citations for claims spanning conversations.
+- Every topic needs a quote that explicitly refers to ${name} or their first name. Copy quotes verbatim.
 - Keep at most four topics and two citations per topic. Prefer repeated work, then recent concrete contributions. Profile claims may cite up to four sources.
 - A topic may have one source; Pluto will distinguish one-off work from recurring work later.
 - Make titles specific. The read should explain what the person did, not offer a generic label.
@@ -64,8 +65,6 @@ export const compilePersonKnowledgeChunk = (
   const scope = { type: 'person_context' as const, title: name };
   const baseline = buildDeterministicKnowledgeV2Document(scope, sources);
   const sourceById = new Map(sources.map((source) => [source.id, source]));
-  const firstName = name.split(' ')[0].toLocaleLowerCase();
-  const fullName = name.toLocaleLowerCase();
   const supportedCitation = (meetingId: string, quote: string) => {
     const normalized = quote.trim().toLocaleLowerCase();
     return (
@@ -74,9 +73,7 @@ export const compilePersonKnowledgeChunk = (
         .get(meetingId)
         ?.evidence.toLocaleLowerCase()
         .includes(normalized) &&
-      [firstName, fullName].some((personName) =>
-        normalized.startsWith(`${personName} `),
-      )
+      containsPersonReference(quote, name)
     );
   };
   const profile = parsePersonProfile(
@@ -119,9 +116,7 @@ export const compilePersonKnowledgeChunk = (
           !source ||
           cleanQuote.length < 12 ||
           !source.evidence.toLocaleLowerCase().includes(normalizedQuote) ||
-          ![firstName, fullName].some((personName) =>
-            normalizedQuote.startsWith(`${personName} `),
-          )
+          !containsPersonReference(quote, name)
         )
           return [];
         return [

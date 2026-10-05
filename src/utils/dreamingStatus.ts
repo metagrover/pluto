@@ -5,6 +5,8 @@ export type DreamingUiStatus =
   | 'idle'
   | 'running'
   | 'review_required'
+  | 'unverified'
+  | 'empty_brief'
   | 'error';
 
 export const DREAMING_STATUS_LABEL = {
@@ -21,6 +23,8 @@ export const DREAMING_STATUS_LABEL = {
   no_work: 'No source notes available',
   invalid_request: 'Select a person or project',
   review_required: 'Review required',
+  unverified: 'Updates could not be verified',
   failed: 'Preparation failed',
+  empty_brief: 'No brief could be prepared',
   error: 'Preparation failed',
 } as const satisfies Record<DreamingUiStatus, string>;

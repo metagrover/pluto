@@ -42,7 +42,7 @@ export const classifyAskPlutoFailure = (
     return {
       reason: 'invalid_response',
       answer:
-        'Pluto found relevant meeting evidence, but could not verify the response from the model. Nothing was added to the answer. Retry to generate a fresh response.',
+        'The model returned an incomplete or invalid response. Retry to generate a fresh answer.',
     };
   }
 

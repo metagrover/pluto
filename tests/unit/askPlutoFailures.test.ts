@@ -25,7 +25,7 @@ describe('classifyAskPlutoFailure', () => {
       ),
     ).toMatchObject({
       reason: 'invalid_response',
-      answer: expect.stringContaining('could not verify the response'),
+      answer: expect.stringContaining('incomplete or invalid response'),
     });
   });
 

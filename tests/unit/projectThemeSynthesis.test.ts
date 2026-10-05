@@ -284,8 +284,12 @@ describe('cross-conversation project theme synthesis', () => {
       cause: new DOMException('foreground_preempted', 'AbortError'),
     });
     fixture.deps.generate.mockRejectedValue(preemptionError);
-
-    const result = await synthesizeProjectThemes(fixture.deps);
+    const onDeferred = vi.fn();
+    const result = await synthesizeProjectThemes({
+      ...fixture.deps,
+      onDeferred,
+    });
+    expect(onDeferred).toHaveBeenCalledWith('foreground_preempted');
     expect(result).toMatchObject({
       discovered: 0,
       remaining: 1,
@@ -588,6 +592,83 @@ describe('stable project identities and grounded grouping', () => {
           : candidate;
       },
     });
+    expect(deps.saveTheme).not.toHaveBeenCalled();
+  });
+});
+
+describe('preparing a selected project brief', () => {
+  const selectedFixture = () => {
+    const fixture = makeDeps();
+    const target = {
+      id: 'candidate-1',
+      type: 'project',
+      name: 'Archive indexing',
+      metadata: JSON.stringify({
+        projectThemeSynthesis: { version: 3, currentFocus: '' },
+      }),
+    };
+    const scopedSources = sources.map((source) => ({
+      ...source,
+      candidateProjects: [{ id: target.id, name: target.name }],
+    }));
+    const deps = {
+      ...fixture.deps,
+      listProjects: () => [target],
+      getProject: (id: string) =>
+        id === target.id ? target : fixture.deps.getProject(id),
+      listSources: () => [
+        ...scopedSources,
+        {
+          id: 'unrelated',
+          title: 'Other initiative',
+          notes: 'Unrelated private source',
+          startedAt: '2026-08-28T12:00:00Z',
+          candidateProjects: [{ id: 'candidate-2', name: 'Other' }],
+        },
+      ],
+      getSource: (id: string) =>
+        scopedSources.find((source) => source.id === id),
+      generate: vi.fn(async (_prompt: string) =>
+        JSON.stringify({
+          themes: [
+            {
+              ...response.themes[0],
+              existingProjectId: target.id,
+              candidateProjectIds: [target.id],
+            },
+          ],
+        }),
+      ),
+    };
+    return { fixture, deps };
+  };
+
+  it('retries completed synthesis and saves a grounded brief on the selected identity', async () => {
+    const { deps } = selectedFixture();
+    await synthesizeProjectThemes(deps, { projectId: 'candidate-1' });
+    await synthesizeProjectThemes(deps, { projectId: 'candidate-1' });
+    expect(deps.generate).toHaveBeenCalledTimes(2);
+    expect(deps.generate.mock.calls[0]?.[0]).not.toContain(
+      'Unrelated private source',
+    );
+    expect(deps.saveTheme).toHaveBeenCalledTimes(2);
+    expect(deps.saveTheme.mock.calls[0]?.[0]).toMatchObject({
+      id: 'candidate-1',
+      memberships: [],
+      metadata: {
+        projectThemeSynthesis: {
+          currentFocus: response.themes[0].currentFocus,
+        },
+      },
+    });
+  });
+
+  it('cannot create another project when preparing a selected brief', async () => {
+    const { deps } = selectedFixture();
+    deps.generate.mockResolvedValue(JSON.stringify(response));
+    expect(
+      await synthesizeProjectThemes(deps, { projectId: 'candidate-1' }),
+    ).toMatchObject({ discovered: 0 });
     expect(deps.saveTheme).not.toHaveBeenCalled();
   });
 });

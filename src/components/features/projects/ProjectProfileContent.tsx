@@ -387,9 +387,11 @@ export function ProjectProfileContent({
                     role="status"
                     className="mt-4 max-w-[46ch] text-sm leading-6 text-pro-text-muted"
                   >
-                    {preparationState === 'no_change'
-                      ? 'No new updates were found. More connected discussion may be needed to build this brief.'
-                      : DREAMING_STATUS_LABEL[preparationState]}
+                    {preparationState === 'empty_brief'
+                      ? 'Pluto could not build a supported brief from the connected notes. Retry preparation or review the source history.'
+                      : preparationState === 'no_change'
+                        ? 'No new updates were found. More connected discussion may be needed to build this brief.'
+                        : DREAMING_STATUS_LABEL[preparationState]}
                   </p>
                 )}
               </div>

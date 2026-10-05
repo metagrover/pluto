@@ -1,3 +1,4 @@
+import { normalizeEvidenceText } from '../../src/utils/evidenceText';
 import { deriveCitationTrustStatus } from '../../src/utils/trustStatus';
 import { getEntity, getMeetingMid } from '../db';
 import type { CitationChain, RetrievalResult } from './intelligenceTypes';
@@ -82,8 +83,21 @@ const stemToken = (token: string): string => {
   return token;
 };
 
+const normalizeCommonParaphrases = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(
+      /\b(?:repair|repaired|repairing|repairs|fix|fixed|fixing|fixes)\b/g,
+      'fix',
+    )
+    .replace(/\b(?:defect|defects|bug|bugs)\b/g, 'bug')
+    .replace(
+      /\b(?:complete|completed|completing|completes|finish|finished|finishing|finishes)\b/g,
+      'finish',
+    );
+
 const contentTokens = (text: string): string[] =>
-  (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])
+  (normalizeCommonParaphrases(text).match(/[\p{L}\p{N}]+/gu) || [])
     .filter((token) => !CLAIM_STOPWORDS.has(token))
     .map(stemToken);
 
@@ -685,6 +699,46 @@ const resolveSecondPersonClaim = (claim: string, selfName?: string): string =>
 const refersToConfirmedSelf = (claim: string, selfName?: string): boolean =>
   Boolean(selfName && /\b(?:you|your|you're)\b/i.test(claim));
 
+// Explicit assignment roles must survive paraphrasing. A bag of matching
+// names and nouns cannot distinguish "A assigned to B" from the reverse.
+const assignmentRoles = (
+  text: string,
+  names: string[],
+): Array<{ from: string; to: string }> => {
+  const escaped = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const result: Array<{ from: string; to: string }> = [];
+  for (const from of names)
+    for (const to of names) {
+      if (from === to) continue;
+      const active = new RegExp(
+        `\\b${escaped(from)}\\s+(?:has\\s+)?assigned\\b[^.!?;]*?\\bto\\s+${escaped(to)}\\b`,
+        'i',
+      );
+      const passive = new RegExp(
+        `\\bassigned\\s+to\\s+${escaped(to)}\\b[^.!?;]*?\\bby\\s+${escaped(from)}\\b`,
+        'i',
+      );
+      if (active.test(text) || passive.test(text))
+        result.push({ from: from.toLowerCase(), to: to.toLowerCase() });
+    }
+  return result;
+};
+
+const assignmentRolesConflict = (claim: string, evidence: string): boolean => {
+  const names = [...new Set(namedTerms(claim))];
+  if (names.length < 2) return false;
+  const sourceRoles = assignmentRoles(evidence, names);
+  return assignmentRoles(claim, names).some(
+    (role) =>
+      sourceRoles.some(
+        (source) => source.from === role.to && source.to === role.from,
+      ) &&
+      !sourceRoles.some(
+        (source) => source.from === role.from && source.to === role.to,
+      ),
+  );
+};
+
 export const claimIsSupportedByEvidence = (
   claim: string,
   evidence: string | undefined,
@@ -692,7 +746,11 @@ export const claimIsSupportedByEvidence = (
 ): boolean => {
   if (!evidence?.trim()) return false;
   const evidenceClaim = resolveSecondPersonClaim(claim, selfName);
-  if (negationConflicts(evidenceClaim, evidence)) return false;
+  if (
+    negationConflicts(evidenceClaim, evidence) ||
+    assignmentRolesConflict(evidenceClaim, evidence)
+  )
+    return false;
 
   const claimNumbers = evidenceClaim.match(/\b\d+(?:\.\d+)?%?\b/g) || [];
   if (claimNumbers.some((value) => !evidence.includes(value))) return false;
@@ -1085,7 +1143,14 @@ export const auditCitations = (
       ...citation,
       evidence_valid,
       trust_status:
-        evidence_valid && (combinedSupport || provisionalSource)
+        evidence_valid &&
+        (combinedSupport ||
+          provisionalSource ||
+          !normalizeEvidenceText(directSupport).includes(
+            normalizeEvidenceText(
+              resolveSecondPersonClaim(citation.claim, selfName),
+            ),
+          ))
           ? ('inferred' as const)
           : deriveCitationTrustStatus({ evidenceValid: evidence_valid }),
     };
@@ -1507,8 +1572,8 @@ const trimDanglingTrailingSentence = (answer: string): string => {
 
 /**
  * Treats synthesized notes, project profiles, and people profiles as the trust
- * boundary. Citations remain attached for provenance, but lexical overlap no
- * longer gates or rewrites the model's prose.
+ * boundary. Input sources establish provenance, not claim verification.
+ * Keep natural prose, but never label unvalidated generated claims grounded.
  */
 export const buildSynthesizedAnswerPresentation = (
   answer: string,
@@ -1559,9 +1624,8 @@ export const buildSynthesizedAnswerPresentation = (
             source_type: sourceType,
             source_id: sourceId,
             evidence_span: evidenceSpan || undefined,
-            evidence_valid: true,
-            trust_status:
-              source.trust_status || section?.trust_status || 'grounded',
+            evidence_valid: false,
+            trust_status: 'inferred',
             evidence_kind: section ? 'section' : source.evidence_kind,
             section_id: section?.section_id,
             section_heading: section?.heading,
@@ -1573,15 +1637,8 @@ export const buildSynthesizedAnswerPresentation = (
   return {
     answer: cleanAnswer,
     citations,
-    outcome: noEvidence ? 'no_evidence' : 'answered',
-    trustStatus: noEvidence
-      ? undefined
-      : citations.some(
-            (citation) =>
-              !citation.evidence_valid || citation.trust_status === 'inferred',
-          )
-        ? 'inferred'
-        : 'grounded',
+    outcome: noEvidence || !cleanAnswer ? 'no_evidence' : 'answered',
+    trustStatus: noEvidence ? undefined : 'inferred',
     unsupportedClaimCount: 0,
     unsupportedClaims: [],
   };

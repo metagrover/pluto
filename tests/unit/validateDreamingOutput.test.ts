@@ -289,13 +289,13 @@ describe('validateDreamingOutput', () => {
   });
 
   it.each([
-    'The team agreed that Alice will deliver the checklist.',
-    'The team agreed on shipping the migration checklist.',
-    'Alice is responsible for the billing migration checklist.',
-    'Alice is tasked with the billing migration checklist.',
-    'The team is required to deliver the checklist.',
+    'The team agreed that Alice will deliver the billing migration checklist.',
+    'The team agreed on delivering the billing migration checklist.',
+    'Alice is responsible for delivering the billing migration checklist.',
+    'Alice is tasked with delivering the billing migration checklist.',
+    'The team is required to deliver the billing migration checklist.',
     'Action items: deliver the billing migration checklist.',
-    'The team decided to ship the billing migration checklist.',
+    'The team decided to deliver the billing migration checklist.',
     'The team must deliver the billing migration checklist.',
     'Alice needs to deliver the billing migration checklist.',
   ])('accepts explicit commitment language variant: %s', (notesContent) => {
@@ -548,5 +548,100 @@ describe('validateDreamingOutput', () => {
     expect(generateItemFingerprint('   Stripe   Elements connected!  ')).toBe(
       'stripe-elements-connected',
     );
+  });
+});
+
+// Source structure and actual task support outrank incidental wording cues.
+describe('project commitment source context', () => {
+  const check = (task: string, excerpt: string, actionItems?: string[]) =>
+    validateDreamingOutput(
+      JSON.stringify({
+        status: 'proposed',
+        proposals: [
+          {
+            kind: 'project_commitment',
+            payload: { task },
+            evidence: [{ meetingId: 'm', excerpt }],
+          },
+        ],
+      }),
+      {
+        entityId: 'p',
+        entityType: 'project',
+        entityName: 'Launch',
+        sourceRevision: 'r',
+        negativeConstraints: [],
+        recentMeetingNotes: [
+          {
+            meetingId: 'm',
+            title: 'Launch',
+            startedAt: null,
+            notesContent: excerpt,
+            actionItems,
+          },
+        ],
+      },
+    );
+  it.each([
+    "I'll prepare the launch checklist.",
+    'I will prepare the launch checklist.',
+    'Alex agreed to prepare the launch checklist. The old deployment is not needed.',
+    'Alex agreed to prepare the launch checklist. Another option is under consideration.',
+  ])(
+    'accepts a source-supported promise without unrelated wording poisoning it: %s',
+    (excerpt) => {
+      expect(check('Prepare the launch checklist', excerpt)).toMatchObject({
+        valid: true,
+      });
+    },
+  );
+  it('accepts the exact saved action text without manufacturing agreement or ownership', () => {
+    expect(
+      check('Prepare the launch checklist', 'Prepare the launch checklist', [
+        'Prepare the launch checklist',
+      ]),
+    ).toMatchObject({ valid: true });
+    expect(
+      check('Prepare the launch checklist', 'Prepare the launch checklist'),
+    ).toMatchObject({ valid: false });
+  });
+  it('keeps a domain noun from being interpreted as tentative language', () => {
+    expect(
+      check(
+        'Update the product options',
+        'Alex agreed to update the product options.',
+      ),
+    ).toMatchObject({ valid: true });
+  });
+  it.each([
+    [
+      'Schedule a customer workshop',
+      'Alex agreed to prepare the launch checklist.',
+    ],
+    [
+      'Prepare the launch checklist',
+      'Alex agreed to schedule a workshop. Prepare the launch checklist.',
+    ],
+    [
+      'Prepare the launch checklist',
+      'Alex agreed to not prepare the launch checklist.',
+    ],
+    [
+      'Prepare the launch checklist',
+      'If legal approves, Alex will prepare the launch checklist.',
+    ],
+    [
+      'Prepare the launch checklist',
+      'Alex will probably prepare the launch checklist.',
+    ],
+  ])('rejects unsupported or qualified tasks: %s', (task, excerpt) => {
+    expect(check(task, excerpt)).toMatchObject({ valid: false });
+  });
+  it('does not use an unrelated saved action as authorization', () => {
+    expect(
+      check('Schedule a customer workshop', 'Schedule a customer workshop', [
+        'Prepare the launch checklist',
+      ]),
+    ).toMatchObject({ valid: false });
   });
 });

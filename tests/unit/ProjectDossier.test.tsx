@@ -178,6 +178,12 @@ const brief = (overrides: Partial<ProjectBrief> = {}): ProjectBrief => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  api.discoverProjectInitiative.mockResolvedValue({
+    discovered: 0,
+    remaining: 0,
+    failed: 0,
+    deferred: false,
+  });
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -565,6 +571,71 @@ it('previews, performs and undoes a reversible merge', async () => {
   expect(api.restoreProjectMerge).toHaveBeenCalledWith('p2');
 });
 
+it('keeps historical merges out of the More menu', async () => {
+  api.getProjectBrief.mockResolvedValue(
+    brief({
+      mergedProjects: [
+        { id: 'older', name: 'Earlier work', mergedAt: '2026-09-01' },
+      ],
+    }),
+  );
+  await render();
+  expect(host.textContent).not.toContain('Restore Earlier work');
+  expect(host.textContent).not.toContain('Undo');
+});
+
+it('only undoes the latest manual merge without exposing the previous one', async () => {
+  await render({
+    mergeCandidates: [
+      { id: 'p2', name: 'Archive indexing', meeting_count: 3, metadata: null },
+      { id: 'p3', name: 'Archive search', meeting_count: 2, metadata: null },
+    ],
+  });
+  for (const [id, name] of [
+    ['p2', 'Archive indexing'],
+    ['p3', 'Archive search'],
+  ]) {
+    await click('Merge another project');
+    await act(async () =>
+      host.querySelector<HTMLElement>('#merge-project-source')?.click(),
+    );
+    await act(async () =>
+      document.body
+        .querySelector<HTMLButtonElement>(`[role="option"][data-value="${id}"]`)
+        ?.click(),
+    );
+    await click(`Merge ${name}`);
+  }
+  expect(api.mergeProject.mock.calls).toEqual([
+    ['p2', 'p1'],
+    ['p3', 'p1'],
+  ]);
+  await click('Undo');
+  expect(api.restoreProjectMerge.mock.calls).toEqual([['p3']]);
+  expect(host.textContent).not.toContain('Undo');
+});
+
+it('clears merge undo when navigating to another project', async () => {
+  await render({
+    mergeCandidates: [
+      { id: 'p2', name: 'Archive indexing', meeting_count: 3, metadata: null },
+    ],
+  });
+  await click('Merge another project');
+  await act(async () =>
+    host.querySelector<HTMLElement>('#merge-project-source')?.click(),
+  );
+  await act(async () =>
+    document.body
+      .querySelector<HTMLButtonElement>('[role="option"][data-value="p2"]')
+      ?.click(),
+  );
+  await click('Merge Archive indexing');
+  expect(host.textContent).toContain('Undo');
+  await render({ projectId: 'other-project' });
+  expect(host.textContent).not.toContain('Undo');
+});
+
 it('retains the last reliable briefing when refresh fails', async () => {
   await render();
   api.getProjectBrief.mockRejectedValueOnce(new Error('offline'));
@@ -707,6 +778,10 @@ it('prepares updates for the open project and reports no change accurately', asy
 });
 
 it('prepares updates directly from the empty brief and keeps its result honest', async () => {
+  api.triggerDreamingNow.mockResolvedValue({
+    status: 'existing',
+    entityId: 'p1',
+  });
   api.getProjectBrief.mockResolvedValue(brief({ theme: null }));
   await render();
   const panel = host.querySelector('[role="tabpanel"]:not([hidden])')!;
@@ -716,9 +791,14 @@ it('prepares updates directly from the empty brief and keeps its result honest',
   expect(prepare).toBeDefined();
   expect(panel.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
   await act(async () => prepare.click());
-  expect(api.triggerDreamingNow).toHaveBeenCalledWith({ entityId: 'p1' });
+  expect(api.discoverProjectInitiative).toHaveBeenCalledWith({
+    retryFailed: true,
+    projectId: 'p1',
+  });
+  expect(api.triggerDreamingNow).not.toHaveBeenCalled();
+  expect(host.textContent).not.toContain('Already prepared');
   expect(panel.querySelector('[role="status"]')?.textContent).toContain(
-    'More connected discussion may be needed',
+    'Pluto could not build a supported brief',
   );
   await click('Review source history');
   expect(
@@ -728,9 +808,14 @@ it('prepares updates directly from the empty brief and keeps its result honest',
 });
 
 it('keeps the empty brief action disabled during preparation and allows retry after failure', async () => {
-  let finish!: (value: { status: 'failed'; entityId: string }) => void;
+  let finish!: (value: {
+    discovered: number;
+    remaining: number;
+    failed: number;
+    deferred: boolean;
+  }) => void;
   api.getProjectBrief.mockResolvedValue(brief({ theme: null }));
-  api.triggerDreamingNow.mockReturnValueOnce(
+  api.discoverProjectInitiative.mockReturnValueOnce(
     new Promise((resolve) => {
       finish = resolve;
     }),
@@ -746,7 +831,9 @@ it('keeps the empty brief action disabled during preparation and allows retry af
   });
   expect(prepare.disabled).toBe(true);
   expect(prepare.textContent).toContain('Preparing updates');
-  await act(async () => finish({ status: 'failed', entityId: 'p1' }));
+  await act(async () =>
+    finish({ discovered: 0, remaining: 1, failed: 1, deferred: false }),
+  );
   expect(prepare.disabled).toBe(false);
   expect(panel.querySelector('[role="status"]')?.textContent).toBe(
     'Preparation failed',
@@ -770,6 +857,20 @@ it('shows the preparation action only in the empty brief and explains missing so
   );
 });
 
+it('explains rejected commitment evidence without claiming the project is current', async () => {
+  api.triggerDreamingNow.mockResolvedValue({
+    status: 'failed',
+    entityId: 'p1',
+    errorCode: 'unsupported_project_commitment',
+  });
+  await render();
+  await click('Prepare updates');
+  expect(host.textContent).toContain('Updates could not be verified');
+  expect(host.textContent).toContain('Pluto did not add it');
+  expect(host.textContent).not.toContain('Preparation failed');
+  expect(host.textContent).not.toContain('Current — no updates needed');
+});
+
 it('shows a failed dreaming run as a failure', async () => {
   api.triggerDreamingNow.mockResolvedValue({
     status: 'failed',
@@ -779,6 +880,7 @@ it('shows a failed dreaming run as a failure', async () => {
   await render();
   await click('Prepare updates');
   expect(host.textContent).toContain('Preparation failed');
+  expect(host.textContent).toContain('Report a problem');
 });
 
 it('ignores a late preparation result after the open project changes', async () => {
@@ -1193,4 +1295,65 @@ it('does not label possible extracted work as personal or confirmed commitments'
   expect(
     host.querySelector('[role="tabpanel"]:not([hidden])')?.textContent,
   ).not.toContain('Complete migration review');
+});
+
+it('does not let a cached update run mask brief synthesis failure', async () => {
+  api.getProjectBrief.mockResolvedValue(brief({ theme: null }));
+  api.discoverProjectInitiative.mockResolvedValue({
+    discovered: 0,
+    remaining: 1,
+    failed: 1,
+    deferred: false,
+  });
+  api.triggerDreamingNow.mockResolvedValue({
+    status: 'existing',
+    entityId: 'p1',
+  });
+  await render();
+  await click('Prepare updates');
+  expect(host.textContent).toContain('Preparation failed');
+  expect(host.textContent).not.toContain('Already prepared');
+  expect(api.triggerDreamingNow).not.toHaveBeenCalled();
+});
+
+it('reports deferred synthesis and leaves preparation available for retry', async () => {
+  api.getProjectBrief.mockResolvedValue(brief({ theme: null }));
+  api.discoverProjectInitiative.mockResolvedValue({
+    discovered: 0,
+    remaining: 1,
+    failed: 0,
+    deferred: true,
+  });
+  await render();
+  await click('Prepare updates');
+  expect(host.textContent).toContain('Another preparation is running');
+  expect(api.triggerDreamingNow).not.toHaveBeenCalled();
+});
+
+it('shows the refreshed brief after preparation instead of the empty state', async () => {
+  api.getProjectBrief
+    .mockResolvedValueOnce(brief({ theme: null }))
+    .mockResolvedValue(brief());
+  api.discoverProjectInitiative.mockResolvedValue({
+    discovered: 1,
+    remaining: 0,
+    failed: 0,
+    deferred: false,
+  });
+  await render();
+  await click('Prepare updates');
+  expect(host.textContent).not.toContain(
+    'A project brief is still taking shape',
+  );
+  expect(api.triggerDreamingNow).toHaveBeenCalledWith({ entityId: 'p1' });
+});
+
+it('does not report success when the refreshed brief has outdated evidence', async () => {
+  api.getProjectBrief
+    .mockResolvedValueOnce(brief({ theme: null }))
+    .mockResolvedValue(brief({ themeSourceOutdated: true }));
+  await render();
+  await click('Prepare updates');
+  expect(host.textContent).toContain('No brief could be prepared');
+  expect(api.triggerDreamingNow).not.toHaveBeenCalled();
 });

@@ -912,6 +912,7 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     });
     await act(async () => root.render(<ProjectsExecutionTab />));
     expect(discoverProjectInitiativeMock).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain('Report a problem');
     const retry = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent === 'Retry synthesis',
     );
@@ -926,6 +927,7 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     expect(discoverProjectInitiativeMock).toHaveBeenLastCalledWith({
       retryFailed: true,
     });
+    expect(container.textContent).not.toContain('Report a problem');
   });
 
   it.each([0, 1])(

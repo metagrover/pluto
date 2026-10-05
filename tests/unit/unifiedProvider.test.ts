@@ -236,7 +236,11 @@ describe('UnifiedLLMProvider', () => {
       expect(url).toContain('/api/generate');
       const body = parseRequestBody(init);
       selectedModel = String(body.model);
-      return jsonResponse({ response: validAnalysisMarkdown });
+      return jsonResponse({
+        response: validAnalysisMarkdown,
+        done: true,
+        done_reason: 'stop',
+      });
     });
 
     const provider = new UnifiedLLMProvider('ollama', {
@@ -261,7 +265,11 @@ describe('UnifiedLLMProvider', () => {
           return jsonResponse({ done: true });
         }
         events.push(`generate:${String(body.model)}`);
-        return jsonResponse({ response: validAnalysisMarkdown });
+        return jsonResponse({
+          response: validAnalysisMarkdown,
+          done: true,
+          done_reason: 'stop',
+        });
       },
       () => {
         events.push('discover');
@@ -291,7 +299,11 @@ describe('UnifiedLLMProvider', () => {
       (_url, init) => {
         const body = parseRequestBody(init);
         requestBodies.push(body);
-        return jsonResponse({ response: validAnalysisMarkdown });
+        return jsonResponse({
+          response: validAnalysisMarkdown,
+          done: true,
+          done_reason: 'stop',
+        });
       },
       () =>
         jsonResponse({
@@ -313,7 +325,12 @@ describe('UnifiedLLMProvider', () => {
 
   it('fails closed when Ollama residency discovery fails', async () => {
     const fetchMock = installFetchMock(
-      () => jsonResponse({ response: validAnalysisMarkdown }),
+      () =>
+        jsonResponse({
+          response: validAnalysisMarkdown,
+          done: true,
+          done_reason: 'stop',
+        }),
       () => jsonResponse({ error: 'unavailable' }, false, 'Unavailable'),
     );
     const provider = new UnifiedLLMProvider('ollama', {
@@ -350,7 +367,12 @@ describe('UnifiedLLMProvider', () => {
 
   it('propagates cancellation during Ollama residency discovery without generating', async () => {
     const fetchMock = installFetchMock(
-      () => jsonResponse({ response: validAnalysisMarkdown }),
+      () =>
+        jsonResponse({
+          response: validAnalysisMarkdown,
+          done: true,
+          done_reason: 'stop',
+        }),
       (_url, init) =>
         new Promise<Response>((_resolve, reject) => {
           if (init?.signal?.aborted) {
@@ -390,7 +412,11 @@ describe('UnifiedLLMProvider', () => {
         const body = parseRequestBody(init);
         if (body.keep_alive !== 0) {
           generationStarted = true;
-          return jsonResponse({ response: validAnalysisMarkdown });
+          return jsonResponse({
+            response: validAnalysisMarkdown,
+            done: true,
+            done_reason: 'stop',
+          });
         }
         unloadCalls += 1;
         if (unloadCalls === 1) {
@@ -639,7 +665,11 @@ describe('UnifiedLLMProvider', () => {
     const controller = new AbortController();
     const fetchMock = installFetchMock((_url, init) => {
       if (signals.length >= 2)
-        return jsonResponse({ response: validAnalysisMarkdown });
+        return jsonResponse({
+          response: validAnalysisMarkdown,
+          done: true,
+          done_reason: 'stop',
+        });
       signals.push(init!.signal!);
       if (init!.signal!.aborted) return Promise.reject(init!.signal!.reason);
       return new Promise<Response>((_resolve, reject) =>
@@ -702,7 +732,11 @@ describe('UnifiedLLMProvider', () => {
     const requestBodies: Array<Record<string, unknown>> = [];
     installFetchMock((_url, init) => {
       requestBodies.push(parseRequestBody(init));
-      return jsonResponse({ response: 'Grounded answer' });
+      return jsonResponse({
+        response: 'Grounded answer',
+        done: true,
+        done_reason: 'stop',
+      });
     });
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'qwen3.5:9b',
@@ -736,7 +770,11 @@ describe('UnifiedLLMProvider', () => {
     let requestBody: Record<string, unknown> = {};
     installFetchMock((_url, init) => {
       requestBody = parseRequestBody(init);
-      return jsonResponse({ response: '{"overview":[]}' });
+      return jsonResponse({
+        response: '{"overview":[]}',
+        done: true,
+        done_reason: 'stop',
+      });
     });
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'qwen3.5:9b',
@@ -758,7 +796,11 @@ describe('UnifiedLLMProvider', () => {
     let requestBody: Record<string, unknown> = {};
     installFetchMock((_url, init) => {
       requestBody = parseRequestBody(init);
-      return jsonResponse({ message: { content: 'Live answer' } });
+      return jsonResponse({
+        message: { content: 'Live answer' },
+        done: true,
+        done_reason: 'stop',
+      });
     });
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'qwen3.5:9b',
@@ -932,7 +974,13 @@ describe('UnifiedLLMProvider', () => {
   });
 
   it('reports when an Ask Pluto request is admitted to the provider', async () => {
-    installFetchMock(() => jsonResponse({ response: 'Grounded answer' }));
+    installFetchMock(() =>
+      jsonResponse({
+        response: 'Grounded answer',
+        done: true,
+        done_reason: 'stop',
+      }),
+    );
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'qwen3.5:9b',
     });
@@ -997,7 +1045,11 @@ describe('UnifiedLLMProvider', () => {
     const fetchMock = installFetchMock((_url, init) => {
       generationCalls += 1;
       if (generationCalls > 1) {
-        return jsonResponse({ response: validAnalysisMarkdown });
+        return jsonResponse({
+          response: validAnalysisMarkdown,
+          done: true,
+          done_reason: 'stop',
+        });
       }
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener(
@@ -1031,7 +1083,11 @@ describe('UnifiedLLMProvider', () => {
     const fetchMock = installFetchMock((_url, init) => {
       generationCalls += 1;
       if (generationCalls > 1) {
-        return jsonResponse({ response: validAnalysisMarkdown });
+        return jsonResponse({
+          response: validAnalysisMarkdown,
+          done: true,
+          done_reason: 'stop',
+        });
       }
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener(
@@ -1065,7 +1121,12 @@ describe('UnifiedLLMProvider', () => {
     let calls = 0;
     const fetchMock = installFetchMock((_url, init) => {
       calls += 1;
-      if (calls > 1) return jsonResponse({ response: 'Ready' });
+      if (calls > 1)
+        return jsonResponse({
+          response: 'Ready',
+          done: true,
+          done_reason: 'stop',
+        });
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener(
           'abort',
@@ -1101,6 +1162,8 @@ describe('UnifiedLLMProvider', () => {
       if (generationCalls > 2) {
         return jsonResponse({
           response: 'The current meeting is about pricing.',
+          done: true,
+          done_reason: 'stop',
         });
       }
       return new Promise<Response>((_resolve, reject) => {
@@ -1195,6 +1258,8 @@ describe('UnifiedLLMProvider', () => {
           selectedModels.push(String(body.model));
           return jsonResponse({
             response: 'Grounded answer',
+            done: true,
+            done_reason: 'stop',
             message: { content: 'Grounded answer' },
           });
         }
@@ -1230,7 +1295,11 @@ describe('UnifiedLLMProvider', () => {
       if (url.endsWith('/api/generate')) {
         const body = parseRequestBody(init);
         selectedModel = String(body.model);
-        return jsonResponse({ response: validAnalysisMarkdown });
+        return jsonResponse({
+          response: validAnalysisMarkdown,
+          done: true,
+          done_reason: 'stop',
+        });
       }
       throw new Error(`Unexpected URL: ${url}`);
     });
@@ -1250,7 +1319,11 @@ describe('UnifiedLLMProvider', () => {
       if (url.endsWith('/api/generate')) {
         const body = parseRequestBody(init);
         selectedModel = String(body.model);
-        return jsonResponse({ response: validAnalysisMarkdown });
+        return jsonResponse({
+          response: validAnalysisMarkdown,
+          done: true,
+          done_reason: 'stop',
+        });
       }
       throw new Error(`Unexpected URL: ${url}`);
     });

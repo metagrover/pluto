@@ -441,8 +441,8 @@ describe('Citation Engine', () => {
           claim: 'Launch review',
           meeting_id: 'm1',
           evidence_span: 'Sam owns launch signoff. The launch is Friday.',
-          evidence_valid: true,
-          trust_status: 'grounded',
+          evidence_valid: false,
+          trust_status: 'inferred',
           evidence_kind: 'section',
           section_id: 'section-1',
         }),
@@ -1706,5 +1706,95 @@ describe('Citation Engine', () => {
       expect(presentation.outcome).toBe('answered');
       expect(presentation.unsupportedClaimCount).toBe(0);
     });
+  });
+});
+
+it('does not certify a generated ownership claim merely because sources were supplied', () => {
+  const presentation = buildSynthesizedAnswerPresentation(
+    'Morgan owns the report.',
+    [
+      {
+        meeting_id: 'review',
+        meeting_title: 'Review',
+        mid: null,
+        evidence_text: 'Casey owns the report. Morgan is an attendee.',
+        evidence_kind: 'note',
+        trust_status: 'grounded',
+      } as RetrievalResult,
+    ],
+  );
+  expect(presentation.trustStatus).toBe('inferred');
+  expect(presentation.citations[0]).toMatchObject({
+    evidence_valid: false,
+    trust_status: 'inferred',
+  });
+});
+
+describe('citation wording and assignment roles', () => {
+  const audit = (claim: string, evidence: string) =>
+    auditCitations(
+      [
+        {
+          claim,
+          meeting_id: 'role-source',
+          meeting_title: 'Launch',
+          evidence_span: evidence,
+          evidence_valid: false,
+        },
+      ],
+      [
+        {
+          meeting_id: 'role-source',
+          meeting_title: 'Launch',
+          evidence_text: evidence,
+          mid: { evidence_spans: [{ quote: evidence }] },
+        },
+      ] as unknown as RetrievalResult[],
+    )[0];
+  it('preserves a simple supported paraphrase without calling word overlap verified meaning', () => {
+    expect(
+      audit('Avery repaired the login defect.', 'Avery fixed the login bug.'),
+    ).toMatchObject({ evidence_valid: true, trust_status: 'inferred' });
+  });
+  it('keeps an exact cited statement grounded', () => {
+    expect(
+      audit('Avery fixed the login bug.', 'Avery fixed the login bug.'),
+    ).toMatchObject({ evidence_valid: true, trust_status: 'grounded' });
+  });
+  it.each([
+    [
+      'Avery assigned the report to Blair.',
+      'Blair assigned the report to Avery.',
+    ],
+    [
+      'Avery assigned the report to Blair.',
+      'The report was assigned to Avery by Blair.',
+    ],
+  ])(
+    'rejects a reversal of evidenced assignment roles: %s',
+    (claim, evidence) => {
+      expect(audit(claim, evidence)).toMatchObject({
+        evidence_valid: false,
+        trust_status: 'needs_review',
+      });
+    },
+  );
+  it('preserves assignment roles across active and passive wording', () => {
+    expect(
+      audit(
+        'Avery assigned the report to Blair.',
+        'The report was assigned to Blair by Avery.',
+      ),
+    ).toMatchObject({ evidence_valid: true, trust_status: 'inferred' });
+  });
+  it('cannot pass an invented actor or deadline through the paraphrase normalization', () => {
+    expect(
+      audit('Jordan repaired the login defect.', 'Avery fixed the login bug.')
+        .evidence_valid,
+    ).toBe(false);
+    expect(
+      audit('Avery repaired 15 login defects.', 'Avery fixed 2 login bugs.')
+        .evidence_valid,
+    ).toBe(false);
   });
 });

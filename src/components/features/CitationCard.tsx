@@ -40,7 +40,16 @@ export const CitationCard: React.FC<CitationCardProps> = ({
   onClick,
   onNavigateToMeeting,
 }) => {
-  const trustMeta = getTrustStatusMeta(citation.trust_status);
+  const contextOnly =
+    !citation.evidence_valid && citation.trust_status === 'inferred';
+  const trustMeta = contextOnly
+    ? {
+        label: 'Context',
+        tone: 'accent',
+        description:
+          'Used to generate the answer. Individual claims have not been verified against this source.',
+      }
+    : getTrustStatusMeta(citation.trust_status);
   const trustTone =
     trustMeta.tone === 'success'
       ? 'bg-[#10B981]/10 border-[#10B981]/20 text-[#10B981]'
@@ -100,7 +109,7 @@ export const CitationCard: React.FC<CitationCardProps> = ({
       <div className="flex flex-col gap-2 pt-2 border-t border-black/5 dark:border-white/5">
         <div className="flex items-start gap-2">
           <span className="text-[10px] font-semibold text-pro-accent shrink-0 pt-0.5">
-            Claim
+            {contextOnly ? 'Context' : 'Claim'}
           </span>
           <span className="text-[11px] text-pro-text-muted leading-relaxed line-clamp-2">
             {citation.claim}

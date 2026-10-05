@@ -30,6 +30,12 @@ export interface ProjectRoutingState {
   attempts: Record<string, { hash: string; failed: boolean }>;
 }
 interface Dependencies {
+  onDeferred?(
+    reason:
+      | 'foreground_preempted'
+      | 'source_changed'
+      | 'routing_queue_remaining',
+  ): void;
   listProjects(): Project[];
   listSources(): ProjectThemeSource[];
   getProject(id: string): Project | undefined | null;
@@ -266,16 +272,19 @@ CANDIDATE:\n${JSON.stringify({ id: project.id, name: project.name, outcome: read
     )
       throw new SyntaxError('invalid_project_routing');
   } catch (error) {
-    if (isSerializedTaskPreemption(error))
+    if (isSerializedTaskPreemption(error)) {
+      deps.onDeferred?.('foreground_preempted');
       return {
         grouped: 0,
         remaining: pending.length,
         failed: 0,
         deferred: true,
       };
+    }
     if (!(error instanceof SyntaxError)) throw error;
     attempts[project.id] = { hash: hashFor(project), failed: true };
     deps.saveState({ version: 1, attempts });
+    if (pending.length > 1) deps.onDeferred?.('routing_queue_remaining');
     return {
       grouped: 0,
       remaining: pending.length - 1,
@@ -291,13 +300,15 @@ CANDIDATE:\n${JSON.stringify({ id: project.id, name: project.name, outcome: read
       (root) => deps.getProject(root.id)?.metadata !== root.metadata,
     ) ||
     sources.some((source) => deps.getSource(source.id)?.notes !== source.notes)
-  )
+  ) {
+    deps.onDeferred?.('source_changed');
     return {
       grouped: 0,
       remaining: pending.length,
       failed: 0,
       deferred: true,
     };
+  }
   let grouped = 0;
   let failed = false;
   if (response.relationship !== 'none') {
@@ -348,6 +359,7 @@ CANDIDATE:\n${JSON.stringify({ id: project.id, name: project.name, outcome: read
       Object.entries(attempts).filter(([id]) => ids.has(id)),
     ),
   });
+  if (pending.length > 1) deps.onDeferred?.('routing_queue_remaining');
   return {
     grouped,
     remaining: pending.length - 1,

@@ -44,6 +44,7 @@ import { SearchSelect } from '../ui/SearchSelect';
 import { CalendarSettings } from './CalendarSettings';
 import { ChatGptConnectionSettings } from './ChatGptConnectionSettings';
 import { IdentitySettings } from './IdentitySettings';
+import { ReportProblemButton } from './ReportProblemButton';
 
 interface SettingsTabProps {
   llmProvider: ProviderId;
@@ -189,6 +190,7 @@ const settingsTabs = [
   { id: 'meetings', label: 'Meetings' },
   { id: 'intelligence', label: 'Intelligence' },
   { id: 'advanced', label: 'Advanced' },
+  { id: 'help', label: 'Help' },
 ] as const;
 
 export type SettingsTabId = (typeof settingsTabs)[number]['id'];
@@ -1459,6 +1461,24 @@ export const SettingsTab = ({
                 <Trash2 className="w-4 h-4 opacity-80" />
                 Reset Knowledge
               </button>
+            </SettingsRow>
+          </Section>
+        </div>
+      ) : null}
+
+      {activeSettingsTab === 'help' ? (
+        <div
+          id="settings-panel-help"
+          role="tabpanel"
+          aria-labelledby="settings-tab-help"
+        >
+          <Section title="Support">
+            <SettingsRow
+              label="Report a problem"
+              helper="Share a diagnostic report through GitHub or email. You can review everything before sending."
+              actionControl
+            >
+              <ReportProblemButton />
             </SettingsRow>
           </Section>
         </div>

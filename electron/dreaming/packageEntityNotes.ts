@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { normalizeEvidenceText } from '../../src/utils/evidenceText';
 import * as db from '../db';
 import type { DreamingEntityNoteSource, Entity } from '../db';
 import type {
@@ -71,6 +72,37 @@ const noteContent = (source: DreamingEntityNoteSource): string => {
     MAX_NOTE_PROCESSING_CHARACTERS,
     MAX_NOTE_PROCESSING_BYTES,
   ).trim();
+};
+
+const savedActionItems = (
+  source: DreamingEntityNoteSource,
+  notes: string,
+): string[] => {
+  if (
+    !source.action_items_json ||
+    source.action_items_json.length > MAX_NOTE_PROCESSING_CHARACTERS
+  )
+    return [];
+  try {
+    const parsed: unknown = JSON.parse(source.action_items_json);
+    if (!Array.isArray(parsed)) return [];
+    const normalizedNotes = normalizeEvidenceText(notes);
+    return [
+      ...new Set(
+        parsed.flatMap((item) => {
+          const text = item && typeof item === 'object' ? item.text : null;
+          return typeof text === 'string' &&
+            text.trim() &&
+            text.length <= MAX_BASELINE_TEXT_CHARACTERS &&
+            normalizedNotes.includes(normalizeEvidenceText(text))
+            ? [text.trim()]
+            : [];
+        }),
+      ),
+    ].slice(0, 20);
+  } catch {
+    return [];
+  }
 };
 
 const truncateToWords = (content: string, limit: number): string => {
@@ -245,12 +277,15 @@ export const packageEntityNotes = (
     );
     if (!boundedContent) break;
     const wordCount = countWords(boundedContent);
+    const actionItems =
+      entity.type === 'project' ? savedActionItems(source, boundedContent) : [];
     recentMeetingNotes.push({
       meetingId: boundLabel(String(source.id)),
       title: boundLabel(source.title || 'Untitled Meeting'),
       startedAt:
         boundLabel(source.started_at ?? source.created_at ?? '') || null,
       notesContent: boundedContent,
+      ...(actionItems.length ? { actionItems } : {}),
     });
     remainingWords -= wordCount;
     remainingNoteCharacters -= boundedContent.length;

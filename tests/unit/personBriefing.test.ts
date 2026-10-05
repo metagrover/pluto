@@ -463,7 +463,7 @@ describe('selectPersonCommitments', () => {
     sourceMeetingTitle: 'Launch review',
   };
 
-  it('keeps candidate friction for the workspace user (isSelf === true)', () => {
+  it('keeps extracted tasks as candidates for the workspace user', () => {
     const result = selectPersonCommitments({
       personId: 'person-1',
       personNames: ['Jordan Vale'],
@@ -477,7 +477,7 @@ describe('selectPersonCommitments', () => {
     expect(result.delivered).toEqual([]);
   });
 
-  it('removes friction for others (isSelf === false), promoting extracted commitments directly to open', () => {
+  it('keeps extracted tasks as candidates for other people too', () => {
     const result = selectPersonCommitments({
       personId: 'person-1',
       personNames: ['Jordan Vale'],
@@ -486,15 +486,58 @@ describe('selectPersonCommitments', () => {
       isSelf: false,
     });
 
-    expect(result.open.map((item) => item.id)).toEqual([
-      'verified-1',
-      'extracted-1',
-    ]);
-    expect(result.candidates).toEqual([]);
+    expect(result.open.map((item) => item.id)).toEqual(['verified-1']);
+    expect(result.candidates.map((item) => item.id)).toEqual(['extracted-1']);
     expect(result.delivered).toEqual([]);
   });
 
-  it('promotes completed candidate actions to delivered for non-self individuals', () => {
+  it.each([true, false])(
+    'preserves explicit ownership and rejection boundaries (isSelf: %s)',
+    (isSelf) => {
+      const result = selectPersonCommitments({
+        personId: 'person-1',
+        personNames: ['Jordan Vale'],
+        actions: [
+          verifiedAction,
+          {
+            ...verifiedAction,
+            id: 'pipeline-assignment',
+            metadata: JSON.stringify({
+              owner_source: 'pipeline',
+              commitment_state: 'confirmed',
+              source_meeting_id: 'meeting-1',
+            }),
+          },
+        ],
+        candidateActions: [
+          extractedAction,
+          {
+            ...extractedAction,
+            id: 'dismissed',
+            metadata: JSON.stringify({
+              assignee_name: 'Jordan Vale',
+              commitment_state: 'rejected',
+              source_meeting_id: 'meeting-1',
+            }),
+          },
+          {
+            ...extractedAction,
+            id: 'cleared-owner',
+            metadata: JSON.stringify({
+              assignee_name: 'Jordan Vale',
+              owner_source: 'user',
+              source_meeting_id: 'meeting-1',
+            }),
+          },
+        ],
+        isSelf,
+      });
+      expect(result.open.map((item) => item.id)).toEqual(['verified-1']);
+      expect(result.candidates.map((item) => item.id)).toEqual(['extracted-1']);
+    },
+  );
+
+  it('does not report unconfirmed completed candidates as delivered', () => {
     const now = Date.parse('2026-08-31T12:00:00.000Z');
     const completedExtractedAction = {
       ...extractedAction,
@@ -513,9 +556,7 @@ describe('selectPersonCommitments', () => {
     });
 
     expect(result.open).toEqual([]);
-    expect(result.delivered.map((item) => item.id)).toEqual([
-      'completed-extracted-1',
-    ]);
+    expect(result.delivered).toEqual([]);
     expect(result.candidates).toEqual([]);
   });
 });

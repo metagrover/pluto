@@ -185,3 +185,58 @@ describe('compact person knowledge synthesis', () => {
     expect(grounded.evidence_index).toHaveLength(2);
   });
 });
+
+describe('person reference position', () => {
+  it.each([
+    'For the launch, Avery prepared the checklist.',
+    "Avery's checklist was completed for the launch.",
+    'The checklist was prepared by Avery.',
+    'Avery’s checklist was completed.',
+  ])(
+    'retains attributable exact quotes regardless of name position: %s',
+    (quote) => {
+      const source = {
+        id: 'm',
+        title: 'Launch',
+        occurred_at: null,
+        evidence: quote,
+      };
+      const chunk = compilePersonKnowledgeChunk('Avery', 0, [source], {
+        profile: [
+          {
+            section: 'responsibilities',
+            summary: 'Avery contributed the launch checklist.',
+            citations: [{ meeting_id: 'm', quote }],
+          },
+        ],
+      });
+      expect(chunk.person_profile).toHaveLength(1);
+      const grounded = groundPersonKnowledgeV2Document(
+        chunk,
+        new Map([['m', quote.toLowerCase()]]),
+        'Avery',
+      );
+      expect(grounded.person_profile).toHaveLength(1);
+    },
+  );
+  it.each([
+    'Averyson prepared the launch checklist.',
+    'Jordan prepared the launch checklist.',
+  ])('keeps wrong or partial person names excluded: %s', (quote) => {
+    const chunk = compilePersonKnowledgeChunk(
+      'Avery',
+      0,
+      [{ id: 'm', title: 'Launch', occurred_at: null, evidence: quote }],
+      {
+        profile: [
+          {
+            section: 'responsibilities',
+            summary: 'Avery prepared the checklist.',
+            citations: [{ meeting_id: 'm', quote }],
+          },
+        ],
+      },
+    );
+    expect(chunk.person_profile).toHaveLength(0);
+  });
+});

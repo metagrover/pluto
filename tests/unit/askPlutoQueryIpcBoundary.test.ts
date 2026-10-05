@@ -47,8 +47,8 @@ describe('Ask Pluto query IPC boundary', () => {
     expect(queryHandler).toMatch(
       /!explicitResolvedScope &&\s*!temporalResolvedScope &&\s*!currentMeetingRequested/,
     );
-    expect(queryHandler).toContain(
-      '!boundedMeetingIds ? assigneeRecall?.answer : undefined',
+    expect(queryHandler).toMatch(
+      /!boundedMeetingIds\s*\? assigneeRecall\?\.answer\s*: undefined/,
     );
   });
   it('gates person recall and final filtering while preserving query facets outside one project', () => {
@@ -180,8 +180,8 @@ describe('Ask Pluto query IPC boundary', () => {
     expect(queryHandler).toContain(
       '...(turn.turnMode ? { turnMode: turn.turnMode } : {})',
     );
-    expect(queryHandler).toContain(
-      '...(turn.retrievalPolicy\n                  ? { retrievalPolicy: turn.retrievalPolicy }',
+    expect(queryHandler).toMatch(
+      /\.\.\.\(turn\.retrievalPolicy\s*\? \{ retrievalPolicy: turn\.retrievalPolicy \}/,
     );
   });
 
@@ -270,14 +270,14 @@ describe('Ask Pluto query IPC boundary', () => {
     expect(queryHandler).toContain('buildNoEvidenceDraftReply(queryText)');
     expect(queryHandler).toContain("conversationResolution.task === 'draft'");
     expect(queryHandler).toMatch(
-      /personWorkSubject && personWorkAssignmentRecall\s*\? personWorkAssignmentRecall\?\.context \|\| \[\]/,
+      /personWorkSubject &&\s*personWorkAssignmentRecall &&\s*!personWorkAssignmentRecall.coverageLimited\s*\? personWorkAssignmentRecall\?\.context \|\| \[\]/,
     );
     expect(queryHandler).toContain(
       "conversationResolution.relation !== 'new_topic'",
     );
     expect(queryHandler).toContain('shouldKeepActiveProjectScope({');
-    expect(queryHandler).toContain(
-      'const effectiveProjectRecall = inheritedProjectRecall ?? projectRecall',
+    expect(queryHandler).toMatch(
+      /const effectiveProjectRecall =\s*inheritedProjectRecall \?\? projectRecall/,
     );
     expect(queryHandler).toMatch(
       /effectiveProjectRecall\s*\? effectiveProjectRecall.context/,

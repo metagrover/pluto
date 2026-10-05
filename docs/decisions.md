@@ -1474,3 +1474,38 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Supersedes:** The browser detection portion of “2026-08-10 - Split live, final transcript, and analysis latency on Apple Silicon” now runs only after opt-in. Its explicit closed-tab evidence remains valid after successful inspection; unavailable inspection cancels rather than starts auto-end grace.
 - **Rationale:** A real RC6 installation exposed unsolicited Automation prompts and rejection of valid cached-model verification events despite passing a separate native smoke parser.
 - **Continuity:** Upgrades preserve existing profiles and models. Installer `--fresh-profile` launches an isolated empty profile for first-run testing without deleting or resetting existing data.
+
+## 2026-10-04 - Preserve Ask Pluto request intent and distinguish context from verification
+
+- **Status:** Accepted.
+- **Refines:** “2026-08-31 - Make saved Ask Pluto notes-first and inference-coordinated.” Its synthesized evidence boundary and inference coordinator remain in force.
+- **Decision:** A failed answer does not erase the original request. Typed retry and Retry repeat that request; repetition suppression applies across turns only to explicit expansion. Conversation persistence is additive and does not block dispatch or Stop. Main-process request ownership and cancellation begin before asynchronous settings/provider startup.
+- **Coverage:** Canonical tasks do not prove that every assignment in their source meeting has been reviewed. Assignee recall searches relevant saved notes too, while completed/rejected canonical state overrides older wording. Breadth requests can discover previously uncited meetings. Meeting/date eligibility precedes FTS limits, and query-aware excerpts precede note truncation.
+- **Trust:** Supplied context establishes provenance, not semantic verification of generated claims. Unvalidated synthesized answers disclose their context and remain inferred; they cannot inherit a grounded label merely from source trust. Incomplete provider responses are recoverable partial/unavailable outcomes, with useful streamed text retained where possible.
+- **Acceptance:** Provider benchmark failure must fail verification, with semantic fixture requirements instead of obsolete citation syntax. An opt-in isolated-profile replay exercises the built IPC/database/provider path and controlled failure recovery. Synthetic acceptance supplements, rather than replaces, real-meeting review.
+
+
+## 2026-10-04 - Limit project merge undo to the latest manual merge
+
+- **Status:** Accepted.
+- **Supersedes:** The project merge recovery UI in “2026-08-29 - Treat a project page as an evidence-backed briefing.” Source-preserving canonicalization remains unchanged.
+- **Decision:** Offer Undo only for the latest successful manual merge in the current project view. A subsequent merge replaces that option; using Undo clears it without exposing earlier merges. Navigating to another project or closing the view clears the option. Do not offer historical Restore actions or a grouped-project management dialog.
+- **Rationale:** Historical merge actions made the More menu unbounded and cluttered routine project controls.
+- **Preservation:** Existing aliases, original project entities, and source evidence remain stored; this changes the available UI actions only.
+
+## 2026-10-05 - Preserve source context during evidence validation
+
+- **Status:** Accepted.
+- **Refines:** The evidence gates in “2026-09-14 - Automatic knowledge consolidation without suggestion review friction,” “2026-09-29 - Synthesize comprehensive People dossiers,” and “2026-10-04 - Preserve Ask Pluto request intent and distinguish context from verification.” Automatic consolidation and source boundaries remain in force.
+- **Decision:** Project synthesis receives bounded saved action-item text when it still appears in the supplied notes. Accepted proposals retain that exact task text. Legacy schema-v3 classifications without a format-pass flag remain eligible; explicit format failures do not. Otherwise, a proposed task must appear in the same cited sentence as an unconditional promise, including first-person promises. An unrelated promise cannot authorize a different task.
+- **People and notes:** A person's name may appear anywhere in a cited quote, including possessive references. Source-supported promised assignments and bare weekday deadlines are accepted; a deadline must occur in the same promise clause.
+- **Citation trust:** Common paraphrases can retain citations, but lexical support alone leaves generated paraphrases inferred. Exact source wording can be grounded. Explicit reversed assignment roles fail validation.
+- **Limits:** These checks preserve exact quote, meeting identity, correction, and source-trust requirements. Phrase matching and targeted role checks do not establish general semantic entailment; regression tests and read-only source replays supplement real-model acceptance.
+
+## 2026-10-05 - Keep candidate ownership separate from active People commitments
+
+- **Status:** Accepted.
+- **Supersedes:** “2026-09-16 - Automatically accept person commitments for non-self individuals” and its preserved peer-commitment treatment in “2026-09-29 - Synthesize comprehensive People dossiers.”
+- **Decision:** Apply the existing explicit-owner review boundary to both the workspace user and other people. A name match or meeting speaker binding suggests an owner and appears under Needs confirmation; it does not populate active or delivered commitments. People list counts distinguish verified open commitments from candidates.
+- **Review:** The existing Confirm owner action establishes explicit user ownership and moves the candidate into active commitments. Clearing ownership or rejecting an item remains authoritative. Source wording, dates, notes, and original records are preserved; this is a projection change with no migration or bulk data rewrite.
+- **Continuity:** Natural commitment language remains supported in shared note extraction. Detecting a task and identifying its speaker are distinct from confirming its assignment. Existing explicitly owned commitments and recent deliveries remain visible.

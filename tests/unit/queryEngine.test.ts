@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../electron/db';
 import {
+  applyAssigneeCommitmentState,
   buildAssigneeActionRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
@@ -668,12 +669,10 @@ describe('Query Engine', () => {
         evidence_kind: 'note',
         trust_status: 'needs_review',
       });
-      expect(result[0].evidence_text).toContain(
+      expect(result[0].evidence_text.replace(/\s+/g, ' ')).toContain(
         'Morgan owns testing; the date follows review.',
       );
-      expect(result[0].evidence_text).toContain(
-        '[Middle of long notes omitted]',
-      );
+      expect(result[0].evidence_text).toContain('[Text omitted]');
       expect(result[0].evidence_text.length).toBeLessThan(8500);
       expect(result[0].evidence_text).not.toMatch(
         /Obsolete approval|STALE_MID_APPROVAL|PRIVATE_TRANSCRIPT/,
@@ -820,7 +819,7 @@ describe('Query Engine', () => {
       expect(result[0].score_breakdown.fts_rank).toBe(1);
       expect(dbModule.searchMeetingNotesFts).toHaveBeenCalledWith(
         '"profile"*',
-        { limit: 40 },
+        { limit: 40, meetingIds: ['eligible'] },
       );
       expect(dbModule.getAskPlutoMeeting).not.toHaveBeenCalledWith('excluded');
     });
@@ -1582,6 +1581,54 @@ describe('Query Engine', () => {
       expect(accomplishments?.answer).not.toContain(
         'Send the revised launch plan',
       );
+    });
+
+    it('searches beyond an empty canonical list for a known person mentioned in notes', () => {
+      vi.mocked(dbModule.findEntity).mockReturnValue({
+        id: 'person-c',
+        name: 'Gamma',
+        type: 'person',
+      } as dbModule.Entity);
+      const recall = buildAssigneeActionRecall(
+        "What's assigned to Gamma?",
+        meetings,
+      );
+      expect(recall).toMatchObject({
+        coverageLimited: true,
+        mentionedMeetingCount: 2,
+        commitmentCount: 0,
+      });
+      // Saved assignments must be retrieved as evidence, not promoted past review.
+      expect(recall?.context).toEqual([]);
+    });
+
+    it('keeps completed canonical work closed while detecting other uncovered notes', () => {
+      vi.mocked(dbModule.findEntity).mockReturnValue({
+        id: 'person-c',
+        name: 'Gamma',
+        type: 'person',
+      } as dbModule.Entity);
+      vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
+        open: [],
+        candidates: [],
+        delivered: [
+          {
+            id: 'closed',
+            text: 'Send the revised launch plan.',
+            status: 'completed',
+            dueDate: null,
+            sourceMeetingId: 'planning',
+            sourceKind: 'mid',
+            evidence: null,
+          },
+        ],
+      });
+      expect(
+        buildAssigneeActionRecall("What's assigned to Gamma?", [meetings[0]]),
+      ).toMatchObject({ coverageLimited: true, commitmentCount: 0 });
+      expect(
+        buildAssigneeActionRecall("What's assigned to Gamma?", meetings),
+      ).toMatchObject({ coverageLimited: true, commitmentCount: 0 });
     });
 
     it('routes priority and focus queries to self commitments sorted by due date', () => {
@@ -3924,4 +3971,98 @@ describe('Query Engine', () => {
       expect(recall.answer).not.toContain('**Focus now**');
     });
   });
+
+  describe('Ask Pluto assignment and long-note recovery', () => {
+    it('does not mistake one completed task for complete coverage of its source', () => {
+      vi.mocked(dbModule.findEntity).mockReturnValue({
+        id: 'person-m',
+        name: 'Morgan',
+        type: 'person',
+      } as dbModule.Entity);
+      const meeting = {
+        id: 'same-source',
+        title: 'Review',
+        enhanced_notes:
+          'Morgan archived the checklist. Morgan agreed to send the acceptance report.',
+      } as dbModule.PersistedMeeting;
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
+      vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
+        open: [],
+        candidates: [],
+        delivered: [
+          {
+            id: 'closed',
+            text: 'Archive the checklist.',
+            status: 'completed',
+            dueDate: null,
+            sourceMeetingId: 'same-source',
+            evidence: null,
+          },
+        ],
+      } as any);
+      const recall = buildAssigneeActionRecall("What's assigned to Morgan?", [
+        meeting,
+      ]);
+      expect(recall).toMatchObject({
+        coverageLimited: true,
+        commitmentCount: 0,
+      });
+      expect(
+        applyAssigneeCommitmentState(
+          [buildMeetingRetrievalResult(meeting)],
+          recall,
+        )[0].evidence_text,
+      ).toContain('acceptance report');
+      expect(
+        applyAssigneeCommitmentState(
+          [buildMeetingRetrievalResult(meeting)],
+          recall,
+        )[0].evidence_text,
+      ).toContain('Morgan — completed: Archive the checklist.');
+      expect(recall?.answer).not.toContain('- Archive');
+    });
+    it('selects relevant middle evidence before long-note budgeting', async () => {
+      const meeting = {
+        id: 'long',
+        title: 'Review',
+        enhanced_notes: `${'General planning update. '.repeat(230)}\nMorgan owns the acceptance report.\n${'Routine engineering update. '.repeat(230)}`,
+      } as dbModule.PersistedMeeting;
+      vi.mocked(dbModule.searchMeetingNotesFts).mockReturnValue([
+        meeting,
+      ] as any);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
+      vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([]);
+      vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue([]);
+      vi.mocked(dbModule.walkEntityGraph).mockReturnValue([]);
+      vi.mocked(dbModule.getEntitiesByType).mockReturnValue([]);
+      const results = await retrieveContext(
+        {
+          intent: 'factual',
+          keywords: ['Morgan'],
+          entity_mentions: [],
+          temporal_range: null,
+        },
+        { query: "What's assigned to Morgan?" },
+      );
+      expect(results[0].evidence_text).toContain(
+        'Morgan owns the acceptance report.',
+      );
+      expect(results[0].evidence_text.length).toBeLessThan(8500);
+    });
+  });
+});
+
+it('retains matching middle evidence when rebuilding a prior cited source for retry', () => {
+  const meeting = {
+    id: 'prior',
+    title: 'Review',
+    enhanced_notes: `${'Routine planning. '.repeat(300)}\nMorgan owns the acceptance report.\n${'Routine implementation. '.repeat(300)}`,
+  } as dbModule.PersistedMeeting;
+  const result = buildMeetingRetrievalResult(
+    meeting,
+    'Prior cited meeting',
+    "What's assigned to Morgan?",
+  );
+  expect(result.evidence_text).toContain('Morgan owns the acceptance report.');
+  expect(result.evidence_text.length).toBeLessThan(2400);
 });

@@ -23,6 +23,7 @@ import {
   type MeetingNotesEvidenceDocument,
   buildMeetingNotesEvidenceDocument,
 } from './meetingNotesEvidence';
+import { excerptQueryEvidence } from './queryEvidenceExcerpt';
 import { getIntentClassificationPrompt } from './queryPrompts';
 import { removeTemporalPhrase, resolveTemporalQuery } from './temporalScope';
 
@@ -38,13 +39,16 @@ const parseMid = (value: unknown): MidFrontmatter | null => {
 export const buildMeetingRetrievalResult = (
   meeting: dbModule.PersistedMeeting,
   label = 'Current meeting',
+  query = '',
 ): RetrievalResult => {
   const document = buildMeetingNotesEvidenceDocument(meeting);
   const evidence: string[] = [`[${label}]: ${document.title}`];
   const occurredAt = meeting.started_at || meeting.created_at;
   if (occurredAt) evidence.push(`[Occurred]: ${occurredAt}`);
   if (document.notesText)
-    evidence.push(`[Analysis]: ${document.notesText.slice(0, 2200)}`);
+    evidence.push(
+      `[Analysis]: ${excerptQueryEvidence(document.notesText, query, 2200)}`,
+    );
   if (document.decisionsText)
     evidence.push(`[Decisions]: ${document.decisionsText.slice(0, 1000)}`);
   if (document.actionItemsText)
@@ -1013,6 +1017,11 @@ export const buildAssigneeActionRecall = (
   coverageLimited: boolean;
   mentionedMeetingCount: number;
   commitmentCount: number;
+  excludedCommitments?: Array<{
+    text: string;
+    status: 'completed' | 'rejected';
+    sourceMeetingId: string;
+  }>;
 } | null => {
   const assignee = parseAssigneeActionQuery(query);
   if (!assignee) return null;
@@ -1083,8 +1092,32 @@ export const buildAssigneeActionRecall = (
       else grouped.set(item.sourceMeetingId, { meeting, items: [item] });
     }
     const groups = [...grouped.values()];
+    const excluded =
+      canonicalCommitments.excluded ||
+      canonicalCommitments.delivered.map((item) => ({
+        text: item.text,
+        status: 'completed' as const,
+        sourceMeetingId: item.sourceMeetingId,
+      }));
     const context = groups.map(({ meeting, items }) => {
       const source = buildMeetingRetrievalResult(meeting, 'Commitment source');
+      const document = buildMeetingNotesEvidenceDocument(meeting);
+      const safeNotes = containsConfidentialAside(document.notesText)
+        ? document.sections
+            .filter(
+              (section) =>
+                !containsConfidentialAside(
+                  `${section.heading}\n${section.content}`,
+                ),
+            )
+            .map((section) => section.content)
+            .join('\n')
+        : document.notesText;
+      const noteEvidence = excerptQueryEvidence(
+        safeNotes,
+        `${person.name} ${query}`,
+        8000,
+      );
       const evidence = items
         .map(
           (item) =>
@@ -1093,7 +1126,7 @@ export const buildAssigneeActionRecall = (
         .join('\n');
       return {
         ...source,
-        evidence_text: `${source.evidence_text}\n[Commitments]:\n${evidence}`,
+        evidence_text: `[Meeting]: ${source.meeting_title}\n[Occurred]: ${meeting.started_at || meeting.created_at || 'unknown'}\n[Current saved notes]:\n${noteEvidence}\n[Assignee]: ${person.name}\n[Commitments]:\n${evidence}`,
         evidence_kind: 'commitment' as const,
       };
     });
@@ -1122,8 +1155,26 @@ export const buildAssigneeActionRecall = (
         : []),
     ];
     const subject = selfReference ? 'you' : person.name;
+    const names = [person.name, ...(selfReference ? [] : [assignee])].map(
+      normalizePersonName,
+    );
+    const mentionedMeetings = meetings.filter((meeting) =>
+      [
+        meeting.user_notes,
+        meeting.enhanced_notes,
+        meeting.mid_json,
+        meeting.analysis_json,
+      ].some(
+        (value) =>
+          typeof value === 'string' &&
+          names.some(
+            (name) => name && normalizePersonName(value).includes(name),
+          ),
+      ),
+    );
     return {
       assignee: subject,
+      excludedCommitments: excluded,
       answer:
         lines.filter(Boolean).length > 0
           ? lines.join('\n')
@@ -1131,8 +1182,14 @@ export const buildAssigneeActionRecall = (
             ? `I couldn't find any open commitments or action items assigned to ${subject} to prioritize.`
             : `I couldn't find any confirmed ${completedRequested ? 'accomplishments or completed deliverables' : 'open commitments'} assigned to ${subject}.`,
       context,
-      coverageLimited: false,
-      mentionedMeetingCount: context.length,
+      coverageLimited:
+        // A canonical item covers that task, not every assignment in its
+        // source meeting. Review matching notes even for known sources.
+        mentionedMeetings.length > 0 ||
+        selected.length >
+          groups.reduce((count, group) => count + group.items.length, 0) ||
+        confirmed.length + possible.length > selected.length,
+      mentionedMeetingCount: Math.max(mentionedMeetings.length, context.length),
       commitmentCount: sortedConfirmed.length,
     };
   }
@@ -1233,6 +1290,24 @@ export const extractNamedPersonQuestionSubject = (
   }
   return null;
 };
+
+// Apply authoritative state after source selection so a source shared by a
+// closed task and a new assignment retains both without widening the scope.
+export const applyAssigneeCommitmentState = (
+  context: RetrievalResult[],
+  recall: ReturnType<typeof buildAssigneeActionRecall>,
+): RetrievalResult[] =>
+  context.map((source) => {
+    const excluded =
+      recall?.excludedCommitments?.filter(
+        (item) => item.sourceMeetingId === source.meeting_id,
+      ) || [];
+    if (!excluded.length) return source;
+    return {
+      ...source,
+      evidence_text: `[Canonical commitment state — overrides older notes]:\n${excluded.map((item) => `${recall?.assignee} — ${item.status}: ${item.text}`).join('\n')}\n[Meeting]: ${source.meeting_title || source.meeting_id}\n${source.evidence_text}`,
+    };
+  });
 
 export const buildNamedPersonEvidenceQuery = (
   query: string,
@@ -1749,10 +1824,7 @@ export const buildProjectRecall = (
               `[${section.heading.slice(0, 120)}]: ${section.content}`,
           )
           .join('\n');
-    const notes =
-      currentNotes.length <= 8000
-        ? currentNotes
-        : `${currentNotes.slice(0, 4000)}\n[Middle of long notes omitted]\n${currentNotes.slice(-4000)}`;
+    const notes = excerptQueryEvidence(currentNotes, query, 8000);
     const prepared = buildMeetingRetrievalResult(
       meeting,
       `Project notes (${displayTitle})`,
@@ -3109,32 +3181,40 @@ export const retrieveContext = async (
     // A global OR query can fill its limit with one common topic. Give each
     // requested term a bounded discovery window; prefix matches cover inflection
     // such as profile/profiles without inventing semantic aliases.
+    const notesSearchScope = {
+      ...(options.meetingIds?.length ? { meetingIds: options.meetingIds } : {}),
+      ...(parsed.temporal_range?.from
+        ? { from: parsed.temporal_range.from }
+        : {}),
+      ...(parsed.temporal_range?.to ? { to: parsed.temporal_range.to } : {}),
+    };
     const facetMeetings = allKeywords.flatMap((keyword) => {
       const parts = keyword.split(/\s+/).filter(Boolean);
       const query = parts.map((part) => `"${part}"*`).join(' AND ');
-      const matches = searchMeetingNotesFts(query, { limit: 40 }).filter(
-        (meeting) => {
-          if (
-            options.meetingIds?.length &&
-            !options.meetingIds.includes(String(meeting.id))
-          )
-            return false;
-          if (!parsed.temporal_range) return true;
-          const occurredAt = Date.parse(
-            meeting.started_at || meeting.created_at || '',
-          );
-          return (
-            occurredAt >=
-              (parsed.temporal_range.from
-                ? Date.parse(parsed.temporal_range.from)
-                : Number.NEGATIVE_INFINITY) &&
-            occurredAt <
-              (parsed.temporal_range.to
-                ? Date.parse(parsed.temporal_range.to)
-                : Number.POSITIVE_INFINITY)
-          );
-        },
-      );
+      const matches = searchMeetingNotesFts(query, {
+        limit: 40,
+        ...notesSearchScope,
+      }).filter((meeting) => {
+        if (
+          options.meetingIds?.length &&
+          !options.meetingIds.includes(String(meeting.id))
+        )
+          return false;
+        if (!parsed.temporal_range) return true;
+        const occurredAt = Date.parse(
+          meeting.started_at || meeting.created_at || '',
+        );
+        return (
+          occurredAt >=
+            (parsed.temporal_range.from
+              ? Date.parse(parsed.temporal_range.from)
+              : Number.NEGATIVE_INFINITY) &&
+          occurredAt <
+            (parsed.temporal_range.to
+              ? Date.parse(parsed.temporal_range.to)
+              : Number.POSITIVE_INFINITY)
+        );
+      });
       const cutoff = recentNotesCutoff(
         options.query || '',
         matches.map((meeting) =>
@@ -3169,7 +3249,13 @@ export const retrieveContext = async (
     );
     const meetings = [
       ...new Map(
-        [...facetMeetings, ...searchMeetingNotesFts(ftsQueryStr, { limit: 20 })]
+        [
+          ...facetMeetings,
+          ...searchMeetingNotesFts(ftsQueryStr, {
+            limit: 20,
+            ...notesSearchScope,
+          }),
+        ]
           .filter(
             (meeting) =>
               !options.meetingIds?.length ||
@@ -3393,10 +3479,11 @@ export const retrieveContext = async (
           .match(/[\p{L}\p{N}]+/gu) || [],
       ),
     );
-    const notes =
-      currentNotes.length <= 8000
-        ? currentNotes
-        : `${currentNotes.slice(0, 4000)}\n[Middle of long notes omitted]\n${currentNotes.slice(-4000)}`;
+    const notes = excerptQueryEvidence(
+      currentNotes,
+      options.query || allKeywords.join(' '),
+      8000,
+    );
     return [
       {
         ...result,

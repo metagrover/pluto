@@ -1,3 +1,4 @@
+import { containsPersonReference } from '../src/utils/evidenceText';
 import {
   buildPersonDossierRead,
   cleanPersonReadText,
@@ -160,7 +161,6 @@ export const groundPersonKnowledgeV2Document = (
     /^conversations with /,
     '',
   );
-  const firstName = personName.split(' ')[0];
   const supported = (meetingId: string, quote: string): boolean => {
     const source = sourceEvidenceByMeeting.get(meetingId);
     const normalizedQuote = normalizeText(quote);
@@ -168,9 +168,7 @@ export const groundPersonKnowledgeV2Document = (
       source &&
         quote.trim().length >= 6 &&
         source.includes(normalizedQuote) &&
-        [personName, firstName].some((name) =>
-          normalizedQuote.startsWith(`${name} `),
-        ),
+        containsPersonReference(quote, personName),
     );
   };
   const keepItems = (items: KnowledgeV2Item[]): KnowledgeV2Item[] =>

@@ -271,7 +271,7 @@ ${details.join('\n')}`;
       ? 'Re-evaluate the prior answer against the current synthesized Context. Say what was overstated, give the latest dated supported picture, and identify any remaining uncertainty. Do not merely agree or restate the earlier answer. Do not claim that newer notes do not exist just because this bounded search did not retrieve them.'
       : '',
     ownershipQuestion
-      ? 'Search every provided source for relevant follow-ups. Separate items that explicitly name the person as owner from possible follow-ups where the notes mention the person but do not establish ownership. Never convert participation, discussion, or an unnamed owner into an assignment.'
+      ? 'Search every provided source for relevant follow-ups. Separate items that explicitly name the person as owner from possible follow-ups where the notes mention the person but do not establish ownership. Never convert participation, discussion, or an unnamed owner into an assignment. Include every distinct explicit assignment in the supplied context, even if it appeared in an earlier answer. Do not infer the purpose, priority, or completion of a task. Canonical completed or rejected task state overrides older note wording: do not reopen those tasks. Describe other assignments found only in notes as recorded in those notes, not confirmed open commitments.'
       : '',
     personWorkQuestion
       ? 'For a question about a named person’s work, describe only tasks the synthesized notes explicitly assign to that person or say they are doing. Work concerning their clients, work done for their review, and work done by a colleague are not their tasks. If the available notes show only involvement or dependencies, say that their current work is not confirmed and describe the involvement separately.'
@@ -324,7 +324,7 @@ USER IDENTITY & ATTRIBUTION:
 - When the user asks about their own work, accomplishments, action items, or statements (using "I", "me", "my", "myself", "mine"), address them directly in the second person ("You worked on...", "You delivered...").
 - Never refer to ${confirmedSelfName} in the third person as if they were someone else.
 - Only attribute accomplishments, tasks, or statements to the user if they belong to ${confirmedSelfName}. Never attribute another person's actions or accomplishments to the user.`;
-  } else {
+  } else if (/\b(?:my|me|myself|mine|i)\b/i.test(query)) {
     identitySection = `
 USER IDENTITY & ATTRIBUTION:
 - The user's identity is not yet confirmed in Pluto.
@@ -429,7 +429,7 @@ RULES:
           ? 'Use short paragraphs, with bullets or brief bold labels only if they make the priorities easier to follow. Do not fill a fixed template or include source/context markers.'
           : 'Do not add headings unless the user asks for a detailed breakdown. Do not include source or context markers in the answer.'
   }
-8. Preserve source boundaries: do not transfer a fact between people, projects, or initiatives merely because both appear in Context or conversation. Attribute speech, decisions, requests, expectations, and ownership only when the same synthesized passage explicitly names the person. Participation or second-person wording does not prove ownership. For inferred expectations, say “My interpretation is…” rather than “they expect”.
+8. Use names rather than guessing gender or pronouns. Preserve source boundaries: do not transfer a fact between people, projects, or initiatives merely because both appear in Context or conversation. Attribute speech, decisions, requests, expectations, and ownership only when the same synthesized passage explicitly names the person. Participation or second-person wording does not prove ownership. For inferred expectations, say “My interpretation is…” rather than “they expect”.
 9. Treat source dates as the age of the information, not proof that an old status is still current. Relative deadlines such as “next Tuesday” are relative to the source's occurrence date, not today; if that target is already past, call it an earlier target or omit it. For priorities and recommendations, separate Pluto's judgment from recorded facts and prefer fresher matching updates.
 10. User corrections constrain what the user says is wrong. Never cite a user correction as meeting evidence. When the user asks for advice, distinguish your judgment from recorded facts in natural language; do not imply the source discussed your recommendation.
 

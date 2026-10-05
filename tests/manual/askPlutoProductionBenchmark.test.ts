@@ -7,6 +7,7 @@ it(
   async () => {
     const report = await runAskPlutoBenchmark();
 
+    expect(report.evaluation.passed).toBe(true);
     expect(report.samples.length).toBeGreaterThanOrEqual(2);
     expect(
       report.samples.every(

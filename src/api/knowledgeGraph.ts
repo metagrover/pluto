@@ -439,7 +439,7 @@ export const restorePersonMerge = async (personId: string): Promise<void> =>
 
 /** Synthesize durable project themes across structured meeting notes. */
 export const discoverProjectInitiative = async (
-  options: { retryFailed?: boolean } = {},
+  options: { retryFailed?: boolean; projectId?: string } = {},
 ): Promise<{
   discovered: number;
   remaining: number;

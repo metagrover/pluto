@@ -229,6 +229,7 @@ describe('packageEntityNotes', () => {
     const [projected] = db.getDreamingEntityNotes(project.id, 8);
     const pkg = packageEntityNotes(project.id);
     expect(Object.keys(projected).sort()).toEqual([
+      'action_items_json',
       'created_at',
       'enhanced_notes',
       'id',
@@ -436,4 +437,121 @@ describe('packageEntityNotes', () => {
     );
     expect(pkg).toBeNull();
   });
+});
+
+describe('saved action-item evidence projection', () => {
+  it('carries classified action text only while it remains in the bounded notes', () => {
+    const source = {
+      ...note('m', '2026-10-01', 'Prepare the launch checklist'),
+      action_items_json: JSON.stringify([
+        {
+          text: 'Prepare the launch checklist',
+          evidence: "I'll prepare the launch checklist",
+          assignee: 'Alex',
+        },
+        { text: 'Removed historical task' },
+      ]),
+    };
+    const pkg = packageEntityNotes(
+      'project-586',
+      packageDeps({ getDreamingEntityNotes: vi.fn(() => [source]) }),
+    );
+    expect(pkg?.recentMeetingNotes[0].actionItems).toEqual([
+      'Prepare the launch checklist',
+    ]);
+    expect(JSON.stringify(pkg)).not.toContain("I'll prepare");
+    expect(JSON.stringify(pkg)).not.toContain('assignee');
+  });
+  it('projects saved actions from accepted notes without exposing the full analysis or transcript', () => {
+    const project = db.upsertEntity({
+      type: 'project',
+      name: 'Structured action projection',
+    });
+    db.saveMeeting({
+      id: 'saved-action-projection',
+      title: 'Launch',
+      enhanced_notes: 'Prepare the launch checklist',
+      analysis_format_pass: true,
+      analysis_json: JSON.stringify({
+        analysis_schema_version: 3,
+        overview: 'Launch',
+        all_action_items: [{ text: 'Prepare the launch checklist' }],
+        secret: 'UNRELATED ANALYSIS PAYLOAD',
+      }),
+      transcript_json: JSON.stringify([{ text: 'RAW TRANSCRIPT SECRET' }]),
+    });
+    db.addMeetingEntity({
+      meeting_id: 'saved-action-projection',
+      entity_id: project.id,
+    });
+    const pkg = packageEntityNotes(project.id);
+    expect(pkg?.recentMeetingNotes[0].actionItems).toEqual([
+      'Prepare the launch checklist',
+    ]);
+    expect(JSON.stringify(pkg)).not.toContain('UNRELATED ANALYSIS PAYLOAD');
+    expect(JSON.stringify(pkg)).not.toContain('RAW TRANSCRIPT SECRET');
+  });
+  it('does not promote unreviewed saved analysis into action-item evidence', () => {
+    const project = db.upsertEntity({
+      type: 'project',
+      name: 'Unreviewed actions',
+    });
+    db.saveMeeting({
+      id: 'unreviewed-action-projection',
+      title: 'Launch',
+      enhanced_notes: 'Prepare the launch checklist',
+      analysis_format_pass: false,
+      analysis_json: JSON.stringify({
+        all_action_items: [{ text: 'Prepare the launch checklist' }],
+      }),
+    });
+    db.addMeetingEntity({
+      meeting_id: 'unreviewed-action-projection',
+      entity_id: project.id,
+    });
+    expect(
+      packageEntityNotes(project.id)?.recentMeetingNotes[0].actionItems,
+    ).toBeUndefined();
+  });
+  it('invalid or mismatched saved action metadata cannot authorize a task', () => {
+    for (const action_items_json of [
+      'not json',
+      '{}',
+      '[null, 3, {"text":"Another task"}]',
+    ]) {
+      const source = {
+        ...note('m', '2026-10-01', 'Prepare the launch checklist'),
+        action_items_json,
+      };
+      const pkg = packageEntityNotes(
+        'project-586',
+        packageDeps({ getDreamingEntityNotes: vi.fn(() => [source]) }),
+      );
+      expect(pkg?.recentMeetingNotes[0].actionItems).toBeUndefined();
+    }
+  });
+});
+
+it('retains legacy v3 action classification when the optional format flag is absent', () => {
+  const project = db.upsertEntity({
+    type: 'project',
+    name: 'Legacy classified actions',
+  });
+  db.saveMeeting({
+    id: 'legacy-v3-action-projection',
+    title: 'Launch',
+    enhanced_notes: 'Prepare the launch checklist',
+    analysis_schema_version: 3,
+    analysis_json: JSON.stringify({
+      analysis_schema_version: 3,
+      all_action_items: [{ text: 'Prepare the launch checklist' }],
+    }),
+  });
+  db.addMeetingEntity({
+    meeting_id: 'legacy-v3-action-projection',
+    entity_id: project.id,
+  });
+  expect(
+    packageEntityNotes(project.id)?.recentMeetingNotes[0].actionItems,
+  ).toEqual(['Prepare the launch checklist']);
 });

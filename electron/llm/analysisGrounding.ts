@@ -394,10 +394,10 @@ const isPassiveUnownedNeed = (evidence: string): boolean =>
 const GENERIC_ACTION_ASSIGNEE =
   /^(?:(?:and|so|then)\s+)?(?:group|team|the team|we|everyone|i|me|you)$/i;
 const FIRST_PERSON_ACTION_COMMITMENT =
-  /\b(?:i will|i['’]ll|i can|i am going to|i['’]m going to|i commit to)\b/i;
+  /\b(?:i will|i['’]ll|i can|i am going to|i['’]m going to|i commit to|i promise(?:d)? to)\b/i;
 const GROUP_ACTION_COMMITMENT = /\b(?:we will|we['’]ll|we commit to)\b/i;
 const NAMED_ACTION_COMMITMENT =
-  /\b([\p{Lu}][\p{L}'’.-]*(?:\s+[\p{Lu}][\p{L}'’.-]*){0,2})\s+(?:will|shall|can|owns?|is assigned|was assigned)\b/gu;
+  /\b([\p{Lu}][\p{L}'’.-]*(?:\s+[\p{Lu}][\p{L}'’.-]*){0,2})\s+(?:will|shall|can|owns?|promises? to|promised to|commits? to|committed to|is assigned|was assigned)\b/gu;
 
 const resolveActionAssignee = (
   claimedAssignee: string | undefined,
@@ -945,15 +945,34 @@ export const groundSourceReviewedItem = (
             : settledFieldSupportedByTurn(item.owner, resolved, 'decision'))
         ? item.owner
         : null;
+  const duePattern = item.due?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const due =
     item.due &&
     isSettledDueValue(item.due) &&
     fieldSupportedBySource(item.due, evidence) &&
     !fieldExplicitlySuperseded(item.due, evidence) &&
-    new RegExp(
-      `\\b(?:by|before|on|due|deadline(?: is)?|no later than)\\s+(?:the\\s+)?${item.due.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+    (new RegExp(
+      `\\b(?:by|before|on|due|deadline(?: is)?|no later than)\\s+(?:the\\s+)?${duePattern}\\b`,
       'i',
-    ).test(evidence)
+    ).test(evidence) ||
+      (item.kind === 'action' &&
+        ownership?.assignee &&
+        /^(?:(?:this|next)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)$/i.test(
+          item.due,
+        ) &&
+        resolved.sourceLines
+          .flatMap(
+            (line) =>
+              transcriptLineContent(line).match(/[^.?!;]+[.?!;]?/g) ?? [],
+          )
+          .some((content) => {
+            return (
+              (FIRST_PERSON_ACTION_COMMITMENT.test(content) ||
+                (content.match(NAMED_ACTION_COMMITMENT)?.length ?? 0) > 0) &&
+              new RegExp(`\\b${duePattern}[.!]?\\s*$`, 'i').test(content) &&
+              claimSupportRatio(item.text, content) >= MIN_FULL_CLAIM_SUPPORT
+            );
+          })))
       ? item.due
       : null;
   return {

@@ -52,6 +52,11 @@ import {
   parseAudioStorageBudgetGb,
 } from './audioRetention';
 import {
+  type BugReportReason,
+  recordBugReportEvent,
+  registerBugReportHandlers,
+} from './bugReports';
+import {
   CalendarHelperClient,
   resolveCalendarHelperPath,
 } from './calendar/client';
@@ -702,6 +707,7 @@ import {
   updateAlertStatus,
 } from './intelligence/proactiveEngine';
 import {
+  applyAssigneeCommitmentState,
   buildAssigneeActionRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
@@ -1006,7 +1012,7 @@ const activeAnalysisGenerations = new Map<
 >();
 const activeAskPlutoQueries = new Map<
   string,
-  { controller: AbortController; settled: Promise<void> }
+  { controller: AbortController; ownerId: number; settled: Promise<void> }
 >();
 const activeMeetingAskPlutoQueries = new Map<
   string,
@@ -1212,6 +1218,7 @@ app.on(
 );
 
 app.whenReady().then(async () => {
+  registerBugReportHandlers(db.getSetting);
   const requestedEncryptionRollout = process.env[ENCRYPTION_ROLLOUT_ENV];
   const encryptionRollout = resolveEncryptionRolloutPolicy({
     isPackaged: app.isPackaged,
@@ -4608,14 +4615,36 @@ app.whenReady().then(async () => {
   const runProjectThemeSynthesis = (options?: {
     retryFailed?: unknown;
     background?: boolean;
-  }) => {
-    if (projectThemeSynthesis) return projectThemeSynthesis;
-    const canCollectSources = () =>
-      !options?.background ||
-      (Date.now() - lastRendererActivityAt >= DREAMING_RENDERER_QUIET_MS &&
-        powerMonitor.getSystemIdleTime() * 1_000 >=
-          DREAMING_RENDERER_QUIET_MS &&
-        !isProjectScopeReviewBusy(knowledgeSynthesisPause.snapshot()));
+    projectId?: string;
+  }): Promise<Awaited<ReturnType<typeof synthesizeProjectThemes>>> => {
+    if (projectThemeSynthesis) {
+      return options?.projectId
+        ? projectThemeSynthesis.then(() => runProjectThemeSynthesis(options))
+        : projectThemeSynthesis;
+    }
+    const selectedBrief = options?.projectId
+      ? db.getProjectBrief(options.projectId)
+      : null;
+    if (options?.projectId && !selectedBrief)
+      return Promise.reject(new Error('project_not_found'));
+    const selectedMeetingIds = selectedBrief
+      ? new Set(selectedBrief.meetings.map((meeting) => meeting.id))
+      : null;
+    const pausedReason = (): BugReportReason | undefined => {
+      const snapshot = knowledgeSynthesisPause.snapshot();
+      return (
+        ['capture', 'transcription', 'downstream', 'ask_pluto_session'] as const
+      ).find((reason) => (snapshot[reason] || 0) > 0);
+    };
+    const collectionBlocker = (): BugReportReason | undefined => {
+      if (!options?.background) return undefined;
+      if (Date.now() - lastRendererActivityAt < DREAMING_RENDERER_QUIET_MS)
+        return 'renderer_active';
+      if (powerMonitor.getSystemIdleTime() * 1_000 < DREAMING_RENDERER_QUIET_MS)
+        return 'system_active';
+      return pausedReason();
+    };
+    const canCollectSources = () => !collectionBlocker();
     const deferredSynthesis = () => ({
       discovered: 0,
       remaining: 0,
@@ -4663,6 +4692,13 @@ app.whenReady().then(async () => {
       );
     };
     let sources: ProjectThemeSource[] = [];
+    const diagnosticStartedAt = Date.now();
+    const diagnosticAttemptId = randomUUID();
+    let diagnosticReason: BugReportReason | undefined;
+    let diagnosticStage:
+      | 'collect_sources'
+      | 'route_projects'
+      | 'synthesize_themes' = 'collect_sources';
     const synthesisDependencies = {
       listSources: () => sources,
       getSource: (id: string) => {
@@ -4689,17 +4725,58 @@ app.whenReady().then(async () => {
           signal: AbortSignal.timeout(300_000),
         });
       },
-      isBusy: () =>
-        isProjectScopeReviewBusy(knowledgeSynthesisPause.snapshot()),
+      isBusy: () => {
+        const reason = pausedReason();
+        if (reason) diagnosticReason = reason;
+        return Boolean(reason);
+      },
+      onDeferred: (
+        reason:
+          | 'foreground_preempted'
+          | 'source_changed'
+          | 'routing_queue_remaining',
+      ) => {
+        diagnosticReason = reason;
+      },
     };
     projectThemeSynthesis = (async () => {
       const collected = await collectProjectSynthesisSources({
-        listMeetings: () => db.getMeetings() as db.PersistedMeeting[],
+        listMeetings: () =>
+          (db.getMeetings() as db.PersistedMeeting[]).filter(
+            (meeting) =>
+              !selectedMeetingIds || selectedMeetingIds.has(String(meeting.id)),
+          ),
         buildSource: sourceFromMeeting,
         shouldContinue: canCollectSources,
       });
-      if (!collected) return deferredSynthesis();
+      if (!collected) {
+        diagnosticReason = collectionBlocker();
+        return deferredSynthesis();
+      }
       sources = collected;
+      if (selectedBrief) {
+        diagnosticStage = 'synthesize_themes';
+        sources = sources.map((source) => ({
+          ...source,
+          candidateProjects: [
+            {
+              id: selectedBrief.project.id,
+              name: selectedBrief.project.displayTitle,
+            },
+          ],
+        }));
+        const result = await synthesizeProjectThemes(
+          {
+            ...synthesisDependencies,
+            getState: () => null,
+            saveState: () => {},
+          },
+          { retryFailed: true, projectId: selectedBrief.project.id },
+        );
+        if (result.discovered > 0) publishProjects();
+        return result;
+      }
+      diagnosticStage = 'route_projects';
       const routing = await routeProjectCandidate(
         {
           ...synthesisDependencies,
@@ -4731,6 +4808,20 @@ app.whenReady().then(async () => {
         },
         { retryFailed: options?.retryFailed === true },
       );
+      if (routing.failed > 0) {
+        recordBugReportEvent({
+          operation: 'project_themes',
+          attemptId: diagnosticAttemptId,
+          entityId: options?.projectId,
+          reason: diagnosticReason,
+          stage: 'route_projects',
+          outcome: 'failed',
+          durationMs: Date.now() - diagnosticStartedAt,
+          sourceCount: sources.length,
+          retryRequested: options?.retryFailed === true,
+          error: 'project_response_incomplete',
+        });
+      }
       if (routing.grouped > 0) {
         publishProjects();
         // Routing changed memberships; theme synthesis needs fresh identities.
@@ -4739,10 +4830,16 @@ app.whenReady().then(async () => {
           buildSource: sourceFromMeeting,
           shouldContinue: canCollectSources,
         });
-        if (!regrouped) return deferredSynthesis();
+        if (!regrouped) {
+          diagnosticReason = collectionBlocker();
+          return deferredSynthesis();
+        }
         sources = regrouped;
       }
-      if (!canCollectSources()) return deferredSynthesis();
+      if (!canCollectSources()) {
+        diagnosticReason = collectionBlocker();
+        return deferredSynthesis();
+      }
       if (routing.deferred)
         return {
           discovered: routing.grouped,
@@ -4751,6 +4848,7 @@ app.whenReady().then(async () => {
           failed: routing.failed,
           deferred: true,
         };
+      diagnosticStage = 'synthesize_themes';
       const themes = await synthesizeProjectThemes(synthesisDependencies, {
         retryFailed: options?.retryFailed === true,
       });
@@ -4761,9 +4859,59 @@ app.whenReady().then(async () => {
         remaining: themes.remaining + routing.remaining,
         routingRemaining: routing.remaining,
       };
-    })().finally(() => {
-      projectThemeSynthesis = null;
-    });
+    })()
+      .then(
+        (result) => {
+          recordBugReportEvent({
+            operation: 'project_themes',
+            attemptId: diagnosticAttemptId,
+            entityId: options?.projectId,
+            reason: diagnosticReason,
+            stage: diagnosticStage,
+            outcome:
+              result.failed > 0
+                ? 'failed'
+                : result.deferred
+                  ? 'deferred'
+                  : 'complete',
+            durationMs: Date.now() - diagnosticStartedAt,
+            sourceCount: sources.length,
+            resultStatus:
+              result.failed > 0
+                ? 'incomplete'
+                : result.deferred
+                  ? 'deferred'
+                  : result.discovered > 0
+                    ? 'updated'
+                    : 'no_change',
+            updatedCount: result.discovered,
+            remainingCount: result.remaining,
+            retryRequested: options?.retryFailed === true,
+            ...(result.failed > 0
+              ? { error: 'project_response_incomplete' }
+              : {}),
+          });
+          return result;
+        },
+        (error) => {
+          recordBugReportEvent({
+            operation: 'project_themes',
+            attemptId: diagnosticAttemptId,
+            entityId: options?.projectId,
+            reason: diagnosticReason,
+            stage: diagnosticStage,
+            outcome: 'failed',
+            durationMs: Date.now() - diagnosticStartedAt,
+            sourceCount: sources.length,
+            retryRequested: options?.retryFailed === true,
+            error,
+          });
+          throw error;
+        },
+      )
+      .finally(() => {
+        projectThemeSynthesis = null;
+      });
     return projectThemeSynthesis;
   };
   ipcMain.handle('DISCOVER_PROJECT_INITIATIVE', (_event, options) =>
@@ -5379,11 +5527,57 @@ app.whenReady().then(async () => {
       ) {
         return { status: 'invalid_request', errorCode: 'entity_id_required' };
       }
-      return (
-        (await idleDreamingCoordinator?.triggerNow(options)) ?? {
-          status: 'no_work',
-        }
-      );
+      const startedAt = Date.now();
+      const diagnosticAttemptId = randomUUID();
+      const isProject = db.getEntity(options.entityId)?.type === 'project';
+      try {
+        const result =
+          (await idleDreamingCoordinator?.triggerNow(options)) ??
+          ({
+            status: 'no_work',
+          } as IdleDreamingResult);
+        if (isProject)
+          recordBugReportEvent({
+            operation: 'project_updates',
+            attemptId: diagnosticAttemptId,
+            requiredProvider: 'ollama',
+            requiredModel: DREAMING_MODEL,
+            stage: 'prepare_updates',
+            entityId: options.entityId,
+            outcome:
+              result.status === 'failed'
+                ? 'failed'
+                : result.status === 'cancelled'
+                  ? 'cancelled'
+                  : ['proposed', 'existing', 'no_change'].includes(
+                        result.status,
+                      )
+                    ? 'complete'
+                    : 'deferred',
+            durationMs: Date.now() - startedAt,
+            resultStatus: result.status,
+            proposalCount:
+              'proposals' in result ? result.proposals?.length : undefined,
+            ...('errorCode' in result && result.errorCode
+              ? { error: result.errorCode }
+              : {}),
+          });
+        return result;
+      } catch (error) {
+        if (isProject)
+          recordBugReportEvent({
+            operation: 'project_updates',
+            attemptId: diagnosticAttemptId,
+            requiredProvider: 'ollama',
+            requiredModel: DREAMING_MODEL,
+            stage: 'prepare_updates',
+            entityId: options.entityId,
+            outcome: 'failed',
+            durationMs: Date.now() - startedAt,
+            error,
+          });
+        throw error;
+      }
     },
   );
   const getCurrentDreamingSourceRevision = (
@@ -6506,1827 +6700,1935 @@ app.whenReady().then(async () => {
           ? `ask-pluto-${randomUUID()}`
           : input.requestId;
       const controller = new AbortController();
-      const settingsStartedAt = Date.now();
-      const settings = await getAllSettings(db);
-      const settingsCompletedAt = Date.now();
-      const isLocalProvider =
-        !settings.llm_provider || settings.llm_provider === 'ollama';
-      const requestTimeoutMs = askPlutoTimeoutMs(
-        typeof input === 'string' ? undefined : input.modeOverride,
-        { isLocal: isLocalProvider },
-      );
-      let recordProgress: ((phase?: 'started' | 'token') => void) | undefined;
-      const meetingHeaders = db.getAskPlutoMeetingHeaders();
-      const priorTurns: AskPlutoConversationTurn[] =
-        typeof input === 'string' || !Array.isArray(input.priorTurns)
-          ? []
-          : input.priorTurns
-              .filter(
-                (turn) =>
-                  (turn.role === 'user' || turn.role === 'assistant') &&
-                  typeof turn.content === 'string' &&
-                  turn.content.trim(),
-              )
-              .slice(-6)
-              .map((turn) => ({
-                role: turn.role,
-                content: turn.content.trim().slice(0, 1200),
-                meetingIds: Array.isArray(turn.meetingIds)
-                  ? turn.meetingIds
-                      .filter((id): id is string => typeof id === 'string')
-                      .slice(0, 8)
-                  : [],
-                ...(turn.outcome ? { outcome: turn.outcome } : {}),
-                ...(turn.turnMode ? { turnMode: turn.turnMode } : {}),
-                ...(turn.retrievalPolicy
-                  ? { retrievalPolicy: turn.retrievalPolicy }
-                  : {}),
-                ...(typeof turn.unsupportedClaimCount === 'number'
-                  ? { unsupportedClaimCount: turn.unsupportedClaimCount }
-                  : {}),
-                ...(typeof turn.omissionRef === 'string'
-                  ? { omissionRef: turn.omissionRef }
-                  : {}),
-                ...(typeof turn.conversationAnchor === 'string'
-                  ? {
-                      conversationAnchor: turn.conversationAnchor.slice(0, 700),
-                    }
-                  : {}),
-                ...(turn.conversationContext &&
-                typeof turn.conversationContext.anchor === 'string'
-                  ? {
-                      conversationContext: {
-                        anchor: turn.conversationContext.anchor.slice(0, 700),
-                        meetingIds: Array.isArray(
-                          turn.conversationContext.meetingIds,
-                        )
-                          ? turn.conversationContext.meetingIds
-                              .filter(
-                                (id): id is string => typeof id === 'string',
-                              )
-                              .slice(0, 8)
-                          : [],
-                        ...(turn.conversationContext.topic
-                          ? { topic: turn.conversationContext.topic }
-                          : {}),
-                      },
-                    }
-                  : {}),
-                ...(turn.resolvedScope
-                  ? { resolvedScope: turn.resolvedScope }
-                  : {}),
-                ...(turn.retrievalSummary
-                  ? { retrievalSummary: turn.retrievalSummary }
-                  : {}),
-                ...(turn.retrievalTrace
-                  ? { retrievalTrace: turn.retrievalTrace }
-                  : {}),
-              }));
-      if (
-        priorTurns.length === 0 &&
-        typeof input !== 'string' &&
-        typeof input.conversationMemory?.lastAnswerSummary === 'string' &&
-        input.conversationMemory.lastAnswerSummary.trim()
-      ) {
-        const memory = input.conversationMemory;
-        const lastAnswerSummary = memory.lastAnswerSummary?.trim() || '';
-        priorTurns.push({
-          role: 'assistant',
-          content: lastAnswerSummary.slice(0, 1200),
-          conversationAnchor: memory.currentGoal?.trim().slice(0, 700),
-          ...(memory.activeTopic
-            ? {
-                conversationContext: {
-                  anchor:
-                    memory.currentGoal?.trim().slice(0, 700) ||
-                    lastAnswerSummary.slice(0, 700),
-                  meetingIds: [],
-                  topic: memory.activeTopic,
-                },
-              }
-            : {}),
-        });
-      }
-      const activeRecording = captureSessionLease.recordingForOwner(
-        event.sender.id,
-      );
-      const currentMeeting = resolveCurrentMeeting({
-        activeRecordingMeetingId: activeRecording?.meetingId,
-        meetings: meetingHeaders.map((meeting) => ({
-          id: meeting.id,
-          started_at: meeting.started_at,
-          created_at: meeting.created_at,
-        })),
+      let markSettled: () => void = () => {};
+      const settled = new Promise<void>((resolve) => {
+        markSettled = resolve;
       });
-      const currentMeetingRow = meetingHeaders.find(
-        (meeting) => String(meeting.id) === currentMeeting.meetingId,
-      );
-      const currentMeetingStatus: AskPlutoCurrentMeeting =
-        currentMeeting.kind === 'active_recording'
-          ? {
-              ...currentMeeting,
-              evidenceState: 'provisional',
-              ...(currentMeetingRow?.title
-                ? { title: currentMeetingRow.title }
-                : {}),
-            }
-          : currentMeeting.kind === 'persisted'
+      for (const active of activeAskPlutoQueries.values()) {
+        if (active.ownerId === event.sender.id)
+          active.controller.abort(
+            new DOMException('Ask Pluto request replaced', 'AbortError'),
+          );
+      }
+      activeAskPlutoQueries.set(requestId, {
+        controller,
+        ownerId: event.sender.id,
+        settled,
+      });
+      const abortForDestroyedOwner = () =>
+        controller.abort(
+          new DOMException('Ask Pluto owner destroyed', 'AbortError'),
+        );
+      event.sender.once('destroyed', abortForDestroyedOwner);
+      try {
+        const settingsStartedAt = Date.now();
+        const settings = await runAskPlutoWithDeadline(
+          getAllSettings(db),
+          controller,
+          15_000,
+        );
+        controller.signal.throwIfAborted();
+        const settingsCompletedAt = Date.now();
+        const isLocalProvider =
+          !settings.llm_provider || settings.llm_provider === 'ollama';
+        const requestTimeoutMs = askPlutoTimeoutMs(
+          typeof input === 'string' ? undefined : input.modeOverride,
+          { isLocal: isLocalProvider },
+        );
+        let recordProgress: ((phase?: 'started' | 'token') => void) | undefined;
+        const meetingHeaders = db.getAskPlutoMeetingHeaders();
+        const priorTurns: AskPlutoConversationTurn[] =
+          typeof input === 'string' || !Array.isArray(input.priorTurns)
+            ? []
+            : input.priorTurns
+                .filter(
+                  (turn) =>
+                    (turn.role === 'user' || turn.role === 'assistant') &&
+                    typeof turn.content === 'string' &&
+                    turn.content.trim(),
+                )
+                .slice(-6)
+                .map((turn) => ({
+                  role: turn.role,
+                  content: turn.content.trim().slice(0, 1200),
+                  meetingIds: Array.isArray(turn.meetingIds)
+                    ? turn.meetingIds
+                        .filter((id): id is string => typeof id === 'string')
+                        .slice(0, 8)
+                    : [],
+                  ...(turn.outcome ? { outcome: turn.outcome } : {}),
+                  ...(turn.turnMode ? { turnMode: turn.turnMode } : {}),
+                  ...(turn.retrievalPolicy
+                    ? { retrievalPolicy: turn.retrievalPolicy }
+                    : {}),
+                  ...(typeof turn.unsupportedClaimCount === 'number'
+                    ? { unsupportedClaimCount: turn.unsupportedClaimCount }
+                    : {}),
+                  ...(typeof turn.omissionRef === 'string'
+                    ? { omissionRef: turn.omissionRef }
+                    : {}),
+                  ...(typeof turn.conversationAnchor === 'string'
+                    ? {
+                        conversationAnchor: turn.conversationAnchor.slice(
+                          0,
+                          700,
+                        ),
+                      }
+                    : {}),
+                  ...(turn.conversationContext &&
+                  typeof turn.conversationContext.anchor === 'string'
+                    ? {
+                        conversationContext: {
+                          anchor: turn.conversationContext.anchor.slice(0, 700),
+                          meetingIds: Array.isArray(
+                            turn.conversationContext.meetingIds,
+                          )
+                            ? turn.conversationContext.meetingIds
+                                .filter(
+                                  (id): id is string => typeof id === 'string',
+                                )
+                                .slice(0, 8)
+                            : [],
+                          ...(turn.conversationContext.topic
+                            ? { topic: turn.conversationContext.topic }
+                            : {}),
+                        },
+                      }
+                    : {}),
+                  ...(turn.resolvedScope
+                    ? { resolvedScope: turn.resolvedScope }
+                    : {}),
+                  ...(turn.retrievalSummary
+                    ? { retrievalSummary: turn.retrievalSummary }
+                    : {}),
+                  ...(turn.retrievalTrace
+                    ? { retrievalTrace: turn.retrievalTrace }
+                    : {}),
+                }));
+        if (
+          priorTurns.length === 0 &&
+          typeof input !== 'string' &&
+          typeof input.conversationMemory?.lastAnswerSummary === 'string' &&
+          input.conversationMemory.lastAnswerSummary.trim()
+        ) {
+          const memory = input.conversationMemory;
+          const lastAnswerSummary = memory.lastAnswerSummary?.trim() || '';
+          priorTurns.push({
+            role: 'assistant',
+            content: lastAnswerSummary.slice(0, 1200),
+            conversationAnchor: memory.currentGoal?.trim().slice(0, 700),
+            ...(memory.activeTopic
+              ? {
+                  conversationContext: {
+                    anchor:
+                      memory.currentGoal?.trim().slice(0, 700) ||
+                      lastAnswerSummary.slice(0, 700),
+                    meetingIds: [],
+                    topic: memory.activeTopic,
+                  },
+                }
+              : {}),
+          });
+        }
+        const activeRecording = captureSessionLease.recordingForOwner(
+          event.sender.id,
+        );
+        const currentMeeting = resolveCurrentMeeting({
+          activeRecordingMeetingId: activeRecording?.meetingId,
+          meetings: meetingHeaders.map((meeting) => ({
+            id: meeting.id,
+            started_at: meeting.started_at,
+            created_at: meeting.created_at,
+          })),
+        });
+        const currentMeetingRow = meetingHeaders.find(
+          (meeting) => String(meeting.id) === currentMeeting.meetingId,
+        );
+        const currentMeetingStatus: AskPlutoCurrentMeeting =
+          currentMeeting.kind === 'active_recording'
             ? {
                 ...currentMeeting,
-                evidenceState: resolvePersistedMeetingEvidenceState({
-                  finalizationStatus: currentMeetingRow?.finalization_status,
-                  downstreamProcessingJson:
-                    currentMeetingRow?.downstream_processing_json,
-                }),
+                evidenceState: 'provisional',
                 ...(currentMeetingRow?.title
                   ? { title: currentMeetingRow.title }
                   : {}),
               }
-            : currentMeeting;
-      const setupCompletedAt = Date.now();
-      let reasoningMode: AskPlutoReasoningMode | undefined;
-      let turnMode: ConversationTurnMode | undefined;
-      let retrievalPolicy: ConversationRetrievalPolicy | undefined;
-      let comparisonMeetingCount = 0;
-      let scopeLabel: string | undefined;
-      let scopeMeetingCount = 0;
-      let retrievalStartedAt: number | undefined;
-      let retrievalCompletedAt: number | undefined;
-      let providerRequestedAt: number | undefined;
-      let providerStartedAt: number | undefined;
-      let rawFirstTokenAt: number | undefined;
-      let firstTokenAt: number | undefined;
-      let generationCompletedAt: number | undefined;
-      let conversationResolutionStartedAt: number | undefined;
-      let conversationResolutionCompletedAt: number | undefined;
-      let recallStartedAt: number | undefined;
-      let recallCompletedAt: number | undefined;
-      let promptStartedAt: number | undefined;
-      let promptCompletedAt: number | undefined;
-      let providerAcquisitionStartedAt: number | undefined;
-      let providerAcquisitionCompletedAt: number | undefined;
-      let finalizationStartedAt: number | undefined;
-      let finalizationCompletedAt: number | undefined;
-      let contextCount = 0;
-      let promptCharacters = 0;
-      let outputCharacters = 0;
-      let providerName: string = settings.llm_provider || 'ollama';
-      let configuredModel =
-        settings.llm_model ||
-        (settings.llm_provider === 'gemini'
-          ? settings.gemini_model
-          : settings.llm_provider === 'openai'
-            ? settings.openai_model
-            : settings.llm_provider === 'openrouter'
-              ? settings.openrouter_model
-              : settings.llm_provider === 'claude'
-                ? settings.claude_model
-                : settings.ollama_model || OLLAMA_GENERAL_MODEL) ||
-        'default';
-      let lastValidatedPresentation: SafeAnswerPresentation | undefined;
-      let conversationAnchor: string | undefined;
-      const elapsed = (from?: number, to?: number): number | null =>
-        from !== undefined && to !== undefined ? to - from : null;
-      const buildPerformanceDiagnostics = (
-        finishedAt = Date.now(),
-      ): AskPlutoPerformanceDiagnostics => ({
-        provider: providerRequestedAt ? providerName : 'not_used',
-        model: providerRequestedAt ? configuredModel : 'not_used',
-        ...(reasoningMode ? { reasoningMode } : {}),
-        contextCount,
-        promptCharacters,
-        outputCharacters,
-        settingsMs: elapsed(settingsStartedAt, settingsCompletedAt),
-        setupMs: elapsed(settingsCompletedAt, setupCompletedAt),
-        conversationResolutionMs: elapsed(
-          conversationResolutionStartedAt,
-          conversationResolutionCompletedAt,
-        ),
-        recallMs: elapsed(recallStartedAt, recallCompletedAt),
-        retrievalMs: elapsed(retrievalStartedAt, retrievalCompletedAt),
-        promptConstructionMs: elapsed(promptStartedAt, promptCompletedAt),
-        providerAcquisitionMs: elapsed(
-          providerAcquisitionStartedAt,
-          providerAcquisitionCompletedAt,
-        ),
-        providerQueueMs: elapsed(providerRequestedAt, providerStartedAt),
-        providerRequestToFirstTokenMs: elapsed(
-          providerRequestedAt,
-          rawFirstTokenAt,
-        ),
-        rawFirstTokenMs: rawFirstTokenAt ? rawFirstTokenAt - startTime : null,
-        visibleFirstTokenMs: firstTokenAt ? firstTokenAt - startTime : null,
-        generationMs: elapsed(providerStartedAt, generationCompletedAt),
-        finalizationMs: elapsed(finalizationStartedAt, finalizationCompletedAt),
-        totalMs: finishedAt - startTime,
-      });
-      const sendStatus = (phase: AskPlutoQueryStatus['phase']) => {
-        if (event.sender.isDestroyed()) return;
-        event.sender.send('intelligence:query:status', {
-          requestId,
-          phase,
-          currentMeeting: currentMeetingStatus,
-          ...(reasoningMode ? { reasoningMode } : {}),
-          ...(comparisonMeetingCount > 0 ? { comparisonMeetingCount } : {}),
-          ...(scopeLabel ? { scopeLabel } : {}),
-          ...(scopeMeetingCount > 0 ? { scopeMeetingCount } : {}),
-        });
-      };
-
-      const generation = (async () => {
-        if (!queryText || !queryText.trim()) {
-          return {
-            status: 'answered' as const,
-            answer: '',
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-          };
-        }
-
-        console.log(
-          `[Pluto] intelligence:query start [request_id=${requestId}, query_length=${queryText.trim().length}]`,
-        );
-        const helpReply = buildPlutoHelpReply(queryText);
-        if (helpReply) {
-          turnMode = 'lookup';
-          retrievalPolicy = 'none';
-          outputCharacters = helpReply.length;
-          generationCompletedAt = Date.now();
-          finalizationStartedAt = generationCompletedAt;
-          finalizationCompletedAt = generationCompletedAt;
-          return {
-            status: 'answered' as const,
-            answer: helpReply,
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-            outcome: 'answered' as const,
-          };
-        }
-        conversationResolutionStartedAt = Date.now();
-        const conversationResolution = resolveAskPlutoConversation(
-          queryText,
-          priorTurns,
-        );
-        turnMode = conversationResolution.turnMode;
-        retrievalPolicy = conversationResolution.retrievalPolicy;
-        conversationResolutionCompletedAt = Date.now();
-        recallStartedAt = Date.now();
-        conversationAnchor = conversationResolution.retrievalQuery.slice(
-          0,
-          700,
-        );
-        const previousAssistantTurn = latestAssistantTurn(priorTurns);
-        const previousConversationContext =
-          previousAssistantTurn?.conversationContext;
-        const activeConversationContext =
-          conversationResolution.relation === 'new_topic'
-            ? undefined
-            : previousConversationContext;
-        const previousConversationAnswer =
-          conversationResolution.relation !== 'new_topic'
-            ? previousAssistantTurn?.content
-            : undefined;
-        const previousExpansionAnswer =
-          conversationResolution.relation === 'expansion'
-            ? priorTurns
-                .filter(
-                  (turn) =>
-                    turn.role === 'assistant' &&
-                    turn.conversationAnchor === conversationAnchor,
-                )
-                .map((turn) => turn.content)
-                .join('\n') || previousAssistantTurn?.content
-            : undefined;
-        const priorConversationContext =
-          previousConversationAnswer || previousExpansionAnswer;
-        const safePriorConversationContext =
-          priorConversationContext &&
-          !containsConfidentialAside(priorConversationContext)
-            ? priorConversationContext
-            : undefined;
-        const answerConversationally = async (
-          promptOverride?: string,
-        ): Promise<string> => {
-          const boundaryReply = promptOverride
-            ? null
-            : buildConversationBoundaryReply(queryText);
-          if (boundaryReply) return boundaryReply;
-          if (!promptOverride && conversationResolution.turnMode === 'social') {
-            return buildSocialReply({
-              query: queryText,
-              previousAnswer: previousAssistantTurn?.content,
-              previousTurnMode: previousAssistantTurn?.turnMode,
-            });
-          }
-          providerAcquisitionStartedAt = Date.now();
-          const provider = await getProvider(settings);
-          providerAcquisitionCompletedAt = Date.now();
-          providerName = provider.name;
-          if (isLocalProvider) {
-            configuredModel =
-              (settings.ollama_fast_model || '').trim() ||
-              OLLAMA_QUICK_CHAT_MODEL;
-          }
-          const prompt =
-            promptOverride ||
-            buildConversationalReplyPrompt({
-              query: queryText,
-              turns: priorTurns,
-            });
-          promptCharacters = prompt.length;
-          promptStartedAt = providerAcquisitionCompletedAt;
-          promptCompletedAt = Date.now();
-          providerRequestedAt = Date.now();
-          let streamedAnswer = '';
-          try {
-            const returnedAnswer = await provider.answerAskPluto(prompt, {
-              signal: controller.signal,
-              mode: 'fast',
-              live: true,
-              onStart: () => {
-                providerStartedAt ??= Date.now();
-                sendStatus('writing');
-              },
-              onToken: (delta) => {
-                if (!delta || controller.signal.aborted) return;
-                rawFirstTokenAt ??= Date.now();
-                firstTokenAt ??= rawFirstTokenAt;
-                streamedAnswer += delta;
-                if (!event.sender.isDestroyed()) {
-                  event.sender.send('intelligence:query:delta', {
-                    requestId,
-                    delta,
-                  });
+            : currentMeeting.kind === 'persisted'
+              ? {
+                  ...currentMeeting,
+                  evidenceState: resolvePersistedMeetingEvidenceState({
+                    finalizationStatus: currentMeetingRow?.finalization_status,
+                    downstreamProcessingJson:
+                      currentMeetingRow?.downstream_processing_json,
+                  }),
+                  ...(currentMeetingRow?.title
+                    ? { title: currentMeetingRow.title }
+                    : {}),
                 }
-              },
-            });
-            const answer = (returnedAnswer || streamedAnswer).trim();
-            if (answer) return answer;
-          } catch (error) {
-            if (controller.signal.aborted) throw error;
-            console.warn(
-              '[Pluto][Ask Pluto] conversational response failed; using safe fallback',
-              error,
-            );
+              : currentMeeting;
+        const setupCompletedAt = Date.now();
+        let reasoningMode: AskPlutoReasoningMode | undefined;
+        let turnMode: ConversationTurnMode | undefined;
+        let retrievalPolicy: ConversationRetrievalPolicy | undefined;
+        let comparisonMeetingCount = 0;
+        let scopeLabel: string | undefined;
+        let scopeMeetingCount = 0;
+        let retrievalStartedAt: number | undefined;
+        let retrievalCompletedAt: number | undefined;
+        let providerRequestedAt: number | undefined;
+        let providerStartedAt: number | undefined;
+        let rawFirstTokenAt: number | undefined;
+        let firstTokenAt: number | undefined;
+        let generationCompletedAt: number | undefined;
+        let conversationResolutionStartedAt: number | undefined;
+        let conversationResolutionCompletedAt: number | undefined;
+        let recallStartedAt: number | undefined;
+        let recallCompletedAt: number | undefined;
+        let promptStartedAt: number | undefined;
+        let promptCompletedAt: number | undefined;
+        let providerAcquisitionStartedAt: number | undefined;
+        let providerAcquisitionCompletedAt: number | undefined;
+        let finalizationStartedAt: number | undefined;
+        let finalizationCompletedAt: number | undefined;
+        let contextCount = 0;
+        let promptCharacters = 0;
+        let outputCharacters = 0;
+        let providerName: string = settings.llm_provider || 'ollama';
+        let configuredModel =
+          settings.llm_model ||
+          (settings.llm_provider === 'gemini'
+            ? settings.gemini_model
+            : settings.llm_provider === 'openai'
+              ? settings.openai_model
+              : settings.llm_provider === 'openrouter'
+                ? settings.openrouter_model
+                : settings.llm_provider === 'claude'
+                  ? settings.claude_model
+                  : settings.ollama_model || OLLAMA_GENERAL_MODEL) ||
+          'default';
+        let lastValidatedPresentation: SafeAnswerPresentation | undefined;
+        let conversationAnchor: string | undefined;
+        const elapsed = (from?: number, to?: number): number | null =>
+          from !== undefined && to !== undefined ? to - from : null;
+        const buildPerformanceDiagnostics = (
+          finishedAt = Date.now(),
+        ): AskPlutoPerformanceDiagnostics => ({
+          provider: providerRequestedAt ? providerName : 'not_used',
+          model: providerRequestedAt ? configuredModel : 'not_used',
+          ...(reasoningMode ? { reasoningMode } : {}),
+          contextCount,
+          promptCharacters,
+          outputCharacters,
+          settingsMs: elapsed(settingsStartedAt, settingsCompletedAt),
+          setupMs: elapsed(settingsCompletedAt, setupCompletedAt),
+          conversationResolutionMs: elapsed(
+            conversationResolutionStartedAt,
+            conversationResolutionCompletedAt,
+          ),
+          recallMs: elapsed(recallStartedAt, recallCompletedAt),
+          retrievalMs: elapsed(retrievalStartedAt, retrievalCompletedAt),
+          promptConstructionMs: elapsed(promptStartedAt, promptCompletedAt),
+          providerAcquisitionMs: elapsed(
+            providerAcquisitionStartedAt,
+            providerAcquisitionCompletedAt,
+          ),
+          providerQueueMs: elapsed(providerRequestedAt, providerStartedAt),
+          providerRequestToFirstTokenMs: elapsed(
+            providerRequestedAt,
+            rawFirstTokenAt,
+          ),
+          rawFirstTokenMs: rawFirstTokenAt ? rawFirstTokenAt - startTime : null,
+          visibleFirstTokenMs: firstTokenAt ? firstTokenAt - startTime : null,
+          generationMs: elapsed(providerStartedAt, generationCompletedAt),
+          finalizationMs: elapsed(
+            finalizationStartedAt,
+            finalizationCompletedAt,
+          ),
+          totalMs: finishedAt - startTime,
+        });
+        const sendStatus = (phase: AskPlutoQueryStatus['phase']) => {
+          if (event.sender.isDestroyed()) return;
+          event.sender.send('intelligence:query:status', {
+            requestId,
+            phase,
+            currentMeeting: currentMeetingStatus,
+            ...(reasoningMode ? { reasoningMode } : {}),
+            ...(comparisonMeetingCount > 0 ? { comparisonMeetingCount } : {}),
+            ...(scopeLabel ? { scopeLabel } : {}),
+            ...(scopeMeetingCount > 0 ? { scopeMeetingCount } : {}),
+          });
+        };
+
+        const generation = (async () => {
+          if (!queryText || !queryText.trim()) {
+            return {
+              status: 'answered' as const,
+              answer: '',
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+            };
           }
-          return promptOverride
-            ? "I couldn't finish that response just now. I still don't have confirmed work details to build on; please retry or tell me what you'd like me to use."
-            : buildSocialReply({
+
+          console.log(
+            `[Pluto] intelligence:query start [request_id=${requestId}, query_length=${queryText.trim().length}]`,
+          );
+          const helpReply = buildPlutoHelpReply(queryText);
+          if (helpReply) {
+            turnMode = 'lookup';
+            retrievalPolicy = 'none';
+            outputCharacters = helpReply.length;
+            generationCompletedAt = Date.now();
+            finalizationStartedAt = generationCompletedAt;
+            finalizationCompletedAt = generationCompletedAt;
+            return {
+              status: 'answered' as const,
+              answer: helpReply,
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'answered' as const,
+            };
+          }
+          conversationResolutionStartedAt = Date.now();
+          const conversationResolution = resolveAskPlutoConversation(
+            queryText,
+            priorTurns,
+          );
+          turnMode = conversationResolution.turnMode;
+          retrievalPolicy = conversationResolution.retrievalPolicy;
+          conversationResolutionCompletedAt = Date.now();
+          recallStartedAt = Date.now();
+          conversationAnchor = conversationResolution.retrievalQuery.slice(
+            0,
+            700,
+          );
+          const previousAssistantTurn = latestAssistantTurn(priorTurns);
+          const previousConversationContext =
+            previousAssistantTurn?.conversationContext;
+          const activeConversationContext =
+            conversationResolution.relation === 'new_topic'
+              ? undefined
+              : previousConversationContext;
+          const previousConversationAnswer =
+            conversationResolution.relation !== 'new_topic'
+              ? previousAssistantTurn?.content
+              : undefined;
+          const previousExpansionAnswer =
+            conversationResolution.relation === 'expansion'
+              ? priorTurns
+                  .filter(
+                    (turn) =>
+                      turn.role === 'assistant' &&
+                      turn.conversationAnchor === conversationAnchor,
+                  )
+                  .map((turn) => turn.content)
+                  .join('\n') || previousAssistantTurn?.content
+              : undefined;
+          const priorConversationContext =
+            previousConversationAnswer || previousExpansionAnswer;
+          const safePriorConversationContext =
+            priorConversationContext &&
+            !containsConfidentialAside(priorConversationContext)
+              ? priorConversationContext
+              : undefined;
+          const answerConversationally = async (
+            promptOverride?: string,
+          ): Promise<string> => {
+            const boundaryReply = promptOverride
+              ? null
+              : buildConversationBoundaryReply(queryText);
+            if (boundaryReply) return boundaryReply;
+            if (
+              !promptOverride &&
+              conversationResolution.turnMode === 'social'
+            ) {
+              return buildSocialReply({
                 query: queryText,
                 previousAnswer: previousAssistantTurn?.content,
                 previousTurnMode: previousAssistantTurn?.turnMode,
               });
-        };
-        if (conversationResolution.relation === 'acknowledgment') {
-          const answer = await answerConversationally();
-          outputCharacters = answer.length;
-          generationCompletedAt = Date.now();
-          finalizationStartedAt = generationCompletedAt;
-          finalizationCompletedAt = generationCompletedAt;
-          return {
-            status: 'answered' as const,
-            answer,
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-            outcome: 'answered' as const,
-            resolvedScope: previousAssistantTurn?.resolvedScope,
-            conversationContext: previousConversationContext,
-          };
-        }
-        if (conversationResolution.turnMode === 'act') {
-          const actionProposal = parseConversationActionProposal(queryText);
-          const answer = actionProposal
-            ? `I can add “${actionProposal.text}” as an open commitment. Confirm it below and I’ll save it locally.`
-            : 'I haven’t made that change. Chat can currently prepare a commitment for your confirmation, but this action is not available yet.';
-          outputCharacters = answer.length;
-          generationCompletedAt = Date.now();
-          finalizationStartedAt = generationCompletedAt;
-          finalizationCompletedAt = generationCompletedAt;
-          return {
-            status: 'answered' as const,
-            answer,
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-            outcome: 'answered' as const,
-            resolvedScope: previousAssistantTurn?.resolvedScope,
-            conversationContext: previousConversationContext,
-            ...(actionProposal ? { actionProposal } : {}),
-          };
-        }
-        if (
-          previousAssistantTurn?.outcome === 'no_evidence' &&
-          conversationResolution.retrievalPolicy === 'reuse' &&
-          conversationResolution.task === 'draft'
-        ) {
-          const answer = buildNoEvidenceDraftReply(queryText);
-          outputCharacters = answer.length;
-          generationCompletedAt = Date.now();
-          finalizationStartedAt = generationCompletedAt;
-          finalizationCompletedAt = generationCompletedAt;
-          return {
-            status: 'answered' as const,
-            answer,
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-            outcome: 'no_evidence' as const,
-            resolvedScope: previousAssistantTurn.resolvedScope,
-            conversationContext: previousConversationContext,
-          };
-        }
-        const persistedMeetings = db.getAskPlutoMeetings();
-        sendStatus('scope_resolved');
-        sendStatus('retrieving');
-        const omissionReview =
-          conversationResolution.relation === 'omission_follow_up'
-            ? getAskPlutoOmissionReview(
-                previousAssistantTurn?.omissionRef,
-                event.sender.id,
-              )
-            : undefined;
-        const explicitPersonSubject = parsePersonWorkQuery(queryText);
-        const effectiveQueryText = omissionReview
-          ? omissionReview.originalQuery
-          : explicitPersonSubject
-            ? queryText
-            : conversationResolution.retrievalQuery;
-        const attributionDispute = detectAttributionDispute(effectiveQueryText);
-        const disputedEntity = attributionDispute?.disputedEntity || null;
-        const planningConversationAnchor = [...priorTurns]
-          .reverse()
-          .find(
-            (turn) =>
-              turn.role === 'assistant' && turn.conversationAnchor?.trim(),
-          )?.conversationAnchor;
-        const isPlanning = shouldUseWorkspaceIntelligence({
-          query: queryText,
-          relation: conversationResolution.relation,
-          priorQuestion: conversationResolution.priorQuestion,
-          conversationAnchor: planningConversationAnchor,
-        });
-        const workspaceIntelligenceMode = resolveWorkspaceIntelligenceMode(
-          queryText,
-          conversationResolution.relation,
-          conversationResolution.priorQuestion || planningConversationAnchor,
-        );
-        const selfPersonId = db.identityStore.getSelfPersonId();
-        const selfProfile = selfPersonId
-          ? db.identityStore.getProfile()
-          : undefined;
-        const confirmedSelfName =
-          selfProfile?.preferredName.trim() || undefined;
-        const selfReference = resolveAskPlutoSelfReference(
-          effectiveQueryText,
-          confirmedSelfName,
-          selfProfile?.aliases,
-        );
-        if (selfReference.asksIdentity) {
-          return {
-            status: 'answered' as const,
-            answer: confirmedSelfName
-              ? `You're ${confirmedSelfName}.`
-              : "I don't know which person is you yet. Confirm your identity in Pluto, then ask me again.",
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-          };
-        }
-        if (selfReference.refersToSelf && !confirmedSelfName) {
-          return {
-            status: 'answered' as const,
-            answer:
-              "I don't know which person is you yet. Confirm your identity in Pluto so I can find your contributions in meeting evidence.",
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-          };
-        }
-        const retrievalOptionsQuery =
-          conversationResolution.relation === 'omission_follow_up' ||
-          conversationResolution.relation === 'expansion'
-            ? `${selfReference.retrievalQuery}\ngo deeper`
-            : selfReference.retrievalQuery;
-        const parsed = await parseQuery(selfReference.retrievalQuery, {
-          signal: controller.signal,
-          useModelClassification:
-            conversationResolution.relation === 'new_topic' &&
-            !isExplicitInformationRequest(queryText),
-        });
-        const assigneeRecall = buildAssigneeActionRecall(
-          effectiveQueryText,
-          persistedMeetings,
-        );
-        const overviewRecall = buildWorkingMemoryOverviewRecall(
-          effectiveQueryText,
-          parsed.entity_mentions,
-        );
-        const workspaceRecall = isPlanning
-          ? buildWorkspaceIntelligenceRecall({
-              query: effectiveQueryText,
-              persistedMeetings,
-              selfPersonId: selfPersonId || undefined,
-              mode: workspaceIntelligenceMode,
-            })
-          : null;
-        const explicitProjectScopes = findExplicitProjectScopes(
-          queryText,
-          db.getEntitiesByType('project').map((project) => ({
-            canonicalId: db.resolveProjectIdentityId(project.id),
-            name: project.name,
-            displayTitle: readProjectDisplayTitle(
-              project.metadata,
-              project.name,
-            ),
-          })),
-        );
-        const hasMultipleProjectScopes = explicitProjectScopes.length > 1;
-        const multiProjectContext = hasMultipleProjectScopes
-          ? balanceProjectNoteContexts(
-              explicitProjectScopes
-                .slice(0, 3)
-                .map(
-                  (project) =>
-                    buildProjectRecall(project.name, [project.canonicalId])
-                      ?.context || [],
-                ),
-            )
-          : null;
-        const candidateProjectRecall =
-          hasMultipleProjectScopes ||
-          asksToVerifyProjectAssociation(queryText) ||
-          asksForExplicitAttribution(queryText)
-            ? null
-            : buildProjectRecall(queryText, parsed.entity_mentions);
-        // A partial theme/term hit is not enough to establish project identity.
-        // Otherwise an unknown named initiative can inherit an unrelated brief.
-        const projectRecall =
-          candidateProjectRecall?.project.matchKind === 'explicit_label'
-            ? candidateProjectRecall
-            : null;
-        const keepActiveProjectScope =
-          !hasMultipleProjectScopes &&
-          shouldKeepActiveProjectScope({
-            relation: conversationResolution.relation,
-            hasActiveProject:
-              activeConversationContext?.topic?.kind === 'project',
-            candidateMatchKind: projectRecall?.project.matchKind,
-          });
-        const inheritedProjectRecall =
-          keepActiveProjectScope &&
-          activeConversationContext?.topic?.kind === 'project'
-            ? buildProjectRecall(
-                `${activeConversationContext.topic.label || activeConversationContext.topic.id || ''} ${queryText}`,
-              )
-            : null;
-        const effectiveProjectRecall = inheritedProjectRecall ?? projectRecall;
-        if (effectiveProjectRecall) {
-          const projectDoc = db.getKnowledgeDocByScope(
-            'project',
-            effectiveProjectRecall.project.canonicalId,
-          );
-          if (projectDoc) {
-            backgroundKnowledgeRefresh?.prioritize(`doc:${projectDoc.id}`);
-          }
-        }
-        const personFocusedRequest = shouldUsePersonFocusedEvidence(
-          queryText,
-          conversationResolution.task,
-          activeConversationContext?.topic?.kind === 'person',
-        );
-        const personWorkRecall = personFocusedRequest
-          ? buildPersonWorkRecall(effectiveQueryText)
-          : null;
-        const personWorkSubject = personFocusedRequest
-          ? parsePersonWorkQuery(effectiveQueryText)
-          : null;
-        const personWorkAssignmentRecall =
-          personWorkSubject &&
-          !personWorkRecall &&
-          !/^\s*(?:tell me about|who is)\b/i.test(queryText)
-            ? buildAssigneeActionRecall(
-                `What is assigned to ${personWorkSubject}?`,
-                persistedMeetings,
-              )
-            : null;
-        const inheritedPersonWorkRecall =
-          personFocusedRequest &&
-          !personWorkRecall &&
-          shouldKeepActivePersonScope({
-            relation: conversationResolution.relation,
-            hasActivePerson:
-              activeConversationContext?.topic?.kind === 'person',
-            hasExplicitPersonSubject: Boolean(
-              personWorkSubject || extractNamedPersonQuestionSubject(queryText),
-            ),
-            hasExplicitProject: Boolean(effectiveProjectRecall),
-          }) &&
-          activeConversationContext?.topic?.kind === 'person'
-            ? buildPersonWorkRecall(
-                effectiveQueryText,
-                activeConversationContext.topic.label ||
-                  activeConversationContext.topic.id,
-              )
-            : null;
-        const effectivePersonWorkRecall =
-          personWorkRecall ?? inheritedPersonWorkRecall;
-        const answerSelfName =
-          effectivePersonWorkRecall &&
-          effectivePersonWorkRecall.person.id !== selfPersonId
-            ? undefined
-            : confirmedSelfName;
-        if (effectivePersonWorkRecall) {
-          const personDoc = db.getKnowledgeDocByScope(
-            'person_context',
-            effectivePersonWorkRecall.person.id,
-          );
-          if (personDoc) {
-            backgroundKnowledgeRefresh?.prioritize(`doc:${personDoc.id}`);
-          }
-        }
-        const useWorkspaceRecall = Boolean(
-          isPlanning &&
-            !hasMultipleProjectScopes &&
-            workspaceRecall &&
-            !effectiveProjectRecall &&
-            !effectivePersonWorkRecall,
-        );
-        const explicitMeetingScope = resolveExplicitMeetingScope(
-          effectiveQueryText,
-          persistedMeetings,
-        );
-        const requestedMode =
-          typeof input !== 'string' &&
-          (input.modeOverride === 'fast' || input.modeOverride === 'deep')
-            ? input.modeOverride
-            : 'auto';
-        reasoningMode = resolveAskPlutoReasoningMode({
-          query: effectiveQueryText,
-          intent: parsed.intent,
-          override: requestedMode,
-          task: conversationResolution.task,
-          relation: conversationResolution.relation,
-        });
-        recallCompletedAt = Date.now();
-        retrievalStartedAt = recallCompletedAt;
-
-        if (
-          conversationResolution.turnMode === 'social' ||
-          (conversationResolution.relation === 'new_topic' &&
-            (parsed.intent === 'conversational' || parsed.cannedResponse))
-        ) {
-          console.log('[Pluto] intelligence:query conversational response');
-          turnMode = 'social';
-          retrievalPolicy = 'none';
-          const answer = await answerConversationally();
-          outputCharacters = answer.length;
-          generationCompletedAt = Date.now();
-          finalizationStartedAt = generationCompletedAt;
-          finalizationCompletedAt = generationCompletedAt;
-          return {
-            status: 'answered' as const,
-            answer,
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-            outcome: 'answered' as const,
-          };
-        }
-
-        const currentMeetingRequested =
-          queryReferencesCurrentMeeting(effectiveQueryText);
-        const switchesNamedProject =
-          projectRecall?.project.matchKind === 'explicit_label' &&
-          projectRecall.project.canonicalId !==
-            activeConversationContext?.topic?.id;
-        const inheritedScope =
-          parsed.temporal_range ||
-          switchesNamedProject ||
-          hasMultipleProjectScopes
-            ? undefined
-            : inheritConversationScope(
-                queryText,
-                priorTurns,
-                conversationResolution.relation,
+            }
+            providerAcquisitionStartedAt = Date.now();
+            const provider = await getProvider(settings);
+            providerAcquisitionCompletedAt = Date.now();
+            providerName = provider.name;
+            if (isLocalProvider) {
+              configuredModel =
+                (settings.ollama_fast_model || '').trim() ||
+                OLLAMA_QUICK_CHAT_MODEL;
+            }
+            const prompt =
+              promptOverride ||
+              buildConversationalReplyPrompt({
+                query: queryText,
+                turns: priorTurns,
+              });
+            promptCharacters = prompt.length;
+            promptStartedAt = providerAcquisitionCompletedAt;
+            promptCompletedAt = Date.now();
+            providerRequestedAt = Date.now();
+            let streamedAnswer = '';
+            try {
+              const returnedAnswer = await provider.answerAskPluto(prompt, {
+                signal: controller.signal,
+                mode: 'fast',
+                live: true,
+                onStart: () => {
+                  providerStartedAt ??= Date.now();
+                  sendStatus('writing');
+                },
+                onToken: (delta) => {
+                  if (!delta || controller.signal.aborted) return;
+                  rawFirstTokenAt ??= Date.now();
+                  firstTokenAt ??= rawFirstTokenAt;
+                  streamedAnswer += delta;
+                  if (!event.sender.isDestroyed()) {
+                    event.sender.send('intelligence:query:delta', {
+                      requestId,
+                      delta,
+                    });
+                  }
+                },
+              });
+              const answer = (returnedAnswer || streamedAnswer).trim();
+              if (answer) return answer;
+            } catch (error) {
+              if (controller.signal.aborted) throw error;
+              console.warn(
+                '[Pluto][Ask Pluto] conversational response failed; using safe fallback',
+                error,
               );
-        if (
-          isDiagnosticConversationFollowUp(queryText) &&
-          previousAssistantTurn
-        ) {
-          const resolvedScope: ResolvedAskPlutoScope = inheritedScope || {
-            kind: 'global',
-            meetingIds: [],
-            resolvedAt: new Date().toISOString(),
-            source: 'inherited',
+            }
+            return promptOverride
+              ? "I couldn't finish that response just now. I still don't have confirmed work details to build on; please retry or tell me what you'd like me to use."
+              : buildSocialReply({
+                  query: queryText,
+                  previousAnswer: previousAssistantTurn?.content,
+                  previousTurnMode: previousAssistantTurn?.turnMode,
+                });
           };
-          return {
-            status: 'answered' as const,
-            answer: describePreviousConversationFailure(previousAssistantTurn),
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-            outcome: 'answered' as const,
-            resolvedScope,
-            retrievalSummary: previousAssistantTurn.retrievalSummary,
-            retrievalTrace: previousAssistantTurn.retrievalTrace,
-          };
-        }
-        const globalKnowledgeDoc = db.ensureGlobalKnowledgeDoc();
-        const storedCorrections = parseAskPlutoCorrectionRecords(
-          db.getKnowledgeCorrections(globalKnowledgeDoc.id),
-        );
-        const explicitCorrection = detectExplicitAskPlutoCorrection(
-          queryText,
-          priorTurns,
-        );
-        if (
-          explicitCorrection &&
-          !storedCorrections.some(
-            (correction) =>
-              correction.originalClaim === explicitCorrection.originalClaim &&
-              correction.correctedText === explicitCorrection.correctedText,
-          )
-        ) {
-          const targetId = `ask-pluto:${createHash('sha256')
-            .update(explicitCorrection.originalClaim)
-            .digest('hex')
-            .slice(0, 20)}`;
-          db.saveKnowledgeCorrection({
-            doc_id: globalKnowledgeDoc.id,
-            target_kind: 'claim',
-            target_id: targetId,
-            action: 'correct_claim',
-            payload: {
-              source: 'ask_pluto',
-              original_claim: explicitCorrection.originalClaim,
-              corrected_text: explicitCorrection.correctedText,
-              meeting_ids: explicitCorrection.meetingIds,
-            },
-          });
-          storedCorrections.unshift(explicitCorrection);
-          queueKnowledgeDocRefresh(globalKnowledgeDoc.id);
-        }
-        const correctionContext = [
-          queryText,
-          ...priorTurns.map((turn) => turn.content),
-        ].join('\n');
-        const relevantCorrections = selectRelevantAskPlutoCorrections(
-          correctionContext,
-          storedCorrections,
-        );
-        if (
-          explicitCorrection &&
-          !relevantCorrections.some(
-            (correction) =>
-              correction.originalClaim === explicitCorrection.originalClaim &&
-              correction.correctedText === explicitCorrection.correctedText,
-          )
-        ) {
-          relevantCorrections.unshift(explicitCorrection);
-        }
-        const activeSnapshot =
-          typeof input !== 'string' &&
-          activeRecording?.meetingId === input.activeMeetingSnapshot?.meetingId
-            ? input.activeMeetingSnapshot
-            : undefined;
-        const explicitTemporalRange =
-          parsed.temporal_range?.from && parsed.temporal_range.to
-            ? {
-                fromInclusive: parsed.temporal_range.from,
-                toExclusive: parsed.temporal_range.to,
-                label: parsed.temporal_range.label || 'the selected period',
-                timeZone:
-                  Intl.DateTimeFormat().resolvedOptions().timeZone || 'local',
-              }
-            : undefined;
-        const temporalRange = explicitMeetingScope
-          ? undefined
-          : explicitTemporalRange || inheritedScope?.temporalRange;
-        const inheritedMeetingIds = inheritedScope?.meetingIds || [];
-        const temporalMeetings = temporalRange
-          ? inheritedScope?.kind === 'temporal' &&
-            !explicitTemporalRange &&
-            inheritedMeetingIds.length > 0
-            ? inheritedMeetingIds
-                .map((meetingId) => db.getAskPlutoMeeting(meetingId))
-                .filter((meeting): meeting is db.PersistedMeeting =>
-                  Boolean(meeting),
+          if (conversationResolution.relation === 'acknowledgment') {
+            const answer = await answerConversationally();
+            outputCharacters = answer.length;
+            generationCompletedAt = Date.now();
+            finalizationStartedAt = generationCompletedAt;
+            finalizationCompletedAt = generationCompletedAt;
+            return {
+              status: 'answered' as const,
+              answer,
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'answered' as const,
+              resolvedScope: previousAssistantTurn?.resolvedScope,
+              conversationContext: previousConversationContext,
+            };
+          }
+          if (conversationResolution.turnMode === 'act') {
+            const actionProposal = parseConversationActionProposal(queryText);
+            const answer = actionProposal
+              ? `I can add “${actionProposal.text}” as an open commitment. Confirm it below and I’ll save it locally.`
+              : 'I haven’t made that change. Chat can currently prepare a commitment for your confirmation, but this action is not available yet.';
+            outputCharacters = answer.length;
+            generationCompletedAt = Date.now();
+            finalizationStartedAt = generationCompletedAt;
+            finalizationCompletedAt = generationCompletedAt;
+            return {
+              status: 'answered' as const,
+              answer,
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'answered' as const,
+              resolvedScope: previousAssistantTurn?.resolvedScope,
+              conversationContext: previousConversationContext,
+              ...(actionProposal ? { actionProposal } : {}),
+            };
+          }
+          if (
+            previousAssistantTurn?.outcome === 'no_evidence' &&
+            conversationResolution.retrievalPolicy === 'reuse' &&
+            conversationResolution.task === 'draft'
+          ) {
+            const answer = buildNoEvidenceDraftReply(queryText);
+            outputCharacters = answer.length;
+            generationCompletedAt = Date.now();
+            finalizationStartedAt = generationCompletedAt;
+            finalizationCompletedAt = generationCompletedAt;
+            return {
+              status: 'answered' as const,
+              answer,
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'no_evidence' as const,
+              resolvedScope: previousAssistantTurn.resolvedScope,
+              conversationContext: previousConversationContext,
+            };
+          }
+          const persistedMeetings = db.getAskPlutoMeetings();
+          sendStatus('scope_resolved');
+          sendStatus('retrieving');
+          const omissionReview =
+            conversationResolution.relation === 'omission_follow_up'
+              ? getAskPlutoOmissionReview(
+                  previousAssistantTurn?.omissionRef,
+                  event.sender.id,
                 )
-            : persistedMeetings.filter((meeting) => {
-                const occurredAt =
-                  meeting.started_at || meeting.created_at || '';
-                return (
-                  occurredAt >= temporalRange.fromInclusive &&
-                  occurredAt < temporalRange.toExclusive
-                );
-              })
-          : [];
-        const temporalMeetingLimit = 24;
-        const includedTemporalMeetings = temporalMeetings.slice(
-          0,
-          temporalMeetingLimit,
-        );
-        const temporalRetrievalSummary: AskPlutoRetrievalSummary | undefined =
-          temporalRange
-            ? {
-                matchedMeetingCount: temporalMeetings.length,
-                includedMeetingCount: includedTemporalMeetings.length,
-                preparedEvidenceCount: includedTemporalMeetings.filter(
-                  (meeting) =>
-                    Boolean(
-                      meeting.analysis_json ||
-                        meeting.enhanced_notes ||
-                        meeting.user_notes ||
-                        meeting.mid_json,
-                    ),
-                ).length,
-                transcriptOnlyCount: includedTemporalMeetings.filter(
-                  (meeting) =>
-                    Boolean(meeting.transcript_json) &&
-                    !meeting.analysis_json &&
-                    !meeting.enhanced_notes &&
-                    !meeting.user_notes &&
-                    !meeting.mid_json,
-                ).length,
-                omittedMeetingCount:
-                  temporalMeetings.length - includedTemporalMeetings.length,
-              }
-            : undefined;
-        const temporalResolvedScope: ResolvedAskPlutoScope | undefined =
-          temporalRange
-            ? {
-                kind: 'temporal',
-                meetingIds: temporalMeetings.map((meeting) =>
-                  String(meeting.id),
-                ),
-                temporalRange,
-                resolvedAt: new Date().toISOString(),
-                source: explicitTemporalRange ? 'explicit' : 'inherited',
-              }
-            : undefined;
-        const explicitlyScopedMeetings = explicitMeetingScope?.meetings || [];
-        const explicitRetrievalSummary: AskPlutoRetrievalSummary | undefined =
-          explicitMeetingScope
-            ? {
-                matchedMeetingCount: explicitlyScopedMeetings.length,
-                includedMeetingCount: explicitlyScopedMeetings.length,
-                preparedEvidenceCount: explicitlyScopedMeetings.filter(
-                  (meeting) =>
-                    Boolean(
-                      meeting.analysis_json ||
-                        meeting.enhanced_notes ||
-                        meeting.user_notes ||
-                        meeting.mid_json,
-                    ),
-                ).length,
-                transcriptOnlyCount: explicitlyScopedMeetings.filter(
-                  (meeting) =>
-                    Boolean(meeting.transcript_json) &&
-                    !meeting.analysis_json &&
-                    !meeting.enhanced_notes &&
-                    !meeting.user_notes &&
-                    !meeting.mid_json,
-                ).length,
-                omittedMeetingCount: 0,
-              }
-            : undefined;
-        const explicitResolvedScope: ResolvedAskPlutoScope | undefined =
-          explicitMeetingScope
-            ? {
-                kind: 'meeting_ids',
-                meetingIds: explicitlyScopedMeetings.map((meeting) =>
-                  String(meeting.id),
-                ),
-                resolvedAt: new Date().toISOString(),
-                source: 'explicit',
-              }
-            : undefined;
-        const usePreparedAssigneeRecall = Boolean(
-          !explicitResolvedScope &&
-            !temporalResolvedScope &&
-            !currentMeetingRequested &&
-            !isPlanning &&
-            assigneeRecall &&
-            !assigneeRecall.coverageLimited &&
-            conversationResolution.relation === 'new_topic',
-        );
-        if (explicitMeetingScope) {
-          scopeLabel = explicitMeetingScope.label;
-          scopeMeetingCount = explicitlyScopedMeetings.length;
-          sendStatus('retrieving');
-        }
-        if (temporalRange) {
-          scopeLabel = temporalRange.label;
-          scopeMeetingCount = temporalMeetings.length;
-          sendStatus('retrieving');
-        }
-        if (temporalRange && temporalMeetings.length === 0) {
-          return {
-            status: 'answered' as const,
-            answer: `I couldn't find any meetings from ${temporalRange.label}.`,
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-            outcome: 'no_evidence' as const,
-            resolvedScope: temporalResolvedScope,
-            retrievalSummary: temporalRetrievalSummary,
-          };
-        }
-        if (explicitMeetingScope && explicitlyScopedMeetings.length === 0) {
-          return {
-            status: 'answered' as const,
-            answer: "I couldn't find any recent meetings.",
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-            outcome: 'no_evidence' as const,
-            resolvedScope: explicitResolvedScope,
-            retrievalSummary: explicitRetrievalSummary,
-          };
-        }
-        if (currentMeetingRequested && currentMeeting.kind === 'none') {
-          return {
-            status: 'unavailable' as const,
-            answer:
-              "There isn't a current meeting yet. Start or record a meeting, then ask me again.",
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-          };
-        }
-        if (
-          currentMeetingRequested &&
-          currentMeeting.kind === 'active_recording' &&
-          (!activeSnapshot || !activeSnapshot.notes.trim())
-        ) {
-          return {
-            status: 'unavailable' as const,
-            answer:
-              'The current recording does not have synthesized notes to answer that yet.',
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-          };
-        }
-        const currentMeetingEvidenceRow = currentMeeting.meetingId
-          ? db.getAskPlutoMeeting(currentMeeting.meetingId)
-          : undefined;
-        if (
-          currentMeetingRequested &&
-          currentMeeting.kind === 'persisted' &&
-          currentMeetingEvidenceRow &&
-          !currentMeetingEvidenceRow.analysis_json &&
-          !currentMeetingEvidenceRow.enhanced_notes &&
-          !currentMeetingEvidenceRow.user_notes
-        ) {
-          return {
-            status: 'unavailable' as const,
-            answer: `${currentMeetingEvidenceRow.title || 'The latest meeting'} is still being prepared and does not have usable synthesized notes yet.`,
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-          };
-        }
-        const currentPinnedResult = currentMeetingRequested
-          ? currentMeeting.kind === 'active_recording' && activeSnapshot
-            ? buildLiveMeetingRetrievalResult(activeSnapshot)
-            : currentMeeting.kind === 'persisted' && currentMeetingEvidenceRow
-              ? buildMeetingRetrievalResult(currentMeetingEvidenceRow)
-              : undefined
-          : undefined;
-        const temporalPinnedResults = includedTemporalMeetings.map((meeting) =>
-          buildMeetingRetrievalResult(
-            meeting,
-            `Meeting from ${temporalRange?.label || 'selected period'}`,
-          ),
-        );
-        const explicitlyScopedPinnedResults = explicitlyScopedMeetings.map(
-          (meeting) =>
-            buildMeetingRetrievalResult(
-              meeting,
-              explicitMeetingScope?.kind === 'recent'
-                ? 'Recent meeting'
-                : 'Named meeting',
-            ),
-        );
-        const priorMeetingIds = [
-          ...new Set([
-            ...(inheritedScope?.meetingIds || []),
-            ...(activeConversationContext?.meetingIds.slice(0, 3) || []),
-            ...(conversationResolution.relation !== 'new_topic' ||
-            queryReferencesPriorTurn(effectiveQueryText)
-              ? priorTurns
-                  .filter((turn) => !containsConfidentialAside(turn.content))
-                  .filter((turn) => turn.role === 'assistant')
-                  .flatMap((turn) => turn.meetingIds || [])
-              : []),
-          ]),
-        ];
-        const expansionMeetingIds = (
-          [...priorTurns]
+              : undefined;
+          const explicitPersonSubject = parsePersonWorkQuery(queryText);
+          const effectiveQueryText = omissionReview
+            ? omissionReview.originalQuery
+            : explicitPersonSubject
+              ? queryText
+              : conversationResolution.retrievalQuery;
+          const attributionDispute =
+            detectAttributionDispute(effectiveQueryText);
+          const disputedEntity = attributionDispute?.disputedEntity || null;
+          const planningConversationAnchor = [...priorTurns]
             .reverse()
             .find(
               (turn) =>
-                turn.role === 'assistant' &&
-                turn.conversationAnchor === conversationAnchor &&
-                turn.meetingIds?.length,
-            )?.meetingIds ||
-          (previousAssistantTurn?.meetingIds?.length
-            ? previousAssistantTurn.meetingIds
-            : undefined) ||
-          inheritedScope?.meetingIds ||
-          []
-        ).slice(0, 3);
-        const priorPinnedResults =
-          priorMeetingIds.length > 0
-            ? [...priorMeetingIds]
-                .map((meetingId) => db.getAskPlutoMeeting(meetingId))
-                .filter((meeting): meeting is db.PersistedMeeting =>
-                  Boolean(meeting),
-                )
-                .map((meeting) =>
-                  buildMeetingRetrievalResult(meeting, 'Prior cited meeting'),
-                )
-            : [];
-        const historicalCandidateLimit = currentMeetingRequested
-          ? getCrossMeetingCandidateLimit(effectiveQueryText, parsed.intent)
-          : 0;
-        const historicalPinnedResults = persistedMeetings
-          .filter((meeting) => String(meeting.id) !== currentMeeting.meetingId)
-          .slice(0, historicalCandidateLimit)
-          .map((meeting) =>
-            buildMeetingRetrievalResult(meeting, 'Earlier meeting'),
+                turn.role === 'assistant' && turn.conversationAnchor?.trim(),
+            )?.conversationAnchor;
+          const isPlanning = shouldUseWorkspaceIntelligence({
+            query: queryText,
+            relation: conversationResolution.relation,
+            priorQuestion: conversationResolution.priorQuestion,
+            conversationAnchor: planningConversationAnchor,
+          });
+          const workspaceIntelligenceMode = resolveWorkspaceIntelligenceMode(
+            queryText,
+            conversationResolution.relation,
+            conversationResolution.priorQuestion || planningConversationAnchor,
           );
-        comparisonMeetingCount = historicalPinnedResults.length;
-        const overviewContextUsed = Boolean(
-          !explicitMeetingScope &&
-            !temporalRange &&
-            !currentMeetingRequested &&
-            overviewRecall?.context.length,
-        );
-        const pinnedResults = mergeRetrievalResultsByMeeting(
-          currentPinnedResult ? [currentPinnedResult] : [],
-          temporalPinnedResults,
-          explicitlyScopedPinnedResults,
-          historicalPinnedResults,
-          priorPinnedResults,
-          overviewContextUsed ? overviewRecall?.context || [] : [],
-          workspaceRecall?.context || [],
-          effectiveProjectRecall?.context || [],
-          effectivePersonWorkRecall?.context || [],
-        );
-        const restrictToCurrentMeeting = shouldRestrictToCurrentMeetingEvidence(
-          {
-            currentMeetingRequested,
-            historicalCandidateLimit,
-            priorPinnedCount: priorPinnedResults.length,
-          },
-        );
-        const restrictToPriorConversation =
-          shouldRestrictToPriorConversationEvidence({
-            currentMeetingRequested,
+          const selfPersonId = db.identityStore.getSelfPersonId();
+          const selfProfile = selfPersonId
+            ? db.identityStore.getProfile()
+            : undefined;
+          const confirmedSelfName =
+            selfProfile?.preferredName.trim() || undefined;
+          const selfReference = resolveAskPlutoSelfReference(
+            effectiveQueryText,
+            confirmedSelfName,
+            selfProfile?.aliases,
+          );
+          if (selfReference.asksIdentity) {
+            return {
+              status: 'answered' as const,
+              answer: confirmedSelfName
+                ? `You're ${confirmedSelfName}.`
+                : "I don't know which person is you yet. Confirm your identity in Pluto, then ask me again.",
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+            };
+          }
+          if (selfReference.refersToSelf && !confirmedSelfName) {
+            return {
+              status: 'answered' as const,
+              answer:
+                "I don't know which person is you yet. Confirm your identity in Pluto so I can find your contributions in meeting evidence.",
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+            };
+          }
+          const retrievalOptionsQuery =
+            conversationResolution.relation === 'omission_follow_up' ||
+            conversationResolution.relation === 'expansion'
+              ? `${selfReference.retrievalQuery}\ngo deeper`
+              : selfReference.retrievalQuery;
+          const parsed = await parseQuery(selfReference.retrievalQuery, {
+            signal: controller.signal,
+            useModelClassification:
+              conversationResolution.relation === 'new_topic' &&
+              !isExplicitInformationRequest(queryText),
+          });
+          const assigneeRecall = buildAssigneeActionRecall(
+            effectiveQueryText,
+            persistedMeetings,
+          );
+          const overviewRecall = buildWorkingMemoryOverviewRecall(
+            effectiveQueryText,
+            parsed.entity_mentions,
+          );
+          const workspaceRecall = isPlanning
+            ? buildWorkspaceIntelligenceRecall({
+                query: effectiveQueryText,
+                persistedMeetings,
+                selfPersonId: selfPersonId || undefined,
+                mode: workspaceIntelligenceMode,
+              })
+            : null;
+          const explicitProjectScopes = findExplicitProjectScopes(
+            queryText,
+            db.getEntitiesByType('project').map((project) => ({
+              canonicalId: db.resolveProjectIdentityId(project.id),
+              name: project.name,
+              displayTitle: readProjectDisplayTitle(
+                project.metadata,
+                project.name,
+              ),
+            })),
+          );
+          const hasMultipleProjectScopes = explicitProjectScopes.length > 1;
+          const multiProjectContext = hasMultipleProjectScopes
+            ? balanceProjectNoteContexts(
+                explicitProjectScopes
+                  .slice(0, 3)
+                  .map(
+                    (project) =>
+                      buildProjectRecall(project.name, [project.canonicalId])
+                        ?.context || [],
+                  ),
+              )
+            : null;
+          const candidateProjectRecall =
+            hasMultipleProjectScopes ||
+            asksToVerifyProjectAssociation(queryText) ||
+            asksForExplicitAttribution(queryText)
+              ? null
+              : buildProjectRecall(queryText, parsed.entity_mentions);
+          // A partial theme/term hit is not enough to establish project identity.
+          // Otherwise an unknown named initiative can inherit an unrelated brief.
+          const projectRecall =
+            candidateProjectRecall?.project.matchKind === 'explicit_label'
+              ? candidateProjectRecall
+              : null;
+          const keepActiveProjectScope =
+            !hasMultipleProjectScopes &&
+            shouldKeepActiveProjectScope({
+              relation: conversationResolution.relation,
+              hasActiveProject:
+                activeConversationContext?.topic?.kind === 'project',
+              candidateMatchKind: projectRecall?.project.matchKind,
+            });
+          const inheritedProjectRecall =
+            keepActiveProjectScope &&
+            activeConversationContext?.topic?.kind === 'project'
+              ? buildProjectRecall(
+                  `${activeConversationContext.topic.label || activeConversationContext.topic.id || ''} ${queryText}`,
+                )
+              : null;
+          const effectiveProjectRecall =
+            inheritedProjectRecall ?? projectRecall;
+          if (effectiveProjectRecall) {
+            const projectDoc = db.getKnowledgeDocByScope(
+              'project',
+              effectiveProjectRecall.project.canonicalId,
+            );
+            if (projectDoc) {
+              backgroundKnowledgeRefresh?.prioritize(`doc:${projectDoc.id}`);
+            }
+          }
+          const personFocusedRequest = shouldUsePersonFocusedEvidence(
+            queryText,
+            conversationResolution.task,
+            activeConversationContext?.topic?.kind === 'person',
+          );
+          const personWorkRecall = personFocusedRequest
+            ? buildPersonWorkRecall(effectiveQueryText)
+            : null;
+          const personWorkSubject = personFocusedRequest
+            ? parsePersonWorkQuery(effectiveQueryText)
+            : null;
+          const personWorkAssignmentRecall =
+            personWorkSubject &&
+            !personWorkRecall &&
+            !/^\s*(?:tell me about|who is)\b/i.test(queryText)
+              ? buildAssigneeActionRecall(
+                  `What is assigned to ${personWorkSubject}?`,
+                  persistedMeetings,
+                )
+              : null;
+          const inheritedPersonWorkRecall =
+            personFocusedRequest &&
+            !personWorkRecall &&
+            shouldKeepActivePersonScope({
+              relation: conversationResolution.relation,
+              hasActivePerson:
+                activeConversationContext?.topic?.kind === 'person',
+              hasExplicitPersonSubject: Boolean(
+                personWorkSubject ||
+                  extractNamedPersonQuestionSubject(queryText),
+              ),
+              hasExplicitProject: Boolean(effectiveProjectRecall),
+            }) &&
+            activeConversationContext?.topic?.kind === 'person'
+              ? buildPersonWorkRecall(
+                  effectiveQueryText,
+                  activeConversationContext.topic.label ||
+                    activeConversationContext.topic.id,
+                )
+              : null;
+          const effectivePersonWorkRecall =
+            personWorkRecall ?? inheritedPersonWorkRecall;
+          const answerSelfName =
+            effectivePersonWorkRecall &&
+            effectivePersonWorkRecall.person.id !== selfPersonId
+              ? undefined
+              : confirmedSelfName;
+          if (effectivePersonWorkRecall) {
+            const personDoc = db.getKnowledgeDocByScope(
+              'person_context',
+              effectivePersonWorkRecall.person.id,
+            );
+            if (personDoc) {
+              backgroundKnowledgeRefresh?.prioritize(`doc:${personDoc.id}`);
+            }
+          }
+          const useWorkspaceRecall = Boolean(
+            isPlanning &&
+              !hasMultipleProjectScopes &&
+              workspaceRecall &&
+              !effectiveProjectRecall &&
+              !effectivePersonWorkRecall,
+          );
+          const explicitMeetingScope = resolveExplicitMeetingScope(
+            effectiveQueryText,
+            persistedMeetings,
+          );
+          const requestedMode =
+            typeof input !== 'string' &&
+            (input.modeOverride === 'fast' || input.modeOverride === 'deep')
+              ? input.modeOverride
+              : 'auto';
+          reasoningMode = resolveAskPlutoReasoningMode({
+            query: effectiveQueryText,
             intent: parsed.intent,
-            priorPinnedCount: priorPinnedResults.length,
+            override: requestedMode,
             task: conversationResolution.task,
             relation: conversationResolution.relation,
-            retrievalPolicy: conversationResolution.retrievalPolicy,
           });
-        const restrictToPinnedCurrentComparison =
-          shouldRestrictToPinnedCurrentComparison({
-            currentMeetingRequested,
-            historicalCandidateLimit,
-          });
-        const boundedMeetingIds =
-          explicitResolvedScope?.meetingIds ||
-          temporalResolvedScope?.meetingIds ||
-          (restrictToCurrentMeeting && currentPinnedResult
-            ? [currentPinnedResult.meeting_id]
-            : undefined);
-        const generalContext = !usePreparedAssigneeRecall
-          ? explicitResolvedScope
-            ? await retrieveContext(parsed, {
-                pinnedResults: explicitlyScopedPinnedResults,
-                query: retrievalOptionsQuery,
-                meetingIds: explicitResolvedScope.meetingIds,
-              })
-            : temporalResolvedScope
-              ? await retrieveContext(parsed, {
-                  pinnedResults: restrictEvidenceToMeetingIds(
-                    pinnedResults,
-                    temporalResolvedScope.meetingIds,
-                  ),
-                  query: retrievalOptionsQuery,
-                  meetingIds: temporalResolvedScope.meetingIds,
-                })
-              : restrictToCurrentMeeting && currentPinnedResult
-                ? [currentPinnedResult]
-                : multiProjectContext
-                  ? multiProjectContext
-                  : effectiveProjectRecall
-                    ? effectiveProjectRecall.context
-                    : effectivePersonWorkRecall
-                      ? effectivePersonWorkRecall.context
-                      : personWorkSubject && personWorkAssignmentRecall
-                        ? personWorkAssignmentRecall?.context || []
-                        : conversationResolution.relation === 'expansion' &&
-                            !useWorkspaceRecall &&
-                            expansionMeetingIds.length > 0
-                          ? await retrieveContext(parsed, {
-                              query: retrievalOptionsQuery,
-                              meetingIds: expansionMeetingIds,
-                            })
-                          : restrictToPinnedCurrentComparison
-                            ? pinnedResults
-                            : useWorkspaceRecall && workspaceRecall
-                              ? workspaceRecall.context
-                              : restrictToPriorConversation
-                                ? priorPinnedResults
-                                : await retrieveContext(parsed, {
-                                    pinnedResults,
-                                    query: retrievalOptionsQuery,
-                                  })
-          : [];
-        const projectFacetKeywords =
-          effectiveProjectRecall && !multiProjectContext && !boundedMeetingIds
-            ? getProjectFacetKeywords(parsed.keywords, [
-                effectiveProjectRecall.project.name,
-                effectiveProjectRecall.displayTitle,
-              ])
-            : [];
-        const projectFacetContext = projectFacetKeywords.length
-          ? await retrieveContext(
-              {
-                ...parsed,
-                keywords: projectFacetKeywords,
-                expanded_keywords: [],
-                entity_mentions: [],
-              },
-              { query: queryText },
-            )
-          : [];
-        const scopedGeneralContext =
-          effectiveProjectRecall && projectFacetContext.length
-            ? combineProjectFacetContext(generalContext, projectFacetContext)
-            : generalContext;
-        const generalContextWithFallback =
-          conversationResolution.relation === 'expansion' &&
-          scopedGeneralContext.length === 0
-            ? priorPinnedResults.filter((result) =>
-                expansionMeetingIds.includes(result.meeting_id),
-              )
-            : scopedGeneralContext;
-        const namedPersonSubject =
-          extractNamedPersonQuestionSubject(effectiveQueryText) ||
-          effectivePersonWorkRecall?.person.name;
-        const namedPersonEvidenceQuery = namedPersonSubject
-          ? buildNamedPersonEvidenceQuery(
-              effectiveQueryText,
-              namedPersonSubject,
-            )
-          : null;
-        const shouldSupplementNamedPersonContext = Boolean(
-          namedPersonSubject &&
-            conversationResolution.task !== 'draft' &&
-            !/^\s*(?:who|which\s+person)\b/i.test(effectiveQueryText),
-        );
-        const namedPersonCandidates = shouldSupplementNamedPersonContext
-          ? await retrieveContext(
-              await parseQuery(
-                namedPersonEvidenceQuery || namedPersonSubject || '',
-                {
-                  signal: controller.signal,
-                  useModelClassification: false,
-                },
-              ),
-              { query: namedPersonEvidenceQuery || namedPersonSubject || '' },
-            )
-          : [];
-        const namedPersonContext = effectivePersonWorkRecall
-          ? selectRecentPersonNoteContext(
-              namedPersonCandidates,
-              effectivePersonWorkRecall.person.name,
-              effectivePersonWorkRecall.asOf,
-            )
-          : namedPersonCandidates;
-        const omissionContexts = omissionReview
-          ? await Promise.all(
-              omissionReview.claims.slice(0, 6).map(async (claim) => {
-                controller.signal.throwIfAborted();
-                const claimParsed = await parseQuery(claim, {
-                  signal: controller.signal,
-                  useModelClassification: false,
-                });
-                return (
-                  await retrieveContext(claimParsed, {
-                    query: `${claim}\ngo deeper`,
-                    ...(omissionReview.searchMeetingIds?.length
-                      ? { meetingIds: omissionReview.searchMeetingIds }
-                      : {}),
-                  })
-                ).slice(0, 2);
-              }),
-            )
-          : [];
-        const unguardedContext = omissionReview
-          ? selectAskPlutoOmissionContext(
-              omissionContexts,
-              generalContextWithFallback,
-            )
-          : usePreparedAssigneeRecall && assigneeRecall
-            ? assigneeRecall.context
-            : mergeRetrievalResultsByMeeting(
-                namedPersonContext,
-                assigneeRecall?.context ?? [],
-                generalContextWithFallback,
-              );
-        const removedTranscriptPassageCount = unguardedContext.reduce(
-          (total, result) =>
-            total +
-            (result.evidence_kind === 'transcript' ? 1 : 0) +
-            (result.transcript_passages?.length || 0),
-          0,
-        );
-        const subjectFocusedContext =
-          !effectiveProjectRecall &&
-          !multiProjectContext &&
-          !effectivePersonWorkRecall
-            ? focusContextOnExplicitNamedSubject(
-                effectiveQueryText,
-                unguardedContext,
-              )
-            : unguardedContext;
-        const context = enforceSynthesizedOnlyContext(
-          restrictEvidenceToMeetingIds(
-            effectiveProjectRecall ||
-              multiProjectContext ||
-              !personFocusedRequest
-              ? subjectFocusedContext
-              : selectNamedPersonAnswerContext(
-                  effectiveQueryText,
-                  subjectFocusedContext,
-                  personWorkAssignmentRecall?.context,
-                ),
-            boundedMeetingIds,
-          ),
-        );
-        contextCount = context.length;
-        if (removedTranscriptPassageCount > 0) {
-          console.warn(
-            `[Pluto] Ask Pluto removed ${removedTranscriptPassageCount} raw transcript result(s) from synthesized-only context [request_id=${requestId}]`,
-          );
-        }
-        const contextMeetings = uniqueAskPlutoEvidenceMeetings(context);
-        retrievalCompletedAt = Date.now();
-        controller.signal.throwIfAborted();
+          recallCompletedAt = Date.now();
+          retrievalStartedAt = recallCompletedAt;
 
-        const resolvedScope: ResolvedAskPlutoScope =
-          explicitResolvedScope ||
-          temporalResolvedScope ||
-          (currentMeetingRequested && currentMeeting.meetingId
-            ? {
-                kind: 'current',
-                meetingIds: [currentMeeting.meetingId],
-                resolvedAt: new Date().toISOString(),
-                source: 'explicit',
-              }
-            : inheritedScope || {
-                kind:
-                  overviewContextUsed ||
-                  context.length === 0 ||
-                  context.some((result) => result.source_type === 'artifact')
-                    ? 'global'
-                    : 'meeting_ids',
-                meetingIds: contextMeetings.map((result) => result.meeting_id),
-                resolvedAt: new Date().toISOString(),
-                source: 'explicit',
-              });
-        const baseRetrievalSummary: AskPlutoRetrievalSummary =
-          explicitRetrievalSummary ||
-            temporalRetrievalSummary || {
-              matchedMeetingCount: contextMeetings.length,
-              includedMeetingCount: contextMeetings.length,
-              preparedEvidenceCount: context.length,
-              transcriptOnlyCount: 0,
-              omittedMeetingCount: 0,
+          if (
+            conversationResolution.turnMode === 'social' ||
+            (conversationResolution.relation === 'new_topic' &&
+              (parsed.intent === 'conversational' || parsed.cannedResponse))
+          ) {
+            console.log('[Pluto] intelligence:query conversational response');
+            turnMode = 'social';
+            retrievalPolicy = 'none';
+            const answer = await answerConversationally();
+            outputCharacters = answer.length;
+            generationCompletedAt = Date.now();
+            finalizationStartedAt = generationCompletedAt;
+            finalizationCompletedAt = generationCompletedAt;
+            return {
+              status: 'answered' as const,
+              answer,
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'answered' as const,
             };
-        const matchedSectionCount = context.reduce(
-          (total, result) => total + (result.retrieved_sections?.length || 0),
-          0,
-        );
-        const transcriptPassageCount = context.reduce(
-          (total, result) => total + (result.transcript_passages?.length || 0),
-          0,
-        );
-        const retrievalSummary: AskPlutoRetrievalSummary = {
-          ...baseRetrievalSummary,
-          matchedSectionCount,
-          includedSectionCount: matchedSectionCount,
-          transcriptPassageCount,
-          commitmentCount: assigneeRecall?.commitmentCount || 0,
-          artifactCount: context.filter(
-            (result) => result.source_type === 'artifact',
-          ).length,
-          retrievalLevel: isPlanning
-            ? 'overview'
-            : assigneeRecall
-              ? 'commitment'
-              : transcriptPassageCount > 0
-                ? 'transcript'
-                : overviewContextUsed
-                  ? 'overview'
-                  : matchedSectionCount > 0
-                    ? 'section'
-                    : 'note',
-        };
-        const retrievalTrace = {
-          level: retrievalSummary.retrievalLevel || ('note' as const),
-          searchedMeetingCount:
-            explicitResolvedScope?.meetingIds.length ??
-            temporalResolvedScope?.meetingIds.length ??
-            (effectiveProjectRecall
-              ? context.filter((result) => result.source_type !== 'artifact')
-                  .length
+          }
+
+          const currentMeetingRequested =
+            queryReferencesCurrentMeeting(effectiveQueryText);
+          const switchesNamedProject =
+            projectRecall?.project.matchKind === 'explicit_label' &&
+            projectRecall.project.canonicalId !==
+              activeConversationContext?.topic?.id;
+          const inheritedScope =
+            parsed.temporal_range ||
+            switchesNamedProject ||
+            hasMultipleProjectScopes
+              ? undefined
+              : inheritConversationScope(
+                  queryText,
+                  priorTurns,
+                  conversationResolution.relation,
+                );
+          if (
+            isDiagnosticConversationFollowUp(queryText) &&
+            previousAssistantTurn
+          ) {
+            const resolvedScope: ResolvedAskPlutoScope = inheritedScope || {
+              kind: 'global',
+              meetingIds: [],
+              resolvedAt: new Date().toISOString(),
+              source: 'inherited',
+            };
+            return {
+              status: 'answered' as const,
+              answer: describePreviousConversationFailure(
+                previousAssistantTurn,
+              ),
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'answered' as const,
+              resolvedScope,
+              retrievalSummary: previousAssistantTurn.retrievalSummary,
+              retrievalTrace: previousAssistantTurn.retrievalTrace,
+            };
+          }
+          const globalKnowledgeDoc = db.ensureGlobalKnowledgeDoc();
+          const storedCorrections = parseAskPlutoCorrectionRecords(
+            db.getKnowledgeCorrections(globalKnowledgeDoc.id),
+          );
+          const explicitCorrection = detectExplicitAskPlutoCorrection(
+            queryText,
+            priorTurns,
+          );
+          if (
+            explicitCorrection &&
+            !storedCorrections.some(
+              (correction) =>
+                correction.originalClaim === explicitCorrection.originalClaim &&
+                correction.correctedText === explicitCorrection.correctedText,
+            )
+          ) {
+            const targetId = `ask-pluto:${createHash('sha256')
+              .update(explicitCorrection.originalClaim)
+              .digest('hex')
+              .slice(0, 20)}`;
+            db.saveKnowledgeCorrection({
+              doc_id: globalKnowledgeDoc.id,
+              target_kind: 'claim',
+              target_id: targetId,
+              action: 'correct_claim',
+              payload: {
+                source: 'ask_pluto',
+                original_claim: explicitCorrection.originalClaim,
+                corrected_text: explicitCorrection.correctedText,
+                meeting_ids: explicitCorrection.meetingIds,
+              },
+            });
+            storedCorrections.unshift(explicitCorrection);
+            queueKnowledgeDocRefresh(globalKnowledgeDoc.id);
+          }
+          const correctionContext = [
+            queryText,
+            ...priorTurns.map((turn) => turn.content),
+          ].join('\n');
+          const relevantCorrections = selectRelevantAskPlutoCorrections(
+            correctionContext,
+            storedCorrections,
+          );
+          if (
+            explicitCorrection &&
+            !relevantCorrections.some(
+              (correction) =>
+                correction.originalClaim === explicitCorrection.originalClaim &&
+                correction.correctedText === explicitCorrection.correctedText,
+            )
+          ) {
+            relevantCorrections.unshift(explicitCorrection);
+          }
+          const activeSnapshot =
+            typeof input !== 'string' &&
+            activeRecording?.meetingId ===
+              input.activeMeetingSnapshot?.meetingId
+              ? input.activeMeetingSnapshot
+              : undefined;
+          const explicitTemporalRange =
+            parsed.temporal_range?.from && parsed.temporal_range.to
+              ? {
+                  fromInclusive: parsed.temporal_range.from,
+                  toExclusive: parsed.temporal_range.to,
+                  label: parsed.temporal_range.label || 'the selected period',
+                  timeZone:
+                    Intl.DateTimeFormat().resolvedOptions().timeZone || 'local',
+                }
+              : undefined;
+          const temporalRange = explicitMeetingScope
+            ? undefined
+            : explicitTemporalRange || inheritedScope?.temporalRange;
+          const inheritedMeetingIds = inheritedScope?.meetingIds || [];
+          const temporalMeetings = temporalRange
+            ? inheritedScope?.kind === 'temporal' &&
+              !explicitTemporalRange &&
+              inheritedMeetingIds.length > 0
+              ? inheritedMeetingIds
+                  .map((meetingId) => db.getAskPlutoMeeting(meetingId))
+                  .filter((meeting): meeting is db.PersistedMeeting =>
+                    Boolean(meeting),
+                  )
+              : persistedMeetings.filter((meeting) => {
+                  const occurredAt =
+                    meeting.started_at || meeting.created_at || '';
+                  return (
+                    occurredAt >= temporalRange.fromInclusive &&
+                    occurredAt < temporalRange.toExclusive
+                  );
+                })
+            : [];
+          const temporalMeetingLimit = 24;
+          const includedTemporalMeetings = temporalMeetings.slice(
+            0,
+            temporalMeetingLimit,
+          );
+          const temporalRetrievalSummary: AskPlutoRetrievalSummary | undefined =
+            temporalRange
+              ? {
+                  matchedMeetingCount: temporalMeetings.length,
+                  includedMeetingCount: includedTemporalMeetings.length,
+                  preparedEvidenceCount: includedTemporalMeetings.filter(
+                    (meeting) =>
+                      Boolean(
+                        meeting.analysis_json ||
+                          meeting.enhanced_notes ||
+                          meeting.user_notes ||
+                          meeting.mid_json,
+                      ),
+                  ).length,
+                  transcriptOnlyCount: includedTemporalMeetings.filter(
+                    (meeting) =>
+                      Boolean(meeting.transcript_json) &&
+                      !meeting.analysis_json &&
+                      !meeting.enhanced_notes &&
+                      !meeting.user_notes &&
+                      !meeting.mid_json,
+                  ).length,
+                  omittedMeetingCount:
+                    temporalMeetings.length - includedTemporalMeetings.length,
+                }
+              : undefined;
+          const temporalResolvedScope: ResolvedAskPlutoScope | undefined =
+            temporalRange
+              ? {
+                  kind: 'temporal',
+                  meetingIds: temporalMeetings.map((meeting) =>
+                    String(meeting.id),
+                  ),
+                  temporalRange,
+                  resolvedAt: new Date().toISOString(),
+                  source: explicitTemporalRange ? 'explicit' : 'inherited',
+                }
+              : undefined;
+          const explicitlyScopedMeetings = explicitMeetingScope?.meetings || [];
+          const explicitRetrievalSummary: AskPlutoRetrievalSummary | undefined =
+            explicitMeetingScope
+              ? {
+                  matchedMeetingCount: explicitlyScopedMeetings.length,
+                  includedMeetingCount: explicitlyScopedMeetings.length,
+                  preparedEvidenceCount: explicitlyScopedMeetings.filter(
+                    (meeting) =>
+                      Boolean(
+                        meeting.analysis_json ||
+                          meeting.enhanced_notes ||
+                          meeting.user_notes ||
+                          meeting.mid_json,
+                      ),
+                  ).length,
+                  transcriptOnlyCount: explicitlyScopedMeetings.filter(
+                    (meeting) =>
+                      Boolean(meeting.transcript_json) &&
+                      !meeting.analysis_json &&
+                      !meeting.enhanced_notes &&
+                      !meeting.user_notes &&
+                      !meeting.mid_json,
+                  ).length,
+                  omittedMeetingCount: 0,
+                }
+              : undefined;
+          const explicitResolvedScope: ResolvedAskPlutoScope | undefined =
+            explicitMeetingScope
+              ? {
+                  kind: 'meeting_ids',
+                  meetingIds: explicitlyScopedMeetings.map((meeting) =>
+                    String(meeting.id),
+                  ),
+                  resolvedAt: new Date().toISOString(),
+                  source: 'explicit',
+                }
+              : undefined;
+          const usePreparedAssigneeRecall = Boolean(
+            !explicitResolvedScope &&
+              !temporalResolvedScope &&
+              !currentMeetingRequested &&
+              !isPlanning &&
+              assigneeRecall &&
+              !assigneeRecall.coverageLimited &&
+              (conversationResolution.relation === 'new_topic' ||
+                (conversationResolution.task === 'lookup' &&
+                  conversationResolution.retrievalPolicy === 'fresh' &&
+                  conversationResolution.retrievalQuery ===
+                    conversationResolution.priorQuestion &&
+                  conversationResolution.answerQuery ===
+                    conversationResolution.priorQuestion)),
+          );
+          if (explicitMeetingScope) {
+            scopeLabel = explicitMeetingScope.label;
+            scopeMeetingCount = explicitlyScopedMeetings.length;
+            sendStatus('retrieving');
+          }
+          if (temporalRange) {
+            scopeLabel = temporalRange.label;
+            scopeMeetingCount = temporalMeetings.length;
+            sendStatus('retrieving');
+          }
+          if (temporalRange && temporalMeetings.length === 0) {
+            return {
+              status: 'answered' as const,
+              answer: `I couldn't find any meetings from ${temporalRange.label}.`,
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'no_evidence' as const,
+              resolvedScope: temporalResolvedScope,
+              retrievalSummary: temporalRetrievalSummary,
+            };
+          }
+          if (explicitMeetingScope && explicitlyScopedMeetings.length === 0) {
+            return {
+              status: 'answered' as const,
+              answer: "I couldn't find any recent meetings.",
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'no_evidence' as const,
+              resolvedScope: explicitResolvedScope,
+              retrievalSummary: explicitRetrievalSummary,
+            };
+          }
+          if (currentMeetingRequested && currentMeeting.kind === 'none') {
+            return {
+              status: 'unavailable' as const,
+              answer:
+                "There isn't a current meeting yet. Start or record a meeting, then ask me again.",
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+            };
+          }
+          if (
+            currentMeetingRequested &&
+            currentMeeting.kind === 'active_recording' &&
+            (!activeSnapshot || !activeSnapshot.notes.trim())
+          ) {
+            return {
+              status: 'unavailable' as const,
+              answer:
+                'The current recording does not have synthesized notes to answer that yet.',
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+            };
+          }
+          const currentMeetingEvidenceRow = currentMeeting.meetingId
+            ? db.getAskPlutoMeeting(currentMeeting.meetingId)
+            : undefined;
+          if (
+            currentMeetingRequested &&
+            currentMeeting.kind === 'persisted' &&
+            currentMeetingEvidenceRow &&
+            !currentMeetingEvidenceRow.analysis_json &&
+            !currentMeetingEvidenceRow.enhanced_notes &&
+            !currentMeetingEvidenceRow.user_notes
+          ) {
+            return {
+              status: 'unavailable' as const,
+              answer: `${currentMeetingEvidenceRow.title || 'The latest meeting'} is still being prepared and does not have usable synthesized notes yet.`,
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+            };
+          }
+          const currentPinnedResult = currentMeetingRequested
+            ? currentMeeting.kind === 'active_recording' && activeSnapshot
+              ? buildLiveMeetingRetrievalResult(activeSnapshot)
+              : currentMeeting.kind === 'persisted' && currentMeetingEvidenceRow
+                ? buildMeetingRetrievalResult(
+                    currentMeetingEvidenceRow,
+                    'Current meeting',
+                    effectiveQueryText,
+                  )
+                : undefined
+            : undefined;
+          const temporalPinnedResults = includedTemporalMeetings.map(
+            (meeting) =>
+              buildMeetingRetrievalResult(
+                meeting,
+                `Meeting from ${temporalRange?.label || 'selected period'}`,
+                effectiveQueryText,
+              ),
+          );
+          const explicitlyScopedPinnedResults = explicitlyScopedMeetings.map(
+            (meeting) =>
+              buildMeetingRetrievalResult(
+                meeting,
+                explicitMeetingScope?.kind === 'recent'
+                  ? 'Recent meeting'
+                  : 'Named meeting',
+                effectiveQueryText,
+              ),
+          );
+          const priorMeetingIds = [
+            ...new Set([
+              ...(inheritedScope?.meetingIds || []),
+              ...(activeConversationContext?.meetingIds.slice(0, 3) || []),
+              ...(conversationResolution.relation !== 'new_topic' ||
+              queryReferencesPriorTurn(effectiveQueryText)
+                ? priorTurns
+                    .filter((turn) => !containsConfidentialAside(turn.content))
+                    .filter((turn) => turn.role === 'assistant')
+                    .flatMap((turn) => turn.meetingIds || [])
+                : []),
+            ]),
+          ];
+          const expansionMeetingIds = (
+            [...priorTurns]
+              .reverse()
+              .find(
+                (turn) =>
+                  turn.role === 'assistant' &&
+                  turn.conversationAnchor === conversationAnchor &&
+                  turn.meetingIds?.length,
+              )?.meetingIds ||
+            (previousAssistantTurn?.meetingIds?.length
+              ? previousAssistantTurn.meetingIds
+              : undefined) ||
+            inheritedScope?.meetingIds ||
+            []
+          ).slice(0, 3);
+          const priorPinnedResults =
+            priorMeetingIds.length > 0
+              ? [...priorMeetingIds]
+                  .map((meetingId) => db.getAskPlutoMeeting(meetingId))
+                  .filter((meeting): meeting is db.PersistedMeeting =>
+                    Boolean(meeting),
+                  )
+                  .map((meeting) =>
+                    buildMeetingRetrievalResult(
+                      meeting,
+                      'Prior cited meeting',
+                      effectiveQueryText,
+                    ),
+                  )
+              : [];
+          const historicalCandidateLimit = currentMeetingRequested
+            ? getCrossMeetingCandidateLimit(effectiveQueryText, parsed.intent)
+            : 0;
+          const historicalPinnedResults = persistedMeetings
+            .filter(
+              (meeting) => String(meeting.id) !== currentMeeting.meetingId,
+            )
+            .slice(0, historicalCandidateLimit)
+            .map((meeting) =>
+              buildMeetingRetrievalResult(
+                meeting,
+                'Earlier meeting',
+                effectiveQueryText,
+              ),
+            );
+          comparisonMeetingCount = historicalPinnedResults.length;
+          const overviewContextUsed = Boolean(
+            !explicitMeetingScope &&
+              !temporalRange &&
+              !currentMeetingRequested &&
+              overviewRecall?.context.length,
+          );
+          const pinnedResults = mergeRetrievalResultsByMeeting(
+            currentPinnedResult ? [currentPinnedResult] : [],
+            temporalPinnedResults,
+            explicitlyScopedPinnedResults,
+            historicalPinnedResults,
+            priorPinnedResults,
+            overviewContextUsed ? overviewRecall?.context || [] : [],
+            workspaceRecall?.context || [],
+            effectiveProjectRecall?.context || [],
+            effectivePersonWorkRecall?.context || [],
+          );
+          const restrictToCurrentMeeting =
+            shouldRestrictToCurrentMeetingEvidence({
+              currentMeetingRequested,
+              historicalCandidateLimit,
+              priorPinnedCount: priorPinnedResults.length,
+            });
+          const restrictToPriorConversation =
+            shouldRestrictToPriorConversationEvidence({
+              currentMeetingRequested,
+              intent: parsed.intent,
+              priorPinnedCount: priorPinnedResults.length,
+              task: conversationResolution.task,
+              relation: conversationResolution.relation,
+              retrievalPolicy: conversationResolution.retrievalPolicy,
+            });
+          const restrictToPinnedCurrentComparison =
+            shouldRestrictToPinnedCurrentComparison({
+              currentMeetingRequested,
+              historicalCandidateLimit,
+            });
+          const boundedMeetingIds =
+            explicitResolvedScope?.meetingIds ||
+            temporalResolvedScope?.meetingIds ||
+            (restrictToCurrentMeeting && currentPinnedResult
+              ? [currentPinnedResult.meeting_id]
+              : undefined);
+          const generalContext = !usePreparedAssigneeRecall
+            ? explicitResolvedScope
+              ? await retrieveContext(parsed, {
+                  pinnedResults: explicitlyScopedPinnedResults,
+                  query: retrievalOptionsQuery,
+                  meetingIds: explicitResolvedScope.meetingIds,
+                })
+              : temporalResolvedScope
+                ? await retrieveContext(parsed, {
+                    pinnedResults: restrictEvidenceToMeetingIds(
+                      pinnedResults,
+                      temporalResolvedScope.meetingIds,
+                    ),
+                    query: retrievalOptionsQuery,
+                    meetingIds: temporalResolvedScope.meetingIds,
+                  })
+                : restrictToCurrentMeeting && currentPinnedResult
+                  ? [currentPinnedResult]
+                  : multiProjectContext
+                    ? multiProjectContext
+                    : effectiveProjectRecall
+                      ? effectiveProjectRecall.context
+                      : effectivePersonWorkRecall
+                        ? effectivePersonWorkRecall.context
+                        : personWorkSubject &&
+                            personWorkAssignmentRecall &&
+                            !personWorkAssignmentRecall.coverageLimited
+                          ? personWorkAssignmentRecall?.context || []
+                          : conversationResolution.relation === 'expansion' &&
+                              !assigneeRecall &&
+                              !useWorkspaceRecall &&
+                              expansionMeetingIds.length > 0
+                            ? await retrieveContext(parsed, {
+                                query: retrievalOptionsQuery,
+                                meetingIds: expansionMeetingIds,
+                              })
+                            : restrictToPinnedCurrentComparison
+                              ? pinnedResults
+                              : useWorkspaceRecall && workspaceRecall
+                                ? workspaceRecall.context
+                                : restrictToPriorConversation
+                                  ? priorPinnedResults
+                                  : await retrieveContext(parsed, {
+                                      pinnedResults,
+                                      query: retrievalOptionsQuery,
+                                    })
+            : [];
+          const projectFacetKeywords =
+            effectiveProjectRecall && !multiProjectContext && !boundedMeetingIds
+              ? getProjectFacetKeywords(parsed.keywords, [
+                  effectiveProjectRecall.project.name,
+                  effectiveProjectRecall.displayTitle,
+                ])
+              : [];
+          const projectFacetContext = projectFacetKeywords.length
+            ? await retrieveContext(
+                {
+                  ...parsed,
+                  keywords: projectFacetKeywords,
+                  expanded_keywords: [],
+                  entity_mentions: [],
+                },
+                { query: queryText },
+              )
+            : [];
+          const scopedGeneralContext =
+            effectiveProjectRecall && projectFacetContext.length
+              ? combineProjectFacetContext(generalContext, projectFacetContext)
+              : generalContext;
+          const generalContextWithFallback =
+            conversationResolution.relation === 'expansion' &&
+            scopedGeneralContext.length === 0
+              ? priorPinnedResults.filter((result) =>
+                  expansionMeetingIds.includes(result.meeting_id),
+                )
+              : scopedGeneralContext;
+          const namedPersonSubject =
+            extractNamedPersonQuestionSubject(effectiveQueryText) ||
+            effectivePersonWorkRecall?.person.name;
+          const namedPersonEvidenceQuery = namedPersonSubject
+            ? buildNamedPersonEvidenceQuery(
+                effectiveQueryText,
+                namedPersonSubject,
+              )
+            : null;
+          const shouldSupplementNamedPersonContext = Boolean(
+            namedPersonSubject &&
+              conversationResolution.task !== 'draft' &&
+              !/^\s*(?:who|which\s+person)\b/i.test(effectiveQueryText),
+          );
+          const namedPersonCandidates = shouldSupplementNamedPersonContext
+            ? await retrieveContext(
+                await parseQuery(
+                  namedPersonEvidenceQuery || namedPersonSubject || '',
+                  {
+                    signal: controller.signal,
+                    useModelClassification: false,
+                  },
+                ),
+                { query: namedPersonEvidenceQuery || namedPersonSubject || '' },
+              )
+            : [];
+          const namedPersonContext = effectivePersonWorkRecall
+            ? selectRecentPersonNoteContext(
+                namedPersonCandidates,
+                effectivePersonWorkRecall.person.name,
+                effectivePersonWorkRecall.asOf,
+              )
+            : namedPersonCandidates;
+          const omissionContexts = omissionReview
+            ? await Promise.all(
+                omissionReview.claims.slice(0, 6).map(async (claim) => {
+                  controller.signal.throwIfAborted();
+                  const claimParsed = await parseQuery(claim, {
+                    signal: controller.signal,
+                    useModelClassification: false,
+                  });
+                  return (
+                    await retrieveContext(claimParsed, {
+                      query: `${claim}\ngo deeper`,
+                      ...(omissionReview.searchMeetingIds?.length
+                        ? { meetingIds: omissionReview.searchMeetingIds }
+                        : {}),
+                    })
+                  ).slice(0, 2);
+                }),
+              )
+            : [];
+          const unguardedContext = omissionReview
+            ? selectAskPlutoOmissionContext(
+                omissionContexts,
+                generalContextWithFallback,
+              )
+            : usePreparedAssigneeRecall && assigneeRecall
+              ? assigneeRecall.context
+              : mergeRetrievalResultsByMeeting(
+                  assigneeRecall?.context ?? [],
+                  namedPersonContext,
+                  generalContextWithFallback,
+                );
+          const removedTranscriptPassageCount = unguardedContext.reduce(
+            (total, result) =>
+              total +
+              (result.evidence_kind === 'transcript' ? 1 : 0) +
+              (result.transcript_passages?.length || 0),
+            0,
+          );
+          const subjectFocusedContext =
+            !effectiveProjectRecall &&
+            !multiProjectContext &&
+            !effectivePersonWorkRecall
+              ? focusContextOnExplicitNamedSubject(
+                  effectiveQueryText,
+                  unguardedContext,
+                )
+              : unguardedContext;
+          const context = applyAssigneeCommitmentState(
+            enforceSynthesizedOnlyContext(
+              restrictEvidenceToMeetingIds(
+                effectiveProjectRecall ||
+                  multiProjectContext ||
+                  !personFocusedRequest
+                  ? subjectFocusedContext
+                  : selectNamedPersonAnswerContext(
+                      effectiveQueryText,
+                      subjectFocusedContext,
+                      personWorkAssignmentRecall?.coverageLimited
+                        ? undefined
+                        : personWorkAssignmentRecall?.context,
+                    ),
+                boundedMeetingIds,
+              ),
+            ),
+            assigneeRecall || personWorkAssignmentRecall,
+          );
+          contextCount = context.length;
+          if (removedTranscriptPassageCount > 0) {
+            console.warn(
+              `[Pluto] Ask Pluto removed ${removedTranscriptPassageCount} raw transcript result(s) from synthesized-only context [request_id=${requestId}]`,
+            );
+          }
+          const contextMeetings = uniqueAskPlutoEvidenceMeetings(context);
+          retrievalCompletedAt = Date.now();
+          controller.signal.throwIfAborted();
+
+          const resolvedScope: ResolvedAskPlutoScope =
+            explicitResolvedScope ||
+            temporalResolvedScope ||
+            (currentMeetingRequested && currentMeeting.meetingId
+              ? {
+                  kind: 'current',
+                  meetingIds: [currentMeeting.meetingId],
+                  resolvedAt: new Date().toISOString(),
+                  source: 'explicit',
+                }
+              : inheritedScope || {
+                  kind:
+                    overviewContextUsed ||
+                    context.length === 0 ||
+                    context.some((result) => result.source_type === 'artifact')
+                      ? 'global'
+                      : 'meeting_ids',
+                  meetingIds: contextMeetings.map(
+                    (result) => result.meeting_id,
+                  ),
+                  resolvedAt: new Date().toISOString(),
+                  source: 'explicit',
+                });
+          const baseRetrievalSummary: AskPlutoRetrievalSummary =
+            explicitRetrievalSummary ||
+              temporalRetrievalSummary || {
+                matchedMeetingCount: contextMeetings.length,
+                includedMeetingCount: contextMeetings.length,
+                preparedEvidenceCount: context.length,
+                transcriptOnlyCount: 0,
+                omittedMeetingCount: 0,
+              };
+          const matchedSectionCount = context.reduce(
+            (total, result) => total + (result.retrieved_sections?.length || 0),
+            0,
+          );
+          const transcriptPassageCount = context.reduce(
+            (total, result) =>
+              total + (result.transcript_passages?.length || 0),
+            0,
+          );
+          const retrievalSummary: AskPlutoRetrievalSummary = {
+            ...baseRetrievalSummary,
+            matchedSectionCount,
+            includedSectionCount: matchedSectionCount,
+            transcriptPassageCount,
+            commitmentCount: assigneeRecall?.commitmentCount || 0,
+            artifactCount: context.filter(
+              (result) => result.source_type === 'artifact',
+            ).length,
+            retrievalLevel: isPlanning
+              ? 'overview'
               : assigneeRecall
-                ? assigneeRecall.mentionedMeetingCount
-                : persistedMeetings.length),
-          meetings: contextMeetings.map((result) => ({
-            meetingId: result.meeting_id,
-            meetingTitle:
-              result.meeting_title || result.mid?.title || 'Untitled meeting',
-          })),
-          sections: context.flatMap((result) =>
-            (result.retrieved_sections || []).map((section) => ({
+                ? 'commitment'
+                : transcriptPassageCount > 0
+                  ? 'transcript'
+                  : overviewContextUsed
+                    ? 'overview'
+                    : matchedSectionCount > 0
+                      ? 'section'
+                      : 'note',
+          };
+          const retrievalTrace = {
+            level: retrievalSummary.retrievalLevel || ('note' as const),
+            searchedMeetingCount:
+              explicitResolvedScope?.meetingIds.length ??
+              temporalResolvedScope?.meetingIds.length ??
+              (effectiveProjectRecall
+                ? context.filter((result) => result.source_type !== 'artifact')
+                    .length
+                : assigneeRecall
+                  ? assigneeRecall.mentionedMeetingCount
+                  : persistedMeetings.length),
+            meetings: contextMeetings.map((result) => ({
               meetingId: result.meeting_id,
               meetingTitle:
                 result.meeting_title || result.mid?.title || 'Untitled meeting',
-              sectionId: section.section_id,
-              heading: section.heading,
-              kind: section.kind,
-              sourceRevision: section.source_revision,
             })),
-          ),
-          transcriptPassages: context.flatMap((result) =>
-            (result.transcript_passages || []).map((passage) => ({
-              meetingId: result.meeting_id,
-              meetingTitle:
-                result.meeting_title || result.mid?.title || 'Untitled meeting',
-              quote: passage.quote,
-              speaker: passage.speaker,
-              ...(passage.start_ms !== undefined
-                ? { startMs: passage.start_ms }
+            sections: context.flatMap((result) =>
+              (result.retrieved_sections || []).map((section) => ({
+                meetingId: result.meeting_id,
+                meetingTitle:
+                  result.meeting_title ||
+                  result.mid?.title ||
+                  'Untitled meeting',
+                sectionId: section.section_id,
+                heading: section.heading,
+                kind: section.kind,
+                sourceRevision: section.source_revision,
+              })),
+            ),
+            transcriptPassages: context.flatMap((result) =>
+              (result.transcript_passages || []).map((passage) => ({
+                meetingId: result.meeting_id,
+                meetingTitle:
+                  result.meeting_title ||
+                  result.mid?.title ||
+                  'Untitled meeting',
+                quote: passage.quote,
+                speaker: passage.speaker,
+                ...(passage.start_ms !== undefined
+                  ? { startMs: passage.start_ms }
+                  : {}),
+                ...(passage.end_ms !== undefined
+                  ? { endMs: passage.end_ms }
+                  : {}),
+                sourceRevision: passage.source_revision,
+                trustStatus: passage.trust_status,
+              })),
+            ),
+            commitmentCount: assigneeRecall?.commitmentCount || 0,
+            omittedResultCount: retrievalSummary.omittedMeetingCount,
+          };
+          if (context.length === 0) {
+            return {
+              status: 'answered' as const,
+              answer:
+                conversationResolution.relation === 'omission_follow_up'
+                  ? describeUnverifiedAskPlutoOmissions(
+                      omissionReview?.claims.length ||
+                        previousAssistantTurn?.unsupportedClaimCount,
+                    )
+                  : ((!boundedMeetingIds
+                      ? assigneeRecall?.answer
+                      : undefined) ??
+                    (personWorkSubject
+                      ? buildNamedPersonNoEvidenceReply(
+                          queryText,
+                          personWorkSubject,
+                        )
+                      : null) ??
+                    "I couldn't verify an answer from this search."),
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'no_evidence' as const,
+              resolvedScope,
+              retrievalSummary,
+              retrievalTrace,
+            };
+          }
+
+          console.log(
+            `[Pluto] Retrieval complete (${Date.now() - startTime}ms), context items: ${context.length}`,
+          );
+
+          if (usePreparedAssigneeRecall) {
+            sendStatus('writing');
+          } else {
+            sendStatus('waiting');
+          }
+          let visibleValidatedAnswer = '';
+          const onAnswerDelta = () => {
+            if (controller.signal.aborted || event.sender.isDestroyed()) return;
+            const validated = lastValidatedPresentation;
+            if (!validated) return;
+            const nextAnswer = validated.answer;
+            if (
+              !nextAnswer.startsWith(visibleValidatedAnswer) ||
+              nextAnswer.length === visibleValidatedAnswer.length
+            )
+              return;
+            firstTokenAt ??= Date.now();
+            event.sender.send('intelligence:query:delta', {
+              requestId,
+              delta: nextAnswer.slice(visibleValidatedAnswer.length),
+            });
+            visibleValidatedAnswer = nextAnswer;
+          };
+          const onAnswerPresentation = (
+            presentation: SafeAnswerPresentation,
+          ) => {
+            const distinct =
+              conversationResolution.task === 'draft'
+                ? presentation
+                : {
+                    ...presentation,
+                    ...removeRepeatedAskPlutoClaims(
+                      presentation.answer,
+                      presentation.citations,
+                      previousExpansionAnswer,
+                    ),
+                  };
+            if (distinct.answer)
+              lastValidatedPresentation = {
+                ...distinct,
+                answer: addressConfirmedSelf(distinct.answer, answerSelfName),
+              };
+          };
+          const answerStream =
+            conversationResolution.relation === 'omission_follow_up'
+              ? createValidatedAnswerStream(
+                  context,
+                  onAnswerDelta,
+                  'analysis',
+                  onAnswerPresentation,
+                  confirmedSelfName,
+                )
+              : createSynthesizedAnswerStream(
+                  context,
+                  onAnswerDelta,
+                  onAnswerPresentation,
+                  confirmedSelfName,
+                );
+          const extractiveAnswer = useWorkspaceRecall
+            ? null
+            : conversationResolution.relation === 'omission_follow_up' ||
+                conversationResolution.relation === 'expansion' ||
+                selfReference.refersToSelf
+              ? null
+              : usePreparedAssigneeRecall && assigneeRecall
+                ? assigneeRecall.answer
+                : buildExtractiveTemporalSummary(effectiveQueryText, context);
+          let answerRaw: string;
+          if (
+            extractiveAnswer &&
+            (usePreparedAssigneeRecall ||
+              shouldUsePreparedExtractiveAnswer({
+                mode: reasoningMode,
+                contextCount: context.length,
+              }))
+          ) {
+            answerRaw = extractiveAnswer;
+            for (const [index, line] of answerRaw.split('\n').entries()) {
+              answerStream.push(`${index > 0 ? '\n' : ''}${line}`);
+            }
+          } else {
+            providerAcquisitionStartedAt = Date.now();
+            const provider = await getProvider(settings);
+            providerAcquisitionCompletedAt = Date.now();
+            providerName = provider.name;
+            promptStartedAt = Date.now();
+            const prompt = getAskPlutoPrompt(
+              conversationResolution.answerQuery,
+              context,
+              parsed.intent,
+              !switchesNamedProject &&
+                (shouldIncludePriorConversation(
+                  effectiveQueryText,
+                  Boolean(explicitMeetingScope),
+                  conversationResolution.relation,
+                ) ||
+                  activeConversationContext)
+                ? priorTurns.filter(
+                    (turn) => !containsConfidentialAside(turn.content),
+                  )
+                : [],
+              formatAskPlutoCorrectionsForPrompt(relevantCorrections),
+              conversationResolution.task,
+              omissionReview
+                ? {
+                    claims: omissionReview.claims,
+                    previousAnswer: omissionReview.visibleAnswer,
+                  }
+                : undefined,
+              safePriorConversationContext &&
+                (conversationResolution.relation === 'expansion' ||
+                  conversationResolution.task === 'draft') &&
+                !switchesNamedProject
+                ? { previousAnswer: safePriorConversationContext }
+                : undefined,
+              confirmedSelfName,
+              {
+                userProfile: confirmedSelfName
+                  ? {
+                      name: confirmedSelfName,
+                      aliases: selfProfile?.aliases,
+                    }
+                  : null,
+                disputedEntity,
+                projectContext: effectiveProjectRecall
+                  ? {
+                      name: effectiveProjectRecall.project.name,
+                      displayTitle: effectiveProjectRecall.displayTitle,
+                      asOf: effectiveProjectRecall.asOf,
+                      latestNoteAt: effectiveProjectRecall.latestNoteAt,
+                    }
+                  : null,
+                activeConversationContext: switchesNamedProject
+                  ? null
+                  : activeConversationContext || null,
+                conversationMode: conversationResolution.turnMode,
+                isPlanningQuery: isPlanning,
+              },
+            );
+            promptCompletedAt = Date.now();
+            promptCharacters = prompt.length;
+            console.log(
+              `[Pluto] Generating answer via provider: ${provider.name} ...`,
+            );
+            providerRequestedAt = Date.now();
+            answerRaw = await provider.answerAskPluto(prompt, {
+              signal: controller.signal,
+              mode: reasoningMode,
+              onStart: () => {
+                recordProgress?.('started');
+                providerStartedAt ??= Date.now();
+                sendStatus('writing');
+              },
+              onToken: (delta) => {
+                if (controller.signal.aborted) return;
+                recordProgress?.();
+                if (!rawFirstTokenAt) {
+                  rawFirstTokenAt = Date.now();
+                  sendStatus('generating');
+                }
+                answerStream.push(delta);
+              },
+            });
+          }
+          controller.signal.throwIfAborted();
+          generationCompletedAt = Date.now();
+
+          finalizationStartedAt = Date.now();
+          let presentation = answerStream.finalize(answerRaw);
+          if (
+            presentation.outcome !== 'no_evidence' &&
+            conversationResolution.task !== 'draft'
+          ) {
+            const distinct = removeRepeatedAskPlutoClaims(
+              presentation.answer,
+              presentation.citations,
+              conversationResolution.relation === 'expansion'
+                ? priorConversationContext
+                : '',
+            );
+            presentation = {
+              ...presentation,
+              ...distinct,
+              ...(conversationResolution.relation === 'expansion' &&
+              !distinct.answer
+                ? {
+                    answer:
+                      "I checked the same meeting again but couldn't find more supported detail to add.",
+                    outcome: 'no_evidence' as const,
+                    citations: [],
+                    unsupportedClaimCount: 0,
+                    unsupportedClaims: [],
+                  }
                 : {}),
-              ...(passage.end_ms !== undefined
-                ? { endMs: passage.end_ms }
-                : {}),
-              sourceRevision: passage.source_revision,
-              trustStatus: passage.trust_status,
-            })),
-          ),
-          commitmentCount: assigneeRecall?.commitmentCount || 0,
-          omittedResultCount: retrievalSummary.omittedMeetingCount,
-        };
-        if (context.length === 0) {
-          return {
-            status: 'answered' as const,
-            answer:
-              conversationResolution.relation === 'omission_follow_up'
-                ? describeUnverifiedAskPlutoOmissions(
+            };
+          }
+          if (
+            conversationResolution.relation === 'expansion' &&
+            assigneeRecall &&
+            presentation.outcome === 'no_evidence'
+          ) {
+            const verifiedRecall = createValidatedAnswerStream(
+              assigneeRecall.context,
+              () => undefined,
+            ).finalize(assigneeRecall.answer);
+            if (verifiedRecall.outcome !== 'no_evidence') {
+              presentation = {
+                ...verifiedRecall,
+                answer: `${verifiedRecall.answer}\n\nThat is the full extent of the explicit assignment evidence I could verify. I could not verify additional status, rationale, constraints, or related decisions in this search.`,
+                outcome: 'partial',
+                unsupportedClaimCount: 0,
+              };
+            }
+          }
+          if (conversationResolution.relation === 'omission_follow_up') {
+            const earlierAnswer =
+              omissionReview?.visibleAnswer ||
+              previousAssistantTurn?.content ||
+              '';
+            const additional = selectAdditionalSupportedClaims(
+              presentation.citations,
+              earlierAnswer,
+            );
+            presentation = additional.claims.length
+              ? {
+                  ...presentation,
+                  answer: additional.claims.join(
+                    additional.claims.some((claim) => /^[-*]\s/.test(claim))
+                      ? '\n'
+                      : ' ',
+                  ),
+                  citations: additional.citations,
+                  outcome:
+                    presentation.unsupportedClaimCount > 0
+                      ? 'partial'
+                      : 'answered',
+                }
+              : {
+                  ...presentation,
+                  answer: describeUnverifiedAskPlutoOmissions(
                     omissionReview?.claims.length ||
                       previousAssistantTurn?.unsupportedClaimCount,
-                  )
-                : ((!boundedMeetingIds ? assigneeRecall?.answer : undefined) ??
-                  (personWorkSubject
-                    ? buildNamedPersonNoEvidenceReply(
-                        queryText,
-                        personWorkSubject,
-                      )
-                    : null) ??
-                  "I couldn't verify an answer from this search."),
-            citations: [],
+                  ),
+                  citations: [],
+                  outcome: 'no_evidence',
+                  unsupportedClaimCount: 0,
+                  unsupportedClaims: [],
+                };
+          }
+          const coverageLimited = retrievalSummary.omittedMeetingCount > 0;
+          const attributionSafeAnswer = ensureAskPlutoAttributionAnswer(
+            conversationResolution.answerQuery,
+            presentation.answer,
+          );
+          const addressedAnswer = addressConfirmedSelf(
+            attributionSafeAnswer,
+            answerSelfName,
+          );
+          const answer = coverageLimited
+            ? `I found ${retrievalSummary.matchedMeetingCount} meetings, but this answer covers ${retrievalSummary.includedMeetingCount}. Narrow the time period for complete coverage.\n\n${addressedAnswer}`
+            : addressedAnswer;
+          const omissionRef =
+            presentation.outcome === 'partial' &&
+            presentation.unsupportedClaims.length > 0
+              ? rememberAskPlutoOmissions({
+                  ownerId: event.sender.id,
+                  originalQuery: queryText.trim(),
+                  visibleAnswer: answer,
+                  claims: presentation.unsupportedClaims,
+                  scope: resolvedScope,
+                  searchMeetingIds:
+                    explicitResolvedScope?.meetingIds ||
+                    temporalResolvedScope?.meetingIds,
+                })
+              : undefined;
+          const conversationMeetingIds = context
+            .filter((result) => result.source_type !== 'artifact')
+            .map((result) => result.meeting_id)
+            .filter((id, index, ids) => ids.indexOf(id) === index)
+            .slice(0, 8);
+          const nextConversationContext = {
+            anchor: conversationAnchor || queryText.trim().slice(0, 700),
+            meetingIds: conversationMeetingIds,
+            topic: effectiveProjectRecall
+              ? {
+                  kind: 'project' as const,
+                  id: effectiveProjectRecall.project.canonicalId,
+                  label: effectiveProjectRecall.displayTitle,
+                }
+              : effectivePersonWorkRecall
+                ? {
+                    kind: 'person' as const,
+                    id: effectivePersonWorkRecall.person.id,
+                    label: effectivePersonWorkRecall.person.name,
+                  }
+                : useWorkspaceRecall
+                  ? {
+                      kind: 'workspace' as const,
+                      label: 'Workspace priorities',
+                    }
+                  : conversationMeetingIds.length > 0
+                    ? { kind: 'meeting_set' as const }
+                    : { kind: 'general' as const },
+          };
+          outputCharacters = answer.length;
+          finalizationCompletedAt = Date.now();
+
+          console.log(
+            `[Pluto] Query complete. Total duration: ${Date.now() - startTime}ms`,
+          );
+
+          return {
+            status: 'answered' as const,
+            answer,
+            citations: presentation.citations,
             currentMeeting: currentMeetingStatus,
-            outcome: 'no_evidence' as const,
+            outcome: coverageLimited
+              ? ('partial' as const)
+              : presentation.outcome,
             resolvedScope,
             retrievalSummary,
             retrievalTrace,
+            trustStatus: presentation.trustStatus,
+            unsupportedClaimCount: presentation.unsupportedClaimCount,
+            conversationContext: nextConversationContext,
+            ...(omissionRef ? { omissionRef } : {}),
           };
-        }
-
-        console.log(
-          `[Pluto] Retrieval complete (${Date.now() - startTime}ms), context items: ${context.length}`,
-        );
-
-        if (usePreparedAssigneeRecall) {
-          sendStatus('writing');
-        } else {
-          sendStatus('waiting');
-        }
-        let visibleValidatedAnswer = '';
-        const onAnswerDelta = () => {
-          if (controller.signal.aborted || event.sender.isDestroyed()) return;
-          const validated = lastValidatedPresentation;
-          if (!validated) return;
-          const nextAnswer = validated.answer;
-          if (
-            !nextAnswer.startsWith(visibleValidatedAnswer) ||
-            nextAnswer.length === visibleValidatedAnswer.length
-          )
-            return;
-          firstTokenAt ??= Date.now();
-          event.sender.send('intelligence:query:delta', {
-            requestId,
-            delta: nextAnswer.slice(visibleValidatedAnswer.length),
-          });
-          visibleValidatedAnswer = nextAnswer;
-        };
-        const onAnswerPresentation = (presentation: SafeAnswerPresentation) => {
-          const distinct =
-            conversationResolution.task === 'draft'
-              ? presentation
-              : {
-                  ...presentation,
-                  ...removeRepeatedAskPlutoClaims(
-                    presentation.answer,
-                    presentation.citations,
-                    previousExpansionAnswer,
-                  ),
-                };
-          if (distinct.answer)
-            lastValidatedPresentation = {
-              ...distinct,
-              answer: addressConfirmedSelf(distinct.answer, answerSelfName),
-            };
-        };
-        const answerStream =
-          conversationResolution.relation === 'omission_follow_up'
-            ? createValidatedAnswerStream(
-                context,
-                onAnswerDelta,
-                'analysis',
-                onAnswerPresentation,
-                confirmedSelfName,
-              )
-            : createSynthesizedAnswerStream(
-                context,
-                onAnswerDelta,
-                onAnswerPresentation,
-                confirmedSelfName,
-              );
-        const extractiveAnswer = useWorkspaceRecall
-          ? null
-          : conversationResolution.relation === 'omission_follow_up' ||
-              conversationResolution.relation === 'expansion' ||
-              selfReference.refersToSelf
-            ? null
-            : usePreparedAssigneeRecall && assigneeRecall
-              ? assigneeRecall.answer
-              : buildExtractiveTemporalSummary(effectiveQueryText, context);
-        let answerRaw: string;
-        if (
-          extractiveAnswer &&
-          (usePreparedAssigneeRecall ||
-            shouldUsePreparedExtractiveAnswer({
-              mode: reasoningMode,
-              contextCount: context.length,
-            }))
-        ) {
-          answerRaw = extractiveAnswer;
-          for (const [index, line] of answerRaw.split('\n').entries()) {
-            answerStream.push(`${index > 0 ? '\n' : ''}${line}`);
-          }
-        } else {
-          providerAcquisitionStartedAt = Date.now();
-          const provider = await getProvider(settings);
-          providerAcquisitionCompletedAt = Date.now();
-          providerName = provider.name;
-          promptStartedAt = Date.now();
-          const prompt = getAskPlutoPrompt(
-            conversationResolution.answerQuery,
-            context,
-            parsed.intent,
-            !switchesNamedProject &&
-              (shouldIncludePriorConversation(
-                effectiveQueryText,
-                Boolean(explicitMeetingScope),
-                conversationResolution.relation,
-              ) ||
-                activeConversationContext)
-              ? priorTurns.filter(
-                  (turn) => !containsConfidentialAside(turn.content),
-                )
-              : [],
-            formatAskPlutoCorrectionsForPrompt(relevantCorrections),
-            conversationResolution.task,
-            omissionReview
-              ? {
-                  claims: omissionReview.claims,
-                  previousAnswer: omissionReview.visibleAnswer,
-                }
-              : undefined,
-            safePriorConversationContext && !switchesNamedProject
-              ? { previousAnswer: safePriorConversationContext }
-              : undefined,
-            confirmedSelfName,
-            {
-              userProfile: confirmedSelfName
-                ? {
-                    name: confirmedSelfName,
-                    aliases: selfProfile?.aliases,
-                  }
-                : null,
-              disputedEntity,
-              projectContext: effectiveProjectRecall
-                ? {
-                    name: effectiveProjectRecall.project.name,
-                    displayTitle: effectiveProjectRecall.displayTitle,
-                    asOf: effectiveProjectRecall.asOf,
-                    latestNoteAt: effectiveProjectRecall.latestNoteAt,
-                  }
-                : null,
-              activeConversationContext: switchesNamedProject
-                ? null
-                : activeConversationContext || null,
-              conversationMode: conversationResolution.turnMode,
-              isPlanningQuery: isPlanning,
+        })();
+        const deadlineGeneration = runAskPlutoWithDeadline(
+          generation,
+          controller,
+          Math.max(1, requestTimeoutMs - (Date.now() - startTime)),
+          {
+            onProgressSetup: (fn) => {
+              recordProgress = fn;
             },
-          );
-          promptCompletedAt = Date.now();
-          promptCharacters = prompt.length;
-          console.log(
-            `[Pluto] Generating answer via provider: ${provider.name} ...`,
-          );
-          providerRequestedAt = Date.now();
-          answerRaw = await provider.answerAskPluto(prompt, {
-            signal: controller.signal,
-            mode: reasoningMode,
-            onStart: () => {
-              recordProgress?.('started');
-              providerStartedAt ??= Date.now();
-              sendStatus('writing');
-            },
-            onToken: (delta) => {
-              if (controller.signal.aborted) return;
-              recordProgress?.();
-              if (!rawFirstTokenAt) {
-                rawFirstTokenAt = Date.now();
-                sendStatus('generating');
-              }
-              answerStream.push(delta);
-            },
-          });
-        }
-        controller.signal.throwIfAborted();
-        generationCompletedAt = Date.now();
-
-        finalizationStartedAt = Date.now();
-        let presentation = answerStream.finalize(answerRaw);
-        if (
-          presentation.outcome !== 'no_evidence' &&
-          conversationResolution.task !== 'draft'
-        ) {
-          const distinct = removeRepeatedAskPlutoClaims(
-            presentation.answer,
-            presentation.citations,
-            priorConversationContext,
-          );
-          presentation = {
-            ...presentation,
-            ...distinct,
-            ...(conversationResolution.relation === 'expansion' &&
-            !distinct.answer
-              ? {
-                  answer:
-                    "I checked the same meeting again but couldn't find more supported detail to add.",
-                  outcome: 'no_evidence' as const,
-                  citations: [],
-                  unsupportedClaimCount: 0,
-                  unsupportedClaims: [],
-                }
-              : {}),
-          };
-        }
-        if (
-          conversationResolution.relation === 'expansion' &&
-          assigneeRecall &&
-          presentation.outcome === 'no_evidence'
-        ) {
-          const verifiedRecall = createValidatedAnswerStream(
-            assigneeRecall.context,
-            () => undefined,
-          ).finalize(assigneeRecall.answer);
-          if (verifiedRecall.outcome !== 'no_evidence') {
-            presentation = {
-              ...verifiedRecall,
-              answer: `${verifiedRecall.answer}\n\nThat is the full extent of the explicit assignment evidence I could verify. I could not verify additional status, rationale, constraints, or related decisions in this search.`,
-              outcome: 'partial',
-              unsupportedClaimCount: 0,
-            };
-          }
-        }
-        if (conversationResolution.relation === 'omission_follow_up') {
-          const earlierAnswer =
-            omissionReview?.visibleAnswer ||
-            previousAssistantTurn?.content ||
-            '';
-          const additional = selectAdditionalSupportedClaims(
-            presentation.citations,
-            earlierAnswer,
-          );
-          presentation = additional.claims.length
-            ? {
-                ...presentation,
-                answer: additional.claims.join(
-                  additional.claims.some((claim) => /^[-*]\s/.test(claim))
-                    ? '\n'
-                    : ' ',
-                ),
-                citations: additional.citations,
-                outcome:
-                  presentation.unsupportedClaimCount > 0
-                    ? 'partial'
-                    : 'answered',
-              }
-            : {
-                ...presentation,
-                answer: describeUnverifiedAskPlutoOmissions(
-                  omissionReview?.claims.length ||
-                    previousAssistantTurn?.unsupportedClaimCount,
-                ),
-                citations: [],
-                outcome: 'no_evidence',
-                unsupportedClaimCount: 0,
-                unsupportedClaims: [],
-              };
-        }
-        const coverageLimited = retrievalSummary.omittedMeetingCount > 0;
-        const attributionSafeAnswer = ensureAskPlutoAttributionAnswer(
-          conversationResolution.answerQuery,
-          presentation.answer,
-        );
-        const addressedAnswer = addressConfirmedSelf(
-          attributionSafeAnswer,
-          answerSelfName,
-        );
-        const answer = coverageLimited
-          ? `I found ${retrievalSummary.matchedMeetingCount} meetings, but this answer covers ${retrievalSummary.includedMeetingCount}. Narrow the time period for complete coverage.\n\n${addressedAnswer}`
-          : addressedAnswer;
-        const omissionRef =
-          presentation.outcome === 'partial' &&
-          presentation.unsupportedClaims.length > 0
-            ? rememberAskPlutoOmissions({
-                ownerId: event.sender.id,
-                originalQuery: queryText.trim(),
-                visibleAnswer: answer,
-                claims: presentation.unsupportedClaims,
-                scope: resolvedScope,
-                searchMeetingIds:
-                  explicitResolvedScope?.meetingIds ||
-                  temporalResolvedScope?.meetingIds,
-              })
-            : undefined;
-        const conversationMeetingIds = context
-          .filter((result) => result.source_type !== 'artifact')
-          .map((result) => result.meeting_id)
-          .filter((id, index, ids) => ids.indexOf(id) === index)
-          .slice(0, 8);
-        const nextConversationContext = {
-          anchor: conversationAnchor || queryText.trim().slice(0, 700),
-          meetingIds: conversationMeetingIds,
-          topic: effectiveProjectRecall
-            ? {
-                kind: 'project' as const,
-                id: effectiveProjectRecall.project.canonicalId,
-                label: effectiveProjectRecall.displayTitle,
-              }
-            : effectivePersonWorkRecall
-              ? {
-                  kind: 'person' as const,
-                  id: effectivePersonWorkRecall.person.id,
-                  label: effectivePersonWorkRecall.person.name,
-                }
-              : useWorkspaceRecall
-                ? { kind: 'workspace' as const, label: 'Workspace priorities' }
-                : conversationMeetingIds.length > 0
-                  ? { kind: 'meeting_set' as const }
-                  : { kind: 'general' as const },
-        };
-        outputCharacters = answer.length;
-        finalizationCompletedAt = Date.now();
-
-        console.log(
-          `[Pluto] Query complete. Total duration: ${Date.now() - startTime}ms`,
-        );
-
-        return {
-          status: 'answered' as const,
-          answer,
-          citations: presentation.citations,
-          currentMeeting: currentMeetingStatus,
-          outcome: coverageLimited
-            ? ('partial' as const)
-            : presentation.outcome,
-          resolvedScope,
-          retrievalSummary,
-          retrievalTrace,
-          trustStatus: presentation.trustStatus,
-          unsupportedClaimCount: presentation.unsupportedClaimCount,
-          conversationContext: nextConversationContext,
-          ...(omissionRef ? { omissionRef } : {}),
-        };
-      })();
-      const deadlineGeneration = runAskPlutoWithDeadline(
-        generation,
-        controller,
-        Math.max(1, requestTimeoutMs - (Date.now() - startTime)),
-        {
-          onProgressSetup: (fn) => {
-            recordProgress = fn;
+            idleTimeoutMs: isLocalProvider ? 60_000 : 30_000,
           },
-          idleTimeoutMs: isLocalProvider ? 60_000 : 30_000,
-        },
-      );
-      const settled = deadlineGeneration.then(
-        () => undefined,
-        () => undefined,
-      );
-      activeAskPlutoQueries.set(requestId, { controller, settled });
+        );
 
-      try {
-        const response = await deadlineGeneration;
-        outputCharacters ||= response.answer.length;
-        if (response.status === 'answered') {
-          sendStatus('citations_ready');
-          sendStatus('completed');
-        } else if (response.status === 'unavailable') {
-          sendStatus('unavailable');
+        try {
+          const response = await deadlineGeneration;
+          outputCharacters ||= response.answer.length;
+          if (response.status === 'answered') {
+            sendStatus('citations_ready');
+            sendStatus('completed');
+          } else if (response.status === 'unavailable') {
+            sendStatus('unavailable');
+          }
+          return {
+            ...response,
+            ...(turnMode ? { turnMode } : {}),
+            ...(retrievalPolicy ? { retrievalPolicy } : {}),
+            ...(conversationAnchor ? { conversationAnchor } : {}),
+            performance: buildPerformanceDiagnostics(),
+          };
+        } catch (error) {
+          if (
+            controller.signal.aborted &&
+            controller.signal.reason instanceof Error &&
+            controller.signal.reason.name === 'AbortError'
+          ) {
+            console.log(
+              `[Pluto] intelligence:query cancelled after ${Date.now() - startTime}ms [request_id=${requestId}]`,
+            );
+            sendStatus('cancelled');
+            return {
+              status: 'cancelled' as const,
+              answer: '',
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              performance: buildPerformanceDiagnostics(),
+            };
+          }
+          const failure = classifyAskPlutoFailure(error);
+          console.error(
+            `[Pluto] intelligence:query failed after ${Date.now() - startTime}ms:`,
+            error,
+          );
+          sendStatus(failure.reason === 'timeout' ? 'unavailable' : 'failed');
+          if (
+            (failure.reason === 'timeout' ||
+              failure.reason === 'invalid_response') &&
+            lastValidatedPresentation
+          ) {
+            const partialAnswer = `${lastValidatedPresentation.answer}\n\n${failure.answer}`;
+            outputCharacters = partialAnswer.length;
+            return {
+              status: 'unavailable' as const,
+              answer: partialAnswer,
+              citations: lastValidatedPresentation.citations,
+              currentMeeting: currentMeetingStatus,
+              failureReason: failure.reason,
+              outcome: 'partial' as const,
+              trustStatus: lastValidatedPresentation.trustStatus,
+              unsupportedClaimCount:
+                lastValidatedPresentation.unsupportedClaimCount,
+              ...(conversationAnchor ? { conversationAnchor } : {}),
+              performance: buildPerformanceDiagnostics(),
+            };
+          }
+          outputCharacters = failure.answer.length;
+          return {
+            status: 'unavailable' as const,
+            answer: failure.answer,
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+            failureReason: failure.reason,
+            ...(conversationAnchor ? { conversationAnchor } : {}),
+            performance: buildPerformanceDiagnostics(),
+          };
+        } finally {
+          const finishedAt = Date.now();
+          const performance = buildPerformanceDiagnostics(finishedAt);
+          console.log(
+            '[Pluto] intelligence:query timings',
+            JSON.stringify({
+              request_id: requestId,
+              ...performance,
+            }),
+          );
         }
-        return {
-          ...response,
-          ...(turnMode ? { turnMode } : {}),
-          ...(retrievalPolicy ? { retrievalPolicy } : {}),
-          ...(conversationAnchor ? { conversationAnchor } : {}),
-          performance: buildPerformanceDiagnostics(),
-        };
       } catch (error) {
         if (
           controller.signal.aborted &&
           controller.signal.reason instanceof Error &&
           controller.signal.reason.name === 'AbortError'
         ) {
-          console.log(
-            `[Pluto] intelligence:query cancelled after ${Date.now() - startTime}ms [request_id=${requestId}]`,
-          );
-          sendStatus('cancelled');
-          return {
-            status: 'cancelled' as const,
-            answer: '',
-            citations: [],
-            currentMeeting: currentMeetingStatus,
-            performance: buildPerformanceDiagnostics(),
-          };
+          return { status: 'cancelled' as const, answer: '', citations: [] };
         }
         const failure = classifyAskPlutoFailure(error);
-        console.error(
-          `[Pluto] intelligence:query failed after ${Date.now() - startTime}ms:`,
-          error,
-        );
-        sendStatus(failure.reason === 'timeout' ? 'unavailable' : 'failed');
-        if (failure.reason === 'timeout' && lastValidatedPresentation) {
-          const partialAnswer = `${lastValidatedPresentation.answer}\n\n${failure.answer}`;
-          outputCharacters = partialAnswer.length;
-          return {
-            status: 'unavailable' as const,
-            answer: partialAnswer,
-            citations: lastValidatedPresentation.citations,
-            currentMeeting: currentMeetingStatus,
-            failureReason: failure.reason,
-            outcome: 'partial' as const,
-            trustStatus: lastValidatedPresentation.trustStatus,
-            unsupportedClaimCount:
-              lastValidatedPresentation.unsupportedClaimCount,
-            ...(conversationAnchor ? { conversationAnchor } : {}),
-            performance: buildPerformanceDiagnostics(),
-          };
-        }
-        outputCharacters = failure.answer.length;
         return {
           status: 'unavailable' as const,
           answer: failure.answer,
           citations: [],
-          currentMeeting: currentMeetingStatus,
           failureReason: failure.reason,
-          ...(conversationAnchor ? { conversationAnchor } : {}),
-          performance: buildPerformanceDiagnostics(),
         };
       } finally {
-        const finishedAt = Date.now();
-        const performance = buildPerformanceDiagnostics(finishedAt);
-        console.log(
-          '[Pluto] intelligence:query timings',
-          JSON.stringify({
-            request_id: requestId,
-            ...performance,
-          }),
-        );
-        if (activeAskPlutoQueries.get(requestId)?.controller === controller) {
+        event.sender.removeListener('destroyed', abortForDestroyedOwner);
+        if (activeAskPlutoQueries.get(requestId)?.controller === controller)
           activeAskPlutoQueries.delete(requestId);
-        }
+        markSettled();
       }
     },
   );
 
-  ipcMain.handle('intelligence:query:cancel', async (_event, requestId) => {
+  ipcMain.handle('intelligence:query:cancel', async (event, requestId) => {
     if (typeof requestId !== 'string') return { cancelled: false };
     const active = activeAskPlutoQueries.get(requestId);
-    if (!active) return { cancelled: false };
+    if (!active || active.ownerId !== event.sender.id)
+      return { cancelled: false };
     const cancellationStartedAt = Date.now();
     active.controller.abort(
       new DOMException('Ask Pluto request cancelled', 'AbortError'),

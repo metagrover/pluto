@@ -13,7 +13,10 @@ import {
   generateDreamingWithProvider,
 } from '../../electron/dreaming/idleDreamingCoordinator';
 import { packageEntityNotes } from '../../electron/dreaming/packageEntityNotes';
-import { buildDreamingGenerationRequest } from '../../electron/dreaming/prompt';
+import {
+  DREAMING_PROMPT_VERSION,
+  buildDreamingGenerationRequest,
+} from '../../electron/dreaming/prompt';
 import { validateDreamingOutput } from '../../electron/dreaming/validateDreamingOutput';
 
 describe('Dreaming production request integration', () => {
@@ -124,11 +127,11 @@ describe('Dreaming production request integration', () => {
       status: 'no_change',
     });
     expect(synthesizeKnowledgeDocument).toHaveBeenCalledWith(
-      expect.stringContaining('Prompt version: dreaming-proposals-v2'),
+      expect.stringContaining(`Prompt version: ${DREAMING_PROMPT_VERSION}`),
       expect.objectContaining({
         purpose: 'dreaming',
         model: 'gemma4:12b',
-        promptVersion: 'dreaming-proposals-v2',
+        promptVersion: DREAMING_PROMPT_VERSION,
       }),
     );
   });

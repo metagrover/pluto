@@ -84,6 +84,8 @@ export interface EntityMeetingNoteSummary {
   startedAt: string | null;
   notesContent: string;
   mentionedContext?: string | null;
+  /** Saved action-item text still present in these notes. */
+  actionItems?: string[];
 }
 
 export type DreamingMeetingNote = EntityMeetingNoteSummary;

@@ -999,3 +999,10 @@ describe('getAskPlutoPrompt', () => {
     );
   });
 });
+
+it('does not ask for self identity when the question names another person', () => {
+  const prompt = getAskPlutoPrompt("What's assigned to Morgan?", [], 'factual');
+  expect(prompt).not.toContain("The user's identity is not yet confirmed");
+  expect(prompt).toContain('Include every distinct explicit assignment');
+  expect(prompt).toContain('Use names rather than guessing gender');
+});

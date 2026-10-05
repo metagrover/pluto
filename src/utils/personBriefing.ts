@@ -427,107 +427,15 @@ export const selectPersonCommitments = (input: {
   delivered: PersonBriefingCommitment[];
   candidates: PersonBriefingCommitmentCandidate[];
 } => {
-  if (input.isSelf) {
-    const { open, delivered } = selectVerifiedPersonCommitments({
-      personId: input.personId,
-      actions: input.actions,
-      now: input.now,
-      deliveryWindowDays: input.deliveryWindowDays,
-    });
-    const candidates = selectCandidatePersonCommitments({
-      personNames: input.personNames ?? [],
-      actions: input.candidateActions ?? [],
-    });
-    return { open, delivered, candidates };
-  }
-
-  // Non-self individuals: automatically promote candidate commitments from notes into active commitments
-  const now = input.now ?? Date.now();
-  const deliveryWindowMs =
-    (input.deliveryWindowDays ?? 60) * 24 * 60 * 60 * 1_000;
-  const personNames = new Set(
-    (input.personNames ?? []).map(normalizePersonLabel).filter(Boolean),
-  );
-
-  const seenIds = new Set<string>();
-  const allCommitments: PersonBriefingCommitment[] = [];
-
-  const toCommitment = (
-    action: PersonCommitmentCandidate,
-  ): PersonBriefingCommitment | null => {
-    if (seenIds.has(action.id)) return null;
-    const metadata = parseActionMetadata(action.metadata);
-    if (
-      getCommitmentState(action.metadata) === 'rejected' ||
-      !['active', 'overdue', 'completed'].includes(action.status || '') ||
-      typeof metadata.source_meeting_id !== 'string'
-    ) {
-      return null;
-    }
-    seenIds.add(action.id);
-    const text =
-      typeof metadata.full_description === 'string'
-        ? metadata.full_description
-        : action.name;
-    return {
-      id: action.id,
-      text,
-      status: action.status as PersonBriefingCommitment['status'],
-      dueDate: action.due_date,
-      evidence:
-        typeof metadata.source_evidence === 'string'
-          ? metadata.source_evidence
-          : null,
-      sourceMeetingId: metadata.source_meeting_id,
-      sourceMeetingTitle: action.sourceMeetingTitle,
-      updatedAt: action.updated_at,
-    };
-  };
-
-  // 1. Process actions explicitly assigned to this person
-  for (const action of input.actions) {
-    if (action.assigned_to === input.personId) {
-      const commitment = toCommitment(action);
-      if (commitment) allCommitments.push(commitment);
-    }
-  }
-
-  // 2. Process candidate actions matching person name or bound speaker
-  for (const action of input.candidateActions ?? []) {
-    const metadata = parseActionMetadata(action.metadata);
-    const suggestedOwnerName =
-      typeof action.suggested_owner_name === 'string' &&
-      action.suggested_owner_name.trim()
-        ? action.suggested_owner_name.trim()
-        : typeof metadata.assignee_name === 'string'
-          ? metadata.assignee_name.trim()
-          : '';
-    if (
-      suggestedOwnerName &&
-      personNames.has(normalizePersonLabel(suggestedOwnerName))
-    ) {
-      const commitment = toCommitment(action);
-      if (commitment) allCommitments.push(commitment);
-    }
-  }
-
-  const open = allCommitments
-    .filter((item) => item.status === 'active' || item.status === 'overdue')
-    .sort(
-      (a, b) =>
-        Number(b.status === 'overdue') - Number(a.status === 'overdue') ||
-        (Date.parse(a.dueDate || '') || Number.MAX_SAFE_INTEGER) -
-          (Date.parse(b.dueDate || '') || Number.MAX_SAFE_INTEGER) ||
-        Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
-    );
-  const delivered = allCommitments
-    .filter(
-      (item) =>
-        item.status === 'completed' &&
-        Number.isFinite(Date.parse(item.updatedAt)) &&
-        now - Date.parse(item.updatedAt) <= deliveryWindowMs,
-    )
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-
-  return { open, delivered, candidates: [] };
+  const { open, delivered } = selectVerifiedPersonCommitments({
+    personId: input.personId,
+    actions: input.actions,
+    now: input.now,
+    deliveryWindowDays: input.deliveryWindowDays,
+  });
+  const candidates = selectCandidatePersonCommitments({
+    personNames: input.personNames ?? [],
+    actions: input.candidateActions ?? [],
+  });
+  return { open, delivered, candidates };
 };

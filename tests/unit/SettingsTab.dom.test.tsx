@@ -190,6 +190,7 @@ describe('SettingsTab', () => {
       'Meetings',
       'Intelligence',
       'Advanced',
+      'Help',
     ]);
     expect(tabs[0].getAttribute('aria-selected')).toBe('true');
     expect(tabs[0].tabIndex).toBe(0);
@@ -229,12 +230,12 @@ describe('SettingsTab', () => {
         new KeyboardEvent('keydown', { key: 'End', bubbles: true }),
       );
     });
-    expect(document.activeElement).toBe(tabs[3]);
-    expect(tabs[3].getAttribute('aria-selected')).toBe('true');
-    expect(container.textContent).toContain('Reset knowledge base');
+    expect(document.activeElement).toBe(tabs[4]);
+    expect(tabs[4].getAttribute('aria-selected')).toBe('true');
+    expect(container.textContent).toContain('Report a problem');
 
     act(() => {
-      tabs[3].dispatchEvent(
+      tabs[4].dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Home', bubbles: true }),
       );
     });
@@ -246,8 +247,8 @@ describe('SettingsTab', () => {
         new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }),
       );
     });
-    expect(document.activeElement).toBe(tabs[3]);
-    expect(tabs[3].getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(tabs[4]);
+    expect(tabs[4].getAttribute('aria-selected')).toBe('true');
 
     act(() => root.unmount());
   });

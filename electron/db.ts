@@ -8710,6 +8710,7 @@ export const getEntityMeetings = (
 };
 
 export interface DreamingEntityNoteSource {
+  action_items_json?: string | null;
   id: string;
   title: string;
   started_at: string | null;
@@ -8736,7 +8737,12 @@ const dreamingEntityNotesQuery = (
     m.started_at,
     m.created_at,
     m.user_notes,
-    m.enhanced_notes
+    m.enhanced_notes,
+    CASE WHEN (m.analysis_format_pass = 1 OR
+      (m.analysis_format_pass IS NULL AND m.analysis_schema_version = 3))
+      AND json_valid(m.analysis_json)
+      THEN json_extract(m.analysis_json, '$.all_action_items')
+      ELSE NULL END AS action_items_json
   FROM meeting_entities me INDEXED BY idx_meeting_entities_entity_meeting
   JOIN meetings m ON m.id = me.meeting_id
   WHERE me.entity_id IN (SELECT id FROM family)
@@ -8769,8 +8775,8 @@ const getDreamingEntityQueryContext = (entityId: string) => {
 
 /**
  * Return the bounded, notes-only meeting projection used by idle dreaming.
- * Keep this projection explicit: transcripts, audio paths, and analysis payloads
- * are intentionally unavailable to the packager.
+ * Keep this projection explicit: transcripts, audio paths, and full analysis
+ * payloads are unavailable. Only saved action-item text is projected; explicit format failures are excluded.
  */
 export const getDreamingEntityNotes = (
   entityId: string,
@@ -9458,7 +9464,7 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
     .filter((row) => isUsablePersonName(row.name))
     .filter((row) => row.id !== canonicalSelfPersonId)
     .map((row) => {
-      const allAssignedOpenCount = Number(row.open_commitment_count);
+      const verifiedOpenCount = Number(row.verified_open_commitment_count);
       const candidateCount = Number(row.candidate_commitment_count);
       return {
         id: row.id,
@@ -9471,8 +9477,8 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         latestMeetingTitle: row.latest_meeting_title,
         latestMeetingAt: row.latest_meeting_at,
         context: row.latest_context,
-        openCommitmentCount: allAssignedOpenCount + candidateCount,
-        candidateCommitmentCount: 0,
+        openCommitmentCount: verifiedOpenCount,
+        candidateCommitmentCount: candidateCount,
         briefHeadline: row.brief_headline,
         briefStatus: row.brief_status,
         briefUpdatedAt: row.brief_updated_at,
@@ -9936,9 +9942,62 @@ export const getPersonBriefing = (
   };
 };
 
-export const getCanonicalPersonCommitments = (personId: string) => {
+export const getCanonicalPersonCommitments = (
+  personId: string,
+):
+  | (PersonBriefingDetail['commitments'] & {
+      excluded?: Array<{
+        text: string;
+        status: 'completed' | 'rejected';
+        sourceMeetingId: string;
+      }>;
+    })
+  | undefined => {
   const briefing = getPersonBriefing(personId);
-  return briefing?.commitments;
+  if (!briefing) return undefined;
+  // Closed/rejected tasks remain authoritative even outside the briefing's
+  // recent-delivery window. Notes retrieval must not reopen them.
+  const actions = db
+    .prepare(`
+    WITH family(id) AS (
+      SELECT ? UNION SELECT person_id FROM person_aliases
+      WHERE canonical_id = ? AND active = 1
+    ), names(name) AS (
+      SELECT LOWER(TRIM(name)) FROM entities WHERE id IN (SELECT id FROM family)
+      UNION SELECT LOWER(TRIM(display_name)) FROM person_name_aliases
+      WHERE person_id IN (SELECT id FROM family)
+    )
+    SELECT name, status, metadata FROM entities
+    WHERE type = 'action_item' AND (
+      assigned_to IN (SELECT id FROM family)
+      OR (assigned_to IS NULL AND LOWER(TRIM(json_extract(
+        CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.assignee_name'
+      ))) IN (SELECT name FROM names))
+    )
+  `)
+    .all(briefing.person.id, briefing.person.id) as Array<
+    Pick<Entity, 'name' | 'status' | 'metadata'>
+  >;
+  const excluded = actions.flatMap((action) => {
+    const metadata = parseActionMetadata(action.metadata);
+    const rejected = getCommitmentState(action.metadata) === 'rejected';
+    if (
+      (!rejected && action.status !== 'completed') ||
+      typeof metadata.source_meeting_id !== 'string'
+    )
+      return [];
+    return [
+      {
+        text:
+          typeof metadata.full_description === 'string'
+            ? metadata.full_description
+            : action.name,
+        status: rejected ? ('rejected' as const) : ('completed' as const),
+        sourceMeetingId: metadata.source_meeting_id,
+      },
+    ];
+  });
+  return { ...briefing.commitments, excluded };
 };
 
 /**
@@ -10362,9 +10421,33 @@ export const searchMeetingsFts = (
 
 export const searchMeetingNotesFts = (
   query: string,
-  options: SearchFtsOptions = {},
+  options: SearchFtsOptions & {
+    meetingIds?: string[];
+    from?: string;
+    to?: string;
+  } = {},
 ) => {
   const limit = options.limit || 50;
+  const constraints: string[] = [];
+  const parameters: string[] = [];
+  if (options.meetingIds?.length) {
+    constraints.push(
+      `m.id IN (${options.meetingIds.map(() => '?').join(',')})`,
+    );
+    parameters.push(...options.meetingIds);
+  }
+  if (options.from) {
+    constraints.push(
+      'julianday(COALESCE(m.started_at, m.created_at)) >= julianday(?)',
+    );
+    parameters.push(options.from);
+  }
+  if (options.to) {
+    constraints.push(
+      'julianday(COALESCE(m.started_at, m.created_at)) < julianday(?)',
+    );
+    parameters.push(options.to);
+  }
   return db
     .prepare(`
     SELECT
@@ -10376,10 +10459,13 @@ export const searchMeetingNotesFts = (
     FROM meeting_notes_fts f
     JOIN meetings m ON f.meeting_id = m.id
     WHERE meeting_notes_fts MATCH ?
+      ${constraints.length ? `AND ${constraints.join(' AND ')}` : ''}
     ORDER BY rank
     LIMIT ?
   `)
-    .all(query, limit) as (PersistedMeeting & { snippet: string })[];
+    .all(query, ...parameters, limit) as (PersistedMeeting & {
+    snippet: string;
+  })[];
 };
 
 export const searchMeetingContextSectionsFts = (

@@ -19,6 +19,21 @@ export function excerptQueryEvidence(
   const budget = Math.max(0, Math.floor(requestedBudget));
   if (text.length <= budget) return text;
   if (budget < OMITTED.length * 2 + 20) return text.slice(0, budget);
+  // Task state overrides note prose. Retain the leading state block before
+  // spending the remaining budget on ranked note excerpts.
+  if (text.startsWith('[Canonical commitment state')) {
+    const boundary = text.indexOf('\n[Meeting]');
+    if (boundary > 0) {
+      const state = text.slice(0, boundary);
+      if (state.length >= budget - OMITTED.length)
+        return state.slice(0, budget - OMITTED.length) + OMITTED;
+      return `${state}\n${excerptQueryEvidence(
+        text.slice(boundary + 1),
+        query,
+        budget - state.length - 1,
+      )}`;
+    }
+  }
   const terms = [
     ...new Set(
       words(query).filter((word) => word.length > 2 && !STOP.has(word)),
@@ -65,6 +80,10 @@ export function excerptQueryEvidence(
     )
       add(index);
   }
+  // Keep a small ending window for corrections/status updates even when the
+  // requested topic also occurs in the heading.
+  for (let index = Math.max(0, lines.length - 2); index < lines.length; index++)
+    add(index);
   for (const { index } of ranked) {
     // Context below a heading commonly contains the owner, count or due date.
     for (const neighbor of [index, index + 1, index + 2, index - 1])

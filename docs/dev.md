@@ -274,3 +274,23 @@ When you commit, Lefthook runs the dependency security audit and Biome checks on
 staged JavaScript, TypeScript, and JSON files. Biome may write formatting fixes;
 review and stage those changes before retrying the commit. See `lefthook.yml`
 for the current hook configuration.
+
+### Ask Pluto workflow acceptance
+
+After `pnpm exec vite build` and `pnpm run ensure:sqlite-abi`, run:
+
+```sh
+ASK_PLUTO_WORKFLOW_ACCEPTANCE=1 pnpm exec electron scripts/verify_ask_pluto_workflows.cjs
+```
+
+This opt-in replay creates and removes a temporary Standard profile containing
+only synthetic meetings. It exercises the built renderer/preload/main IPC path,
+real database retrieval, and the configured Gemma model for assignment, retry,
+broader search, and drafting. It then redirects only this test process's local
+model transport to a controlled server for truncation, unavailability,
+cancellation, and recovery. The installed app and its profile are untouched.
+Results default to ignored `.private/ask-pluto-workflow-acceptance.json`;
+`ASK_PLUTO_WORKFLOW_REPORT` selects another output path. This complements the
+provider latency benchmark; it does not establish real-meeting correctness or
+latency percentiles. Restore the Node SQLite ABI with `pnpm rebuild better-sqlite3`
+before Node-based database tests, and the Electron ABI before returning to the app.

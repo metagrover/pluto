@@ -42,6 +42,7 @@ import {
   readProjectQualification,
 } from '../../../utils/projectQualification';
 import { PageHeader } from '../../ui/PageHeader';
+import { ReportProblemButton } from '../ReportProblemButton';
 import { ProjectCommitments } from './ProjectCommitments';
 import { ProjectDossier } from './ProjectDossier';
 
@@ -1593,13 +1594,19 @@ export function ProjectsOverview({
               </div>
               {(synthesisState === 'failed' ||
                 synthesisState === 'incomplete') && (
-                <button
-                  type="button"
-                  className="shrink-0 rounded px-2 py-1 font-medium text-pro-accent underline underline-offset-4 hover:bg-pro-hover"
-                  onClick={retry}
-                >
-                  Retry synthesis
-                </button>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="shrink-0 rounded px-2 py-1 font-medium text-pro-accent underline underline-offset-4 hover:bg-pro-hover"
+                    onClick={retry}
+                  >
+                    Retry synthesis
+                  </button>
+                  <ReportProblemButton
+                    area="project_themes"
+                    className="min-h-9 rounded px-2 py-1 font-medium text-pro-text-muted underline underline-offset-4 hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+                  />
+                </div>
               )}
             </div>
           )}

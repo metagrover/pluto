@@ -113,27 +113,36 @@ const toRetrievalResult = (meeting: BenchmarkMeeting): RetrievalResult => {
   };
 };
 
-const answerPassesQuality = (
+export const answerPassesQuality = (
   mode: AskPlutoBenchmarkMode,
   answer: string,
 ): boolean => {
   const normalized = answer.toLowerCase();
+  if (
+    !normalized.trim() ||
+    /could(?:n't| not) (?:find|verify)|no evidence/.test(normalized)
+  )
+    return false;
+  if (
+    mode === 'deep' &&
+    (/\bsam\s+(?:(?:still|now|currently)\s+)?(?:owns?|is responsible for)\b/.test(
+      normalized,
+    ) ||
+      /\b(?:testing|payment integration)\s+(?:is|was)\s+(?:now\s+)?(?:complete|unblocked)\b/.test(
+        normalized,
+      ))
+  )
+    return false;
   if (mode === 'fast') {
-    return (
-      normalized.includes('sam') &&
-      normalized.includes('friday') &&
-      /\[source\s+1\]/i.test(answer)
-    );
+    return /\bsam\b/.test(normalized) && normalized.includes('friday');
   }
   return (
     normalized.includes('tuesday') &&
     normalized.includes('friday') &&
-    normalized.includes('sam') &&
-    normalized.includes('alex') &&
+    /\bsam\b/.test(normalized) &&
+    /\balex\b/.test(normalized) &&
     normalized.includes('payment') &&
-    normalized.includes('block') &&
-    /\[source\s+1\]/i.test(answer) &&
-    /\[source\s+2\]/i.test(answer)
+    normalized.includes('block')
   );
 };
 

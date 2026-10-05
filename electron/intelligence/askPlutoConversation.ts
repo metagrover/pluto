@@ -427,6 +427,27 @@ export const resolveAskPlutoConversation = (
               turn.role === 'user' && !isExpansionRequest(turn.content.trim()),
           )?.content
       : latestUserQuestion;
+  if (
+    previousAssistant &&
+    /^(?:please\s+)?(?:try again|retry|try once more)[?.!]*$/i.test(
+      trimmedQuery,
+    )
+  ) {
+    const retryQuery = previousAssistant.conversationAnchor || priorQuestion;
+    if (retryQuery)
+      return {
+        relation: 'follow_up',
+        task: resolveResearchTask(retryQuery),
+        turnMode: decideConversationTurn({
+          query: retryQuery,
+          hasPriorAssistant: false,
+        }).mode,
+        retrievalPolicy: 'fresh',
+        retrievalQuery: retryQuery,
+        answerQuery: retryQuery,
+        priorQuestion: retryQuery,
+      };
+  }
   if (previousAssistant && turnDecision.mode === 'social') {
     return {
       relation: 'acknowledgment',

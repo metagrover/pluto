@@ -13,8 +13,10 @@ import {
   getAskPlutoMeeting,
   getAskPlutoMeetingHeaders,
   getAskPlutoMeetings,
+  getCanonicalPersonCommitments,
   saveMeeting,
   searchMeetingNotesFts,
+  upsertEntity,
 } from '../../electron/db';
 
 afterAll(() => {
@@ -49,4 +51,88 @@ describe('Ask Pluto synthesized meeting projection', () => {
     }
     expect(headers[0]).not.toHaveProperty('analysis_json');
   });
+});
+
+it('applies meeting and date scopes before the FTS limit', () => {
+  for (let index = 0; index < 45; index++)
+    saveMeeting({
+      id: `outside-${index}`,
+      title: 'Morgan',
+      started_at: '2026-09-01T00:00:00Z',
+      enhanced_notes: 'Morgan Morgan Morgan Morgan report.',
+    });
+  saveMeeting({
+    id: 'scoped',
+    title: 'Review',
+    started_at: '2026-10-04T12:00:00Z',
+    enhanced_notes: `Morgan owns the acceptance report. ${'General context. '.repeat(100)}`,
+  });
+  expect(
+    searchMeetingNotesFts('Morgan', { limit: 1 }).map((row) => row.id),
+  ).not.toContain('scoped');
+  expect(
+    searchMeetingNotesFts('Morgan', { limit: 1, meetingIds: ['scoped'] }).map(
+      (row) => row.id,
+    ),
+  ).toEqual(['scoped']);
+  expect(
+    searchMeetingNotesFts('Morgan', {
+      limit: 1,
+      from: '2026-10-04T00:00:00Z',
+      to: '2026-10-05T00:00:00Z',
+    }).map((row) => row.id),
+  ).toEqual(['scoped']);
+  expect(
+    searchMeetingNotesFts('Morgan', {
+      limit: 1,
+      meetingIds: ['scoped'],
+      to: '2026-10-04T12:00:00Z',
+    }),
+  ).toEqual([]);
+});
+
+it('retains rejected and old completed tasks as exclusions for notes recall', () => {
+  const person = upsertEntity({
+    id: 'person-morgan',
+    type: 'person',
+    name: 'Morgan',
+  });
+  upsertEntity({
+    id: 'rejected-report',
+    type: 'action_item',
+    name: 'Send obsolete report',
+    assigned_to: person.id,
+    status: 'active',
+    metadata: {
+      source_meeting_id: 'scoped',
+      commitment_state: 'rejected',
+      full_description: 'Send obsolete report.',
+    },
+  });
+  upsertEntity({
+    id: 'completed-checklist',
+    type: 'action_item',
+    name: 'Archive checklist',
+    assigned_to: person.id,
+    status: 'completed',
+    metadata: {
+      source_meeting_id: 'scoped',
+      owner_source: 'user',
+      full_description: 'Archive checklist.',
+    },
+  });
+  expect(getCanonicalPersonCommitments(person.id)?.excluded).toEqual(
+    expect.arrayContaining([
+      {
+        text: 'Send obsolete report.',
+        status: 'rejected',
+        sourceMeetingId: 'scoped',
+      },
+      {
+        text: 'Archive checklist.',
+        status: 'completed',
+        sourceMeetingId: 'scoped',
+      },
+    ]),
+  );
 });

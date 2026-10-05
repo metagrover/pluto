@@ -40,3 +40,11 @@
   font-display: swap;
   src: url(./Lora-SemiBold.ttf) format('truetype');
 }
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url(./JetBrainsMono.ttf) format('truetype');
+}

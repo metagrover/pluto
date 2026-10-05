@@ -42,6 +42,28 @@ const priorTurns: AskPlutoConversationTurn[] = [
 ];
 
 describe('project evidence follow-up routing', () => {
+  it('retries the original lookup with fresh retrieval through repeated retries', () => {
+    const original = "What's assigned to Gamma?";
+    for (const previousQuestion of [original, 'try again?']) {
+      const result = resolveAskPlutoConversation('try again?', [
+        { role: 'user', content: previousQuestion },
+        {
+          role: 'assistant',
+          content: 'No verified answer.',
+          outcome: 'no_evidence',
+          conversationAnchor: original,
+        },
+      ]);
+      expect(result).toMatchObject({
+        relation: 'follow_up',
+        task: 'lookup',
+        retrievalPolicy: 'fresh',
+        retrievalQuery: original,
+        answerQuery: original,
+        priorQuestion: original,
+      });
+    }
+  });
   it('returns a complete draft for a tone revision rather than additional details', () => {
     const turns: AskPlutoConversationTurn[] = [
       {

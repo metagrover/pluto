@@ -207,40 +207,43 @@ describe('People identity controls', () => {
     expect(api.restorePersonMerge).toHaveBeenCalledWith('person-2');
   });
 
-  it('requires an explicit owner decision for a name-matched open loop for self', async () => {
-    api.getPersonBriefing.mockResolvedValue({
-      ...detail('person-1', 'Avery Chen'),
-      isSelf: true,
-      commitments: {
-        open: [],
-        delivered: [],
-        candidates: [
-          {
-            id: 'action-1',
-            text: 'Share the launch notes',
-            status: 'active',
-            dueDate: null,
-            evidence: 'Avery can share the notes.',
-            sourceMeetingId: 'meeting-1',
-            sourceMeetingTitle: 'Product review',
-            updatedAt: '2026-08-20T12:00:00.000Z',
-            suggestedOwnerName: 'Avery Chen',
-          },
-        ],
-      },
-    });
-    await render();
-    expect(host.textContent).toContain('Needs confirmation');
+  it.each([true, false])(
+    'requires an explicit owner decision (isSelf: %s)',
+    async (isSelf) => {
+      api.getPersonBriefing.mockResolvedValue({
+        ...detail('person-1', 'Avery Chen'),
+        isSelf,
+        commitments: {
+          open: [],
+          delivered: [],
+          candidates: [
+            {
+              id: 'action-1',
+              text: 'Share the launch notes',
+              status: 'active',
+              dueDate: null,
+              evidence: 'Avery can share the notes.',
+              sourceMeetingId: 'meeting-1',
+              sourceMeetingTitle: 'Product review',
+              updatedAt: '2026-08-20T12:00:00.000Z',
+              suggestedOwnerName: 'Avery Chen',
+            },
+          ],
+        },
+      });
+      await render();
+      expect(host.textContent).toContain('Needs confirmation');
 
-    await click('Confirm owner');
+      await click('Confirm owner');
 
-    expect(api.resolvePersonCommitmentOwner).toHaveBeenCalledWith(
-      'action-1',
-      'person-1',
-    );
-  });
+      expect(api.resolvePersonCommitmentOwner).toHaveBeenCalledWith(
+        'action-1',
+        'person-1',
+      );
+    },
+  );
 
-  it('displays commitments directly without confirmation friction for others', async () => {
+  it('displays verified commitments directly for other people', async () => {
     api.getPersonBriefing.mockResolvedValue({
       ...detail('person-1', 'Avery Chen'),
       isSelf: false,

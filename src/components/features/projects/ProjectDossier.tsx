@@ -1,5 +1,6 @@
 import { Check, MoreHorizontal, Pencil, Star, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { BugReportArea } from '../../../../electron/bugReports';
 import {
   deleteEntity,
   detachTopicFromProject,
@@ -26,6 +27,7 @@ import {
 } from '../../../utils/projectPortfolio';
 import { readProjectQualification } from '../../../utils/projectQualification';
 import { SearchSelect } from '../../ui/SearchSelect';
+import { ReportProblemButton } from '../ReportProblemButton';
 import { ProjectMilestones } from './ProjectMilestones';
 import { ProjectProfileContent } from './ProjectProfileContent';
 
@@ -91,6 +93,8 @@ export const ProjectDossier = ({
     name: string;
   } | null>(null);
   const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
+  const [reportArea, setReportArea] =
+    useState<BugReportArea>('project_updates');
   const [isDeleting, setIsDeleting] = useState(false);
   const prepareGeneration = useRef(0);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -104,6 +108,7 @@ export const ProjectDossier = ({
   useEffect(() => {
     prepareGeneration.current += 1;
     setDreamingState('idle');
+    setLastMerged(null);
   }, [projectId]);
 
   useEffect(
@@ -148,10 +153,37 @@ export const ProjectDossier = ({
     const generation = ++prepareGeneration.current;
     const preparedProjectId = projectId;
     setDreamingState('running');
+    setReportArea('project_themes');
     try {
-      const synthesis = await discoverProjectInitiative({ retryFailed: true });
+      const synthesis = await discoverProjectInitiative({
+        retryFailed: true,
+        projectId: preparedProjectId,
+      });
       if (generation !== prepareGeneration.current) return;
-      if (synthesis.discovered > 0) setRequest((r) => r + 1);
+      // A cached update run must never hide a failed or deferred brief synthesis.
+      if (synthesis.failed > 0) {
+        setDreamingState('failed');
+        return;
+      }
+      if (synthesis.deferred || synthesis.remaining > 0) {
+        setDreamingState('busy');
+        return;
+      }
+      const refreshed = await getProjectBrief(preparedProjectId);
+      if (generation !== prepareGeneration.current) return;
+      setBrief(refreshed);
+      setLoadedProjectId(preparedProjectId);
+      if (
+        !refreshed ||
+        refreshed.themeSourceOutdated ||
+        !(
+          refreshed.theme?.summary?.text || refreshed.theme?.currentFocus
+        )?.trim()
+      ) {
+        setDreamingState('empty_brief');
+        return;
+      }
+      setReportArea('project_updates');
       const result = await triggerDreamingNow({
         entityId: preparedProjectId,
       });
@@ -164,7 +196,12 @@ export const ProjectDossier = ({
         setRequest((r) => r + 1);
         setDreamingState(result.status);
       } else {
-        setDreamingState(result.status);
+        setDreamingState(
+          result.status === 'failed' &&
+            result.errorCode === 'unsupported_project_commitment'
+            ? 'unverified'
+            : result.status,
+        );
       }
     } catch {
       if (
@@ -334,18 +371,6 @@ export const ProjectDossier = ({
     }
   };
 
-  const restoreMergedProject = async (id: string) => {
-    setMergeState('saving');
-    try {
-      await restoreProjectMerge(id);
-      setMergeState('idle');
-      await onPortfolioChanged?.();
-      setRequest((value) => value + 1);
-    } catch {
-      setMergeState('error');
-    }
-  };
-
   const isStarred = isProjectStarred(brief?.project.metadata);
 
   const toggleStar = async () => {
@@ -396,6 +421,16 @@ export const ProjectDossier = ({
               ) : null}
               <span>{DREAMING_STATUS_LABEL[dreamingState]}</span>
             </div>
+          ) : null}
+          {dreamingState === 'failed' ||
+          dreamingState === 'error' ||
+          dreamingState === 'unverified' ||
+          dreamingState === 'empty_brief' ? (
+            <ReportProblemButton
+              area={reportArea}
+              entityId={projectId}
+              className={quietButton}
+            />
           ) : null}
           <button
             type="button"
@@ -471,17 +506,6 @@ export const ProjectDossier = ({
               >
                 Merge another project
               </button>
-              {current?.mergedProjects.map((project) => (
-                <button
-                  key={project.id}
-                  type="button"
-                  disabled={mergeState === 'saving'}
-                  onClick={() => void restoreMergedProject(project.id)}
-                  className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
-                >
-                  Restore {project.name}
-                </button>
-              ))}
               <button
                 type="button"
                 disabled={dreamingState === 'running'}
@@ -527,6 +551,16 @@ export const ProjectDossier = ({
             Retry project
           </button>
         </div>
+      )}
+
+      {dreamingState === 'unverified' && (
+        <p
+          role="status"
+          className="mb-6 max-w-[65ch] text-sm leading-6 text-pro-text-muted"
+        >
+          The proposed commitment lacked explicit agreement in its source notes,
+          so Pluto did not add it. Existing project information is preserved.
+        </p>
       )}
 
       {loading && !current && (
