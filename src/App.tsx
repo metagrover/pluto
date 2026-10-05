@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
+import { openMeetingPrep } from './api/meetingPrep';
 import {
   type SilenceAutoStopDuration,
   resolveSilenceAutoStopDuration,
 } from './autoStop/silenceWatchdog';
-import { openMeetingPrep } from './api/meetingPrep';
 import './App.css';
 
 // Core

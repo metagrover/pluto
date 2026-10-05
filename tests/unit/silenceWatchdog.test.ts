@@ -3,8 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   SILENCE_AUTO_STOP_TIMEOUT_MS,
-  resolveSilenceAutoStopDuration,
   createSilenceWatchdog,
+  resolveSilenceAutoStopDuration,
 } from '../../src/autoStop/silenceWatchdog';
 
 describe('silence watchdog auto-stop coordinator', () => {

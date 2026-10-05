@@ -1,4 +1,3 @@
-import { DetailsMenu } from '../ui/DetailsMenu';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -65,6 +64,7 @@ import {
 } from '../../utils/personDossierRead';
 import { readPersonProfile } from '../../utils/personProfile';
 import { PersonChatDock } from '../features/PersonChatDock';
+import { DetailsMenu } from '../ui/DetailsMenu';
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
 import { PersonProfileContent } from './PersonProfileContent';

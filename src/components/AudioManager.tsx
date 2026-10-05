@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { CalendarEvent } from '../../electron/calendar/types';
 import type { RendererCaptureCounters } from '../../electron/captureDiagnostics';
 import {
+  SILENCE_AUTO_STOP_TIMEOUT_MS,
   type SilenceAutoStopDuration,
   type SilenceWatchdog,
   createSilenceWatchdog,
   resolveSilenceAutoStopDuration,
-  SILENCE_AUTO_STOP_TIMEOUT_MS,
 } from '../autoStop/silenceWatchdog';
 import type {
   CaptureLifecycleSnapshot,

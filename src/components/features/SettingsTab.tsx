@@ -1,4 +1,3 @@
-import type { SilenceAutoStopDuration } from '../../autoStop/silenceWatchdog';
 import {
   BookOpen,
   Check,
@@ -35,6 +34,7 @@ import {
   cloudConsentSettingKey,
 } from '../../../electron/llm/providerCatalog';
 import { useAppUpdate } from '../../api/updater';
+import type { SilenceAutoStopDuration } from '../../autoStop/silenceWatchdog';
 import type { AppTheme } from '../../types/theme';
 import {
   OLLAMA_GENERAL_MODEL,

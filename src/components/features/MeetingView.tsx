@@ -1,4 +1,3 @@
-import { DetailsMenu } from '../ui/DetailsMenu';
 import {
   ArrowLeft,
   Check,
@@ -73,6 +72,7 @@ import {
   canUseTranscriptTrustState,
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
+import { DetailsMenu } from '../ui/DetailsMenu';
 import { SearchSelect } from '../ui/SearchSelect';
 import { MeetingAttachmentsBar } from './MeetingAttachmentsBar';
 import { MeetingCalendarContext } from './MeetingCalendarContext';

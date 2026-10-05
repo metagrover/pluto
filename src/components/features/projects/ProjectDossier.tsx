@@ -1,4 +1,3 @@
-import { DetailsMenu } from '../../ui/DetailsMenu';
 import { Check, MoreHorizontal, Pencil, Star, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BugReportArea } from '../../../../electron/bugReports';
@@ -27,6 +26,7 @@ import {
   readProjectCadence,
 } from '../../../utils/projectPortfolio';
 import { readProjectQualification } from '../../../utils/projectQualification';
+import { DetailsMenu } from '../../ui/DetailsMenu';
 import { SearchSelect } from '../../ui/SearchSelect';
 import { ReportProblemButton } from '../ReportProblemButton';
 import { ProjectMilestones } from './ProjectMilestones';
