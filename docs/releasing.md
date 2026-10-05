@@ -76,18 +76,24 @@ Verify without publishing: `pnpm run test:release-workflow`. A workflow-only
 change can additionally be exercised on a PR with the `release-test` label; that
 builds and verifies an installer without publishing a release.
 
-## Unnotarized installation
+## One-command installation
 
-The README and generated release notes provide one copyable command after the
-user drags Pluto into Applications:
+`README.md` documents a private `gh api … | bash` command and the public
+`curl … | bash` command for `scripts/install-macos.sh`. The installer uses the
+public release list when available and falls back to authenticated GitHub CLI
+while the repository is private. Public users need no GitHub account or CLI.
+The repository and releases must actually be public before advertising the curl
+command as available. Do not change repository visibility implicitly.
 
-```sh
-xattr -dr com.apple.quarantine "/Applications/Pluto.app" && open "/Applications/Pluto.app"
-```
+The installer selects the newest published release, including RCs, instead of
+`/releases/latest`, which excludes RCs. Preserve the release asset names
+`Pluto-Mac-<version>-Installer.dmg` and `SHA256SUMS.txt`. It verifies the checksum,
+app identity/version, and signature before replacing an app, stages upgrades,
+and restores the old app if replacement fails. It explicitly removes only
+Pluto's quarantine attribute; profiles, models, and TCC permissions are untouched.
+It refuses to upgrade a running app. This is an explicit trust workaround, not
+Apple notarization. Do not use `xattr -cr` or disable Gatekeeper globally.
 
-This is an explicit, app-specific trust workaround, not notarization. Clear only
-`com.apple.quarantine`; do not use `xattr -cr` or disable Gatekeeper globally.
-Users may need to repeat it for a new quarantined download. Do not remove
-quarantine automatically during download or claim that macOS has approved the app.
-The repository is private, so anonymous raw-GitHub/curl installation is not a
-working public distribution path. Do not make source or assets public implicitly.
+Run `pnpm run test:installer` for isolated installation and recovery checks.
+`bash scripts/install-macos.sh --verify-only` downloads and verifies the live
+release without installing, removing quarantine, or launching anything.

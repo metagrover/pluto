@@ -40,8 +40,9 @@ test('release notes include direct changes, evidence links, and installation', (
   assert.match(notes, /compare\/v1.0.0.rc.3\.\.\.v1.0.0-rc.4/);
   assert.match(notes, /SHA256SUMS.txt/);
   assert.match(notes, /not notarized/);
-  assert.match(notes, /xattr -dr com\.apple\.quarantine/);
-  assert.match(notes, /&& open/);
+  assert.match(notes, /curl -fsSL/);
+  assert.match(notes, /gh api/);
+  assert.match(notes, /install-macos\.sh/);
   assert.doesNotMatch(notes, /xattr -cr|spctl --master-disable/);
 });
 

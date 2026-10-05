@@ -28,6 +28,7 @@
     "package:verify-setup": "node scripts/verify_parakeet_setup.mjs",
     "release": "node scripts/release.mjs",
     "test:release-workflow": "node --test scripts/release.test.mjs",
+    "test:installer": "node --test scripts/install-macos.test.mjs",
     "lint": "biome lint .",
     "format": "biome format . --write",
     "check": "biome check .",

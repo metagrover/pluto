@@ -73,30 +73,42 @@ Intel Macs, Windows, and Linux are not currently supported. Model downloads need
 additional disk space; local intelligence also needs memory appropriate to your
 chosen model.
 
-### Download and install
+### Install with one command
 
-1. **[Download the installer from the newest release](https://github.com/metagrover/pluto/releases).**
-   GitHub's **Source code** archives contain the project source, not an installable app.
-2. Open the `.dmg` and drag **Pluto** into **Applications**. Eject the installer disk.
+During private testing, with GitHub CLI already signed in and access to this repo:
 
-### Open with one command
+```sh
+gh api -H 'Accept: application/vnd.github.raw+json' repos/metagrover/pluto/contents/scripts/install-macos.sh | bash
+```
 
-The current build is ad-hoc signed and is not notarized. After installing it in
-Applications, paste this single command into Terminal if you trust this release:
+Once this repository and its releases are public, anyone can use:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/metagrover/pluto/master/scripts/install-macos.sh | bash
+```
+
+Both commands download the newest published release (including RCs), verify its
+SHA-256 checksum and app identity/version/signature, install Pluto into
+Applications, remove only its quarantine attribute, and launch it. No manual DMG
+download or dragging is needed. The public command needs no GitHub account,
+Homebrew, Node, or Xcode. If Applications isn't writable on a new installation,
+it uses `~/Applications`. Quit Pluto before upgrading; your profile and models
+are preserved. Failed verification leaves an existing app in place.
+
+Running the installer explicitly trusts this repository and Pluto's unnotarized
+release. It does not disable Gatekeeper globally or grant microphone, audio, or
+calendar permissions. Checksums and ad-hoc signatures verify integrity, not
+Apple's malware review. You can [inspect the installer](scripts/install-macos.sh).
+
+### Install manually
+
+Download the DMG from the [release listing](https://github.com/metagrover/pluto/releases)
+and drag Pluto into Applications. If macOS blocks it, use **System Settings →
+Privacy & Security → Open Anyway**, or explicitly trust the installed app with:
 
 ```sh
 xattr -dr com.apple.quarantine "/Applications/Pluto.app" && open "/Applications/Pluto.app"
 ```
-
-This removes only Pluto's download-quarantine attribute and opens it. It does not
-clear other extended attributes, disable Gatekeeper globally, or change your
-microphone, audio, or calendar permissions. It does not delete meetings, settings,
-or downloaded models. Repeat for a new download if macOS blocks it again.
-No Apple account, Homebrew, Node, or Xcode is required. This is an explicit trust
-workaround; it does not provide Apple's notarization review.
-
-For the GUI alternative, open **System Settings → Privacy & Security**, click
-**Open Anyway** for Pluto, and confirm **Open** when prompted.
 
 ### First launch and your first recording
 

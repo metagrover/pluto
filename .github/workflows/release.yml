@@ -60,6 +60,7 @@ jobs:
         run: |
           pnpm run changelog:check
           pnpm run test:release-workflow
+          pnpm run test:installer
           pnpm exec vitest run
 
       - name: Build Native Runtimes
