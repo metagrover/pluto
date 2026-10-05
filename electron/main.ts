@@ -524,7 +524,10 @@ function createWindow() {
   }
 
   if (!updateChecker) {
-    updateChecker = new UpdateChecker(() => win, () => !isCaptureActive());
+    updateChecker = new UpdateChecker(
+      () => win,
+      () => !isCaptureActive(),
+    );
     updateChecker.start();
   }
 }
