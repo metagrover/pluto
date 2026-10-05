@@ -1,4 +1,4 @@
-import { type ChildProcess, execFile, spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -125,7 +125,10 @@ import {
   buildMacApplicationMenuTemplate,
   updateResultDialog,
 } from './macAppMenu';
-import { installInChatGptDesktop } from './mcp/chatgptDesktop';
+import {
+  installInChatGptDesktop,
+  openChatGptDesktop,
+} from './mcp/chatgptDesktop';
 import {
   PLUTO_MCP_ENABLED_SETTING,
   PLUTO_MCP_SETUP_URL,
@@ -621,6 +624,7 @@ import {
   runAskPlutoWithDeadline,
 } from './intelligence/askPlutoDeadline';
 import { classifyAskPlutoFailure } from './intelligence/askPlutoFailures';
+import { buildPlutoHelpReply } from './intelligence/askPlutoHelp';
 import {
   clearAskPlutoOmissions,
   describeUnverifiedAskPlutoOmissions,
@@ -5810,23 +5814,15 @@ app.whenReady().then(async () => {
   ipcMain.handle('PLUTO_MCP_OPEN_SETUP_GUIDE', async () => {
     await shell.openExternal(PLUTO_MCP_SETUP_URL);
   });
-  ipcMain.handle(
-    'PLUTO_MCP_OPEN_CHATGPT',
-    () =>
-      new Promise<void>((resolve, reject) => {
-        if (process.platform !== 'darwin')
-          return reject(new Error('chatgpt_desktop_requires_macos'));
-        execFile(
-          '/usr/bin/open',
-          ['-a', 'ChatGPT'],
-          { timeout: 10_000 },
-          (error) => {
-            if (error) reject(new Error('chatgpt_desktop_unavailable'));
-            else resolve();
-          },
-        );
-      }),
-  );
+  ipcMain.handle('PLUTO_MCP_OPEN_CHATGPT', async () => {
+    if (process.platform !== 'darwin')
+      throw new Error('chatgpt_desktop_requires_macos');
+    try {
+      await openChatGptDesktop();
+    } catch {
+      throw new Error('chatgpt_desktop_unavailable');
+    }
+  });
   ipcMain.handle('GET_SETTING', (_event, key) => {
     if (typeof key !== 'string' || isSecretSettingKey(key)) {
       throw new Error('secret_setting_requires_credential_ipc');
@@ -6750,6 +6746,22 @@ app.whenReady().then(async () => {
         console.log(
           `[Pluto] intelligence:query start [request_id=${requestId}, query_length=${queryText.trim().length}]`,
         );
+        const helpReply = buildPlutoHelpReply(queryText);
+        if (helpReply) {
+          turnMode = 'lookup';
+          retrievalPolicy = 'none';
+          outputCharacters = helpReply.length;
+          generationCompletedAt = Date.now();
+          finalizationStartedAt = generationCompletedAt;
+          finalizationCompletedAt = generationCompletedAt;
+          return {
+            status: 'answered' as const,
+            answer: helpReply,
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+            outcome: 'answered' as const,
+          };
+        }
         conversationResolutionStartedAt = Date.now();
         const conversationResolution = resolveAskPlutoConversation(
           queryText,

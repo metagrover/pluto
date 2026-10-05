@@ -157,15 +157,17 @@ describe('ChatGptConnectionSettings', () => {
     expect(container.textContent).toContain(
       'start a new Work chat and mention Pluto',
     );
-    expect(container.textContent).not.toMatch(
-      /open Plugins|choose.*marketplace|install Pluto|install the plugin/i,
+    expect(container.textContent).toContain('Type @ and select Pluto');
+    expect(container.textContent).toContain('Plugins → Personal');
+    expect(container.textContent).toContain(
+      'What did we decide in my latest meeting?',
     );
     expect(container.textContent).toContain('fully quit ChatGPT (⌘Q)');
     expect(container.textContent).not.toMatch(
       /tunnel|Node.js|terminal|API key|ChatGPT connected/i,
     );
     expect(container.querySelector('code')).toBeNull();
-    await act(async () => button(container, 'Open ChatGPT').click());
+    await act(async () => button(container, 'Start a ChatGPT chat').click());
     expect(api.openChatGpt).toHaveBeenCalledOnce();
     await act(async () => button(container, 'Connection help').click());
     expect(api.openChatGptSetupGuide).toHaveBeenCalledOnce();
@@ -178,7 +180,7 @@ describe('ChatGptConnectionSettings', () => {
     const container = await render();
     expect(container.textContent).not.toContain('Local setup complete');
     expect(container.textContent).toContain('Connection needs attention');
-    expect(button(container, 'Open ChatGPT')).toBeUndefined();
+    expect(button(container, 'Start a ChatGPT chat')).toBeUndefined();
     expect(button(container, 'Disable access').disabled).toBe(false);
   });
 
@@ -188,7 +190,7 @@ describe('ChatGptConnectionSettings', () => {
     );
     api.openChatGpt.mockRejectedValue(new Error('app unavailable'));
     const container = await render();
-    await act(async () => button(container, 'Open ChatGPT').click());
+    await act(async () => button(container, 'Start a ChatGPT chat').click());
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'Install the ChatGPT desktop app',
     );
@@ -210,7 +212,7 @@ describe('ChatGptConnectionSettings', () => {
       'Local setup is complete. Open ChatGPT desktop to start a Work chat on this computer.',
     );
     expect(button(container, 'Disable access').disabled).toBe(false);
-    expect(button(container, 'Open ChatGPT')).toBeDefined();
+    expect(button(container, 'Start a ChatGPT chat')).toBeDefined();
   });
 
   it('does not launch ChatGPT when plugin preparation is incomplete', async () => {

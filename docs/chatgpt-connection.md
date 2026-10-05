@@ -16,11 +16,13 @@ reads; it cannot remove content already shared with ChatGPT.
 3. Allow meeting-note access and click **Connect to ChatGPT**.
 4. Fully quit ChatGPT (⌘Q) and reopen it to load the local plugin. Opening
    another window is not enough. Keep Pluto running with access enabled.
-5. Start a new Work chat in ChatGPT and mention Pluto. ChatGPT controls tool
-   permissions. If tools failed to load before setup finished, use a new chat.
+5. Click **Start a ChatGPT chat** in Pluto to open a new Work chat. Type `@`,
+   select **Pluto**, and ask a question such as “What did we decide in my latest
+   meeting?” ChatGPT controls tool permissions. If ChatGPT restores an older
+   screen, start a new Work chat manually and select Pluto with `@`.
 
 The button registers and installs the local plugin through ChatGPT's bundled
-CLI, then opens ChatGPT. No website, hosted server, tunnel, terminal command,
+CLI, then opens a new Work chat in ChatGPT. No website, hosted server, tunnel, terminal command,
 separate Node installation, or OpenAI API key is needed. This integration targets
 ChatGPT Desktop's local Work plugins; merely installing a desktop version
 without local plugin support does not make it compatible.
@@ -32,6 +34,23 @@ the personal local marketplace, preserving other entries. **Ready for ChatGPT**
 confirms local setup, not a successful conversation or account authorization.
 
 See OpenAI's [local plugin documentation](https://developers.openai.com/plugins/build/plugins).
+
+## Personal installation and public distribution
+
+The shipped connection installs a personal plugin on each user’s Mac. It does
+not publish Pluto to the public directory. Users need ChatGPT Desktop with local
+plugin support and must enable access in their own Pluto installation.
+
+Development builds register **Pluto (Development)** separately from the release
+plugin **Pluto**, so both can coexist without looking identical. Reconnecting
+updates the existing entry for that build rather than adding a new identity.
+
+A public directory listing requires a separate package submission, OpenAI review,
+and publication. Public discovery does not grant access to anyone’s meeting
+notes. Remote MCP submissions require a production public endpoint; the current
+local plugin uses paths specific to the user’s Mac and is not a portable public
+submission package. See OpenAI’s [plugin submission guide](https://developers.openai.com/plugins/deploy/submission)
+and [remote MCP requirements](https://developers.openai.com/plugins/deploy/app-review).
 
 ## Tools and conversations
 

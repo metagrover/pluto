@@ -60,6 +60,7 @@ interface AskPlutoProps {
     target?: { sectionId?: string; timestampMs?: number },
   ) => void;
   onOpenArtifact: (id: string) => void;
+  onOpenSettings?: (tab: 'advanced' | 'meetings') => void;
   visible: boolean;
   onClose: () => void;
   activeMeetingSnapshot?: AskPlutoActiveMeetingSnapshot;
@@ -169,6 +170,7 @@ const formatConversationDate = (value: string): string => {
 export const AskPluto: React.FC<AskPlutoProps> = ({
   onOpenMeeting,
   onOpenArtifact,
+  onOpenSettings,
   visible,
   activeMeetingSnapshot,
   messages: controlledMessages,
@@ -1194,7 +1196,33 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                               {requestPhaseLabel(true)}
                             </output>
                           ) : null}
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              a: ({ href, children }) => {
+                                const tab =
+                                  href === '/settings/advanced'
+                                    ? 'advanced'
+                                    : href === '/settings/meetings'
+                                      ? 'meetings'
+                                      : undefined;
+                                if (tab) {
+                                  return onOpenSettings ? (
+                                    <button
+                                      type="button"
+                                      className="text-pro-accent underline underline-offset-4 rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+                                      onClick={() => onOpenSettings(tab)}
+                                    >
+                                      {children}
+                                    </button>
+                                  ) : (
+                                    <span>{children}</span>
+                                  );
+                                }
+                                return <a href={href}>{children}</a>;
+                              },
+                            }}
+                          >
                             {msg.isLoading
                               ? msg.content.replace(/\[Source\s+\d+\]/gi, '')
                               : msg.content}

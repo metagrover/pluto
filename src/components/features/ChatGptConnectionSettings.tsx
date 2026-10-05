@@ -160,11 +160,24 @@ export const ChatGptConnectionSettings = () => {
         </div>
         {status?.enabled && status.running && status.pluginReady ? (
           <div className="space-y-3">
+            <ol className="list-decimal space-y-1 pl-4 text-xs leading-relaxed text-pro-text-muted">
+              <li>
+                After connecting or updating, fully quit ChatGPT (⌘Q) once to
+                load the plugin.
+              </li>
+              <li>Click Start a ChatGPT chat below to open a new Work chat.</li>
+              <li>
+                Type @ and select{' '}
+                {status.pluginName === 'pluto-notes-development'
+                  ? 'Pluto (Development)'
+                  : 'Pluto'}
+                , then ask “What did we decide in my latest meeting?”
+              </li>
+            </ol>
             <p className="text-xs leading-relaxed text-pro-text-muted">
-              To finish setup, fully quit ChatGPT (⌘Q) and reopen it. Keep Pluto
-              running with access enabled, then start a new Work chat and
-              mention Pluto. ChatGPT needs this restart to load the installed
-              plugin; opening another window is not enough.
+              Keep Pluto running with access enabled. Your plugin appears under
+              Plugins → Personal on this Mac. If ChatGPT restores an older
+              screen, start a new Work chat and mention Pluto using @.
             </p>
             <button
               type="button"
@@ -178,7 +191,7 @@ export const ChatGptConnectionSettings = () => {
                 });
               }}
             >
-              Open ChatGPT
+              Start a ChatGPT chat
             </button>
           </div>
         ) : null}

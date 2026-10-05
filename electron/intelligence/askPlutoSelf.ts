@@ -4,9 +4,14 @@ export interface AskPlutoSelfReference {
   retrievalQuery: string;
 }
 
-const PERSONAL_TOPIC =
-  /\b(?:contribut\w*|work\w*|say|said|ask\w*|decid\w*|do|did|done|assign\w*|action items?|responsib\w*|role|feedback|strength\w*|weakness\w*|priorit\w*|own\w*|task\w*|mention\w*|participat\w*|achiev\w*|accomplish\w*)\b/i;
-const SELF_PRONOUN = /\b(?:i|me|my|mine|myself)\b/i;
+// Identity is needed for attribution, not for generic first-person requests.
+const PERSONAL_EVIDENCE = [
+  /\bmy\s+(?:(?:recent|current|open|past|meeting)\s+)*(?:contributions?|work|decisions?|commitments?|action items?|responsibilities|role|feedback|strengths?|weaknesses?|priorities|tasks?|participation|achievements?|accomplishments?)\b/i,
+  /\b(?:i|me|myself)\s+(?:(?:have|was|am|been|had)\s+)*(?:said|asked|decided|committed|agreed|contributed|assigned|own|owe|mentioned|participated|achieved|accomplished)\b/i,
+  /\b(?:what|which)\s+(?:did|have)\s+i\s+(?:do|done|say|ask|decide|commit|agree|contribute|mention|achieve|accomplish)\b/i,
+  /\b(?:assigned|feedback|responsibilities|action items?|tasks?|commitments?)\s+(?:to|for|about)\s+me\b|\bfeedback\s+(?:did|have)\s+i\s+(?:get|receive\w*)\b/i,
+  /\bwhat\s+(?:should|do)\s+i\s+(?:focus|prioriti\w*)\b|\babout\s+me\b/i,
+];
 const IDENTITY_QUESTION =
   /^(?:who am i|what(?:'s| is) my name|do you know who i am)[?.!]*$/i;
 const escapeRegExp = (text: string): string =>
@@ -39,9 +44,9 @@ export const resolveAskPlutoSelfReference = (
   aliases: string[] = [],
 ): AskPlutoSelfReference => {
   const asksIdentity = IDENTITY_QUESTION.test(query.trim());
-  const personalPronoun =
-    (SELF_PRONOUN.test(query) && PERSONAL_TOPIC.test(query)) ||
-    /\b(?:about|to|for)\s+me\b/i.test(query);
+  const personalPronoun = PERSONAL_EVIDENCE.some((pattern) =>
+    pattern.test(query),
+  );
   const namedSelf = mentionsName(query, selfName || '');
   const namedAlias = aliases.find((alias) => mentionsName(query, alias));
   const refersToSelf =

@@ -176,7 +176,12 @@ describe('local Pluto plugin registration', () => {
           'plugin.json',
         ),
       ).interface.displayName,
-    ).toBe('Pluto');
+    ).toBe('Pluto (Development)');
+    installPlutoLocalPlugin({
+      ...options,
+      pluginName: 'pluto-notes-development',
+    });
+    expect(readJson(catalogPath).plugins).toHaveLength(2);
   });
 
   it.each(['broken-json', 'bad-shape'])(

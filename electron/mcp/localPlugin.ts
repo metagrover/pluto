@@ -226,7 +226,10 @@ export function installPlutoLocalPlugin({
     const description =
       'Read current Pluto meeting notes for grounded conversations, feedback, comparisons, and analytics.';
     const presentation = {
-      displayName: 'Pluto',
+      displayName:
+        pluginName === 'pluto-notes-development'
+          ? 'Pluto (Development)'
+          : 'Pluto',
       composerIcon: './assets/logo.png',
       logo: './assets/logo.png',
       shortDescription: 'Conversations grounded in your meeting notes',

@@ -1,6 +1,9 @@
 import { constants } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { installInChatGptDesktop } from '../../electron/mcp/chatgptDesktop';
+import {
+  installInChatGptDesktop,
+  openChatGptDesktop,
+} from '../../electron/mcp/chatgptDesktop';
 
 function fixture() {
   const runCommand = vi.fn(
@@ -36,6 +39,17 @@ function fixture() {
 }
 
 describe('ChatGPT Desktop local plugin installer', () => {
+  it('opens a fresh Work chat rather than only activating the previous window', async () => {
+    const { runCommand } = fixture();
+    await openChatGptDesktop(runCommand);
+    expect(runCommand).toHaveBeenCalledWith(
+      '/usr/bin/open',
+      ['-a', 'ChatGPT', 'codex://threads/new?mode=work'],
+      expect.objectContaining({ timeout: 10_000 }),
+    );
+    runCommand.mockRejectedValueOnce(new Error('missing app'));
+    await expect(openChatGptDesktop(runCommand)).rejects.toThrow('missing app');
+  });
   it('locates the installed app and uses its supported CLI without a shell or editing config', async () => {
     const { options, runCommand, accessFile } = fixture();
     await installInChatGptDesktop(options);

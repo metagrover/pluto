@@ -16,6 +16,16 @@ const commandOptions: CommandOptions = {
   maxBuffer: 1024 * 1024,
 };
 
+export async function openChatGptDesktop(
+  runCommand: RunCommand = executeFile,
+): Promise<void> {
+  await runCommand(
+    '/usr/bin/open',
+    ['-a', 'ChatGPT', 'codex://threads/new?mode=work'],
+    { ...commandOptions, timeout: 10_000 },
+  );
+}
+
 export async function installInChatGptDesktop({
   homeDirectory,
   pluginName,

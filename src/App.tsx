@@ -2397,6 +2397,12 @@ function App() {
                   messages={askPlutoConversation}
                   setMessages={setAskPlutoConversation}
                   onClose={() => setActiveTab('hub')}
+                  onOpenSettings={(tab) => {
+                    setSettingsInitialTab(tab);
+                    setSettingsNavigationToken((token) => token + 1);
+                    setSelectedMeetingId(null);
+                    setActiveTab('settings');
+                  }}
                   onOpenMeeting={(meetingId, target) => {
                     setAskPlutoCitationTarget({ meetingId, ...target });
                     handleOpenMeeting(meetingId, { label: 'Back to Chat' });

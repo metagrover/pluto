@@ -6,6 +6,34 @@ import {
 } from '../../electron/intelligence/askPlutoSelf';
 
 describe('Ask Pluto confirmed self reference', () => {
+  it.each([
+    'How do I make the chat GPT connection work here?',
+    'How do I start recording?',
+    'Why aren’t my meetings showing up?',
+    'Can you help me set up Pluto?',
+    'How do I change my settings?',
+    'Tell me how this connection works',
+    'Can I ask a question?',
+    'Help me understand the project priorities',
+    'Draft an email for me',
+  ])('does not require speaker identity for a general request: %s', (query) => {
+    expect(resolveAskPlutoSelfReference(query).refersToSelf).toBe(false);
+    expect(
+      resolveAskPlutoSelfReference(query, 'Avery Chen').retrievalQuery,
+    ).toBe(query);
+  });
+
+  it.each([
+    'What did I commit to?',
+    'What feedback did I receive?',
+    'What did I do in the meeting?',
+    'Which tasks were assigned to me?',
+    'Summarize my recent contributions',
+    'What should I focus on this week?',
+  ])('requires identity for personal meeting evidence: %s', (query) => {
+    expect(resolveAskPlutoSelfReference(query).refersToSelf).toBe(true);
+  });
+
   it('resolves personal questions to the confirmed name for retrieval', () => {
     expect(
       resolveAskPlutoSelfReference(
