@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { CalendarEvent } from '../../electron/calendar/types';
 import type { RendererCaptureCounters } from '../../electron/captureDiagnostics';
 import {
+  type SilenceAutoStopDuration,
   type SilenceWatchdog,
   createSilenceWatchdog,
+  resolveSilenceAutoStopDuration,
+  SILENCE_AUTO_STOP_TIMEOUT_MS,
 } from '../autoStop/silenceWatchdog';
 import type {
   CaptureLifecycleSnapshot,
@@ -117,7 +120,7 @@ interface AudioManagerProps {
   transcriptionParticipantHints?: string[];
   systemAudioStatus?: string;
   transcriptionSettings?: TranscriptionSettings;
-  silenceAutoStopDuration?: '3' | '5' | '10' | 'disabled';
+  silenceAutoStopDuration?: SilenceAutoStopDuration;
   calendarEndTimeMs?: number | null;
   fasterNotesEnabled?: boolean;
 
@@ -235,7 +238,7 @@ export const AudioManager = ({
   onLiveTranscriptIntegrityChange,
   onRecordingStarted,
   systemAudioStatus = 'unknown',
-  silenceAutoStopDuration = '5',
+  silenceAutoStopDuration = '0.5',
   calendarEndTimeMs = null,
   fasterNotesEnabled = true,
 }: AudioManagerProps) => {
@@ -365,15 +368,11 @@ export const AudioManager = ({
   }, [silenceAutoStopDuration]);
 
   const getSilenceTimeoutMs = (): number | null => {
-    const raw = silenceAutoStopDurationRef.current;
-    if (raw === 'off' || raw === 'disabled' || raw === '0') {
-      return null;
-    }
-    const minutes = Number.parseInt(raw || '5', 10);
-    if (!Number.isFinite(minutes) || minutes <= 0) {
-      return null;
-    }
-    return minutes * 60 * 1000;
+    return resolveSilenceAutoStopDuration(
+      silenceAutoStopDurationRef.current,
+    ) === 'disabled'
+      ? null
+      : SILENCE_AUTO_STOP_TIMEOUT_MS;
   };
   const transcriptionVocabularyRef = useRef<TranscriptionVocabularySelection>({
     initialPrompt: null,
@@ -1536,7 +1535,7 @@ export const AudioManager = ({
         },
       });
       silenceWatchdogRef.current = watchdog;
-      watchdog.start(5000);
+      watchdog.start();
 
       if (
         typeof navigator !== 'undefined' &&

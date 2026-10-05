@@ -1,3 +1,4 @@
+import { DetailsMenu } from '../ui/DetailsMenu';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -1432,7 +1433,7 @@ export const PersonDossier = ({
               <span>{DREAMING_STATUS_LABEL[dreamingState]}</span>
             </div>
           ) : null}
-          <details className="person-dossier__more">
+          <DetailsMenu className="person-dossier__more">
             <summary>
               <MoreHorizontal aria-hidden="true" size={16} />
               More
@@ -1519,7 +1520,7 @@ export const PersonDossier = ({
                 </button>
               )}
             </div>
-          </details>
+          </DetailsMenu>
         </div>
       </div>
       <header className="person-dossier__identity">

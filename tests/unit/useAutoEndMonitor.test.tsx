@@ -73,7 +73,7 @@ describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
     });
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(detectionCount).toBe(2);
 
@@ -85,4 +85,73 @@ describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
 
     await act(async () => root.unmount());
   });
+});
+
+describe('short call-end grace', () => {
+  it.each(['inactive', 'resumed', 'unavailable', 'exited'])(
+    'handles %s during the 20-second inactivity grace',
+    async (outcome) => {
+      vi.useFakeTimers();
+      const stopSession = vi.fn();
+      const stopSessionRef = createRef<((reason?: string) => void) | null>();
+      stopSessionRef.current = stopSession;
+      let count = 0;
+      const active = {
+        active: true,
+        appName: 'Zoom',
+        confidence: 'high',
+        reason: 'call-app-running-with-active-audio',
+      };
+      const inactive = {
+        active: false,
+        appName: 'Zoom',
+        confidence: 'low',
+        reason: 'call-app-running-without-target-audio',
+      };
+      Object.defineProperty(window, 'ipcRenderer', {
+        configurable: true,
+        value: {
+          invoke: vi.fn(async (channel: string) => {
+            if (channel !== 'DETECT_ACTIVE_CALL') return true;
+            count += 1;
+            if (count === 1) return active;
+            if (count === 2 || outcome === 'inactive') return inactive;
+            if (outcome === 'resumed') return active;
+            return {
+              ...inactive,
+              reason:
+                outcome === 'exited'
+                  ? 'no-call-app-running'
+                  : 'browser-tab-inspection-unavailable',
+            };
+          }),
+        },
+      });
+      const root = createRoot(document.createElement('div'));
+      await act(async () =>
+        root.render(createElement(Harness, { stopSessionRef })),
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      expect(stopSession).not.toHaveBeenCalled();
+      await act(async () => vi.advanceTimersByTimeAsync(5_001));
+      if (outcome === 'exited') {
+        expect(stopSession).toHaveBeenCalledExactlyOnceWith(
+          'auto:call_app_exited',
+        );
+      } else {
+        expect(stopSession).not.toHaveBeenCalled();
+        await act(async () => vi.advanceTimersByTimeAsync(14_998));
+        expect(stopSession).not.toHaveBeenCalled();
+        await act(async () => vi.advanceTimersByTimeAsync(1));
+        if (outcome === 'inactive') {
+          expect(stopSession).toHaveBeenCalledExactlyOnceWith(
+            'auto:audio_inactive_timeout',
+          );
+        } else {
+          expect(stopSession).not.toHaveBeenCalled();
+        }
+      }
+      await act(async () => root.unmount());
+    },
+  );
 });

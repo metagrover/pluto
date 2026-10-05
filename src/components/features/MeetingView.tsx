@@ -1,3 +1,4 @@
+import { DetailsMenu } from '../ui/DetailsMenu';
 import {
   ArrowLeft,
   Check,
@@ -1701,7 +1702,7 @@ const SelectedMeetingView = ({
                   <span>{isRegeneratingNotes ? 'Writing…' : 'Regenerate'}</span>
                 </button>
               ) : null}
-              <details className="meeting-document-menu">
+              <DetailsMenu className="meeting-document-menu">
                 <summary aria-label="Meeting note actions">
                   <MoreHorizontal aria-hidden="true" size={15} />
                 </summary>
@@ -1886,7 +1887,7 @@ const SelectedMeetingView = ({
                     </div>
                   ) : null}
                 </div>
-              </details>
+              </DetailsMenu>
             </div>
           </div>
           {calendarContext ? (

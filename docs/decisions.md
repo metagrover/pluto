@@ -1509,3 +1509,11 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Decision:** Apply the existing explicit-owner review boundary to both the workspace user and other people. A name match or meeting speaker binding suggests an owner and appears under Needs confirmation; it does not populate active or delivered commitments. People list counts distinguish verified open commitments from candidates.
 - **Review:** The existing Confirm owner action establishes explicit user ownership and moves the candidate into active commitments. Clearing ownership or rejecting an item remains authoritative. Source wording, dates, notes, and original records are preserved; this is a projection change with no migration or bulk data rewrite.
 - **Continuity:** Natural commitment language remains supported in shared note extraction. Detecting a task and identifying its speaker are distinct from confirming its assignment. Existing explicitly owned commitments and recent deliveries remain visible.
+
+
+## 2026-10-05 - End detected calls promptly and cap the silence fallback at 30 seconds
+
+- **Status:** Accepted.
+- **Supersedes:** The auto-end grace timing in “2026-08-10 - Split live, final transcript, and analysis latency on Apple Silicon.” Its shared stop/finalization path and attached-call evidence rules remain in force.
+- **Decision:** Poll active-call detection every five seconds. Explicit app exit or closed-tab evidence ends recording without an additional grace period, including during pending inactivity grace. Other detected inactivity uses a 20-second cancellable grace. Enabled silence fallback uses a 30-second deadline after the last speech; legacy 3/5/10-minute settings resolve to this duration, while disabled choices remain disabled.
+- **Preservation:** Resumed call evidence and unavailable browser inspection cancel pending call-end grace. Scheduled silence fallback retains its calendar boundary. Both paths invoke the existing stop callback, drain and seal captured evidence, and finalize transcripts normally. Detection latency and delayed operating-system timer delivery can extend real-world stop timing; these settings do not guarantee platform-level call-end events.

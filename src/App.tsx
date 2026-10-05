@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
+import {
+  type SilenceAutoStopDuration,
+  resolveSilenceAutoStopDuration,
+} from './autoStop/silenceWatchdog';
 import { openMeetingPrep } from './api/meetingPrep';
 import './App.css';
 
@@ -387,9 +391,8 @@ function App() {
   const [settingsNavigationToken, setSettingsNavigationToken] = useState(0);
   const [calendarAutoNameEnabled, setCalendarAutoNameEnabled] = useState(true);
   const [calendarPromptEnabled, setCalendarPromptEnabled] = useState(true);
-  const [silenceAutoStopDuration, setSilenceAutoStopDuration] = useState<
-    '3' | '5' | '10' | 'disabled'
-  >('5');
+  const [silenceAutoStopDuration, setSilenceAutoStopDuration] =
+    useState<SilenceAutoStopDuration>('0.5');
   const [fasterNotesEnabled, setFasterNotesEnabled] = useState(true);
   const [meetingNotesTemplateSettings, setMeetingNotesTemplateSettings] =
     useState<MeetingNotesTemplateSettingsSnapshot>(() =>
@@ -953,9 +956,7 @@ function App() {
     window.ipcRenderer
       .invoke('GET_SETTING', 'silence_auto_stop_duration')
       .then((val) => {
-        if (val && ['3', '5', '10', 'disabled'].includes(val)) {
-          setSilenceAutoStopDuration(val as '3' | '5' | '10' | 'disabled');
-        }
+        setSilenceAutoStopDuration(resolveSilenceAutoStopDuration(val));
       });
     window.ipcRenderer
       .invoke('GET_SETTING', 'faster_notes_enabled')
@@ -1208,7 +1209,7 @@ function App() {
   };
 
   const handleSilenceAutoStopDurationChange = (
-    duration: '3' | '5' | '10' | 'disabled',
+    duration: SilenceAutoStopDuration,
   ) => {
     setSilenceAutoStopDuration(duration);
     window.ipcRenderer.invoke(
@@ -1386,6 +1387,17 @@ function App() {
   const handleStartingChange = async (starting: boolean) => {
     setIsStartingRecording(starting);
     if (!starting) return;
+    setRecordingStartedAtMs(null);
+    setLiveTranscript([]);
+    setLiveConversation(null);
+    setInterimTranscript('');
+    setLiveTranscriptIntegrity('healthy');
+    setCaptureHealth({
+      microphone: 'healthy',
+      systemAudio: 'healthy',
+      captureDurability: 'healthy',
+    });
+    setMeetingAskPlutoConversation([]);
     setZenVisible(true);
     setSelectedMeetingId(null);
     setFinalizingMeeting(null);

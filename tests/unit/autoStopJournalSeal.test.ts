@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSilenceWatchdog } from '../../src/autoStop/silenceWatchdog';
+import {
+  SILENCE_AUTO_STOP_TIMEOUT_MS,
+  createSilenceWatchdog,
+} from '../../src/autoStop/silenceWatchdog';
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
@@ -15,7 +18,7 @@ describe('auto-stop triggering and journal sealing contract', () => {
 
     let currentTime = 1_000_000;
     const watchdog = createSilenceWatchdog({
-      silenceTimeoutMs: 180_000,
+      silenceTimeoutMs: SILENCE_AUTO_STOP_TIMEOUT_MS,
       calendarEndTimeMs: 500_000, // already passed
       isConferenceSilent: () => true,
       onTriggerAutoStop: (reason) => {
@@ -25,8 +28,8 @@ describe('auto-stop triggering and journal sealing contract', () => {
       now: () => currentTime,
     });
 
-    // Advance 200s (> 180s silence)
-    currentTime += 200_000;
+    // Advance to the 30-second silence deadline
+    currentTime += 30_000;
     const check = watchdog.checkSilence();
     expect(check.shouldStop).toBe(true);
     expect(check.reason).toBe('auto:calendar_silence_timeout');

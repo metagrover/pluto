@@ -1,5 +1,5 @@
-export const GRACE_SHORT_MS = 60_000;
-export const GRACE_LONG_MS = 120_000;
+export const GRACE_SHORT_MS = 0;
+export const GRACE_LONG_MS = 20_000;
 
 export type PollInput = {
   active: boolean;
@@ -50,16 +50,25 @@ export function autoEndDecision(input: AutoEndInput): AutoEndAction {
     return graceActive ? { type: 'cancel_grace' } : { type: 'no_op' };
   }
 
+  // Explicit exit evidence also replaces any pending inactivity grace.
+  const hasExplicitExitEvidence =
+    poll.reason === 'no-call-app-running' ||
+    poll.reason === 'browser-call-tab-closed';
+  if (hasExplicitExitEvidence) {
+    return {
+      type: 'start_grace',
+      graceMs: GRACE_SHORT_MS,
+      reasonCode: 'call_app_exited',
+    };
+  }
+
   // Tracked app is inactive — start grace if not already running
   if (!graceActive) {
-    const hasExplicitExitEvidence =
-      poll.reason === 'no-call-app-running' ||
-      poll.reason === 'browser-call-tab-closed';
-    const reasonCode = hasExplicitExitEvidence
-      ? 'call_app_exited'
-      : 'audio_inactive_timeout';
-    const graceMs = hasExplicitExitEvidence ? GRACE_SHORT_MS : GRACE_LONG_MS;
-    return { type: 'start_grace', graceMs, reasonCode };
+    return {
+      type: 'start_grace',
+      graceMs: GRACE_LONG_MS,
+      reasonCode: 'audio_inactive_timeout',
+    };
   }
 
   // Grace already running, let it continue

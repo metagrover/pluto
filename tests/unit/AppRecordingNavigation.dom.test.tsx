@@ -6,6 +6,11 @@ import { createRoot } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CalendarEvent } from '../../electron/calendar/types';
+import type {
+  CaptureHealthState,
+  LiveTranscriptIntegrity,
+  LiveTranscriptSegment,
+} from '../../src/components/features/recordingWorkspaceModel';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -19,6 +24,7 @@ let titleAtCalendarStart: string | null = null;
 let notesAtCalendarStart: string | null = null;
 let notesAtManualStart: string | null = null;
 let calendarForTest: CalendarEvent | null = null;
+let publishRecordingPreview: (() => void) | null = null;
 const calendarListeners = new Map<string, (...args: unknown[]) => void>();
 
 vi.mock('../../src/components/AudioManager', () => ({
@@ -36,6 +42,8 @@ vi.mock('../../src/components/AudioManager', () => ({
     onCaptureHealthChange,
     onLiveTranscriptIntegrityChange,
     onCaptureLifecycleChange,
+    onLiveTranscript,
+    onInterimTranscript,
   }: {
     onStartSessionRef?: React.MutableRefObject<(() => void) | null>;
     userTitle?: string;
@@ -54,16 +62,33 @@ vi.mock('../../src/components/AudioManager', () => ({
       userNotes: string;
     }) => void;
     onSessionComplete?: (meetingId: string) => void | Promise<void>;
-    onCaptureHealthChange?: (health: {
-      microphone: 'healthy';
-      systemAudio: 'healthy';
-      captureDurability: 'healthy';
-    }) => void;
-    onLiveTranscriptIntegrityChange?: (state: 'healthy') => void;
+    onCaptureHealthChange?: (health: CaptureHealthState) => void;
+    onLiveTranscriptIntegrityChange?: (state: LiveTranscriptIntegrity) => void;
+    onLiveTranscript?: (segments: LiveTranscriptSegment[]) => void;
+    onInterimTranscript?: (text: string) => void;
     onCaptureLifecycleChange?: (snapshot: {
       state: 'idle' | 'starting' | 'recording' | 'sealing';
     }) => void;
   }) => {
+    publishRecordingPreview = () => {
+      onRecordingStarted?.(Date.now() - 192_000);
+      onLiveTranscript?.([
+        {
+          id: 'previous-recording-segment',
+          speaker: 'Me',
+          text: 'Speech from the previous recording.',
+          timestampMs: 0,
+          confirmed: true,
+        },
+      ]);
+      onInterimTranscript?.('Previous unfinished speech');
+      onCaptureHealthChange?.({
+        microphone: 'warning',
+        systemAudio: 'healthy',
+        captureDurability: 'healthy',
+      });
+      onLiveTranscriptIntegrityChange?.('lagging');
+    };
     useEffect(() => {
       if (onStartSessionRef) {
         onStartSessionRef.current = (event?: CalendarEvent) => {
@@ -174,6 +199,7 @@ describe('App recording navigation', () => {
     notesAtManualStart = null;
     window.localStorage.clear();
     calendarForTest = null;
+    publishRecordingPreview = null;
     calendarListeners.clear();
     container = document.createElement('div');
     document.body.append(container);
@@ -503,6 +529,67 @@ describe('App recording navigation', () => {
       container.querySelector('textarea[placeholder="Ask about this meeting"]'),
     ).not.toBeNull();
 
+    await act(async () => root.unmount());
+  });
+
+  it('clears the previous recording while the next capture is still starting', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_791_216_000_000);
+    const { default: App } = await import('../../src/App');
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<App />);
+      await flushPromises();
+    });
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'n', metaKey: true }),
+      );
+      await flushPromises();
+    });
+    await act(async () => {
+      publishRecordingPreview?.();
+      await flushPromises();
+    });
+    expect(
+      container.querySelector('.recording-capture-bar time')?.textContent,
+    ).toBe('03:12');
+    expect(container.textContent).toContain(
+      'Speech from the previous recording.',
+    );
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.recording-finish')?.click();
+      await flushPromises();
+      completePendingStop?.();
+      await flushPromises();
+    });
+    holdRecordingStart = true;
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'n', metaKey: true }),
+      );
+      await flushPromises();
+    });
+
+    expect(container.textContent).toContain('Starting recording');
+    expect(
+      container.querySelector('.recording-capture-bar time')?.textContent,
+    ).toBe('00:00');
+    expect(container.textContent).toContain('Preparing capture');
+    expect(container.textContent).not.toContain(
+      'Speech from the previous recording.',
+    );
+    expect(container.textContent).not.toContain('Previous unfinished speech');
+    expect(container.querySelector('.recording-health--warning')).toBeNull();
+
+    await act(async () => {
+      completePendingStart?.();
+      await flushPromises();
+    });
+    expect(container.textContent).toContain('Finish recording');
+    expect(
+      container.querySelector('.recording-capture-bar time')?.textContent,
+    ).toBe('00:00');
     await act(async () => root.unmount());
   });
 

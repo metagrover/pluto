@@ -128,7 +128,7 @@ describe('autoEndDecision', () => {
   // Phase 3: Tracked app is inactive
   // =============================================
 
-  it('returns start_grace (60s) when tracked app exited', () => {
+  it('returns start_grace (0s) when tracked app exited', () => {
     const result = autoEndDecision({
       poll: {
         active: false,
@@ -146,7 +146,7 @@ describe('autoEndDecision', () => {
     });
   });
 
-  it('returns start_grace (120s) when tracked app running but no audio', () => {
+  it('returns start_grace (20s) when tracked app running but no audio', () => {
     const result = autoEndDecision({
       poll: {
         active: false,
@@ -164,7 +164,7 @@ describe('autoEndDecision', () => {
     });
   });
 
-  it('returns start_grace (60s) when a tracked browser meeting tab closes', () => {
+  it('returns start_grace (0s) when a tracked browser meeting tab closes', () => {
     const result = autoEndDecision({
       poll: {
         active: false,
@@ -196,7 +196,7 @@ describe('autoEndDecision', () => {
     expect(result).toEqual({ type: 'no_op' });
   });
 
-  it('returns no_op when tracked app inactive but grace already running', () => {
+  it('ends immediately when explicit exit replaces a running inactivity grace', () => {
     const result = autoEndDecision({
       poll: {
         active: false,
@@ -207,7 +207,11 @@ describe('autoEndDecision', () => {
       trackedApp: 'Zoom',
       graceActive: true,
     });
-    expect(result).toEqual({ type: 'no_op' });
+    expect(result).toEqual({
+      type: 'start_grace',
+      graceMs: 0,
+      reasonCode: 'call_app_exited',
+    });
   });
 
   // =============================================
@@ -250,11 +254,11 @@ describe('autoEndDecision', () => {
   // Grace constant sanity checks
   // =============================================
 
-  it('GRACE_SHORT_MS is 60 seconds', () => {
-    expect(GRACE_SHORT_MS).toBe(60_000);
+  it('GRACE_SHORT_MS is immediate', () => {
+    expect(GRACE_SHORT_MS).toBe(0);
   });
 
-  it('GRACE_LONG_MS is 120 seconds', () => {
-    expect(GRACE_LONG_MS).toBe(120_000);
+  it('GRACE_LONG_MS is 20 seconds', () => {
+    expect(GRACE_LONG_MS).toBe(20_000);
   });
 });

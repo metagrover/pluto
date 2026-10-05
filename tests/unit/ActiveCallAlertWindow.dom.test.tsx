@@ -27,6 +27,9 @@ describe('ActiveCallAlertWindow component', () => {
 
   afterEach(() => {
     container.remove();
+    document.documentElement.className = '';
+    document.documentElement.style.colorScheme = '';
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
     window.history.replaceState({}, '', '/');
   });
@@ -99,6 +102,58 @@ describe('ActiveCallAlertWindow component', () => {
       occurrenceKey: 'meet-1',
     });
     expect(window.close).toHaveBeenCalled();
+  });
+
+  it.each(['call', 'calendar'])(
+    'applies all selected theme palettes to %s alerts',
+    async (type) => {
+      for (const [selected, expected] of [
+        ['light', 'light'],
+        ['dark', 'dark'],
+        ['terracotta', 'terracotta'],
+        ['pluto-site', 'pluto-site'],
+        ['aubergine', 'aubergine'],
+        ['coral', 'pluto-site'],
+        ['airbnb', 'pluto-site'],
+        ['slack', 'aubergine'],
+        ['claude', 'terracotta'],
+        ['celestial', 'terracotta'],
+        ['botanical', 'terracotta'],
+      ]) {
+        window.history.replaceState({}, '', `/?type=${type}&theme=${selected}`);
+        const root = createRoot(container);
+        await act(async () => root.render(<ActiveCallAlertWindow />));
+        expect(document.documentElement.className).toBe(expected);
+        expect(
+          container.querySelector(`.alert-theme--${expected}`),
+        ).not.toBeNull();
+        await act(async () => root.unmount());
+      }
+    },
+  );
+
+  it('follows system appearance changes for system-themed alerts', async () => {
+    let change: (() => void) | undefined;
+    const media = {
+      matches: true,
+      addEventListener: vi.fn((_event, callback) => {
+        change = callback;
+      }),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => media),
+    );
+    window.history.replaceState({}, '', '/?type=calendar&theme=system');
+    const root = createRoot(container);
+    await act(async () => root.render(<ActiveCallAlertWindow />));
+    expect(document.documentElement.className).toBe('dark');
+    media.matches = false;
+    await act(async () => change?.());
+    expect(document.documentElement.className).toBe('light');
+    await act(async () => root.unmount());
+    expect(media.removeEventListener).toHaveBeenCalled();
   });
 
   it('sends dismiss action when close button is clicked on calendar prompt', async () => {

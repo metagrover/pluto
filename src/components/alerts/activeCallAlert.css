@@ -1,16 +1,21 @@
+/* Reuse the application's selected theme tokens instead of a separate palette. */
 :root {
-  color-scheme: light;
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
-  --alert-surface: oklch(0.985 0.006 255);
-  --alert-surface-subtle: oklch(0.955 0.012 255);
-  --alert-border: oklch(0.88 0.018 255);
-  --alert-text-main: oklch(0.31 0.045 255);
-  --alert-text-muted: oklch(0.55 0.035 255);
-  --alert-accent: oklch(0.52 0.15 254);
-  --alert-accent-hover: oklch(0.47 0.15 254);
-  --alert-on-accent: oklch(0.98 0.006 255);
-  --alert-progress-bg: oklch(0.93 0.012 255);
-  --alert-progress: oklch(0.68 0.055 254);
+  --alert-surface: hsl(var(--pro-surface) / 0.95);
+  --alert-surface-subtle: hsl(var(--pro-hover));
+  --alert-border: hsl(var(--pro-border));
+  --alert-text-main: hsl(var(--pro-text-main));
+  --alert-text-muted: hsl(var(--pro-text-muted));
+  --alert-accent: hsl(var(--pro-accent));
+  --alert-accent-subtle: hsl(var(--pro-accent) / 0.15);
+  --alert-accent-hover: color-mix(
+    in srgb,
+    hsl(var(--pro-accent)) 90%,
+    hsl(var(--pro-text-main))
+  );
+  --alert-on-accent: hsl(var(--pro-bg));
+  --alert-progress-bg: hsl(var(--pro-border));
+  --alert-progress: hsl(var(--pro-accent) / 0.65);
+  background: transparent;
 }
 
 html,
@@ -33,7 +38,9 @@ body {
   border-radius: 8px;
   border: 1px solid var(--alert-border);
   background: var(--alert-surface);
-  box-shadow: 0 8px 24px oklch(0.26 0.035 255 / 0.14);
+  box-shadow: 0 10px 24px hsl(var(--pro-text-main) / 0.14);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   position: relative;
   display: flex;
   align-items: center;
@@ -43,45 +50,8 @@ body {
   padding: 10px 12px;
 }
 
-.active-call-alert--call.alert-theme--light {
-  --alert-surface: hsl(60 4% 96% / 0.95);
-  --alert-surface-subtle: hsl(0 0% 92% / 0.75);
-  --alert-border: hsl(0 0% 92%);
-  --alert-text-main: hsl(0 0% 22%);
-  --alert-text-muted: hsl(0 0% 60%);
-  --alert-accent: hsl(212 80% 42%);
-  --alert-accent-subtle: hsl(212 80% 42% / 0.15);
-  --alert-accent-hover: hsl(212 80% 38%);
-  --alert-on-accent: white;
-  background: var(--alert-surface);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 10px 24px rgb(0 0 0 / 0.1);
+.active-call-alert--call {
   animation: call-alert-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.active-call-alert--call.alert-theme--dark {
-  color-scheme: dark;
-  --alert-surface: hsl(0 0% 12% / 0.95);
-  --alert-surface-subtle: hsl(0 0% 18% / 0.8);
-  --alert-border: hsl(0 0% 18%);
-  --alert-text-main: hsl(0 0% 90%);
-  --alert-text-muted: hsl(0 0% 60%);
-  --alert-accent: hsl(212 90% 65%);
-  --alert-accent-subtle: hsl(212 90% 65% / 0.15);
-  --alert-accent-hover: hsl(212 90% 60%);
-  --alert-on-accent: hsl(0 0% 10%);
-  --alert-progress-bg: hsl(0 0% 18%);
-  --alert-progress: hsl(212 90% 65% / 0.65);
-  background: var(--alert-surface);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 10px 24px rgb(0 0 0 / 0.28);
-  animation: call-alert-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.active-call-alert--call .status-icon {
-  background: var(--alert-accent-subtle);
 }
 
 .active-call-alert--call .title {
@@ -150,7 +120,7 @@ body {
   width: 34px;
   height: 34px;
   border-radius: 7px;
-  background: oklch(0.93 0.035 254);
+  background: var(--alert-accent-subtle);
   color: var(--alert-accent);
   display: inline-flex;
   align-items: center;
@@ -242,7 +212,7 @@ body {
   height: 34px;
   background: transparent;
   color: var(--alert-text-muted);
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-family: var(--font-main);
   font-size: 11px;
   font-weight: 600;
   padding: 0 8px;
@@ -260,7 +230,7 @@ body {
   height: 34px;
   background: var(--alert-accent);
   color: var(--alert-on-accent);
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-family: var(--font-main);
   font-size: 11px;
   line-height: 1;
   font-weight: 600;
@@ -281,7 +251,7 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background-color: #fb7185;
+  background-color: hsl(var(--pro-urgent));
   flex-shrink: 0;
   animation: alert-record-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
@@ -326,7 +296,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .active-call-alert--call,
+  .active-call-alert,
   .close-alert,
   .take-notes {
     animation: none;

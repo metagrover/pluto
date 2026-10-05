@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import plutoLogo from '../../assets/brand/pluto_logo.svg?inline';
 import plutoLogoDark from '../../assets/brand/pluto_logo_dark_mode.svg?inline';
 import { formatRelativeStartTime } from '../../utils/relativeStartTime';
@@ -9,7 +16,6 @@ type AlertData =
   | {
       type: 'call';
       appName: string;
-      theme: 'light' | 'dark';
     }
   | {
       type: 'calendar';
@@ -19,6 +25,22 @@ type AlertData =
       hasLink: boolean;
       attendees?: number;
     };
+
+// Match App's persisted theme aliases; use the same CSS tokens in this window.
+const resolveAlertTheme = (
+  systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches,
+): string => {
+  const selected =
+    new URLSearchParams(window.location.search).get('theme') || 'system';
+  if (selected === 'system') return systemDark ? 'dark' : 'light';
+  if (['coral', 'airbnb', 'pluto-site'].includes(selected)) return 'pluto-site';
+  if (['slack', 'aubergine'].includes(selected)) return 'aubergine';
+  if (['claude', 'celestial', 'botanical', 'terracotta'].includes(selected))
+    return 'terracotta';
+  return ['light', 'dark', 'midnight', 'paper'].includes(selected)
+    ? selected
+    : 'light';
+};
 
 const getAlertData = (): AlertData => {
   const params = new URLSearchParams(window.location.search);
@@ -59,12 +81,25 @@ const getAlertData = (): AlertData => {
   return {
     type: 'call',
     appName: normalized || 'Call',
-    theme: params.get('theme') === 'dark' ? 'dark' : 'light',
   };
 };
 
 export const ActiveCallAlertWindow = () => {
   const alertData = useMemo(getAlertData, []);
+  const [theme, setTheme] = useState(() => resolveAlertTheme());
+  useLayoutEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      const next = resolveAlertTheme(media.matches);
+      document.documentElement.className = next;
+      document.documentElement.style.colorScheme =
+        next === 'dark' ? 'dark' : 'light';
+      setTheme(next);
+    };
+    applyTheme();
+    media.addEventListener('change', applyTheme);
+    return () => media.removeEventListener('change', applyTheme);
+  }, []);
   const progressBarRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef(0);
   const isPausedRef = useRef(false);
@@ -182,9 +217,7 @@ export const ActiveCallAlertWindow = () => {
 
   return (
     <div
-      className={`active-call-alert active-call-alert--${isCalendar ? 'calendar' : 'call'}${
-        !isCalendar ? ` alert-theme--${alertData.theme}` : ''
-      }`}
+      className={`active-call-alert active-call-alert--${isCalendar ? 'calendar' : 'call'} alert-theme--${theme}`}
       onMouseEnter={pauseCountdown}
       onMouseLeave={resumeCountdown}
     >
@@ -220,7 +253,7 @@ export const ActiveCallAlertWindow = () => {
         ) : (
           <img
             className="pluto-status-logo"
-            src={alertData.theme === 'dark' ? plutoLogoDark : plutoLogo}
+            src={theme === 'dark' ? plutoLogoDark : plutoLogo}
             alt=""
           />
         )}

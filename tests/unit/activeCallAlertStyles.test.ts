@@ -51,18 +51,19 @@ describe('active call alert styles', () => {
     expect(hasReducedMotion).toBe(true);
   });
 
-  it('provides current Pluto light and dark tokens only for call alerts', () => {
-    const light = declarationsFor(
-      '.active-call-alert--call.alert-theme--light',
+  it('uses shared app theme tokens for both call and calendar alerts', () => {
+    const tokens = declarationsFor(':root');
+    expect(tokens.get('--alert-surface')).toBe(
+      'hsl(var(--pro-surface) / 0.95)',
     );
-    const dark = declarationsFor('.active-call-alert--call.alert-theme--dark');
-
-    expect(light.get('--alert-surface')).toBe('hsl(60 4% 96% / 0.95)');
-    expect(light.get('backdrop-filter')).toBe('blur(12px)');
-    expect(dark.get('color-scheme')).toBe('dark');
-    expect(dark.get('--alert-surface')).toBe('hsl(0 0% 12% / 0.95)');
+    expect(tokens.get('--alert-accent')).toBe('hsl(var(--pro-accent))');
+    expect(tokens.get('--alert-text-main')).toBe('hsl(var(--pro-text-main))');
+    expect(tokens.get('background')).toBe('transparent');
+    expect(declarationsFor('.active-call-alert').get('backdrop-filter')).toBe(
+      'blur(12px)',
+    );
     expect(
-      ruleFor('.active-call-alert--calendar.alert-theme--dark'),
-    ).toBeUndefined();
+      readFileSync('src/components/alerts/activeCallAlert.main.tsx', 'utf8'),
+    ).toContain("import '../../index.css'");
   });
 });

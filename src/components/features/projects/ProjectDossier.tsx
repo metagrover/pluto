@@ -1,3 +1,4 @@
+import { DetailsMenu } from '../../ui/DetailsMenu';
 import { Check, MoreHorizontal, Pencil, Star, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BugReportArea } from '../../../../electron/bugReports';
@@ -454,7 +455,7 @@ export const ProjectDossier = ({
             />
             <span>{isStarred ? 'Primary Focus' : 'Star'}</span>
           </button>
-          <details ref={moreDetailsRef} className="relative">
+          <DetailsMenu ref={moreDetailsRef} className="relative">
             <summary className={`${quietButton} cursor-pointer list-none`}>
               <MoreHorizontal aria-hidden="true" className="h-4 w-4" />
               More
@@ -529,7 +530,7 @@ export const ProjectDossier = ({
                 Delete project
               </button>
             </div>
-          </details>
+          </DetailsMenu>
         </div>
       </div>
 

@@ -153,7 +153,7 @@ describe('SettingsTab', () => {
         <SettingsTab
           {...defaultProps}
           initialTab="meetings"
-          silenceAutoStopDuration="5"
+          silenceAutoStopDuration="disabled"
           setSilenceAutoStopDuration={setDuration}
         />,
       ),
@@ -167,12 +167,12 @@ describe('SettingsTab', () => {
     );
     const option = [
       ...document.querySelectorAll<HTMLElement>('[role="option"]'),
-    ].find((item) => item.textContent === '10 minutes')!;
+    ].find((item) => item.textContent === '30 seconds (Default)')!;
     await act(async () => option.click());
-    expect(setDuration).toHaveBeenCalledWith('10');
+    expect(setDuration).toHaveBeenCalledWith('0.5');
     expect(window.ipcRenderer.invoke).toHaveBeenCalledWith('SET_SETTING', {
       key: 'silence_auto_stop_duration',
-      value: '10',
+      value: '0.5',
     });
     act(() => root.unmount());
   });

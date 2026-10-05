@@ -1,3 +1,13 @@
+export type SilenceAutoStopDuration = '0.5' | 'disabled';
+
+export const SILENCE_AUTO_STOP_TIMEOUT_MS = 30_000;
+
+// Legacy minute-based settings now use the shorter enabled timeout.
+export const resolveSilenceAutoStopDuration = (
+  value: unknown,
+): SilenceAutoStopDuration =>
+  value === 'disabled' || value === 'off' || value === '0' ? 'disabled' : '0.5';
+
 export type SilenceWatchdogOptions = {
   /** Silence threshold duration in milliseconds, or null if auto-stop is disabled */
   silenceTimeoutMs: number | (() => number | null) | null;
@@ -19,7 +29,8 @@ export type SilenceCheckResult = {
 export class SilenceWatchdog {
   private lastSpeechTimestampMs: number;
   private armed = true;
-  private intervalId: number | null = null;
+  private timerId: number | null = null;
+  private intervalMs = 1000;
 
   constructor(private readonly options: SilenceWatchdogOptions) {
     const getTime = options.now ?? Date.now;
@@ -33,6 +44,7 @@ export class SilenceWatchdog {
     if (!this.armed) return;
     const getTime = this.options.now ?? Date.now;
     this.lastSpeechTimestampMs = timestampMs ?? getTime();
+    if (this.timerId !== null) this.scheduleCheck();
   }
 
   /**
@@ -92,18 +104,39 @@ export class SilenceWatchdog {
   }
 
   /**
-   * Starts an interval loop checking silence at regular intervals.
+   * Checks silence regularly and at the exact silence deadline.
    */
-  start(intervalMs = 5000): void {
+  start(intervalMs = 1000): void {
     this.stop();
     this.armed = true;
-    this.intervalId = window.setInterval(() => {
+    this.intervalMs = intervalMs;
+    this.scheduleCheck();
+  }
+
+  private scheduleCheck(): void {
+    this.stop();
+    const timeoutMs =
+      typeof this.options.silenceTimeoutMs === 'function'
+        ? this.options.silenceTimeoutMs()
+        : this.options.silenceTimeoutMs;
+    const nowMs = (this.options.now ?? Date.now)();
+    const remainingMs =
+      timeoutMs === null ? 0 : timeoutMs - (nowMs - this.lastSpeechTimestampMs);
+    // Check at the silence deadline even when speech resets it between ticks.
+    const delayMs =
+      remainingMs > 0
+        ? Math.min(this.intervalMs, remainingMs)
+        : this.intervalMs;
+    this.timerId = window.setTimeout(() => {
+      this.timerId = null;
       const result = this.checkSilence();
       if (result.shouldStop && result.reason) {
-        this.stop();
+        this.armed = false;
         this.options.onTriggerAutoStop?.(result.reason);
+      } else {
+        this.scheduleCheck();
       }
-    }, intervalMs);
+    }, delayMs);
   }
 
   /**
@@ -115,9 +148,9 @@ export class SilenceWatchdog {
   }
 
   stop(): void {
-    if (this.intervalId !== null) {
-      window.clearInterval(this.intervalId);
-      this.intervalId = null;
+    if (this.timerId !== null) {
+      window.clearTimeout(this.timerId);
+      this.timerId = null;
     }
   }
 }

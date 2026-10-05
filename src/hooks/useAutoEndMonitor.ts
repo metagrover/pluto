@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
 import { autoEndDecision } from '../autoEnd/decision';
 
-const AUTO_END_POLL_INTERVAL_MS = 10_000;
+const AUTO_END_POLL_INTERVAL_MS = 5_000;
 const TOAST_AUTO_DISMISS_MS = 30_000;
 
 type UseAutoEndMonitorArgs = {
@@ -63,9 +63,10 @@ export const useAutoEndMonitor = ({
     }
 
     let cancelled = false;
+    let stopRequested = false;
 
     const poll = async () => {
-      if (pollInFlightRef.current || cancelled) return;
+      if (pollInFlightRef.current || cancelled || stopRequested) return;
       pollInFlightRef.current = true;
 
       try {
@@ -108,6 +109,7 @@ export const useAutoEndMonitor = ({
             break;
 
           case 'start_grace': {
+            clearGraceTimer();
             const { graceMs, reasonCode } = action;
             const graceSeconds = Math.round(graceMs / 1000);
 
@@ -121,8 +123,9 @@ export const useAutoEndMonitor = ({
             });
 
             graceActiveRef.current = true;
-            graceTimerRef.current = window.setTimeout(() => {
+            const finish = () => {
               if (cancelled) return;
+              stopRequested = true;
               graceTimerRef.current = null;
               graceActiveRef.current = false;
 
@@ -150,7 +153,12 @@ export const useAutoEndMonitor = ({
               dismissTimeoutRef.current = window.setTimeout(() => {
                 dismissAutoEndToast();
               }, TOAST_AUTO_DISMISS_MS);
-            }, graceMs);
+            };
+            if (graceMs === 0) {
+              finish();
+            } else {
+              graceTimerRef.current = window.setTimeout(finish, graceMs);
+            }
             break;
           }
 

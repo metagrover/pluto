@@ -14,6 +14,7 @@ export type CalendarPromptAlertPayload = {
   start: string;
   hasConferenceLink?: boolean;
   attendeeCount?: number;
+  theme?: string;
 };
 
 type ActiveCallAlertControllerOptions = {
@@ -142,7 +143,7 @@ export const createActiveCallAlertController = ({
 
   const show = (
     appName: string,
-    theme: 'light' | 'dark',
+    theme: string,
     anchorBounds?: Rectangle,
   ): boolean => {
     if (
@@ -163,7 +164,7 @@ export const createActiveCallAlertController = ({
     if (devServerUrl) {
       const base = new URL('active-call-alert.html', devServerUrl).toString();
       void alertWin.loadURL(
-        `${base}?type=call&appName=${encodeURIComponent(appName)}&theme=${theme}`,
+        `${base}?type=call&appName=${encodeURIComponent(appName)}&theme=${encodeURIComponent(theme)}`,
       );
     } else {
       void alertWin.loadFile(
@@ -188,6 +189,7 @@ export const createActiveCallAlertController = ({
       occurrenceKey: payload.occurrenceKey,
       title: payload.title,
       start: payload.start,
+      theme: payload.theme || 'system',
     };
     if (payload.hasConferenceLink) {
       queryParams.hasLink = 'true';

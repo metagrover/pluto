@@ -1,5 +1,6 @@
 import ReactDOM from 'react-dom/client';
 import { ActiveCallAlertWindow } from './ActiveCallAlertWindow';
+import '../../index.css';
 import './activeCallAlert.css';
 
 const rootElement = document.getElementById('root');

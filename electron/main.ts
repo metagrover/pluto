@@ -3265,7 +3265,7 @@ app.whenReady().then(async () => {
       if (typeof appName !== 'string') return false;
       const normalized = appName.trim();
       if (!normalized) return false;
-      const resolvedTheme = theme === 'dark' ? 'dark' : 'light';
+      const resolvedTheme = db.getSetting('theme') || theme || 'system';
       const anchorBounds =
         win && !win.isDestroyed() ? win.getBounds() : undefined;
       return activeCallAlertController.show(
@@ -3324,6 +3324,7 @@ app.whenReady().then(async () => {
           start: promptEvent.start || new Date().toISOString(),
           hasConferenceLink: Boolean(promptEvent.hasConferenceLink),
           attendeeCount: promptEvent.attendeeCount,
+          theme: db.getSetting('theme') || 'system',
         },
         anchorBounds,
       );

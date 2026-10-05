@@ -1,5 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSilenceWatchdog } from '../../src/autoStop/silenceWatchdog';
+// @vitest-environment happy-dom
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  SILENCE_AUTO_STOP_TIMEOUT_MS,
+  resolveSilenceAutoStopDuration,
+  createSilenceWatchdog,
+} from '../../src/autoStop/silenceWatchdog';
 
 describe('silence watchdog auto-stop coordinator', () => {
   let currentTime = 1_000_000;
@@ -117,5 +123,57 @@ describe('silence watchdog auto-stop coordinator', () => {
       reason: null,
     });
     expect(onTriggerAutoStop).not.toHaveBeenCalled();
+  });
+});
+
+describe('30-second silence policy', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it.each([null, undefined, '3', '5', '10', '0.5'])(
+    'uses 30 seconds for an enabled or legacy setting (%s)',
+    (setting) => {
+      expect(resolveSilenceAutoStopDuration(setting)).toBe('0.5');
+      expect(SILENCE_AUTO_STOP_TIMEOUT_MS).toBe(30_000);
+    },
+  );
+
+  it.each(['disabled', 'off', '0'])(
+    'preserves disabled setting %s',
+    (setting) => {
+      expect(resolveSilenceAutoStopDuration(setting)).toBe('disabled');
+    },
+  );
+
+  it('stops at 30 seconds after the last speech, including between polling ticks', async () => {
+    vi.useFakeTimers();
+    const onTriggerAutoStop = vi.fn();
+    const watchdog = createSilenceWatchdog({
+      silenceTimeoutMs: SILENCE_AUTO_STOP_TIMEOUT_MS,
+      isConferenceSilent: () => true,
+      onTriggerAutoStop,
+    });
+    watchdog.start();
+    await vi.advanceTimersByTimeAsync(750);
+    watchdog.recordSpeechActivity();
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(onTriggerAutoStop).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onTriggerAutoStop).toHaveBeenCalledExactlyOnceWith(
+      'auto:silence_timeout',
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(onTriggerAutoStop).toHaveBeenCalledOnce();
+    watchdog.disarm();
+  });
+
+  it('keeps a scheduled meeting recording during a silent pause before its end', () => {
+    const watchdog = createSilenceWatchdog({
+      silenceTimeoutMs: SILENCE_AUTO_STOP_TIMEOUT_MS,
+      calendarEndTimeMs: 120_000,
+      isConferenceSilent: () => true,
+      now: () => 0,
+    });
+    watchdog.recordSpeechActivity(-30_000);
+    expect(watchdog.checkSilence().shouldStop).toBe(false);
   });
 });

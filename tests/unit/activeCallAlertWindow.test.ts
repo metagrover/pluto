@@ -89,6 +89,7 @@ describe('activeCallAlertWindow', () => {
       {
         query: {
           type: 'calendar',
+          theme: 'system',
           occurrenceKey: 'meeting-123',
           title: 'Design Review',
           start: '2026-09-12T21:00:00.000Z',
@@ -128,6 +129,39 @@ describe('activeCallAlertWindow', () => {
       expect.stringContaining('occurrenceKey=meeting-456'),
     );
   });
+
+  it.each(['dark', 'terracotta', 'pluto-site', 'aubergine', 'system'])(
+    'forwards %s to calendar alerts in development and packaged builds',
+    async (theme) => {
+      const { BrowserWindow } = await import('electron');
+      const { createActiveCallAlertController } = await import(
+        '../../electron/windows/activeCallAlertWindow'
+      );
+      for (const devServerUrl of [undefined, 'http://localhost:5173']) {
+        const controller = createActiveCallAlertController({
+          preloadPath: '/preload.js',
+          rendererDist: '/dist',
+          devServerUrl,
+        });
+        controller.showCalendarPrompt({
+          occurrenceKey: 'neutral',
+          title: 'Meeting',
+          start: '2026-10-05T20:00:00Z',
+          theme,
+        });
+        const instance = vi.mocked(BrowserWindow).mock.results.at(-1)?.value;
+        if (devServerUrl) {
+          expect(
+            new URL(instance.loadURL.mock.calls[0][0]).searchParams.get(
+              'theme',
+            ),
+          ).toBe(theme);
+        } else {
+          expect(instance.loadFile.mock.calls[0][1].query.theme).toBe(theme);
+        }
+      }
+    },
+  );
 
   it('closes calendar prompt alert when closeCalendarPrompt is called', async () => {
     const { BrowserWindow } = await import('electron');

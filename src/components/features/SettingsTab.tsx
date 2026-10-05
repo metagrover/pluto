@@ -1,3 +1,4 @@
+import type { SilenceAutoStopDuration } from '../../autoStop/silenceWatchdog';
 import {
   BookOpen,
   Check,
@@ -66,8 +67,8 @@ interface SettingsTabProps {
   setCalendarAutoNameEnabled?: (val: boolean) => void;
   calendarPromptEnabled?: boolean;
   setCalendarPromptEnabled?: (val: boolean) => void;
-  silenceAutoStopDuration?: '3' | '5' | '10' | 'disabled';
-  setSilenceAutoStopDuration?: (val: '3' | '5' | '10' | 'disabled') => void;
+  silenceAutoStopDuration?: SilenceAutoStopDuration;
+  setSilenceAutoStopDuration?: (val: SilenceAutoStopDuration) => void;
   fasterNotesEnabled?: boolean;
   setFasterNotesEnabled?: (val: boolean) => void;
   meetingNotesTemplateSettings?: MeetingNotesTemplateSettingsSnapshot;
@@ -310,7 +311,7 @@ export const SettingsTab = ({
   setCalendarAutoNameEnabled,
   calendarPromptEnabled = true,
   setCalendarPromptEnabled,
-  silenceAutoStopDuration = '5',
+  silenceAutoStopDuration = '0.5',
   setSilenceAutoStopDuration,
   fasterNotesEnabled = true,
   setFasterNotesEnabled,
@@ -1052,21 +1053,19 @@ export const SettingsTab = ({
 
             <SettingsRow
               label="Auto-stop on prolonged silence"
-              helper="Automatically stop recording after continuous silence once the scheduled meeting ends or conference audio goes quiet."
+              helper="Stop recording after 30 seconds of continuous silence once the scheduled meeting ends, or when conference audio is quiet with no scheduled meeting."
               actionControl={false}
             >
               <SearchSelect
                 ariaLabel="Auto-stop on prolonged silence duration"
-                value={silenceAutoStopDuration || '5'}
+                value={silenceAutoStopDuration || '0.5'}
                 searchable={false}
                 options={[
-                  { value: '3', label: '3 minutes' },
-                  { value: '5', label: '5 minutes (Default)' },
-                  { value: '10', label: '10 minutes' },
+                  { value: '0.5', label: '30 seconds (Default)' },
                   { value: 'disabled', label: 'Disabled' },
                 ]}
                 onValueChange={(value) => {
-                  const val = value as '3' | '5' | '10' | 'disabled';
+                  const val = value as SilenceAutoStopDuration;
                   setSilenceAutoStopDuration?.(val);
                   persistSetting('silence_auto_stop_duration', val);
                 }}
