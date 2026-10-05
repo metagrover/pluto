@@ -25,8 +25,10 @@
 
 Pluto turns conversations into a connected working memory. Capture meeting audio,
 follow a local transcript, and return to notes, decisions, commitments, and the
-context behind them. People and projects connect that history across meetings;
-Ask Pluto helps you find answers with links back to supporting evidence.
+context behind them. Voice ID recognizes familiar speakers, People and Projects
+connect your history, and Ask Pluto helps you explore it with links to supporting
+evidence. Already use ChatGPT? The optional plugin brings your synthesized
+meeting notes into the conversation there, too.
 
 Capture and speech recognition run on your Mac. For summaries and chat, choose a
 local model through Ollama or configure a cloud provider with your own API key.
@@ -45,15 +47,50 @@ on them.
   FluidAudio and Core ML for live text and final transcription.
 - **Return to the important details.** Review meeting notes, decisions, action
   items, and searchable transcripts with paths back to source evidence.
-- **Keep context across meetings.** People, Projects, and commitments bring
-  related conversations together.
 - **Prepare for the next conversation.** Use local calendar context and previous
   discussions to build meeting preparation.
-- **Ask questions across your history.** Ask Pluto uses accumulated meeting
-  context and provides citations to supporting material.
-- **Review speaker identity.** Local speaker evidence supports attribution;
-  calendar attendees are hints, not proof of who spoke. Identity confirmations
-  and manual corrections remain important.
+
+## A memory that builds from one conversation to the next
+
+### Recognize the voice, remember the person
+
+Confirm who a speaker is, and eligible voice samples build a local Voice ID
+profile. In future meetings, Pluto can recognize that voice and automatically
+map clear matches to the person you’ve identified. That means less repeated
+work turning “Speaker 1” into a name after every call. Uncertain matches still
+need your review; you can correct labels and manage or delete voice samples in
+People. Calendar attendees provide context, not proof of who spoke.
+
+### Keep the thread across people and projects
+
+People and Project dossiers bring linked conversations into one place: what
+you’ve discussed, decisions, commitments, and recurring themes. Synthesis helps
+you see how those threads connect as your meeting history grows. Before the next
+catch-up or project review, return to the accumulated context and follow the
+links back to its source meetings.
+
+### Ask about today, or take a step back
+
+Ask Pluto draws on meetings and connected people and project context. Ask “What
+do I owe Maya?” before a call, or “What keeps coming up across this project?”
+when you need a wider view. Continue with follow-up questions and use citations
+to check the evidence behind the answer.
+
+### Bring your meeting context into ChatGPT
+
+If you already use the ChatGPT desktop app, the optional Pluto plugin lets it
+find and read your synthesized meeting notes. Explore decisions, prepare for a
+follow-up, or think through your next move without copying notes into each chat.
+
+With both apps on the same Mac, connect from Pluto Settings, fully quit and
+reopen ChatGPT to load the plugin, then mention **@Pluto** in a Work chat. Keep
+Pluto running with access enabled. See the
+[connection setup guide](docs/chatgpt-connection.md).
+
+Enabling makes all meeting notes available through the connection; retrieved
+notes are sent to OpenAI. The plugin reads meeting notes rather than People or
+Project dossiers, and excludes raw transcripts and recordings. Disabling stops
+future access; notes already shared in ChatGPT remain there.
 
 ## Install Pluto
 
