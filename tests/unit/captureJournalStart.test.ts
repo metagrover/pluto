@@ -1,7 +1,10 @@
+import { systemPreferences } from 'electron';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as captureJournal from '../../electron/captureJournal';
 import { handleAudioCaptureJournalStart } from '../../electron/captureJournalStart';
 import { captureSessionLease } from '../../electron/captureSessionLease';
+import { getRecordingReadinessStatus } from '../../electron/recordingReadiness';
+import type { ParakeetFinalClient } from '../../electron/transcription/parakeetFinalClient';
 
 vi.mock('electron', () => ({
   app: { isPackaged: false, getAppPath: () => '' },
@@ -37,6 +40,7 @@ describe('handleAudioCaptureJournalStart', () => {
       parakeetFinalClient: null,
       parakeetModelRoot: '',
       audiocapPath: '',
+      systemAudioPermission: true,
     },
     watchCaptureOwner: vi.fn(),
     knowledgeSynthesisPause: { acquire: vi.fn(), release: vi.fn() },
@@ -60,6 +64,48 @@ describe('handleAudioCaptureJournalStart', () => {
     });
     defaultOptions.captureSessionLease.release.mockReturnValue(true);
   });
+
+  it.each([true, false])(
+    'uses the real readiness check at journal admission (verified audio=%s)',
+    async (systemAudioPermission) => {
+      const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', {
+        value: 'darwin',
+        configurable: true,
+      });
+      vi.mocked(systemPreferences.getMediaAccessStatus).mockReturnValue(
+        'granted',
+      );
+      try {
+        const start = handleAudioCaptureJournalStart({
+          ...defaultOptions,
+          checkReadiness: getRecordingReadinessStatus,
+          readinessParams: {
+            parakeetFinalClient: {
+              getPreparedCapability: () => ({
+                ready: true,
+                engine: 'parakeet_coreml',
+                liveEngine: 'parakeet_eou_320ms',
+                modelVersion: 'test-model',
+              }),
+            } as unknown as ParakeetFinalClient,
+            parakeetModelRoot: '/mock/models',
+            audiocapPath: process.execPath,
+            systemAudioPermission,
+          },
+        });
+        if (systemAudioPermission) {
+          await expect(start).resolves.toEqual({ schemaVersion: 3 });
+          expect(captureJournal.createCaptureJournal).toHaveBeenCalled();
+        } else {
+          await expect(start).rejects.toThrow('recording_not_ready');
+          expect(captureJournal.createCaptureJournal).not.toHaveBeenCalled();
+        }
+      } finally {
+        Object.defineProperty(process, 'platform', original);
+      }
+    },
+  );
 
   it('throws recording_not_ready and prevents lease acquisition if not ready', async () => {
     const checkReadiness = vi.fn().mockResolvedValue({

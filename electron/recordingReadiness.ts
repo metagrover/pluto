@@ -27,7 +27,7 @@ type ReadinessOptions = {
   parakeetFinalClient: ParakeetFinalClient | null;
   parakeetModelRoot: string;
   audiocapPath: string;
-  systemAudioPermission?: boolean;
+  systemAudioPermission: boolean;
 };
 
 const evaluateRecordingReadiness = (

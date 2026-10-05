@@ -2762,6 +2762,7 @@ app.whenReady().then(async () => {
             parakeetFinalClient,
             parakeetModelRoot,
             audiocapPath: getAudioCapExecPath(),
+            systemAudioPermission: systemAudioPermissionVerified,
           },
           watchCaptureOwner,
           knowledgeSynthesisPause,

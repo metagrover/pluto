@@ -91,6 +91,7 @@ describe('recordingReadiness', () => {
       parakeetFinalClient: mockParakeetClient,
       parakeetModelRoot,
       audiocapPath,
+      systemAudioPermission: true,
     });
     expect(result.preparationError).toBe('parakeet_process_exited');
     expect(result.details.parakeetModel).toBe(false);
@@ -104,6 +105,7 @@ describe('recordingReadiness', () => {
       parakeetFinalClient: mockParakeetClient,
       parakeetModelRoot,
       audiocapPath,
+      systemAudioPermission: true,
     });
     expect(result.preparationError).toBe('parakeet_setup_failed');
     expect(JSON.stringify(result)).not.toContain('secret-token');
