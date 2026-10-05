@@ -77,9 +77,11 @@ main() {
     exit 0
   fi
   destination="$applications/Pluto.app"
+  previous_requirement=''
   [[ ! -L $destination ]] || fail 'The installation destination is a symbolic link.'
   if [[ -e $destination ]]; then
     [[ $(plutil -extract CFBundleIdentifier raw -o - "$destination/Contents/Info.plist") == com.pluto.app ]] || fail 'The destination contains a different app.'
+    previous_requirement=$(codesign -dr - "$destination" 2>&1 | sed -n 's/^# designated => //p')
   fi
   staging=$(mktemp -d "$applications/.pluto-install.XXXXXX")
   ditto "$app" "$staging/Pluto.app"
@@ -89,6 +91,12 @@ main() {
   mv "$staging/Pluto.app" "$destination"
   installed=true
   printf 'Installed Pluto %s at %s. Existing meetings, settings, and models are preserved.\n' "$version" "$destination"
+  requirement=$(codesign -dr - "$destination" 2>&1 | sed -n 's/^# designated => //p')
+  if "$fresh_profile" || [[ -n $previous_requirement && $requirement == cdhash* && $requirement != "$previous_requirement" ]]; then
+    printf 'Resetting only Pluto’s old macOS permission decisions so this build can request access directly.\n'
+    tccutil reset All com.pluto.app || fail 'Could not reset Pluto permissions. Your app and data are preserved; reset Pluto permissions before launching.'
+    tccutil reset All com.pluto.app.calendar-helper || printf 'Calendar helper permissions could not be reset automatically.\n' >&2
+  fi
   if "$fresh_profile"; then
     mkdir -p "$HOME/Library/Application Support"
     profile=$(mktemp -d "$HOME/Library/Application Support/pluto-first-run.XXXXXX")

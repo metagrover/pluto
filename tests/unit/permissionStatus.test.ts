@@ -1,12 +1,40 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import {
   isGrantedStatus,
+  refreshRecordingPermissions,
   resolveMicrophoneStatus,
   resolveSystemAudioStatus,
   shouldRunBootPermissionProbe,
 } from '../../src/utils/permissions';
 
 describe('permission status helpers', () => {
+  test('refreshes changed permissions without relaunching the app', async () => {
+    const invoke = vi.fn(async (channel: string) =>
+      channel === 'CHECK_MICROPHONE_PERMISSION' ? 'granted' : true,
+    );
+    const probeMicrophone = vi.fn(async () => true);
+    expect(
+      await refreshRecordingPermissions({ invoke, probeMicrophone }),
+    ).toEqual({ mic: 'granted', systemAudio: 'granted' });
+    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+      'CHECK_MICROPHONE_PERMISSION',
+      'SYSTEM_AUDIO_PROBE',
+    ]);
+    expect(probeMicrophone).not.toHaveBeenCalled();
+  });
+  test('keeps a denial visible and allows an explicit retry to recover', async () => {
+    const invoke = vi.fn(async (channel: string) =>
+      channel === 'CHECK_MICROPHONE_PERMISSION' ? 'denied' : true,
+    );
+    const probeMicrophone = vi.fn(async () => false);
+    expect(
+      (await refreshRecordingPermissions({ invoke, probeMicrophone })).mic,
+    ).toBe('denied');
+    probeMicrophone.mockResolvedValueOnce(true);
+    expect(
+      (await refreshRecordingPermissions({ invoke, probeMicrophone })).mic,
+    ).toBe('granted');
+  });
   test('defers the legacy boot probe until onboarding is complete', () => {
     expect(shouldRunBootPermissionProbe(null)).toBe(false);
     expect(shouldRunBootPermissionProbe(true)).toBe(false);

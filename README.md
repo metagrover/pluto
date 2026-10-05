@@ -95,10 +95,15 @@ Homebrew, Node, or Xcode. If Applications isn't writable on a new installation,
 it uses `~/Applications`. Quit Pluto before upgrading; your profile and models
 are preserved. Failed verification leaves an existing app in place.
 
+Ad-hoc signed updates have a different macOS code identity. When that identity
+changes, the installer resets only Pluto's old permission decisions so the new
+build can ask for access again. Other applications' permissions are untouched.
+
 To test onboarding without changing an existing profile, append
 `-s -- --fresh-profile` to `bash` in either command. This launches a separate
 empty test profile with its own model download. Normal launches keep using your
-existing profile. Browser meeting detection is optional in Settings → Meetings;
+existing profile. This option also resets Pluto's permissions for first-run
+testing. Browser meeting detection is optional in Settings → Meetings;
 enabling it asks for macOS Automation access to your browser.
 
 Running the installer explicitly trusts this repository and Pluto's unnotarized

@@ -87,7 +87,11 @@ done
 mkdir -p "$target"
 cp -R "$TEST_ASSET/Pluto.app" "$target/"`,
     );
-    stub('codesign', 'exit "${TEST_SIGNATURE:-0}"');
+    stub(
+      'codesign',
+      'if [[ $1 == -dr ]]; then if [[ -f "$3/old" ]]; then echo \'# designated => cdhash H"old"\'; else echo \'# designated => cdhash H"new"\'; fi; fi; exit "${TEST_SIGNATURE:-0}"',
+    );
+    stub('tccutil', 'printf "tccutil %s\\n" "$*" >> "$TEST_LOG"');
     stub('open', 'printf "open %s\\n" "$*" >> "$TEST_LOG"');
     stub('xattr', 'printf "xattr %s\\n" "$*" >> "$TEST_LOG"');
     stub(
@@ -141,6 +145,10 @@ exec /bin/mv "$@"`,
       result = run({ TEST_PUBLIC: '1' });
       assert.equal(result.status, 0, result.stderr);
       assert.equal(existsSync(join(app, 'old')), false);
+      assert.match(
+        readFileSync(log, 'utf8'),
+        /tccutil reset All com\.pluto\.app/,
+      );
       assert.equal(readFileSync(profile, 'utf8'), 'preserve meeting data');
       result = run({}, ['--fresh-profile']);
       assert.equal(result.status, 0, result.stderr);

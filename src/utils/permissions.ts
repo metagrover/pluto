@@ -22,3 +22,30 @@ export const resolveSystemAudioStatus = (
   if (probeSucceeded) return 'granted';
   return allowSilent ? 'unknown' : 'needs-audio';
 };
+
+export async function refreshRecordingPermissions({
+  invoke,
+  probeMicrophone,
+}: {
+  invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
+  probeMicrophone: () => Promise<boolean>;
+}) {
+  const nativeStatus = String(await invoke('CHECK_MICROPHONE_PERMISSION'));
+  const mic = resolveMicrophoneStatus(
+    nativeStatus,
+    isGrantedStatus(nativeStatus) || (await probeMicrophone()),
+  );
+  let systemGranted = false;
+  try {
+    systemGranted = Boolean(
+      await invoke('SYSTEM_AUDIO_PROBE', {
+        durationMs: 1500,
+        allowSilent: true,
+        silentProbe: true,
+      }),
+    );
+  } catch {
+    // A failed probe leaves access unverified, not silently granted.
+  }
+  return { mic, systemAudio: resolveSystemAudioStatus(systemGranted, true) };
+}

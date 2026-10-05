@@ -4,6 +4,7 @@ interface PermissionsOverlayProps {
   micStatus: string;
   systemAudioStatus: string;
   onRetry: () => void;
+  onRestart: () => void;
   onOpenSystemSettings: (pane: 'microphone' | 'system-audio') => void;
 }
 
@@ -35,10 +36,13 @@ export const PermissionsOverlay = ({
   micStatus,
   systemAudioStatus,
   onRetry,
+  onRestart,
   onOpenSystemSettings,
 }: PermissionsOverlayProps) => {
   const bothGranted =
     isGrantedStatus(micStatus) && isGrantedStatus(systemAudioStatus);
+  const microphoneBlocked =
+    micStatus === 'denied' || micStatus === 'restricted';
   if (!visible || bothGranted) return null;
 
   const handleCheckAgain = () => {
@@ -46,7 +50,7 @@ export const PermissionsOverlay = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[1100] flex items-start justify-center pt-32 px-6 animate-in">
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4 sm:p-6 animate-in">
       <div
         className="absolute inset-0 bg-black/50"
         onClick={onClose}
@@ -58,16 +62,21 @@ export const PermissionsOverlay = ({
         }}
       />
       <div
-        className="relative z-10 w-full max-w-lg overflow-hidden rounded-lg border border-pro-border bg-pro-surface shadow-2xl scale-in-center"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="permissions-title"
+        className="relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-pro-border bg-pro-surface shadow-2xl scale-in-center"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="p-8 border-b border-pro-border/40 flex items-center justify-between bg-pro-bg">
+        <div className="shrink-0 p-6 border-b border-pro-border/40 flex items-center justify-between gap-4 bg-pro-bg">
           <div className="flex items-center gap-5">
             <div className="w-12 h-12 rounded-md bg-pro-surface flex items-center justify-center text-xl border border-pro-border/40 shadow-sm">
               🔒
             </div>
             <div>
-              <h2 className="text-2xl font-semibolder">Permissions Required</h2>
+              <h2 id="permissions-title" className="text-xl font-semibold">
+                Permissions Required
+              </h2>
               <p className="text-[10px] text-pro-text-muted/60 font-medium mt-1.5">
                 Access Needed
               </p>
@@ -86,7 +95,7 @@ export const PermissionsOverlay = ({
           </button>
         </div>
 
-        <div className="p-8 space-y-8">
+        <div className="min-h-0 overflow-y-auto overscroll-contain p-6 space-y-6">
           <div className="space-y-4">
             <p className="text-[13px] text-pro-text-main font-medium leading-relaxed">
               Pluto needs microphone and system audio access to capture your
@@ -140,26 +149,38 @@ export const PermissionsOverlay = ({
               Open System Settings
             </button>
           </div>
-
-          <div className="flex items-center gap-3 pt-2">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-              }}
-              className="flex-1 h-12 rounded-md border border-pro-border/50 bg-pro-surface text-pro-text-muted font-semibold text-[10px] font-medium hover:text-pro-text-main transition-all "
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleCheckAgain}
-              className="flex-[2] h-12 rounded-md bg-pro-text-main dark:bg-pro-accent text-white font-semibold text-[10px] font-medium hover:bg-pro-accent transition-all  shadow-sm"
-            >
-              Restart App
-            </button>
-          </div>
+          {microphoneBlocked && (
+            <p className="text-[12px] leading-relaxed text-pro-text-muted">
+              If you enabled a previously blocked microphone in System Settings,
+              macOS requires restarting Pluto.{' '}
+              <button
+                type="button"
+                onClick={onRestart}
+                className="font-semibold text-pro-accent underline underline-offset-2"
+              >
+                Restart Pluto
+              </button>
+            </p>
+          )}
+        </div>
+        <div className="shrink-0 flex items-center gap-3 border-t border-pro-border/40 bg-pro-bg p-6">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            className="flex-1 h-12 rounded-md border border-pro-border/50 bg-pro-surface text-pro-text-muted font-semibold text-[10px] font-medium hover:text-pro-text-main transition-all "
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleCheckAgain}
+            className="flex-[2] h-12 rounded-md bg-pro-text-main dark:bg-pro-accent text-white font-semibold text-[10px] font-medium hover:bg-pro-accent transition-all  shadow-sm"
+          >
+            Check again
+          </button>
         </div>
       </div>
     </div>

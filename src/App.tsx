@@ -142,8 +142,7 @@ import type { MeetingAskPlutoConversationMessage } from './types/askPluto';
 import { previewMeeting } from './utils/browserIpcFallback';
 import {
   isGrantedStatus,
-  resolveMicrophoneStatus,
-  resolveSystemAudioStatus,
+  refreshRecordingPermissions,
   shouldRunBootPermissionProbe,
 } from './utils/permissions';
 
@@ -1889,32 +1888,22 @@ function App() {
       return false;
     }
   };
-
-  const checkSystemAudioPermission = async (
-    micStatus: string,
-    allowSilent = true,
-  ) => {
+  const refreshingPermissionsRef = useRef(false);
+  const refreshPermissions = async () => {
+    if (refreshingPermissionsRef.current) return;
+    refreshingPermissionsRef.current = true;
     try {
-      const ok = await window.ipcRenderer.invoke('SYSTEM_AUDIO_PROBE', {
-        durationMs: 1500,
-        allowSilent,
-        silentProbe: true,
+      const status = await refreshRecordingPermissions({
+        invoke: (channel, ...args) =>
+          window.ipcRenderer.invoke(channel, ...args),
+        probeMicrophone: probeMicrophonePermission,
       });
-      const systemAudioStatus = resolveSystemAudioStatus(ok, allowSilent);
-      setPermissionStatus((prev) => ({
-        ...prev,
-        mic: micStatus,
-        systemAudio: systemAudioStatus,
-      }));
-      return { systemAudioStatus };
-    } catch {
-      const systemAudioStatus = resolveSystemAudioStatus(false, allowSilent);
-      setPermissionStatus((prev) => ({
-        ...prev,
-        mic: micStatus,
-        systemAudio: systemAudioStatus,
-      }));
-      return { systemAudioStatus };
+      setPermissionStatus(status);
+      setPermissionsVisible(
+        !isGrantedStatus(status.mic) || !isGrantedStatus(status.systemAudio),
+      );
+    } finally {
+      refreshingPermissionsRef.current = false;
     }
   };
 
@@ -1924,24 +1913,7 @@ function App() {
       const alreadyDone = await window.ipcRenderer.invoke('BOOT_PROBE_STATUS');
       if (alreadyDone) return;
       await window.ipcRenderer.invoke('BOOT_PROBE_MARK');
-      const nativeMicStatus = await window.ipcRenderer.invoke(
-        'CHECK_MICROPHONE_PERMISSION',
-      );
-      const micProbeSucceeded = isGrantedStatus(nativeMicStatus)
-        ? true
-        : await probeMicrophonePermission();
-      const micStatus = resolveMicrophoneStatus(
-        nativeMicStatus,
-        micProbeSucceeded,
-      );
-      const { systemAudioStatus } = await checkSystemAudioPermission(micStatus);
-      if (!isGrantedStatus(micStatus)) {
-        window.dispatchEvent(
-          new CustomEvent('SHOW_PERMISSION_OVERLAY', {
-            detail: { micStatus, systemAudioStatus },
-          }),
-        );
-      }
+      await refreshPermissions();
     };
 
     void probeOnBoot();
@@ -1963,6 +1935,15 @@ function App() {
         handlePermissionsOverlay,
       );
   }, [setupNeeded]);
+
+  useEffect(() => {
+    if (!permissionsVisible || setupNeeded !== false) return;
+    const refreshOnFocus = () => {
+      void refreshPermissions().catch(() => undefined);
+    };
+    window.addEventListener('focus', refreshOnFocus);
+    return () => window.removeEventListener('focus', refreshOnFocus);
+  }, [permissionsVisible, setupNeeded]);
 
   useEffect(() => {
     const micGranted = isGrantedStatus(permissionStatus.mic);
@@ -2050,7 +2031,7 @@ function App() {
   }, []);
 
   const retryRecordingIfReady = async () => {
-    await window.ipcRenderer.invoke('APP_RELAUNCH');
+    await refreshPermissions();
   };
 
   if (setupNeeded === null)
@@ -2554,6 +2535,9 @@ function App() {
         micStatus={permissionStatus.mic}
         systemAudioStatus={permissionStatus.systemAudio}
         onRetry={retryRecordingIfReady}
+        onRestart={() => {
+          void window.ipcRenderer.invoke('APP_RELAUNCH');
+        }}
         onOpenSystemSettings={(pane) => {
           window.ipcRenderer.invoke('OPEN_SYSTEM_SETTINGS_PRIVACY', pane);
         }}
