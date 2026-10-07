@@ -2132,12 +2132,21 @@ app.whenReady().then(async () => {
       calendarService.matchActiveEvent(payload?.atTime),
   );
   ipcMain.handle(
-    'CALENDAR_ASSOCIATE_START',
-    (_event, payload: { meetingId: string; atTime?: string }) =>
-      calendarService.associateMeetingAtStart(
-        String(payload.meetingId),
-        payload?.atTime,
-      ),
+    'CALENDAR_LIST_ACTIVE_CANDIDATES',
+    (_event, payload?: { atTime?: string }) =>
+      db.calendarStore.listActiveCandidates(String(payload?.atTime || '')),
+  );
+  ipcMain.handle(
+    'CALENDAR_CONFIRM_RECORDING',
+    (event, payload?: { meetingId?: string; occurrenceKey?: string }) => {
+      const meetingId = String(payload?.meetingId || '');
+      const occurrenceKey = String(payload?.occurrenceKey || '');
+      captureSessionLease.requireRecordingOwner(meetingId, event.sender.id);
+      return db.calendarStore.confirmRecordingSelection(
+        meetingId,
+        occurrenceKey,
+      );
+    },
   );
   ipcMain.handle('OPEN_CALENDAR_SYSTEM_SETTINGS', async (_event, target) => {
     if (process.platform !== 'darwin') return false;
@@ -2149,6 +2158,14 @@ app.whenReady().then(async () => {
     return true;
   });
   calendarService.start();
+  try {
+    db.calendarStore.reconcileRecordingSelections();
+  } catch (error) {
+    console.warn(
+      '[Calendar] Could not reconcile confirmed recording invites:',
+      error,
+    );
+  }
 
   const parakeetModelRoot = path.join(
     app.getPath('userData'),
@@ -4069,23 +4086,7 @@ app.whenReady().then(async () => {
         upsertEntity: db.upsertEntity,
         addMeetingEntity: db.addMeetingEntity,
       });
-      if (
-        result !== false &&
-        meeting?.id != null &&
-        typeof meeting.started_at === 'string'
-      ) {
-        const startedAt = new Date(meeting.started_at);
-        const explicitEnd =
-          typeof meeting.ended_at === 'string'
-            ? new Date(meeting.ended_at)
-            : null;
-        const durationSeconds = Number(meeting.duration_seconds);
-        const endedAt =
-          explicitEnd && !Number.isNaN(explicitEnd.getTime())
-            ? explicitEnd
-            : Number.isFinite(durationSeconds) && durationSeconds > 0
-              ? new Date(startedAt.getTime() + durationSeconds * 1000)
-              : null;
+      if (result !== false && meeting?.id != null) {
         const prep = db.meetingPrepStore.forMeeting(String(meeting.id));
         if (prep) {
           db.calendarStore.setMeetingContext(
@@ -4094,12 +4095,8 @@ app.whenReady().then(async () => {
             'user',
             prep.event,
           );
-        } else if (!Number.isNaN(startedAt.getTime()) && endedAt) {
-          db.calendarStore.associateMeeting(
-            String(meeting.id),
-            startedAt.toISOString(),
-            endedAt.toISOString(),
-          );
+        } else {
+          db.calendarStore.applyRecordingSelection(String(meeting.id));
         }
       }
       if (expectedDownstreamRunId && result !== false) {
@@ -9352,6 +9349,8 @@ app.whenReady().then(async () => {
               'user',
               prep.event,
             );
+          } else {
+            db.calendarStore.applyRecordingSelection(String(meeting.id));
           }
           if (win && !win.isDestroyed()) {
             win.webContents.send('MEETING_NOTES_UPDATED', meeting.id);

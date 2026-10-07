@@ -49,11 +49,17 @@ export const matchActiveCalendarEvent = (atTime?: string) =>
     event: CalendarEvent | null;
   }>('CALENDAR_MATCH_ACTIVE', { atTime });
 
-export const associateMeetingAtStart = (meetingId: string, atTime?: string) =>
-  invoke<{
-    context: MeetingCalendarContext | null;
-    event: CalendarEvent | null;
-  }>('CALENDAR_ASSOCIATE_START', { meetingId, atTime });
+export const listActiveCalendarCandidates = (atTime: string) =>
+  invoke<CalendarEvent[]>('CALENDAR_LIST_ACTIVE_CANDIDATES', { atTime });
+
+export const confirmRecordingCalendarEvent = (
+  meetingId: string,
+  occurrenceKey: string,
+) =>
+  invoke<CalendarEvent>('CALENDAR_CONFIRM_RECORDING', {
+    meetingId,
+    occurrenceKey,
+  });
 
 export const buildPreMeetingBrief = (request: PreMeetingBriefRequest) =>
   invoke<PreMeetingBrief>('PRE_MEETING_BRIEF_BUILD', request);

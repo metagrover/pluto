@@ -15,6 +15,15 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-10-08 - Confirm calendar context for general recordings
+
+- **Status:** Accepted
+- **Source:** Owner direction on 2026-10-08
+- **Supersedes:** The automatic matching and naming for general recordings in “2026-09-04 - Proactive calendar session auto-naming, start prompts, and silence-based auto-stop.”
+- **Decision:** Starting from New meeting or the plus button leaves a recording independent of overlapping calendar invites. During recording, Pluto suggests eligible invites in a compact strip; only Add links a selected invite. Dismissal or no action leaves it unlinked. Starting from a meeting's Prep screen still links that invite directly. The existing auto-name setting now controls whether suggestions appear.
+- **Rationale:** A calendar overlap does not establish that a general recording is for that invite.
+- **Consequences:** Calendar titles, prep, attendees as hints, and the calendar-based stop boundary become available only after explicit selection. The selected invite is persisted before meeting finalization so recovery preserves the user's choice. Calendar attendees remain hints, not speaker identity evidence.
+
 ## 2026-09-29 - Recover live transcription from the durable capture journal
 
 - **Status:** Accepted

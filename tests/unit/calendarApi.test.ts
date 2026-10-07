@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  associateMeetingAtStart,
+  confirmRecordingCalendarEvent,
   connectCalendar,
   disconnectCalendar,
   getCalendarState,
+  listActiveCalendarCandidates,
   listCalendarDay,
   matchActiveCalendarEvent,
   selectCalendar,
@@ -66,16 +67,21 @@ describe('calendar renderer API', () => {
     expect(invoke).toHaveBeenCalledWith('CALENDAR_SELECT', [calendar]);
   });
 
-  it('invokes CALENDAR_MATCH_ACTIVE and CALENDAR_ASSOCIATE_START', async () => {
+  it('lists candidates and submits only an explicit recording choice', async () => {
     await matchActiveCalendarEvent('2026-09-04T17:30:00.000Z');
     expect(invoke).toHaveBeenCalledWith('CALENDAR_MATCH_ACTIVE', {
       atTime: '2026-09-04T17:30:00.000Z',
     });
 
-    await associateMeetingAtStart('meeting-1', '2026-09-04T17:30:00.000Z');
-    expect(invoke).toHaveBeenCalledWith('CALENDAR_ASSOCIATE_START', {
-      meetingId: 'meeting-1',
+    await listActiveCalendarCandidates('2026-09-04T17:30:00.000Z');
+    expect(invoke).toHaveBeenCalledWith('CALENDAR_LIST_ACTIVE_CANDIDATES', {
       atTime: '2026-09-04T17:30:00.000Z',
+    });
+
+    await confirmRecordingCalendarEvent('meeting-1', 'invite-a');
+    expect(invoke).toHaveBeenCalledWith('CALENDAR_CONFIRM_RECORDING', {
+      meetingId: 'meeting-1',
+      occurrenceKey: 'invite-a',
     });
   });
 });

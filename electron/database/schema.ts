@@ -1178,6 +1178,18 @@ export const meetingCalendarContext = sqliteTable(
   ],
 );
 
+// Recording choices are saved before the meeting row exists. They are applied
+// to meeting_calendar_context when the recording is saved or recovered.
+export const meetingCalendarPendingSelection = sqliteTable(
+  'meeting_calendar_pending_selection',
+  {
+    meetingId: text('meeting_id').primaryKey(),
+    occurrenceKey: text('occurrence_key').notNull(),
+    eventJson: text('event_json').notNull(),
+    createdAt: text('created_at').notNull().default(now),
+  },
+);
+
 export const identityWorkspace = sqliteTable(
   'identity_workspace',
   {

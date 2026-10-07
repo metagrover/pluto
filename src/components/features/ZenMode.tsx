@@ -8,6 +8,10 @@ import {
 import type { MeetingAskPlutoConversationMessage } from '../../types/askPluto';
 import { LiveTranscript } from './LiveTranscript';
 import { MeetingAskPlutoDock } from './MeetingAskPlutoDock';
+import {
+  RecordingCalendarSuggestion,
+  type RecordingCalendarSuggestionProps,
+} from './RecordingCalendarSuggestion';
 import { RecordingCaptureBar } from './RecordingCaptureBar';
 import { RecordingMeetingRail } from './RecordingMeetingRail';
 import {
@@ -39,6 +43,7 @@ interface ZenModeProps {
   liveTranscriptIntegrity: LiveTranscriptIntegrity;
   recordingStartedAtMs: number | null;
   calendarEvent?: CalendarEvent | null;
+  calendarSuggestion?: RecordingCalendarSuggestionProps | null;
   onOpenMeeting?: (id: string) => void;
   askPlutoConversation?: MeetingAskPlutoConversationMessage[];
   setAskPlutoConversation?: React.Dispatch<
@@ -68,6 +73,7 @@ export const ZenMode = ({
   liveTranscriptIntegrity,
   recordingStartedAtMs,
   calendarEvent = null,
+  calendarSuggestion = null,
   onOpenMeeting,
   askPlutoConversation,
   setAskPlutoConversation,
@@ -133,6 +139,9 @@ export const ZenMode = ({
         onBackHome={onBackHome}
         onFinish={onEndMeeting}
       />
+      {calendarSuggestion && (
+        <RecordingCalendarSuggestion {...calendarSuggestion} />
+      )}
       <div className="recording-workspace-grid">
         <RecordingMeetingRail
           title={meetingTitle}

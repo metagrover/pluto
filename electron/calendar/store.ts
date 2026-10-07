@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 
 import {
   type CalendarMatch,
+  listActiveCalendarCandidates,
   matchActiveCalendarEvent,
   matchCalendarEvent,
 } from './matcher';
@@ -102,11 +103,19 @@ export const createCalendarStore = (sql: SqlDatabase) => {
       sql.prepare('DELETE FROM calendar_events').run();
       if (calendars.length === 0) {
         sql.prepare('DELETE FROM meeting_calendar_context').run();
+        sql.prepare('DELETE FROM meeting_calendar_pending_selection').run();
       } else {
         const placeholders = calendars.map(() => '?').join(', ');
         sql
           .prepare(`
             DELETE FROM meeting_calendar_context
+            WHERE COALESCE(json_extract(event_json, '$.calendarIdentifier'), '')
+              NOT IN (${placeholders})
+          `)
+          .run(...calendars.map((calendar) => calendar.identifier));
+        sql
+          .prepare(`
+            DELETE FROM meeting_calendar_pending_selection
             WHERE COALESCE(json_extract(event_json, '$.calendarIdentifier'), '')
               NOT IN (${placeholders})
           `)
@@ -299,8 +308,9 @@ export const createCalendarStore = (sql: SqlDatabase) => {
       )
       .get(occurrenceKey) as EventRow | undefined;
     const state = getState();
-    const storedEvent =
-      eventRow || (snapshot ? { event_json: JSON.stringify(snapshot) } : null);
+    const storedEvent = snapshot
+      ? { event_json: JSON.stringify(snapshot) }
+      : eventRow;
     if (
       !storedEvent ||
       (!snapshot &&
@@ -379,6 +389,93 @@ export const createCalendarStore = (sql: SqlDatabase) => {
     return { match, event: null };
   };
 
+  const listActiveCandidates = (atTime: string): CalendarEvent[] => {
+    const state = getState();
+    if (!state.enabled || !state.cacheStart || !state.cacheEnd) return [];
+    return listActiveCalendarCandidates(
+      atTime,
+      listEvents(state.cacheStart, state.cacheEnd),
+    );
+  };
+
+  const confirmRecordingSelection = (
+    meetingId: string,
+    occurrenceKey: string,
+  ): CalendarEvent => {
+    const state = getState();
+    if (!state.enabled || !state.selectedCalendars.length)
+      throw new Error('Calendar is unavailable. Refresh it and try again.');
+    const row = sql
+      .prepare(
+        'SELECT event_json FROM calendar_events WHERE occurrence_key = ?',
+      )
+      .get(occurrenceKey) as EventRow | undefined;
+    if (!row) throw new Error('This calendar invite is no longer available.');
+    const event = JSON.parse(row.event_json) as CalendarEvent;
+    if (
+      event.isAllDay ||
+      event.isCancelled ||
+      !state.selectedCalendars.some(
+        (calendar) => calendar.identifier === event.calendarIdentifier,
+      )
+    ) {
+      throw new Error('This calendar invite is no longer available.');
+    }
+    sql
+      .prepare(`
+      INSERT INTO meeting_calendar_pending_selection(meeting_id, occurrence_key, event_json)
+      VALUES (?, ?, ?)
+      ON CONFLICT(meeting_id) DO UPDATE SET
+        occurrence_key = excluded.occurrence_key,
+        event_json = excluded.event_json
+    `)
+      .run(meetingId, occurrenceKey, row.event_json);
+    return event;
+  };
+
+  const applyRecordingSelection = (
+    meetingId: string,
+  ): MeetingCalendarContext | null =>
+    sql.transaction(() => {
+      const row = sql
+        .prepare(
+          'SELECT occurrence_key, event_json FROM meeting_calendar_pending_selection WHERE meeting_id = ?',
+        )
+        .get(meetingId) as
+        | { occurrence_key: string; event_json: string }
+        | undefined;
+      if (!row) return null;
+      const context = setMeetingContext(
+        meetingId,
+        row.occurrence_key,
+        'user',
+        JSON.parse(row.event_json) as CalendarEvent,
+      );
+      if (context) {
+        sql
+          .prepare(
+            'DELETE FROM meeting_calendar_pending_selection WHERE meeting_id = ?',
+          )
+          .run(meetingId);
+      }
+      return context;
+    })();
+
+  const reconcileRecordingSelections = (): number => {
+    const rows = sql
+      .prepare(`
+        SELECT pending.meeting_id
+        FROM meeting_calendar_pending_selection AS pending
+        JOIN meetings AS meeting ON meeting.id = pending.meeting_id
+      `)
+      .all() as Array<{ meeting_id: string }>;
+    let applied = 0;
+    for (const row of rows) {
+      if (applyRecordingSelection(row.meeting_id)) applied += 1;
+    }
+    return applied;
+  };
+
   const associateMeetingAtStart = (
     meetingId: string,
     atTime: string,
@@ -411,6 +508,7 @@ export const createCalendarStore = (sql: SqlDatabase) => {
   const disconnect = () => {
     sql.transaction(() => {
       sql.prepare('DELETE FROM meeting_calendar_context').run();
+      sql.prepare('DELETE FROM meeting_calendar_pending_selection').run();
       sql.prepare('DELETE FROM calendar_events').run();
       sql
         .prepare(`
@@ -439,6 +537,10 @@ export const createCalendarStore = (sql: SqlDatabase) => {
     associateMeeting,
     associateMeetingAtStart,
     matchActiveEvent,
+    listActiveCandidates,
+    confirmRecordingSelection,
+    applyRecordingSelection,
+    reconcileRecordingSelections,
     setMeetingContext,
     getMeetingContext,
     listPriorMeetingContexts,

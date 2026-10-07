@@ -352,6 +352,96 @@ describe('calendar store', () => {
     const retrieved = store.getMeetingContext('meeting-proactive-1');
     expect(retrieved?.occurrenceKey).toBe(calendarEvent.occurrenceKey);
   });
+
+  it('keeps general recordings unlinked until a selected invite is saved', () => {
+    const store = createCalendarStore(sql);
+    store.selectCalendars([calendar, calendarB]);
+    const overlapping = {
+      ...calendarEventB,
+      start: calendarEvent.start,
+      end: calendarEvent.end,
+    };
+    store.replaceEvents({
+      revision: 1,
+      cacheStart: '2026-08-16T00:00:00.000Z',
+      cacheEnd: '2026-09-30T00:00:00.000Z',
+      readAt: '2026-08-30T16:00:00.000Z',
+      events: [calendarEvent, overlapping],
+    });
+    const candidates = store.listActiveCandidates('2026-08-30T17:31:00.000Z');
+    expect(candidates.map((event) => event.occurrenceKey)).toEqual([
+      calendarEvent.occurrenceKey,
+      overlapping.occurrenceKey,
+    ]);
+
+    sql
+      .prepare('INSERT INTO meetings (id, title) VALUES (?, ?)')
+      .run('unanswered-recording', 'Untitled meeting');
+    expect(store.applyRecordingSelection('unanswered-recording')).toBeNull();
+    expect(store.getMeetingContext('unanswered-recording')).toBeNull();
+
+    store.confirmRecordingSelection(
+      'confirmed-recording',
+      overlapping.occurrenceKey,
+    );
+    store.replaceEvents({
+      revision: 2,
+      cacheStart: '2026-08-16T00:00:00.000Z',
+      cacheEnd: '2026-09-30T00:00:00.000Z',
+      readAt: '2026-08-30T17:45:00.000Z',
+      events: [],
+    });
+    // Recreate the store to simulate a renderer/app restart before recovery saves the meeting.
+    const recoveredStore = createCalendarStore(sql);
+    sql
+      .prepare('INSERT INTO meetings (id, title) VALUES (?, ?)')
+      .run('confirmed-recording', 'My custom title');
+    const linked = recoveredStore.applyRecordingSelection(
+      'confirmed-recording',
+    );
+    expect(linked).toMatchObject({
+      occurrenceKey: overlapping.occurrenceKey,
+      matchOrigin: 'user',
+      matchEvidence: 'user_selected',
+      event: { title: 'Family dinner' },
+    });
+    expect(
+      recoveredStore.applyRecordingSelection('confirmed-recording'),
+    ).toBeNull();
+    expect(recoveredStore.getMeetingContext('unanswered-recording')).toBeNull();
+    recoveredStore.replaceEvents({
+      revision: 3,
+      cacheStart: '2026-08-16T00:00:00.000Z',
+      cacheEnd: '2026-09-30T00:00:00.000Z',
+      readAt: '2026-08-30T17:50:00.000Z',
+      events: [calendarEvent],
+    });
+    recoveredStore.confirmRecordingSelection(
+      'saved-before-link',
+      calendarEvent.occurrenceKey,
+    );
+    sql
+      .prepare('INSERT INTO meetings (id, title) VALUES (?, ?)')
+      .run('saved-before-link', 'Saved before the app stopped');
+    expect(recoveredStore.reconcileRecordingSelections()).toBe(1);
+    expect(recoveredStore.getMeetingContext('saved-before-link')).toMatchObject(
+      {
+        matchOrigin: 'user',
+        occurrenceKey: calendarEvent.occurrenceKey,
+      },
+    );
+    recoveredStore.confirmRecordingSelection(
+      'disconnected-recording',
+      calendarEvent.occurrenceKey,
+    );
+    recoveredStore.disconnect();
+    sql
+      .prepare('INSERT INTO meetings (id, title) VALUES (?, ?)')
+      .run('disconnected-recording', 'Unlinked after disconnect');
+    expect(
+      recoveredStore.applyRecordingSelection('disconnected-recording'),
+    ).toBeNull();
+  });
   it('filters email history before applying the candidate limit', () => {
     const store = createCalendarStore(sql);
     const meetingInsert = sql.prepare(

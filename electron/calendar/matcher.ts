@@ -69,14 +69,12 @@ export const matchCalendarEvent = (
 
 const ACTIVE_MATCH_THRESHOLD_MS = 15 * 60 * 1000;
 
-export const matchActiveCalendarEvent = (
+const rankActiveCalendarCandidates = (
   atTimeValue: string,
   events: CalendarEvent[],
-): CalendarMatch => {
+): Array<{ event: CalendarEvent; score: number }> => {
   const atTime = toMillis(atTimeValue);
-  if (atTime === null) {
-    return { kind: 'none' };
-  }
+  if (atTime === null) return [];
 
   const ranked = events
     .filter((event) => !event.isAllDay && !event.isCancelled)
@@ -113,6 +111,20 @@ export const matchActiveCalendarEvent = (
     )
     .sort((left, right) => right.score - left.score);
 
+  return ranked;
+};
+
+export const listActiveCalendarCandidates = (
+  atTimeValue: string,
+  events: CalendarEvent[],
+): CalendarEvent[] =>
+  rankActiveCalendarCandidates(atTimeValue, events).map(({ event }) => event);
+
+export const matchActiveCalendarEvent = (
+  atTimeValue: string,
+  events: CalendarEvent[],
+): CalendarMatch => {
+  const ranked = rankActiveCalendarCandidates(atTimeValue, events);
   if (!ranked.length) return { kind: 'none' };
   const best = ranked[0];
   const ties = ranked.filter(
