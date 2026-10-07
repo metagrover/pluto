@@ -1534,7 +1534,7 @@
     @apply pb-12;
   }
   .meeting-document-save-row {
-    @apply fixed top-6 right-8 text-xs font-medium opacity-50 hover:opacity-100 transition-opacity z-50;
+    @apply flex min-h-8 items-center justify-end text-xs font-medium;
     color: var(--notes-muted);
   }
   .meeting-save-state {
