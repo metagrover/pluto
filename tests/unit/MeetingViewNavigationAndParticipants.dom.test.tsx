@@ -4,10 +4,10 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getMeetingEntities } from '../../src/api/knowledgeGraph';
 import { MeetingView } from '../../src/components/features/MeetingView';
 import { buildMeetingTranscriptTurns } from '../../src/components/features/meetingTranscriptPresentation';
 import type * as TranscriptPresentation from '../../src/components/features/meetingTranscriptPresentation';
-import { getMeetingEntities } from '../../src/api/knowledgeGraph';
 import type { Meeting } from '../../src/types';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;

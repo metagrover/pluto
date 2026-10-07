@@ -12,8 +12,8 @@ vi.mock('electron', () => ({
 import {
   beginMeetingAnalysisRun,
   claimMeetingDownstreamProcessing,
-  deleteMeeting,
   db as database,
+  deleteMeeting,
   getMeeting,
   getMeetingAnalysisPublicationRevisions,
   getMeetingAnalysisRun,
