@@ -294,3 +294,17 @@ Results default to ignored `.private/ask-pluto-workflow-acceptance.json`;
 provider latency benchmark; it does not establish real-meeting correctness or
 latency percentiles. Restore the Node SQLite ABI with `pnpm rebuild better-sqlite3`
 before Node-based database tests, and the Electron ABI before returning to the app.
+
+### Safe product screenshots
+
+Run `pnpm demo` and open `http://127.0.0.1:4187/?preview=dashboard`. Use
+`preview=meeting` or `preview=chat` for the other screenshot scenes. Append
+`&theme=light`, `dark`, `terracotta`, `pluto-site`, or `aubergine` to compare themes. This serves
+the real React interface with the existing fictional browser IPC fixtures. The
+launcher does not load the Electron plugin or open any desktop profile, calendar,
+recordings, Keychain, or model connection. Keep screenshots labeled as fictional
+demo data; the answers are authored examples, not a live model benchmark.
+
+Capture these browser scenes, never the installed app with a personal profile.
+The People preview currently needs its fixture contract updated before it is
+suitable for marketing captures.

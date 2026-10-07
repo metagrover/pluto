@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Monitor,
   Moon,
+  PanelLeft,
   Plus,
   PlusCircle,
   Search,
@@ -38,6 +39,7 @@ type ActiveTab =
 
 interface SidebarProps {
   sidebarVisible: boolean;
+  onToggleSidebar?: () => void;
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   selectedMeetingId: string | number | null;
@@ -55,6 +57,7 @@ interface SidebarProps {
 
 export const Sidebar = ({
   sidebarVisible,
+  onToggleSidebar,
   activeTab,
   setActiveTab,
   selectedMeetingId,
@@ -86,7 +89,7 @@ export const Sidebar = ({
                 ${sidebarVisible ? '' : 'lg:-mr-[260px]'}
             `}
     >
-      <div className="pt-[60px] pb-6 px-6 flex items-center">
+      <div className="pt-[60px] pb-6 px-6 flex items-center justify-between">
         <button
           type="button"
           aria-label="Pluto, go to Dashboard"
@@ -108,6 +111,17 @@ export const Sidebar = ({
             }
           />
         </button>
+        {onToggleSidebar && (
+          <button
+            type="button"
+            aria-label="Close sidebar"
+            title="Close sidebar (⌘B / Ctrl+B)"
+            onClick={onToggleSidebar}
+            className="no-drag flex h-8 w-8 items-center justify-center rounded-md text-pro-text-muted hover:bg-black/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent lg:hidden"
+          >
+            <PanelLeft size={18} aria-hidden="true" />
+          </button>
+        )}
       </div>
 
       <div className="px-3 pb-3 space-y-0.5">

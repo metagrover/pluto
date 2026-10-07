@@ -175,6 +175,16 @@ describe('App Navigation History', () => {
         }
         expect(toggle.getAttribute('aria-label')).toBe('Show sidebar');
         expect(sidebar.className).toContain('-translate-x-full');
+        const newMeeting = Array.from(
+          container.querySelectorAll('main button'),
+        ).find(
+          (button) => button.textContent?.trim() === 'New meeting',
+        ) as HTMLButtonElement;
+        expect(newMeeting).toBeTruthy();
+        expect(newMeeting.disabled).toBe(false);
+        expect(container.querySelector('main')?.textContent).not.toContain(
+          'Local · Ollama',
+        );
         expect(toggle.className).toContain('no-drag');
         expect(toggle.closest('[aria-hidden="true"]')).toBeNull();
         expect(toggle.closest('main')).not.toBeNull();
@@ -192,12 +202,16 @@ describe('App Navigation History', () => {
             .querySelector('main')!
             .dispatchEvent(new MouseEvent('click', { bubbles: true }));
         });
-        expect(toggle.getAttribute('aria-label')).toBe('Show sidebar');
-        await act(async () => toggle.click());
+        expect(toggle.getAttribute('aria-label')).toBe('Hide sidebar');
         const backdrop = container.querySelector('.lg\\:hidden.bg-black\\/20')!;
         await act(async () => {
           backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         });
+        expect(toggle.getAttribute('aria-expanded')).toBe('true');
+        const close = container.querySelector(
+          '[aria-label="Close sidebar"]',
+        ) as HTMLButtonElement;
+        await act(async () => close.click());
         expect(toggle.getAttribute('aria-expanded')).toBe('false');
         expect(
           container.querySelector('[data-testid="dashboard"]'),

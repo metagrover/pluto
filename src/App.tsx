@@ -1,4 +1,4 @@
-import { PanelLeft } from 'lucide-react';
+import { PanelLeft, Plus } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { openMeetingPrep } from './api/meetingPrep';
@@ -6,6 +6,7 @@ import {
   type SilenceAutoStopDuration,
   resolveSilenceAutoStopDuration,
 } from './autoStop/silenceWatchdog';
+import { resolveCaptureAction } from './services/captureLifecycle';
 import './App.css';
 
 // Core
@@ -236,7 +237,7 @@ function App() {
             content: `Across your meetings with **Acme Corp** and the **Q4 Launch Review**:
 
 1. **Pricing:** The team approved a **$45 per seat** team plan and kept the basic plan at **$20**.
-2. **Trial Date:** Acme Corp starts their 30-day trial on **October 3rd** with 120 team members.
+2. **Trial Date:** Acme Corp starts their 30-day trial on **October 19th** with 120 team members.
 3. **Next Step:** Maya promised to share the new pricing sheet with sales by **Thursday at 5:00 PM**.`,
             citations: [
               {
@@ -254,7 +255,7 @@ function App() {
                 meeting_id: 'preview-acme-sync',
                 meeting_title: 'Acme Corp Customer Sync',
                 evidence_span:
-                  'Acme Corp is ready to start their 30-day trial next week on October 3rd.',
+                  'Acme Corp is ready to start their 30-day trial next week on October 19th.',
                 evidence_valid: true,
                 trust_status: 'grounded',
                 source_type: 'meeting',
@@ -342,20 +343,6 @@ function App() {
     Boolean(previewParam) ||
       (!window.__PLUTO_BROWSER_PREVIEW__ && window.innerWidth >= 1024),
   );
-  useEffect(() => {
-    if (!sidebarVisible) return;
-    const handleOutsideClick = (event: MouseEvent) => {
-      const target = event.target as Element;
-      if (
-        target.closest('main') &&
-        !target.closest('[aria-controls="app-sidebar"]')
-      ) {
-        setSidebarVisible(false);
-      }
-    };
-    document.addEventListener('click', handleOutsideClick);
-    return () => document.removeEventListener('click', handleOutsideClick);
-  }, [sidebarVisible]);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchEntitiesResults, setSearchEntitiesResults] = useState<Entity[]>(
     [],
@@ -1476,6 +1463,19 @@ function App() {
       ? selectedMeetingDetail
       : undefined;
   const activeRecording = isStartingRecording || isRecording;
+  const captureAction = resolveCaptureAction({ state: captureLifecycle.state });
+  const handleStartRecording = () => {
+    if (startSessionRef.current) void startSessionRef.current();
+  };
+  const handleReturnToRecording = () => {
+    if (finalizingMeeting) {
+      setZenVisible(false);
+      setSelectedMeetingId(null);
+      setActiveTab('hub');
+      return;
+    }
+    setZenVisible(true);
+  };
   const showZenMode = activeRecording && zenVisible;
   const resolvedActiveCalendarEvent =
     activeCalendarEvent ||
@@ -2152,16 +2152,11 @@ function App() {
         <>
           <div
             className={`fixed inset-0 bg-black/20 z-30 lg:hidden transition-opacity duration-300 ${sidebarVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-            onClick={() => setSidebarVisible(false)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setSidebarVisible(false);
-              }
-            }}
+            aria-hidden="true"
           />
           <Sidebar
             sidebarVisible={sidebarVisible}
+            onToggleSidebar={() => setSidebarVisible((visible) => !visible)}
             activeTab={activeTab}
             setActiveTab={(tab) => {
               setPreMeetingBriefVisible(false);
@@ -2173,22 +2168,10 @@ function App() {
               setSelectedMeetingId(id);
             }}
             safeMeetings={safeMeetings}
-            onStartRecording={() => {
-              if (startSessionRef.current) {
-                void startSessionRef.current();
-              }
-            }}
+            onStartRecording={handleStartRecording}
             isRecordingActive={activeRecording}
             recordingState={captureLifecycle.state}
-            onReturnToRecording={() => {
-              if (finalizingMeeting) {
-                setZenVisible(false);
-                setSelectedMeetingId(null);
-                setActiveTab('hub');
-                return;
-              }
-              setZenVisible(true);
-            }}
+            onReturnToRecording={handleReturnToRecording}
             onOpenSearch={() => setSearchVisible(true)}
             onOpenPeopleHome={() => {
               if (selectedMeetingId != null) {
@@ -2256,7 +2239,7 @@ function App() {
           }`}
         >
           <div
-            className={`relative flex h-12 w-full shrink-0 items-center pl-[88px] ${sidebarVisible ? 'lg:pl-3' : ''} ${
+            className={`relative flex h-12 w-full shrink-0 items-center ${!window.__PLUTO_BROWSER_PREVIEW__ && window.plutoRuntimePlatform?.platform === 'darwin' ? 'pl-[88px]' : 'pl-3'} ${sidebarVisible ? 'lg:pl-3' : ''} ${
               activeTab === 'chat' ? 'bg-pro-bg' : 'bg-transparent'
             }`}
           >
@@ -2273,11 +2256,29 @@ function App() {
               <PanelLeft size={18} aria-hidden="true" />
             </button>
           </div>
-          <div className="pointer-events-none absolute right-5 top-3 z-[60] rounded-full border border-pro-border/60 bg-pro-surface/90 px-2.5 py-1 text-[11px] font-medium text-pro-text-muted shadow-sm backdrop-blur">
-            {llmProvider === 'ollama'
-              ? 'Local · Ollama'
-              : `Cloud · ${llmProvider === 'openrouter' ? 'OpenRouter' : llmProvider}`}
-          </div>
+          {sidebarVisible ? (
+            <div className="pointer-events-none absolute right-5 top-3 z-[60] rounded-full border border-pro-border/60 bg-pro-surface/90 px-2.5 py-1 text-[11px] font-medium text-pro-text-muted">
+              {llmProvider === 'ollama'
+                ? 'Local · Ollama'
+                : `Cloud · ${llmProvider === 'openrouter' ? 'OpenRouter' : llmProvider}`}
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={!captureAction.enabled}
+              onClick={
+                captureAction.command === 'start'
+                  ? handleStartRecording
+                  : handleReturnToRecording
+              }
+              className="no-drag absolute right-5 top-2 z-[60] inline-flex h-8 items-center gap-2 rounded-md border border-pro-border bg-pro-surface px-3 text-[13px] font-medium text-pro-text-main hover:bg-pro-bg disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+            >
+              {captureAction.command === 'start' && (
+                <Plus size={15} aria-hidden="true" />
+              )}
+              {captureAction.label}
+            </button>
+          )}
           <div
             ref={contentScrollRef}
             className={`min-h-0 flex-1 flex flex-col scroll-smooth relative overflow-y-scroll ${

@@ -10,6 +10,7 @@
   "scripts": {
     "predev": "pnpm run ensure:dev-runtime",
     "dev": "vite",
+    "demo": "node scripts/demo.mjs",
     "prestart": "pnpm run ensure:dev-runtime",
     "start": "vite",
     "prebuild": "node scripts/clean_generated_electron_output.mjs",

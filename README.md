@@ -39,6 +39,28 @@ platform; Intel Macs, Windows, and Linux are not supported. Generated notes,
 speaker attribution, and answers can be wrong—review the source before relying
 on them.
 
+## Pluto in action
+
+![Pluto’s daily briefing with fictional meetings and follow-ups](docs/screenshots/pluto-dashboard.jpg)
+
+*The actual Pluto interface, shown with a fictional product team. No private meeting data.*
+
+<details>
+<summary>See meeting notes, answers, themes, and ChatGPT</summary>
+
+![Meeting decisions and next steps in Pluto](docs/screenshots/pluto-meeting.jpg)
+
+![Ask Pluto answering across meetings with supporting references](docs/screenshots/pluto-chat.jpg)
+
+![Five Pluto themes and the System appearance option](docs/screenshots/pluto-themes.jpg)
+
+![Illustrative example of the Pluto plugin bringing meeting notes into ChatGPT](docs/screenshots/pluto-chatgpt.jpg)
+
+*ChatGPT conversation is illustrative. The optional connection sends retrieved
+meeting notes to OpenAI; raw transcripts and audio are excluded.*
+
+</details>
+
 ## What you can do
 
 - **Capture conversations without a meeting bot.** Record microphone and system

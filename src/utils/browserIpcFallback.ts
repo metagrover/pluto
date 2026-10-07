@@ -30,6 +30,7 @@ type BrowserCaptureJournal = {
   supported: false;
 };
 
+// Fictional screenshot scenario; never sourced from a user profile.
 const now = new Date().toISOString();
 const previewLocalArtifacts: LocalArtifact[] = [
   {
@@ -82,7 +83,7 @@ const previewCalendarEvents = (): CalendarEvent[] => {
     const start = new Date();
     start.setHours(hour, minute, 0, 0);
     if (start.getTime() < Date.now() - 30 * 60_000) {
-      start.setTime(Date.now() + (hour === 10 ? 45 : 150) * 60_000);
+      start.setDate(start.getDate() + 1);
     }
     const end = new Date(start.getTime() + durationMinutes * 60_000);
     return { start: start.toISOString(), end: end.toISOString() };
@@ -160,8 +161,8 @@ export const previewMeeting: Meeting = {
   id: 'preview-pricing-review',
   title: 'Q4 Launch & Customer Pricing',
   meeting_type: 'Recording',
-  created_at: now,
-  started_at: now,
+  created_at: '2026-10-06T10:00:00-07:00',
+  started_at: '2026-10-06T10:00:00-07:00',
   duration_seconds: 42 * 60,
   finalization_status: 'finalized',
   transcript_status: 'validated',
@@ -187,7 +188,7 @@ export const previewMeeting: Meeting = {
         speaker: 'Alex Rivera',
         start: 210,
         end: 230,
-        text: 'The setup for team accounts is ready in testing. We can launch it on October 1st.',
+        text: 'The setup for team accounts is ready in testing. We can launch it on October 15th.',
       },
       {
         speaker: 'Avery Taylor',
@@ -201,7 +202,7 @@ export const previewMeeting: Meeting = {
   analysis_json: JSON.stringify({
     analysis_schema_version: 3,
     overview:
-      'The team agreed on pricing and launch dates. Team plans will cost $45 per seat, and the basic plan will stay at $20. Acme Corp will start their trial next week, and the new setup will go live on October 1st.',
+      'The team agreed on pricing and launch dates. Team plans will cost $45 per seat, and the basic plan will stay at $20. Acme Corp will start their trial next week, and the new setup will go live on October 15th.',
     all_decisions: [
       {
         text: 'Set team plan price at $45 per seat with simple setup included.',
@@ -216,10 +217,10 @@ export const previewMeeting: Meeting = {
           'Maya Chen: ...and keep the basic plan at $20 so new teams can try it easily.',
       },
       {
-        text: 'Launch the new team setup on October 1st.',
+        text: 'Launch the new team setup on October 15th.',
         decided_by: 'Alex Rivera',
         evidence:
-          'Alex Rivera: The setup for team accounts is ready in testing. We can launch it on October 1st.',
+          'Alex Rivera: The setup for team accounts is ready in testing. We can launch it on October 15th.',
       },
     ],
     all_action_items: [
@@ -270,7 +271,7 @@ export const previewMeeting: Meeting = {
       {
         title: 'Customer Trial & Launch Date',
         summary:
-          'Acme Corp starts testing next week, and public launch is set for October 1st.',
+          'Acme Corp starts testing next week, and public launch is set for October 15th.',
         key_points: [
           { text: 'Acme Corp will test with 120 team members.' },
           { text: 'Engineering confirmed the system is ready for launch.' },
@@ -1029,9 +1030,9 @@ const previewProjectPortfolio = [
     health_state: 'on_track' as const,
     health_headline: 'Pricing approved and customer trials ready to start',
     health_summary:
-      'Notes across the last 5 calls show pricing is agreed upon and the setup is tested. Sales and engineering are ready for the October 1st launch.',
+      'Notes across the last 5 calls show pricing is agreed upon and the setup is tested. Sales and engineering are ready for the October 15th launch.',
     typical_participant_count: 4,
-    next_milestone: 'Public Launch (Oct 1)',
+    next_milestone: 'Public Launch (Oct 15)',
     current_focus: 'Pricing sheet handoff & customer trial kickoff',
     activity_state: 'active' as const,
     activity_label: 'Active today',
@@ -1071,7 +1072,7 @@ const previewProjectPortfolio = [
     health_summary:
       'Eight customer teams tested the invite steps with zero drop-offs. Design and engineering finished the final updates.',
     typical_participant_count: 3,
-    next_milestone: 'Final Review (Oct 5)',
+    next_milestone: 'Final Review (Oct 12)',
     current_focus: 'Two-minute invite flow testing',
     activity_state: 'active' as const,
     activity_label: 'Active 2d ago',
@@ -1103,8 +1104,15 @@ const getSetting = (key: unknown) => {
       return 'true';
     case 'llm_provider':
       return 'ollama';
-    case 'theme':
-      return 'system';
+    case 'theme': {
+      const theme = new URLSearchParams(window.location.search).get('theme');
+      return theme &&
+        ['light', 'dark', 'terracotta', 'pluto-site', 'aubergine'].includes(
+          theme,
+        )
+        ? theme
+        : 'system';
+    }
     case 'auto_end_enabled':
       return 'true';
     case 'export_include_transcript':
@@ -1795,7 +1803,7 @@ const createInvokeFallback =
           answer: `Across your meetings with **Acme Corp** and the **Q4 Launch Review**:
 
 1. **Pricing:** The team approved a **$45 per seat** team plan and kept the basic plan at **$20**.
-2. **Trial Date:** Acme Corp starts their 30-day trial on **October 3rd** with 120 team members.
+2. **Trial Date:** Acme Corp starts their 30-day trial on **October 19th** with 120 team members.
 3. **Next Step:** Maya promised to share the new pricing sheet with sales by **Thursday at 5:00 PM**.`,
           citations: [
             {
@@ -1811,7 +1819,7 @@ const createInvokeFallback =
               meeting_id: 'preview-acme-sync',
               meeting_title: 'Acme Corp Customer Sync',
               text_quote:
-                'Acme Corp is ready to start their 30-day trial next week on October 3rd.',
+                'Acme Corp is ready to start their 30-day trial next week on October 19th.',
               speaker: 'David Kim',
               timestamp_ms: 980000,
               source_type: 'meeting',
@@ -1841,9 +1849,12 @@ const createInvokeFallback =
           people: previewPeople.map(({ id, name }) => ({ id, name })),
           revision: 1,
           profile: {
-            preferredName: 'Avery Chen',
+            preferredName: 'Avery Taylor',
             aliases: [],
             useCases: ['work'],
+            role: 'Product designer',
+            industry: 'Software',
+            disposition: 'completed',
           },
         };
         break;
