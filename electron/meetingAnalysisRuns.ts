@@ -134,6 +134,15 @@ export type MeetingAnalysisRunCoordinatorDb = {
     userNotesHash: string;
     analysis: AnalysisDocumentV3;
   }): boolean;
+  saveMeetingAnalysisSecondaryFieldsIfCurrent?(input: {
+    meetingId: string | number;
+    runId: string;
+    inputRevision: string;
+    sourceRevision: string;
+    eligibilityRevision: string;
+    userNotesHash: string;
+    generatedTitle: { expectedTitle: string; title: string };
+  }): boolean;
   getAllEntities(): EntityHint[];
   getMeetingNotesIdentityProjection?(meetingId: string | number): {
     speakerDisplayNames: Record<string, string>;
@@ -169,6 +178,7 @@ type NotesProvider = {
       templateSnapshot?: ResolvedMeetingNotesTemplate;
       contextTokens?: number;
       compactWriterContract?: boolean;
+      hierarchyAuditStrategy?: 'deterministic_only';
       optionalReviewDeadlineAtMs?: number;
       optionalReviewMinStartMs?: number;
       stageCache?: NotesStageCache;
@@ -412,7 +422,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     string,
     { runId: string; controller: AbortController }
   >();
-  const stageCache = new NotesStageCache(Date.now, 60 * 60 * 1000);
+  const stageCache = new NotesStageCache(Date.now, 2 * 60 * 60 * 1000);
   const createRunId = dependencies.createRunId ?? randomUUID;
   const notify = (meetingId: string) => {
     try {
@@ -449,7 +459,11 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     input: Parameters<NonNullable<typeof dependencies.runSecondary>>[0],
     controller: AbortController,
   ): Promise<void> => {
-    if (!dependencies.runSecondary || secondaryByMeeting.has(input.meetingId))
+    if (
+      (!dependencies.runSecondary &&
+        !dependencies.db.saveMeetingAnalysisSecondaryFieldsIfCurrent) ||
+      secondaryByMeeting.has(input.meetingId)
+    )
       return Promise.resolve();
     secondaryByMeeting.set(input.meetingId, { runId: input.runId, controller });
     const update = (
@@ -467,9 +481,45 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       });
       notify(input.meetingId);
     };
-    update('running', 'value_signals');
     return Promise.resolve()
-      .then(() => dependencies.runSecondary!(input))
+      .then(async () => {
+        const meeting = dependencies.db.getMeeting(input.meetingId);
+        if (
+          input.canCommit() &&
+          !input.analysis.title &&
+          meeting &&
+          meetingTitleNeedsGeneration(meeting.title) &&
+          input.provider.generateTitle &&
+          dependencies.db.saveMeetingAnalysisSecondaryFieldsIfCurrent
+        ) {
+          update('running', 'title');
+          try {
+            const title = (
+              await input.provider.generateTitle(
+                [
+                  input.analysis.overview,
+                  ...input.analysis.topics.map((topic) => topic.title),
+                ]
+                  .filter(Boolean)
+                  .join('\n'),
+              )
+            ).trim();
+            if (input.canCommit()) {
+              dependencies.db.saveMeetingAnalysisSecondaryFieldsIfCurrent({
+                ...input,
+                generatedTitle: { expectedTitle: meeting.title ?? '', title },
+              });
+              notify(input.meetingId);
+            }
+          } catch {
+            // A missing title must not block published notes or their secondary work.
+          }
+        }
+        if (input.canCommit() && dependencies.runSecondary) {
+          update('running', 'value_signals');
+          await dependencies.runSecondary(input);
+        }
+      })
       .then(() => update('complete', 'complete'))
       .catch((error) => {
         console.error(
@@ -957,26 +1007,35 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                     templateSnapshot: template,
                     contextTokens: NOTES_CONTEXT_TOKENS,
                     compactWriterContract: true,
+                    hierarchyAuditStrategy: 'deterministic_only',
                     ...optionalReviewBudgetOptions,
                     stageCache,
                     cacheKey: stageCacheKey,
                     onStageEvent: runMetrics.observe,
                     onDraft: (draft) => {
-                      previews.set(
-                        meetingId,
-                        runId,
-                        draft,
-                        () =>
+                      const run =
+                        dependencies.db.getMeetingAnalysisRun(meetingId);
+                      if (
+                        controller.signal.aborted ||
+                        run?.run_id !== runId ||
+                        run.notes_status !== 'running'
+                      )
+                        return;
+                      previews.set(meetingId, runId, draft, () => {
+                        const currentRun =
+                          dependencies.db.getMeetingAnalysisRun(meetingId);
+                        return (
                           !controller.signal.aborted &&
-                          dependencies.db.getMeetingAnalysisRun(meetingId)
-                            ?.notes_status === 'running' &&
+                          currentRun?.run_id === runId &&
+                          currentRun.notes_status === 'running' &&
                           dependencies.db.isMeetingAnalysisRunCurrent({
                             meetingId,
                             runId,
                             inputRevision: fingerprint,
                             ...revisions,
-                          }),
-                      );
+                          })
+                        );
+                      });
                       notify(meetingId);
                     },
                     onPlan: ({ plannedLeafCount }) =>
@@ -1012,28 +1071,6 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             }
           })();
           if (controller.signal.aborted) throw controller.signal.reason;
-          if (
-            !analysis.title &&
-            meetingTitleNeedsGeneration(admittedMeeting.title) &&
-            provider.generateTitle
-          ) {
-            const generatedTitle = (
-              await provider.generateTitle(
-                [
-                  analysis.overview,
-                  ...analysis.topics.map((topic) => topic.title),
-                ]
-                  .filter(Boolean)
-                  .join('\n'),
-              )
-            ).trim();
-            if (
-              generatedTitle.length <= 120 &&
-              !meetingTitleNeedsGeneration(generatedTitle)
-            ) {
-              analysis.title = generatedTitle;
-            }
-          }
           if (analysis.generation_metadata) {
             analysis.generation_metadata.speaker_references =
               buildMeetingNotesSpeakerReferences({
@@ -1054,7 +1091,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           finalizeMetric('published');
           notify(meetingId);
           announcePublication(meetingId, runId);
-          if (dependencies.runSecondary) {
+          {
             const secondaryInput = {
               meetingId,
               runId,

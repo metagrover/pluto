@@ -89,7 +89,8 @@ export type NotesResponseContract =
   | 'draft'
   | 'compact_draft'
   | 'audit'
-  | 'editor';
+  | 'editor'
+  | 'corrections';
 
 export type NotesRequest = {
   task: NotesTask;
@@ -113,9 +114,15 @@ export type NotesContext = {
 export type GenerateMeetingNotesInput = {
   /** Complete-document review used by the compact direct pipeline. */
   reviewProtocol?: 'editor';
-  /** Benchmark-only experiment. Product callers must retain the default. */
+  /** Internal quality/performance experiment; no product default change. */
+  correctionOnlyReview?: boolean;
+  compactSourceSpeakers?: boolean;
+  sourceParagraphs?: boolean;
+  /** Internal chunk-size experiment; the default remains 8,000 characters. */
+  maxSourceCharactersPerLeaf?: 8000 | 12000 | 16000;
+  /** Model review policy; production currently uses deterministic_only. */
   hierarchyAuditStrategy?: 'every_node' | 'final_only' | 'deterministic_only';
-  /** Compact direct writer; deterministic-only remains a benchmark route. */
+  /** Compact writer with source validation and optional model editing. */
   compactWriterContract?: boolean;
   source: NotesSource;
   context: NotesContext;

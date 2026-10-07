@@ -1153,6 +1153,48 @@ describe('meeting analysis run publication', () => {
     });
   });
 
+  it.each(['current', 'renamed', 'stale', 'invalid'])(
+    'updates a deferred title only for the current published placeholder (%s)',
+    (state) => {
+      const meetingId = `deferred-title-${state}`;
+      const revisions = fixture(meetingId);
+      saveMeeting({ ...getMeeting(meetingId), title: 'New Meeting' });
+      start(meetingId, 'title-run', 'title-input', revisions);
+      expect(publish(meetingId, 'title-run', 'title-input', revisions)).toBe(
+        true,
+      );
+      if (state === 'renamed') {
+        saveMeeting({ ...getMeeting(meetingId), title: 'My title' });
+      }
+      const before = getMeeting(meetingId)!;
+      saveMeetingAnalysisSecondaryFieldsIfCurrent({
+        meetingId,
+        runId: 'title-run',
+        inputRevision: 'title-input',
+        ...revisions,
+        ...(state === 'stale' ? { sourceRevision: 'old-source' } : {}),
+        generatedTitle: {
+          expectedTitle: 'New Meeting',
+          title:
+            state === 'invalid' ? 'New Meeting' : 'Quarterly Planning Review',
+        },
+      });
+      const after = getMeeting(meetingId)!;
+      expect(after.title).toBe(
+        state === 'current' ? 'Quarterly Planning Review' : before.title,
+      );
+      const priorAnalysis = JSON.parse(before.analysis_json!);
+      expect(JSON.parse(after.analysis_json!)).toEqual(
+        state === 'current'
+          ? { ...priorAnalysis, title: 'Quarterly Planning Review' }
+          : priorAnalysis,
+      );
+      expect(after.enhanced_notes).toBe(before.enhanced_notes);
+      expect(after.user_edits_json).toBe(before.user_edits_json);
+      expect(getMeetingAnalysisRun(meetingId)?.notes_status).toBe('published');
+    },
+  );
+
   it('does not write secondary fields after the source revision is stale', () => {
     const meetingId = 'stale-secondary-write';
     const revisions = fixture(meetingId);

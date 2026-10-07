@@ -17,6 +17,9 @@ describe('meeting Ask Pluto assistance routing', () => {
   it.each([
     ['What did Avery say about pricing?', 'fact'],
     ['Did we discuss the launch date?', 'fact'],
+    ['Is the proposal approved?', 'fact'],
+    ['Are the changes approved?', 'fact'],
+    ['Was the venue chosen?', 'fact'],
     ['Remind me what the customer asked for', 'fact'],
     ['What is the name of the person mentioned?', 'fact'],
     ['Who was the person mentioned?', 'fact'],
@@ -28,7 +31,12 @@ describe('meeting Ask Pluto assistance routing', () => {
     ['Where are we meeting?', 'fact'],
     ['What did we decide?', 'decision'],
     ['Did everyone agree on the rollout?', 'decision'],
+    ['Did we agree to daily meetings or asynchronous follow-up?', 'decision'],
+    ['Did we approve the follow-up plan?', 'decision'],
+    ['List the agreed action items, stated owners, and deadlines.', 'action'],
     ['What are the next steps?', 'action'],
+    ['What still needs to be sent?', 'action'],
+    ['What remains to be done?', 'action'],
     ['Who owns the migration checklist?', 'action'],
     ['Was there a deadline for the follow-up?', 'action'],
   ] as const)('routes %s to recall/%s', (query, recallKind) => {
@@ -48,6 +56,7 @@ describe('meeting Ask Pluto assistance routing', () => {
 
   it.each([
     ['What could I do better in this conversation?', 'coaching'],
+    ['How can I communicate better?', 'coaching'],
     ['How is the speaker doing?', 'coaching'],
     ['How is Mira doing in this conversation?', 'coaching'],
     ['Did Riley understand the proposal?', 'clarification'],
@@ -71,5 +80,16 @@ describe('meeting Ask Pluto assistance routing', () => {
     ['Write a follow-up with the decisions', { mode: 'draft' }],
   ])('honors the requested answer shape for %s', (query, route) => {
     expect(routeMeetingAskPlutoAssistance(query)).toEqual(route);
+  });
+});
+
+it.each([
+  'What information did someone promise to share?',
+  'Which commitments have been made?',
+  'What did the group promise to send?',
+])('routes explicit commitments to action recall: %s', (query) => {
+  expect(routeMeetingAskPlutoAssistance(query)).toEqual({
+    mode: 'recall',
+    recallKind: 'action',
   });
 });

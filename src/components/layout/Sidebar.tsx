@@ -79,6 +79,7 @@ export const Sidebar = ({
   };
   return (
     <aside
+      id="app-sidebar"
       className={`
                 app-sidebar w-[85vw] md:w-[260px] bg-pro-surface border-r border-pro-border flex flex-col shrink-0 absolute lg:relative h-full z-40 transition-transform duration-300 ease-in-out shadow-2xl lg:shadow-none
                 ${sidebarVisible ? 'translate-x-0' : '-translate-x-full lg:-translate-x-[260px]'}

@@ -22,8 +22,12 @@ import {
   parseEditedNotes,
 } from './meetingNotesEditor';
 import { identifyEditedNotes } from './meetingNotesEditorIdentity';
+import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
 import { isTransientMeetingNotesLeafFailure } from './meetingNotesFailures';
-import { findNotesGuardrailIssues } from './meetingNotesGuardrails';
+import {
+  createNotesGuardrailChecker,
+  findNotesGuardrailIssues,
+} from './meetingNotesGuardrails';
 import {
   planNotesLeaves,
   splitNotesDraftForMerge,
@@ -77,6 +81,7 @@ const reviewPrompt = (
         ...options,
         template: input.context.template,
         compactDraft: input.compactWriterContract === true,
+        correctionOnly: input.correctionOnlyReview,
       })
     : buildNotesAuditPrompt({
         ...options,
@@ -96,10 +101,20 @@ const planDirectCapacity = (
   planNotesCapacity({
     contextTokens: input.contextTokens,
     writerInputTokens: estimateNotesTokens(
-      createNotesWireRequest(writerPrompt, evidenceSpans).prompt,
+      createNotesWireRequest(
+        writerPrompt,
+        evidenceSpans,
+        input.compactSourceSpeakers,
+        input.sourceParagraphs,
+      ).prompt,
     ),
     auditBaseInputTokens: estimateNotesTokens(
-      createNotesWireRequest(preliminaryAuditPrompt, evidenceSpans).prompt,
+      createNotesWireRequest(
+        preliminaryAuditPrompt,
+        evidenceSpans,
+        input.compactSourceSpeakers,
+        input.sourceParagraphs,
+      ).prompt,
     ),
     writerOutputTokens: input.compactWriterContract
       ? COMPACT_WRITER_OUTPUT_TOKENS
@@ -151,9 +166,11 @@ const serializeSource = (
         }));
   return selected
     .map((span) => {
-      const segment = input.source.segments.find(
-        (entry) => entry.index === span.segment,
-      );
+      const indexed = input.source.segments[span.segment];
+      const segment =
+        indexed?.index === span.segment
+          ? indexed
+          : input.source.segments.find((entry) => entry.index === span.segment);
       if (!segment) throw new MeetingNotesError('invalid_source_span');
       return JSON.stringify({
         descriptor: span,
@@ -185,7 +202,9 @@ const makeRequest = (
   responseContract:
     task === 'notesAudit'
       ? input.reviewProtocol === 'editor'
-        ? 'editor'
+        ? input.correctionOnlyReview
+          ? 'corrections'
+          : 'editor'
         : 'audit'
       : task === 'notesWriter' && input.compactWriterContract
         ? 'compact_draft'
@@ -235,7 +254,12 @@ const assertFits = (
   spans?: SourceSpan[],
 ) => {
   const providerPrompt = spans
-    ? createNotesWireRequest(prompt, spans).prompt
+    ? createNotesWireRequest(
+        prompt,
+        spans,
+        input.compactSourceSpeakers,
+        input.sourceParagraphs,
+      ).prompt
     : prompt;
   if (
     estimateNotesTokens(providerPrompt) + outputTokens + SAFETY_TOKENS >
@@ -252,7 +276,14 @@ const fits = (
   spans?: SourceSpan[],
 ) =>
   estimateNotesTokens(
-    spans ? createNotesWireRequest(prompt, spans).prompt : prompt,
+    spans
+      ? createNotesWireRequest(
+          prompt,
+          spans,
+          input.compactSourceSpeakers,
+          input.sourceParagraphs,
+        ).prompt
+      : prompt,
   ) +
     outputTokens +
     SAFETY_TOKENS <=
@@ -481,6 +512,8 @@ const writeDraft = async (
         task,
         prompt,
         'writer-audit-v1:source-labels:guardrails-v3:schema-v1',
+        input.compactSourceSpeakers ?? false,
+        input.sourceParagraphs ?? false,
       ]),
     )
     .digest('hex');
@@ -497,7 +530,7 @@ const writeDraft = async (
     (raw) => {
       const parsed =
         task === 'notesWriter' && input.compactWriterContract
-          ? parseCompactNotesDraft(raw)
+          ? parseCompactNotesDraft(raw, input.sourceParagraphs ? 36 : 3)
           : parseNotesDraft(raw);
       assertAllowedSources(parsed, allowedSpans);
       return parsed;
@@ -580,11 +613,11 @@ const deterministicallyCheckedDraft = (
       ? { ...structuredClone(draft), title: null }
       : structuredClone(draft);
   assertAllowedSources(checkedDraft, evidenceSpans);
-  const issues = findNotesGuardrailIssues(
+  const checkGuardrails = createNotesGuardrailChecker(
     input.source,
-    checkedDraft,
     evidenceSpans,
   );
+  const issues = checkGuardrails(checkedDraft);
   const auditedIssues: string[] = issues.map(
     (issue) => `notes_guardrail:${issue.code}`,
   );
@@ -593,10 +626,8 @@ const deterministicallyCheckedDraft = (
   for (const section of checkedDraft.sections) {
     section.items = section.items.filter((item) => {
       if (item.kind !== 'action') return true;
-      const unsafe = findNotesGuardrailIssues(
-        input.source,
+      const unsafe = checkGuardrails(
         { ...checkedDraft, sections: [{ ...section, items: [item] }] },
-        evidenceSpans,
         ['missing_condition', 'conflicting_action'],
       );
       auditedIssues.push(
@@ -710,11 +741,11 @@ const auditDraft = async (
           (input.reviewProtocol !== 'editor' || !fullSource);
         if (advisory && audited) {
           const allowed = fullSource ? undefined : evidenceSpans;
-          const issues = findNotesGuardrailIssues(
+          const checkGuardrails = createNotesGuardrailChecker(
             input.source,
-            finalDraft,
             allowed,
           );
+          const issues = checkGuardrails(finalDraft);
           audited.issues ??= [];
           audited.issues.push(
             ...issues.map((issue) => `notes_guardrail:${issue.code}`),
@@ -724,10 +755,8 @@ const auditDraft = async (
           for (const section of finalDraft.sections) {
             section.items = section.items.filter((item) => {
               if (item.kind !== 'action') return true;
-              const unsafe = findNotesGuardrailIssues(
-                input.source,
+              const unsafe = checkGuardrails(
                 { ...finalDraft, sections: [{ ...section, items: [item] }] },
-                allowed,
                 ['missing_condition', 'conflicting_action'],
               );
               audited.issues!.push(
@@ -772,10 +801,12 @@ const auditDraft = async (
             model: input.model,
           },
           compactDraft: input.compactWriterContract === true,
+          ...(input.correctionOnlyReview ? { originalDraft: draft } : {}),
         });
         const editedPayload = JSON.parse(raw) as Record<string, unknown>;
         if (
           input.compactWriterContract &&
+          !input.correctionOnlyReview &&
           !Object.hasOwn(editedPayload, 'title')
         ) {
           throw new MeetingNotesError('notes_audit_invalid', 'schema');
@@ -1517,7 +1548,9 @@ const planBoundedCompactLeaves = (
   planNotesLeaves(input.source, (_packet, spans = []) => {
     if (
       sourceCharacterCount(spans) >
-      NOTES_BOUNDED_LIMITS.maxSourceCharactersPerLeaf
+      ((NOTES_EXPERIMENTS_ENABLED
+        ? input.maxSourceCharactersPerLeaf
+        : undefined) ?? NOTES_BOUNDED_LIMITS.maxSourceCharactersPerLeaf)
     ) {
       return false;
     }
@@ -1528,6 +1561,11 @@ const planBoundedCompactLeaves = (
       knownTerms,
       template: input.context.template,
     });
+    if (!fits(input, writerPrompt, COMPACT_WRITER_OUTPUT_TOKENS, spans))
+      return false;
+    // No model editor is requested in this mode, so reserve only the writer's
+    // actual context/output allowance rather than an unused editor envelope.
+    if (input.hierarchyAuditStrategy === 'deterministic_only') return true;
     const editorPrompt = buildNotesEditorPrompt({
       sourceText,
       draft: {},
@@ -1537,14 +1575,20 @@ const planBoundedCompactLeaves = (
       compactDraft: true,
     });
     return (
-      fits(input, writerPrompt, COMPACT_WRITER_OUTPUT_TOKENS, spans) &&
-      estimateNotesTokens(createNotesWireRequest(editorPrompt, spans).prompt) +
+      estimateNotesTokens(
+        createNotesWireRequest(
+          editorPrompt,
+          spans,
+          input.compactSourceSpeakers,
+          input.sourceParagraphs,
+        ).prompt,
+      ) +
         // The empty draft above measures the fixed editor envelope. Reserve a
         // full compact draft for both its JSON body and wire-label expansion.
         2 * COMPACT_WRITER_OUTPUT_TOKENS +
         reviewOutputTokens(input) +
         SAFETY_TOKENS <=
-        input.contextTokens
+      input.contextTokens
     );
   });
 
@@ -1795,7 +1839,7 @@ const runMeetingNotes = async (
     const writerOutputTokens = input.compactWriterContract
       ? COMPACT_WRITER_OUTPUT_TOKENS
       : WRITER_OUTPUT_TOKENS;
-    if (!fits(input, writerPrompt, writerOutputTokens)) {
+    if (!fits(input, writerPrompt, writerOutputTokens, evidenceSpans)) {
       if (input.compactWriterContract) {
         const compactInput = { ...input, reviewProtocol: 'editor' as const };
         const leaves = planBoundedCompactLeaves(compactInput, knownTerms);
@@ -1870,7 +1914,12 @@ const runMeetingNotes = async (
   emitDraftPreview(input, draft);
   if (
     estimateNotesTokens(
-      createNotesWireRequest(auditPrompt, evidenceSpans).prompt,
+      createNotesWireRequest(
+        auditPrompt,
+        evidenceSpans,
+        input.compactSourceSpeakers,
+        input.sourceParagraphs,
+      ).prompt,
     ) +
       reviewOutputTokens(input) +
       SAFETY_TOKENS >

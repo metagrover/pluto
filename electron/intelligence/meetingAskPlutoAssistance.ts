@@ -1,3 +1,5 @@
+import { parseLiveMeetingCommand } from '../../src/utils/liveMeetingCommands';
+
 export type MeetingAskPlutoRecallKind =
   | 'catch_up'
   | 'fact'
@@ -17,7 +19,7 @@ export type MeetingAskPlutoAssistanceRoute =
   | { mode: 'general' };
 
 const ACTION_PATTERN =
-  /\b(action items?|next steps?|follow[- ]?ups?|who (?:owns|is responsible for)|owners?|assignees?|deadlines?|due date|what (?:do|does) (?:i|we|they|he|she) need to do)\b/i;
+  /\b(what (?:still )?(?:needs?|remains?) to|action items?|promises?|promised|commitments?|committed|next steps?|follow[- ]?ups?|who (?:owns|is responsible for)|owners?|assignees?|deadlines?|due date|what (?:do|does) (?:i|we|they|he|she) need to do)\b/i;
 const DECISION_PATTERN =
   /\b(decisions?|decide|decided|agreed?|agreement|settled? on|approved?|chose|chosen)\b/i;
 const CATCH_UP_PATTERN =
@@ -35,13 +37,20 @@ const DIRECT_FACT_PATTERN =
 const DRAFT_PATTERN =
   /^\s*(?:(?:can|could|would|will) you\s+|help me\s+)?(?:please\s+)?(?:draft|write|create|compose|generate)\b/i;
 const COACHING_PATTERN =
-  /\b(?:what (?:can|could|should) (?:i|the speaker|they) do better|how (?:am i|is|are|was|were) .{0,48}\bdoing|coach(?:ing)?|communication feedback|improve (?:my|their) communication)\b/i;
+  /\b(?:what (?:can|could|should) (?:i|the speaker|they) do better|how (?:can|could|should) i (?:communicate|present|explain) (?:this |that |it )?better|how (?:am i|is|are|was|were) .{0,48}\bdoing|coach(?:ing)?|communication feedback|improve (?:my|their) communication)\b/i;
 const CLARIFICATION_PATTERN =
   /\b(?:did [\p{L}\p{N} .'-]{1,80} understand|not understand|confused?|confusion|unclear|misunderstood?|needed? clarification|what (?:was|is) confusing)\b/iu;
 
 export const routeMeetingAskPlutoAssistance = (
   query: string,
 ): MeetingAskPlutoAssistanceRoute => {
+  const shortcut = parseLiveMeetingCommand(query);
+  if (shortcut.kind === 'command') {
+    const task = shortcut.command.task;
+    return task === 'advice'
+      ? { mode: 'advice' }
+      : { mode: 'recall', recallKind: task === 'recap' ? 'catch_up' : task };
+  }
   const normalized = query.normalize('NFKC').replace(/\s+/g, ' ').trim();
 
   if (DRAFT_PATTERN.test(normalized)) {
@@ -61,6 +70,17 @@ export const routeMeetingAskPlutoAssistance = (
   }
   if (SUMMARY_PATTERN.test(normalized)) {
     return { mode: 'recall', recallKind: 'catch_up' };
+  }
+  if (
+    /^(?:did|do|does|have|has|was|were|is|are)\b/i.test(normalized) &&
+    DECISION_PATTERN.test(normalized)
+  ) {
+    return {
+      mode: 'recall',
+      recallKind: /^(?:is|are|was|were)\b/i.test(normalized)
+        ? 'fact'
+        : 'decision',
+    };
   }
   if (ACTION_PATTERN.test(normalized)) {
     return { mode: 'recall', recallKind: 'action' };

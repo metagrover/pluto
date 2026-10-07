@@ -392,7 +392,7 @@ const isPassiveUnownedNeed = (evidence: string): boolean =>
   !/\b(?:assigned|i can|i will|i'll|owns?|sure|yes|will do)\b/i.test(evidence);
 
 const GENERIC_ACTION_ASSIGNEE =
-  /^(?:(?:and|so|then)\s+)?(?:group|team|the team|we|everyone|i|me|you)$/i;
+  /^(?:(?:and|so|then|um|uh|oh|well|okay|ok|yes|yeah)\s+)*(?:group|team|the team|we|everyone|i|me|you)$/i;
 const FIRST_PERSON_ACTION_COMMITMENT =
   /\b(?:i will|i['’]ll|i can|i am going to|i['’]m going to|i commit to|i promise(?:d)? to)\b/i;
 const GROUP_ACTION_COMMITMENT = /\b(?:we will|we['’]ll|we commit to)\b/i;
@@ -638,9 +638,6 @@ export const groundRecentWin = (
   return { ...recentWin, evidence: resolved.evidence };
 };
 
-/** Field/polarity checks for a claim already reviewed against exact canonical
- * spans. Deliberately no lexical-overlap threshold: paraphrases are audited.
- * Never select this path from persisted metadata or a model confidence flag. */
 export const isUnacceptedConditionalWillingness = (evidence: string): boolean =>
   /\bif\b/i.test(evidence) &&
   /\bi can\b/i.test(evidence) &&
@@ -860,6 +857,57 @@ const isUnacceptedSourceOffer = (
   );
 };
 
+// Accept an unambiguous basic count spelled out beside the same unit. Monetary
+// quantities and compound/negative numerals still require their original form.
+const sourceSupportsWrittenCount = (
+  number: string,
+  claim: string,
+  evidence: string,
+): boolean => {
+  const words = [
+    'zero',
+    'one',
+    'two',
+    'three',
+    'four',
+    'five',
+    'six',
+    'seven',
+    'eight',
+    'nine',
+    'ten',
+  ];
+  if (!/^(?:[0-9]|10)$/.test(number)) return false;
+  const units =
+    /^(?:profile|email|file|document|account|client|record|item|report|task|test|case|meeting|day|week|month|year|hour|minute)$/;
+  const compound =
+    /\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|minus|negative)\s+(?:and\s+)?$/i;
+  const occurrences = [...claim.matchAll(new RegExp(`\\b${number}\\b`, 'g'))];
+  return (
+    occurrences.length > 0 &&
+    occurrences.every((occurrence) => {
+      if (/[$€£¥-]\s*$/.test(claim.slice(0, occurrence.index))) return false;
+      const quantity = new RegExp(`^${number}\\s+([\\p{L}]+)\\b`, 'iu').exec(
+        claim.slice(occurrence.index),
+      );
+      if (!quantity) return false;
+      const unit = quantity[1]!.toLowerCase().replace(/s$/, '');
+      if (!units.test(unit)) return false;
+      return [
+        ...evidence.matchAll(
+          new RegExp(`\\b${words[Number(number)]}\\s+${unit}s?\\b`, 'giu'),
+        ),
+      ].some((match) => {
+        const prefix = evidence.slice(0, match.index);
+        return !/[$€£¥-]\s*$/.test(prefix) && !compound.test(prefix);
+      });
+    })
+  );
+};
+
+/** Field/polarity checks for a claim already reviewed against exact canonical
+ * spans. Deliberately no lexical-overlap threshold: paraphrases are audited.
+ * Never select this path from persisted metadata or a model confidence flag. */
 export const groundSourceReviewedItem = (
   item: {
     text: string;
@@ -869,6 +917,13 @@ export const groundSourceReviewedItem = (
   },
   resolved: ResolvedTranscriptEvidence,
 ): { text: string; owner: string | null; due: string | null } | null => {
+  const sourceWords = normalizeTranscriptEvidence(resolved.evidence).split(' ');
+  if (
+    sourceWords.every((word) =>
+      /^(?:um|uh|er|ah|oh|hmm|mm|so|and|well|then)?$/.test(word),
+    )
+  )
+    return null;
   const disposition =
     item.kind === 'decision'
       ? explicitDispositionClause(item.text, resolved)
@@ -920,7 +975,11 @@ export const groundSourceReviewedItem = (
         : evidence,
     ) ||
     hasLexicalContradiction(item.text, evidence) ||
-    numbers(item.text).some((number) => !numbers(evidence).includes(number)) ||
+    numbers(item.text).some(
+      (number) =>
+        !numbers(evidence).includes(number) &&
+        !sourceSupportsWrittenCount(number, item.text, evidence),
+    ) ||
     (conditional.test(evidence) && !conditional.test(item.text)) ||
     isUnacceptedRequest(evidence) ||
     (item.kind === 'action' &&

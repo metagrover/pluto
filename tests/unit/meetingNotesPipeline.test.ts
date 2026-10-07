@@ -1741,6 +1741,121 @@ it('rejects a compact plan that exceeds maximum bounded compact capacity', async
   }
 });
 
+it('packs larger writer-only chunks within the same context without reserving a model editor', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 36 }, (_, index) => ({
+      speaker: 'Nira',
+      text: `Turn ${index}: ${'context '.repeat(160)}`,
+    })),
+  );
+  const counts: number[] = [];
+  for (const maxSourceCharactersPerLeaf of [8000, 12000] as const) {
+    const generate = vi.fn(async (request: NotesRequest) => {
+      expect(request.task).toBe('notesWriter');
+      const wire = createNotesWireRequest(request.prompt, request.sourceSpans!);
+      expect(
+        estimateNotesTokens(wire.prompt) + request.outputTokens + 512,
+      ).toBeLessThanOrEqual(16384);
+      expect(
+        request.sourceSpans!.reduce(
+          (sum, span) => sum + span.end - span.start,
+          0,
+        ),
+      ).toBeLessThanOrEqual(maxSourceCharactersPerLeaf);
+      const span = request.sourceSpans![0]!;
+      return JSON.stringify({
+        meetingType: 'general',
+        title: { text: 'Context', sources: [span] },
+        sections: [
+          {
+            title: 'Context',
+            items: [
+              {
+                kind: 'point',
+                text: 'Context',
+                owner: null,
+                due: null,
+                sources: [span],
+              },
+            ],
+          },
+        ],
+      });
+    });
+    await generateMeetingNotes({
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 16384,
+      compactWriterContract: true,
+      hierarchyAuditStrategy: 'deterministic_only',
+      maxSourceCharactersPerLeaf,
+    });
+    counts.push(generate.mock.calls.length);
+  }
+  expect(counts[1]).toBeLessThan(counts[0]!);
+});
+
+it('uses the provider wire prompt to admit a full writer-only meeting', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 350 }, () => ({
+      speaker: 'Nira',
+      text: 'We discussed the current product roadmap.',
+    })),
+  );
+  const spans = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: segment.text.length,
+  }));
+  const generate = vi.fn(async (request: NotesRequest) => {
+    expect(
+      estimateNotesTokens(request.prompt) + request.outputTokens + 512,
+    ).toBeGreaterThan(16384);
+    expect(
+      estimateNotesTokens(
+        createNotesWireRequest(request.prompt, spans).prompt,
+      ) +
+        request.outputTokens +
+        512,
+    ).toBeLessThanOrEqual(16384);
+    const span = spans[0]!;
+    return JSON.stringify({
+      title: { text: 'Product Roadmap', sources: [span] },
+      sections: [
+        {
+          title: 'Product Roadmap',
+          items: [
+            {
+              kind: 'point',
+              text: 'We discussed the current product roadmap.',
+              owner: null,
+              due: null,
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    });
+  });
+  const result = await generateMeetingNotes({
+    source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16384,
+    compactWriterContract: true,
+    hierarchyAuditStrategy: 'deterministic_only',
+  });
+  expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+    'notesWriter',
+  ]);
+  expect(result.generation_metadata.mode).toBe('direct');
+});
+
 it('can benchmark a direct draft with deterministic checks and no model audit', async () => {
   const fixture = makeDirectNotesFixture();
   const generate = vi.fn().mockResolvedValue(JSON.stringify(fixture.draft));

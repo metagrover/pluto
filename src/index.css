@@ -826,6 +826,21 @@
   .meeting-ask-pluto-dock__error {
     @apply px-2 text-xs font-semibold text-red-600;
   }
+  .meeting-ask-pluto-dock__commands {
+    @apply flex flex-col gap-0.5 rounded-lg bg-pro-surface p-1;
+  }
+  .meeting-ask-pluto-dock__commands button {
+    @apply flex min-h-11 items-center justify-between gap-4 rounded-md px-3 py-2 text-left text-sm text-pro-text-main hover:bg-pro-accent/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent;
+  }
+  .meeting-ask-pluto-dock__commands button[aria-selected="true"] {
+    @apply bg-pro-accent/10;
+  }
+  .meeting-ask-pluto-dock__commands button span:first-child {
+    @apply shrink-0 font-medium;
+  }
+  .meeting-ask-pluto-dock__commands button span:last-child {
+    @apply text-right text-pro-text-main/80;
+  }
   .meeting-ask-pluto-dock__composer {
     @apply flex min-h-12 items-end gap-2 rounded-lg border border-pro-accent/45 bg-pro-surface/80 px-3 py-2 shadow-inner transition-colors duration-200;
   }

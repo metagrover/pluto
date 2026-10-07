@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { findNotesGuardrailIssues } from '../../electron/llm/meetingNotesGuardrails';
+import {
+  createNotesGuardrailChecker,
+  findNotesGuardrailIssues,
+} from '../../electron/llm/meetingNotesGuardrails';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type {
   NotesDraft,
@@ -48,6 +51,39 @@ function fixture(...turns: string[]) {
 }
 
 describe('source-grounded notes guardrails', () => {
+  it('reuses source preparation while checking edited drafts and individual actions independently', () => {
+    const f = fixture(
+      'I will send the outline after legal approves.',
+      'I will review the budget.',
+    );
+    const unsafe = f.item('Send the outline', 'action', [f.spans[0]!]);
+    const safe = {
+      ...f.item('Review the budget', 'action', [f.spans[1]!]),
+      id: 'safe',
+    };
+    const check = createNotesGuardrailChecker(f.source, f.spans);
+    const draft = f.draft(unsafe, safe);
+    expect(check(draft)).toEqual(
+      findNotesGuardrailIssues(f.source, draft, f.spans),
+    );
+    expect(
+      check(f.draft(unsafe), ['missing_condition', 'conflicting_action']),
+    ).toEqual([expect.objectContaining({ code: 'missing_condition' })]);
+    expect(
+      check(f.draft(safe), ['missing_condition', 'conflicting_action']),
+    ).toEqual([]);
+    const edited = f.draft(
+      { ...unsafe, text: 'Send the outline after legal approves' },
+      safe,
+    );
+    expect(check(edited)).toEqual([]);
+    expect(check(draft)).toEqual(
+      findNotesGuardrailIssues(f.source, draft, f.spans),
+    );
+    const scoped = createNotesGuardrailChecker(f.source, [f.spans[1]!]);
+    expect(scoped(f.draft(safe))).toEqual([]);
+  });
+
   it('keeps the default diagnostic cap while selected unsafe kinds bypass unrelated omission diagnostics', () => {
     const f = fixture(
       ...Array.from({ length: 33 }, () => 'I will review the budget.'),

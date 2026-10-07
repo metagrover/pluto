@@ -1517,3 +1517,137 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Supersedes:** The auto-end grace timing in “2026-08-10 - Split live, final transcript, and analysis latency on Apple Silicon.” Its shared stop/finalization path and attached-call evidence rules remain in force.
 - **Decision:** Poll active-call detection every five seconds. Explicit app exit or closed-tab evidence ends recording without an additional grace period, including during pending inactivity grace. Other detected inactivity uses a 20-second cancellable grace. Enabled silence fallback uses a 30-second deadline after the last speech; legacy 3/5/10-minute settings resolve to this duration, while disabled choices remain disabled.
 - **Preservation:** Resumed call evidence and unavailable browser inspection cancel pending call-end grace. Scheduled silence fallback retains its calendar boundary. Both paths invoke the existing stop callback, drain and seal captured evidence, and finalize transcripts normally. Detection latency and delayed operating-system timer delivery can extend real-world stop timing; these settings do not guarantee platform-level call-end events.
+
+
+## 2026-10-05 - Reduce notes overhead while preserving review quality
+
+- **Supersedes:** The publication sequencing in “Ground whole-meeting titles and retire topic fallback” and per-update validation in “Reveal ephemeral notes drafts before final review completes”. Title eligibility, final source checks, and reviewed-note quality rules remain in force.
+- **Decision:** Publish reviewed notes before generating a missing placeholder title. Generate that title through secondary work and save it only for the current published run and unchanged placeholder, without rewriting the note body or user edits. Title failure does not fail published notes.
+- **Scheduling:** Automatic notes outrank project review; Ask Pluto and manual notes keep their higher priorities.
+- **Validation:** Prepare guardrail source candidates once for a draft and its individual-action checks. Streamed previews use cancellation/run-status checks on write and full revision validation on read; final publication still checks current persisted inputs. Writer/editor calls, prompts, review budgets, commitment checks, and cache identity stay unchanged.
+
+
+## 2026-10-05 - Retain local models for up to two hours with idle memory release
+
+- **Decision:** Request two-hour Ollama keep-alive instead of one hour. This changes residency duration, not context size, model weights, prompts, or output limits.
+- **Memory:** Once a minute, use the existing available-memory probe. Below the existing voice-work headroom threshold (2 GiB or 10 percent of total RAM), release Pluto's resident model after at least one idle minute through the inference gate. Recheck activity after admission so active or newly completed requests are preserved. Release the owned model during shutdown on a best-effort, five-second deadline. Two hours is a maximum retention window, not a memory-free cache guarantee.
+- **Notes:** Compact Ollama writer/editor runs may reuse a completed writer context when the full source matches and the conversation fits. Larger notes batches remain explicit benchmark options. Continuation retains the full original source, writer request and raw answer, and the current editor draft; a different source/model/context, incomplete writer, or insufficient capacity uses the original editor request. No additional transcript or model-state cache is introduced. The original standalone editor is the fallback, and the same editor schema and source/commitment checks remain authoritative. Direct-context reuse is enabled after a fixed-source runtime probe demonstrated checkpoint restoration and comparable material coverage; no whole-meeting speedup is attributed to it for an ineligible chunked run.
+- **Chunked runs:** Keep at most six completed writer requests within the current generation so the existing write-all-then-review order can reuse each matching packet. Unmatched reviews retain these candidates; repaired or truncated writers do not seed continuation. This retains small request strings without enlarging the configured model or context limits, and does not alter review order or deadlines. Ollama's internal checkpoint memory remains subject to its own runtime policy and Pluto's idle memory release. Benchmark load and review outcomes separately from raw wall time.
+- **Capacity:** Budget message contents rather than escaped HTTP JSON. Use Ollama's completed prompt token count for the unchanged writer prefix when available; estimate new messages conservatively and retain per-message delimiter space, the output allowance and safety reserve. Missing or invalid measured counts use the existing estimator.
+- **Active generation:** Hold Electron's `prevent-app-suspension` assertion only while a local notes request is executing, releasing it in `finally`. Idle sleep can otherwise pause inference and consume the optional-review deadline. Display sleep remains allowed; model retention alone never holds a power assertion.
+
+## 2026-10-05 - Compose live answers while retaining canonical source evidence
+
+- **Status:** Accepted by the owner's request for polished live responses.
+- **Supersedes:** The copied-answer and limited-rewriting clauses in “2026-09-30 - Ground live chat in checked transcript wording on the fast model.” The current-meeting evidence boundary, configured model selection, and canonical source disclosures remain in force.
+- **Decision:** Generate concise answer points separately from supporting transcript excerpts. Derive answer type from the requested task, preserve chronological exchange context, and independently reconstruct factual answers from the supplied sources. Do not feed a rejected draft back as evidence or discard an entire exchange because it contains both completed work and a future commitment.
+- **Validation:** Check source membership, unsupported identities and quantities, negation, conditions, and explicit commitment or decision evidence. Low word overlap requests independent reconstruction rather than proving a paraphrase false. An invalid reconstruction may retain a previously grounded, non-copied draft; an explicit abstention can retract it. These checks are conservative heuristics, not semantic proof.
+- **Release gate:** Source-valid citations and passing unit tests do not establish useful answers. Require reviewed staged-transcript and independent-meeting evaluations, plus production runtime and active-recording acceptance. Do not promote another model or relax evidence checks merely to improve a benchmark score.
+
+
+## 2026-10-05 - Keep live answers free of source presentation
+
+- **Status:** Accepted by the owner's request to stop sharing sources in in-meeting answers.
+- **Supersedes:** The live source-disclosure and unconditional factual reconstruction requirements in “2026-10-05 - Compose live answers while retaining canonical source evidence.”
+- **Decision:** Hide excerpt panels and missing-citation notices in the live meeting chat. Keep internal transcript context and provenance. A factual answer that already passes the existing checks and is not copied can return without another model call; uncertain, rejected, or copied drafts still use reconstruction. Remove identical repeated answer points before display.
+- **Limits:** This presentation and generation simplification does not establish launch readiness or resolve all real-model omissions. Saved-meeting evidence presentation is unchanged.
+
+
+## 2026-10-05 - Focus live catch-up and edit validated factual drafts
+
+- **Status:** Accepted by the owner's request to fix live answer omissions, stale recaps and wording using local Phi.
+- **Supersedes:** The unchanged factual draft shortcut in “2026-10-05 - Keep live answers free of source presentation,” and the blanket rejection of group-voice decisions in “2026-10-05 - Compose live answers while retaining canonical source evidence.” Source-free live presentation remains in force.
+- **Context:** An unspecified “What did I miss?” uses the last three minutes of the current meeting. Explicit time ranges are honored; whole-meeting summaries can use earlier material from that same meeting. Decision retrieval selects a bounded set of relevant exchanges with adjacent responses.
+- **Answers:** Both general factual questions and explicit fact recall can send one validated draft of at least twelve words to the same local model for a short plain-text grammar edit. Recheck the edited answer against the existing transcript before using it; malformed or unsupported edits retain the valid draft. Short factual answers retain the direct return path; the copy edit replaces independent re-answering for longer single drafts, without adding a third call. A directly supported group decision can be rendered in third person only when its complete statement matches the cited source. Action identity checks distinguish owners and recipients from topic names and weekdays.
+- **Acceptance:** Passing regression tests and isolated transcript replays does not establish active-recording latency or complete decision recall on noisy transcripts.
+
+
+## 2026-10-05 - Return validated live answers without redundant reconstruction
+
+- **Status:** Accepted by the owner's request for quick, relevant answers without more retrieval rules or generation stages.
+- **Supersedes:** The unconditional reconstruction of decisions and single-context recaps in “2026-10-05 - Compose live answers while retaining canonical source evidence.”
+- **Decision:** Except for action lists, return the first answer when every point passes the existing checks and none copies a long transcript sentence. If any point is rejected, retain the existing reconstruction attempt so a partial list is not silently treated as complete. Intentional factual abstention still returns directly. Context selection, source checks, model and time budgets are unchanged.
+- **Wording:** A shorter prompt was rejected after losing useful sharing answers in replay. Retain the existing prompt and factual copy edit from “2026-10-05 - Focus live catch-up and edit validated factual drafts.” Removing it brought back an unclear factual answer during replay; this is an existing corrective pass, not a new generation stage.
+- **Action lists:** Retain their existing review: skipping it lost an explicit deadline in an independent scenario. Do not add special deadline-extraction rules to compensate.
+- **Limits:** This simplification does not establish complete decision/action recall or performance during active recording.
+
+
+## 2026-10-05 - Route live meeting shortcuts through surface-specific task prompts
+
+- **Status:** Accepted by the owner's request to implement the shared task prompt and shortcut plan in one batch, then verify together.
+- **Extends:** “2026-10-05 - Compose live answers while retaining canonical source evidence.” The current-meeting boundary, internal provenance, evidence checks, factual wording repair and action review remain.
+- **Routing:** Live Ask Pluto offers `/recap`, `/catch-me-up`, `/decisions`, `/actions`, and `/ask-next`, with optional additional requests. A recognized command selects its task explicitly and starts a fresh lookup. Ordinary questions use the existing classifier. Both paths use the same prompts, provider and completion checks; classification adds no model call.
+- **Scope:** Recap covers the current meeting. Catch-up uses the existing recent window, with explicit durations honored. No new topic-specific retrieval rules are introduced.
+- **Prompt acceptance:** The compact replacement was rejected after a fixed 66-question isolated Phi evaluation exposed worse factual phrasing and overconfident decisions. Keep the previous source and task instructions; recognized commands use those same task prompts. Negative decision claims require confirmation, while explicitly tentative or undecided status remains reportable. No additional model call or retrieval subsystem is introduced.
+- **Other chats:** The shared slash parser accepts a catalog supplied by the calling surface. The meeting catalog is separate; People, Projects and general Pluto chat may define their own commands and meanings independently. The live composer supplies the meeting menu; saved meeting chat does not show it.
+- **Interaction:** Typing `/` filters an inline keyboard-accessible menu. Selection inserts without sending. Unknown commands preserve the input and show the supported catalog; the live IPC path also returns guidance without invoking the model.
+- **Verification:** The full unit suite passed 6,214 tests before prompt acceptance; 135 focused tests passed after retaining prior instructions and repairing negative-decision confirmation. Type checks, scoped lint, renderer/Electron build and browser composer checks passed. The retained instructions were rerun on ten neutral Phi scenarios: manual inspection found the requested facts, uncertainty and corrections preserved. The automated tentative-decision keyword assertion falsely failed on a correct “No decision has been made” answer. Broad staged meeting omissions remain; isolated replay does not establish active-recording performance or launch readiness.
+
+
+## 2026-10-05 - Keep live task reviews focused and omit transcript clock labels
+
+- **Status:** Accepted by the owner's request for focused Ask Pluto fixes and timestamp-free responses.
+- **Extends:** “Route live meeting shortcuts through surface-specific task prompts.” Commands and normal questions still share the same task, provider and validation path.
+- **Work review:** Source-verified commitments remain when the review omits them or returns an empty list. A supported review point for the same exchange takes precedence, preserving corrections without silently losing other work. This replaces empty-review retraction for action requests only; it adds no generation stage.
+- **Task separation:** Review instructions for commitments apply only to action requests. A decision review must not substitute promises or anecdotes for settled outcomes. Existing review receives the draft's failed validation categories, without repeating the rejected answer, so it can correct an inferred identity rather than reproduce it.
+- **Work coverage:** Retrieval and prompt preparation reuse the shared undertaking check. Within the existing character budget, explicit work exchanges beyond the four highest-ranked windows remain eligible. Candidate undertakings and adjacent context are distinguished for the model; a lexical cue does not certify concrete work. Directly quoted first-person undertakings can become neutral verb phrases only when their complete wording is present in the source; completed work cannot support an outstanding imperative.
+- **Status questions:** Questions phrased as the approval or choice status of something use the factual prompt; requests to list decisions still use the decision prompt. Complete short status excerpts can map to sources without model-selected numbers. A deadline that fails exact-source validation cannot remain in the published prose.
+- **Internal output:** The model returns polished text with an exact supporting excerpt. Pluto resolves that excerpt to canonical source references using the existing reader; the model no longer needs to select source numbers. Legacy structured points with source arrays remain readable.
+- **Presentation:** Transcript offsets are absent from draft, recap and review prompts. Chronology and recency selection still use the clock internally. Normal answers omit transcript positions; a real deadline or scheduled time remains available when relevant to the question.
+- **Limits:** Deterministic tests verify routing, evidence rules and prompt contracts. Staged local Phi replay is a separate answer-quality check and does not prove active-recording performance or launch readiness.
+
+- **Verification:** Final focused checks passed 240 tests; types, scoped lint and the build passed. The final full suite passed 6,237 of 6,238 tests, with one calendar-navigation timeout; that nine-test file passed on its isolated rerun. Ten independent Phi scenarios were manually reviewed with sensible outcomes, including undecided status whose keyword assertion falsely failed. A fresh 12-question Phi replay at two transcript checkpoints completed without timeouts or future-source leakage, with median 5.2 seconds and maximum 10.9 seconds in isolated inference. No transcript timestamps appeared in the answers. Broader staged transcript replay still exposes recap wording and completeness gaps; these results do not establish launch readiness.
+
+
+## 2026-10-05 - Measure scope corrections before accepting broader live recap changes
+
+- **Status:** Accepted within the owner's request to improve task context, concise output and fixed quality evaluation.
+- **Scope correction:** Recent catch-up instructions describe the supplied recent discussion; whole-meeting recap retains the prior prompt. Preserve the existing anecdote boundary, distinguish proposals from decisions and omit unclear details. Reuse the existing query classifier; no added model call or retrieval subsystem.
+- **Recap guard:** Advice-shaped imperatives are rejected in the shared reader for recap requests, including short recent contexts that do not enter the chunked recap path.
+- **Rejected candidates:** Broader uniform window sampling lost substantive topic coverage in local Phi replay. Removing chunked recap generation produced unsupported topic relationships and 28-32 second answers after reconstruction. Both candidates were reverted. The accepted chunked recap path and retrieval budget remain unchanged; these experiments do not supersede their earlier decisions.
+- **Quality check:** The fixed private replay criteria distinguish relevance, correctness, completeness and readability from source-boundary checks. The retained scope correction passed manual acceptance in the earlier fresh catch-up check; the later one remained below acceptance because it inferred a causal relationship from unclear transcription. No product-wide helpfulness score is claimed. Private transcripts and evaluation outputs remain ignored.
+- **Verification:** Final five-file focused suite passed 242 tests. Types, scoped lint and renderer/Electron compilation through Vite passed. These checks do not establish launch readiness or responsiveness during active transcription.
+
+
+## 2026-10-05 - Release live Ask Pluto as specific-question beta without failed shortcuts
+
+- **Status:** Accepted by the owner's request to remove unreliable shortcuts and perform one final improvement pass.
+- **Supersedes:** The offered five-command live catalog in “Route live meeting shortcuts through surface-specific task prompts.” The shared parser, other chat catalogs, current-meeting boundary and ordinary question routes remain.
+- **Decision:** Remove `/recap`, `/catch-me-up`, `/decisions`, `/actions` and `/ask-next` from the live catalog. None consistently met the acceptance bar across the bounded clear/noisy evaluation. Do not retain a command merely because its source-boundary checks passed.
+- **Beta surface:** In-meeting Ask Pluto is labelled beta and asks for specific questions. It does not show an empty slash menu or advertise autocomplete when no commands are available. Retired slash inputs retain the user's text and receive the same beta guidance in the renderer and IPC path without model generation.
+- **One improvement pass:** Next-question instructions ask for clarification of unclear terms and avoid adding premises. This repaired an inferred detail in replay but did not consistently avoid asking about already-explained roles, so the shortcut was still removed. No new retrieval rules or model stages were added.
+- **Acceptance:** Private evaluation completed 41 model checks: 30 questions across three staged transcripts, six next-question retests after the correction and five independent clear scenarios. Clear decision/action examples worked, but shortcut reliability did not generalize. Private meeting data and output remain ignored. No product-wide helpfulness percentage is claimed.
+- **Verification:** Final seven-file focused suite passed 291 tests; types, scoped lint and Vite renderer/Electron builds passed. This authorizes a reduced beta surface, not a broad reliability claim or active-recording performance certification. No release was published by this work.
+
+
+## 2026-10-06 - Retain exact completed note writers for two hours
+
+- **Status:** Accepted
+- **Supersedes:** Only the one-hour writer-cache lifetime in “Admit only exact incremental note leaves under capture headroom” (2026-08-31). Its capture admission, exact-match requirements and final review/publication safeguards remain.
+- **Decision:** The meeting-analysis coordinator retains completed parsed writer drafts for at most two hours, still capped at 64 entries. Reuse requires the same source spans and text, speaker attribution, prompt, model, generation settings, user context and template. Expiry remains absolute; reads do not renew it.
+- **Rationale:** A closed leaf can otherwise expire before a long meeting finishes or a later retry runs, causing identical writer work to repeat. Retaining bounded note text does not retain an Ollama model or relax source validation.
+- **Verification:** Coordinator expiry and cache bounds/mutation checks, plus exact incremental reuse and source/configuration invalidation regression coverage. No cold generation or capture-time reuse percentage is claimed; live final-source changes and headroom admission still determine actual reuse.
+
+
+## 2026-10-06 - Temporarily disable model reviews for meeting notes
+
+- **Status:** Accepted by the owner
+- **Supersedes:** The model-editor requirement in “Retain local models for up to two hours with idle memory release”, the final model-review clause of “Retain exact completed note writers for two hours”, and the model-review sequencing in “Reduce notes overhead while preserving review quality”.
+- **Decision:** The meeting-analysis coordinator uses the existing deterministic-only pipeline for automatic and manual note generation across providers. Model review calls are disabled; source/commitment validation, cancellation, exact cache matching, publication revision checks and preservation of source data remain in force.
+- **Tradeoff:** Writers supply the note content without a model editing pass. Missing overviews, missed material and unresolved cross-chunk wording may remain. Local checks do not guarantee semantic completeness. Re-enable model reviews by removing the coordinator override when an efficient review approach demonstrates useful improvements.
+
+
+## 2026-10-06 - Budget writer-only notes against the provider prompt
+
+- **Status:** Accepted
+- **Context:** The temporary no-model-review policy uses source-labelled wire prompts and does not request an editor.
+- **Decision:** Test whole-meeting writer capacity using the same encoded source-label prompt sent to the provider. In chunk planning, reserve writer output and safety space without an unused editor envelope when the review strategy is deterministic-only. Model-reviewed paths retain their editor reserves.
+- **Limits:** The production context remains 16,384 tokens and the chunk cap remains 8,000 source characters. Internal 12,000/16,000-character options support measured experiments; they do not increase context or output budgets. Source, commitment, cancellation, cache and publication safeguards remain.
+- **Verification:** Regressions cover a raw internal prompt that exceeds capacity while its provider prompt fits, and fewer writer-only chunks within unchanged context/output bounds. Larger packet and context trials require material-coverage checks before promotion; fewer calls alone are insufficient.
+
+
+## 2026-10-06 - Exclude notes experiments from production bundles
+
+- **Status:** Accepted by the owner's release instruction.
+- **Decision:** Keep the 24K, paragraph/speaker wire, correction-only editor, larger chunk and writer-context continuation experiments available only outside production builds. Vite folds the shared research gate to false and removes their branches from the shipped bundle. Private harnesses, outputs and research documents are outside the packaging allowlist.
+- **Extends:** “Budget writer-only notes against the provider prompt.” The production context remains 16,384 tokens, the source chunk cap remains 8,000 characters and the Ollama batch remains 128. The accepted deterministic-only review policy is unchanged. No experiment is promoted by this release.

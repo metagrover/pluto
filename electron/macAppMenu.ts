@@ -1,9 +1,17 @@
 import type { MenuItemConstructorOptions, MessageBoxOptions } from 'electron';
 import type { UpdateInfo } from './updateChecker';
 
+export const buildPlutoHelpMenu = (
+  reportProblem: () => void,
+): MenuItemConstructorOptions => ({
+  label: 'Help',
+  submenu: [{ label: 'Report a problem…', click: reportProblem }],
+});
+
 export const buildMacApplicationMenuTemplate = (actions: {
   openSettings: () => void;
   checkForUpdates: () => void;
+  reportProblem: () => void;
 }): MenuItemConstructorOptions[] => [
   {
     label: 'Pluto',
@@ -30,6 +38,7 @@ export const buildMacApplicationMenuTemplate = (actions: {
   { role: 'editMenu' },
   { role: 'viewMenu' },
   { role: 'windowMenu' },
+  { ...buildPlutoHelpMenu(actions.reportProblem), role: 'help' },
 ];
 
 export const updateResultDialog = (status: UpdateInfo): MessageBoxOptions => {

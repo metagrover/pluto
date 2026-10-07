@@ -224,6 +224,7 @@ export interface LLMProvider {
       signal?: AbortSignal;
       mode?: 'fast' | 'deep';
       jsonMode?: boolean;
+      responseSchema?: Record<string, unknown>;
       live?: boolean;
       onStart?: () => void;
       onToken?: (delta: string) => void;

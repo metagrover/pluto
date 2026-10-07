@@ -40,6 +40,10 @@ import type {
   WorkspaceChatMessagePayload,
 } from '../src/types/workspaceChat';
 import {
+  LIVE_MEETING_SHORTCUT_HELP,
+  parseLiveMeetingCommand,
+} from '../src/utils/liveMeetingCommands';
+import {
   OLLAMA_GENERAL_MODEL,
   OLLAMA_QUICK_CHAT_MODEL,
 } from '../src/utils/ollamaModels';
@@ -128,6 +132,7 @@ import {
 import { createLogger } from './logger';
 import {
   buildMacApplicationMenuTemplate,
+  buildPlutoHelpMenu,
   updateResultDialog,
 } from './macAppMenu';
 import {
@@ -346,6 +351,10 @@ const openSettingsFromMenu = (): void => {
   settingsMenuNavigation.open();
 };
 
+const reportProblemFromMenu = (): void => {
+  settingsMenuNavigation.open('PLUTO_NATIVE_MENU_REPORT_PROBLEM');
+};
+
 const checkForUpdatesFromMenu = async (): Promise<void> => {
   if (checkingFromMenu || !updateChecker) return;
   checkingFromMenu = true;
@@ -378,6 +387,7 @@ const installMacApplicationMenu = (): void => {
     Menu.buildFromTemplate(
       buildMacApplicationMenuTemplate({
         openSettings: openSettingsFromMenu,
+        reportProblem: reportProblemFromMenu,
         checkForUpdates: () => void checkForUpdatesFromMenu(),
       }),
     ),
@@ -675,7 +685,10 @@ import {
   resolveCurrentMeeting,
   resolvePersistedMeetingEvidenceState,
 } from './intelligence/currentMeetingResolver';
-import { completeLiveMeetingChatAnswer } from './intelligence/liveMeetingChatAnswer';
+import {
+  buildLiveMeetingChatSchema,
+  completeLiveMeetingChatAnswer,
+} from './intelligence/liveMeetingChatAnswer';
 import { createLiveMeetingContextCoordinator } from './intelligence/liveMeetingContextCoordinator';
 import {
   buildAmbiguousMeetingAskPlutoResponse,
@@ -772,7 +785,10 @@ import type {
   InternalSignalDocument,
 } from './llm/provider';
 import { inferenceTransportErrorRationale } from './llm/transports/openAICompatible';
-import { UnifiedLLMProvider } from './llm/unifiedProvider';
+import {
+  UnifiedLLMProvider,
+  releaseIdleOllamaModel,
+} from './llm/unifiedProvider';
 import {
   type MeetingAnalysisRunCoordinatorDb,
   createMeetingAnalysisRunCoordinator,
@@ -1196,6 +1212,9 @@ const shutdownMainProcessConsumers = async () => {
   dreamingEntityQueue = null;
   stopIdentityReconciliation?.();
   calendarService.stop();
+  await releaseIdleOllamaModel(0).catch(() => {
+    plutoLog.warn('Could not release the local model during shutdown.');
+  });
   plutoLog.info('Shutting down...');
   parakeetFinalClient?.close();
   parakeetFinalClient = null;
@@ -1381,6 +1400,28 @@ app.whenReady().then(async () => {
     },
   });
   db.recoverInterruptedMeetingAnalysisRuns();
+  // Two-hour retention is a maximum; release idle model RAM when headroom drops.
+  let checkingIdleModelMemory = false;
+  const idleModelMemoryTimer = setInterval(async () => {
+    if (checkingIdleModelMemory) return;
+    checkingIdleModelMemory = true;
+    try {
+      const memory = await probeAvailableMemory();
+      if (
+        memory.availableMemoryBytes <
+        Math.max(2 * 1024 ** 3, os.totalmem() * 0.1)
+      ) {
+        await releaseIdleOllamaModel();
+      }
+    } catch {
+      // The next probe retries; this must never interrupt foreground work.
+    } finally {
+      checkingIdleModelMemory = false;
+    }
+  }, 60_000);
+  idleModelMemoryTimer.unref?.();
+  app.once('before-quit', () => clearInterval(idleModelMemoryTimer));
+
   const audioRetention = createAudioRetentionManager({
     rootDir: getMeetingArtifactsRootDir(),
     sqlite: getApplicationDatabase(),
@@ -8699,6 +8740,24 @@ app.whenReady().then(async () => {
         };
       }
 
+      if (
+        request.scope.type === 'live_meeting' &&
+        parseLiveMeetingCommand(query).kind === 'unknown'
+      ) {
+        return {
+          status: 'answered' as const,
+          answer: LIVE_MEETING_SHORTCUT_HELP,
+          scope: {
+            type: 'live_meeting' as const,
+            meetingId: request.scope.meetingId || '',
+            title: request.scope.title,
+          },
+          trustStatus: 'needs_review' as const,
+          claims: [],
+          citations: [],
+        };
+      }
+
       const replacedRequests: Promise<void>[] = [];
       for (const active of activeMeetingAskPlutoQueries.values()) {
         if (active.ownerId === event.sender.id) {
@@ -8945,6 +9004,9 @@ app.whenReady().then(async () => {
             signal: controller.signal,
             live: structuredLiveAnswer,
             jsonMode: structuredLiveAnswer,
+            responseSchema: structuredLiveAnswer
+              ? buildLiveMeetingChatSchema(context, assistanceRoute)
+              : undefined,
             onToken: (delta) => {
               if (delta && firstTokenAt === undefined)
                 firstTokenAt = Date.now();
@@ -8978,14 +9040,21 @@ app.whenReady().then(async () => {
               raw: answerRaw,
               context,
               route: assistanceRoute,
+              onDiagnostic: ({ stage, reason, detail }) =>
+                plutoLog.debug(
+                  `Live Ask Pluto validation: ${stage}/${reason}${detail ? `/${detail}` : ''}`,
+                ),
               query: conversation.priorQuestion
                 ? `${conversation.priorQuestion}\nCurrent request: ${query}`
                 : query,
-              generate: (prompt) =>
+              generate: (prompt, options) =>
                 provider.answerAskPluto(prompt, {
                   signal: controller.signal,
                   live: true,
-                  jsonMode: true,
+                  jsonMode: !options?.plainText,
+                  responseSchema: options?.plainText
+                    ? undefined
+                    : buildLiveMeetingChatSchema(context, assistanceRoute),
                 }),
             })
           : buildMeetingAskPlutoResponseFromAnswer({
@@ -9527,6 +9596,7 @@ app.whenReady().then(async () => {
       },
     },
     { type: 'separator' },
+    buildPlutoHelpMenu(reportProblemFromMenu),
     { label: 'Quit', click: () => app.quit() },
   ]);
 

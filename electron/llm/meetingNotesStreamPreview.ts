@@ -11,6 +11,7 @@ export function createNotesStreamPreview(input: {
   source: NotesSource;
   spans: SourceSpan[];
   decode: (raw: string) => string;
+  maxSourceSpans?: number;
   onDraft: (draft: NotesDraft) => void;
   signal?: AbortSignal;
 }) {
@@ -64,7 +65,10 @@ export function createNotesStreamPreview(input: {
       if (char !== '}') continue;
       try {
         const raw = answer.slice(0, index + 1) + [...stack].reverse().join('');
-        const draft = parseCompactNotesDraft(input.decode(raw));
+        const draft = parseCompactNotesDraft(
+          input.decode(raw),
+          input.maxSourceSpans,
+        );
         if (!draft.sections.some((s) => s.items.length)) continue;
         for (const section of draft.sections)
           for (const item of section.items)

@@ -37,13 +37,16 @@ describe('native Settings navigation', () => {
       createWindow,
       focusWindow: vi.fn(),
     });
-    navigation.open();
+    navigation.open('PLUTO_NATIVE_MENU_REPORT_PROBLEM');
     expect(createWindow).toHaveBeenCalledOnce();
     expect(current?.webContents.send).not.toHaveBeenCalled();
     navigation.ready(oldWindow.webContents as unknown as Electron.WebContents);
     expect(current?.webContents.send).not.toHaveBeenCalled();
     navigation.ready(current?.webContents as unknown as Electron.WebContents);
     expect(current?.webContents.send).toHaveBeenCalledOnce();
+    expect(current?.webContents.send).toHaveBeenCalledWith(
+      'PLUTO_NATIVE_MENU_REPORT_PROBLEM',
+    );
   });
 
   it('waits again while a window reloads', () => {

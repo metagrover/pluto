@@ -1,5 +1,27 @@
 # Private meeting-notes latency benchmark
 
+For the October 6 working-tree configuration, private experiment results, and
+continuation instructions, see [the notes-performance handoff](research/meeting-notes-performance-handoff-2026-10-06.md).
+
+The October 6 evening continuation tested metadata reduction and upgraded 24K
+prompts within the proposed 90-minute window. The final frozen variant completed
+one physical writer per case, but all five cases failed original-source semantic
+assessment. The product context remains 16K. See the handoff for measurements,
+comparison limits, and private artifact pointers; latency alone does not qualify
+a candidate for promotion.
+
+The additional prompt/output-contract hour kept the model and transcript encoding
+unchanged. Seven protocol variants and twelve physical model attempts included a
+frozen five-case role-separated candidate: 179.248 / 211.899 / 157.358 / 100.380 /
+113.656 seconds for cases 8 / 0 / 4 / 2 / 5. Each frozen run had one writer, no repair,
+zero cached input tokens and a verified complete source packet within 24K.
+Speaker-bound direct promises recovered correct owners in two cases, but material
+certainty, final-state, identity, scope and coverage errors remained. A closing-first
+contract also failed quality in two cases. These are private mock-publication
+experiments, not accepted product behavior or a controlled aggregate speedup.
+The default remains 16K. See the handoff's final-hour section for failures,
+limitations, data-preservation checks and the private evidence pointers.
+
 This benchmark measures local time-to-trusted-notes without publishing generated output. It reads selected meetings from a local SQLite database in query-only mode and writes an owner-only, content-free report.
 
 Create an ignored manifest under `.private/meeting-notes-latency.json`:
@@ -37,7 +59,7 @@ To measure the experimental hierarchy that replaces leaf and intermediate model 
 pnpm run benchmark:meeting-notes-latency -- --manifest .private/one-meeting.json --mode isolated --hierarchy-audit-strategy final_only --output .artifacts/meeting-notes-latency/final-only.json
 ```
 
-This flag affects the private benchmark only. Product generation retains an audit at every hierarchy node. Do not promote the experiment unless the case publishes and separately passes the existing source-grounded semantic quality gate.
+This flag overrides the private benchmark's audit strategy. The October 6 working-tree product coordinator uses `deterministic_only`, with no model audits. Older results that audited every hierarchy node are historical baselines. A successful mock publication still requires separate source-based semantic assessment before an experimental configuration is promoted.
 
 To measure the writer and merge stages with deterministic validation only and no model audit calls, use the same single-case constraint:
 
@@ -45,7 +67,7 @@ To measure the writer and merge stages with deterministic validation only and no
 pnpm run benchmark:meeting-notes-latency -- --manifest .private/one-meeting.json --mode isolated --hierarchy-audit-strategy deterministic_only --output .artifacts/meeting-notes-latency/deterministic-only.json
 ```
 
-This is also benchmark-only. It retains the strict output parser, allowed-source checks, commitment guardrails, and deterministic action/decision owner and deadline grounding. It does not claim semantic equivalence to the audited product path.
+This benchmark flag retains the strict output parser, allowed-source checks, commitment guardrails, and deterministic action/decision owner and deadline grounding. It matches the October 6 working-tree product coordinator's audit strategy; that alone does not establish semantic equivalence to older audited results or acceptance of other experimental settings.
 
 To measure the smaller direct-writer response contract, add
 `--compact-writer-contract` to that deterministic-only command. The compact

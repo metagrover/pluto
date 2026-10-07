@@ -76,6 +76,10 @@ do I owe Maya?” before a call, or “What keeps coming up across this project?
 when you need a wider view. Continue with follow-up questions and use citations
 to check the evidence behind the answer.
 
+In live meetings, Ask Pluto is beta and uses only the current meeting. Ask a
+specific question about something discussed. Live meeting shortcuts are
+currently unavailable. Other chat surfaces have their own commands and context.
+
 ### Bring your meeting context into ChatGPT
 
 If you already use the ChatGPT desktop app, the optional Pluto plugin lets it

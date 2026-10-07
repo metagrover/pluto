@@ -1321,6 +1321,7 @@ describe('ordinary source-reviewed promise wording', () => {
       },
     );
   it.each([
+    'Um, I will prepare the launch checklist.',
     'I promise to prepare the launch checklist.',
     'Alex promised to prepare the launch checklist.',
     'Alex committed to preparing the launch checklist.',
@@ -1348,5 +1349,127 @@ describe('ordinary source-reviewed promise wording', () => {
     expect(
       check('If legal approves, I promise to prepare the launch checklist.'),
     ).toBeNull();
+  });
+});
+
+describe('filler-only settled claim evidence', () => {
+  it.each(['action', 'decision'] as const)(
+    'rejects a %s supported only by a filler utterance',
+    (kind) => {
+      for (const evidence of ['Um.', 'Uh, so...', '   ']) {
+        expect(
+          groundSourceReviewedItem(
+            {
+              text: 'Use parallel processing',
+              kind,
+              owner: 'Casey',
+              due: null,
+            },
+            {
+              evidence,
+              quotedEvidence: evidence,
+              sourceLine: `Casey: ${evidence}`,
+              sourceLines: [`Casey: ${evidence}`],
+              lineIndex: 0,
+            },
+          ),
+        ).toBeNull();
+      }
+    },
+  );
+});
+
+describe('source-reviewed basic count spelling', () => {
+  const check = (text: string, evidence: string) =>
+    groundSourceReviewedItem(
+      { kind: 'action', text, owner: 'Milo', due: null },
+      {
+        evidence,
+        quotedEvidence: evidence,
+        sourceLine: `Milo: ${evidence}`,
+        sourceLines: [`Milo: ${evidence}`],
+        lineIndex: 0,
+      },
+    );
+  it('retains the same basic count and unit across digit/word spelling', () => {
+    expect(check('Send 7 reports', "I'll send seven reports.")?.owner).toBe(
+      'Milo',
+    );
+    expect(
+      check(
+        'Send 7 reports and 7 files',
+        "I'll send seven reports and seven files.",
+      ),
+    ).not.toBeNull();
+  });
+  it.each([
+    ['Send 8 reports', "I'll send seven reports."],
+    ['Send 7 files', "I'll send seven reports."],
+    ['Send 7 reports and 7 files', "I'll send seven reports."],
+    ['Send 7 reports and pay $7', "I'll send seven reports."],
+    ['Send -7 reports', "I'll send seven reports."],
+    ['Send 7 reports', "I'll send minus seven reports."],
+    ['Send 7 reports', "I'll send seventy-seven reports."],
+    ['Send 7 reports', "I'll send seventy seven reports."],
+    ['Send 7 reports', "I'll send one hundred and seven reports."],
+    ['Pay $7', "I'll pay seven dollars."],
+    ['Pay 7 dollars', "I'll pay seven dollars."],
+    ['Send 7 reports', 'If approved, I will send seven reports.'],
+    ['Send 7 reports', 'I can send seven reports if approved.'],
+    ['Send 7 reports', 'Can you send seven reports?'],
+  ])('rejects unsupported reinterpretation: %s / %s', (text, evidence) => {
+    expect(check(text, evidence)).toBeNull();
+  });
+});
+
+describe('filler-prefixed first-person owner phrases', () => {
+  const check = (lines: string[], owner: string) => {
+    const resolved = {
+      evidence: lines
+        .map((line) => line.slice(line.indexOf(': ') + 2))
+        .join(' '),
+      quotedEvidence: lines.join(' '),
+      sourceLine: lines.join(' '),
+      sourceLines: lines,
+      lineIndex: 0,
+    };
+    const snapshot = structuredClone(resolved);
+    const result = groundSourceReviewedItem(
+      {
+        kind: 'action',
+        text: 'Prepare the deployment checklist',
+        owner,
+        due: null,
+      },
+      resolved,
+    );
+    expect(resolved).toEqual(snapshot);
+    return result;
+  };
+  it.each(['Uh I', 'Oh I', 'Well I', 'So I', 'Okay I', 'Um So I'])(
+    'does not invent an owner from %s',
+    (phrase) => {
+      expect(
+        check(
+          [
+            "Milo: I'll prepare the deployment checklist.",
+            `Nira: ${phrase} can go next.`,
+          ],
+          'Milo',
+        )?.owner,
+      ).toBe('Milo');
+    },
+  );
+  it('still recognizes an explicitly assigned named person', () => {
+    expect(
+      check(
+        [
+          "Milo: I'll prepare a draft.",
+          'Nira: Uh I can go next.',
+          'Rina: Nora will prepare the deployment checklist.',
+        ],
+        'Nora',
+      )?.owner,
+    ).toBe('Nora');
   });
 });

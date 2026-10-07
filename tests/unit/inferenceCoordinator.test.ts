@@ -66,6 +66,32 @@ describe('local inference coordinator', () => {
     ]);
   });
 
+  it('finishes automatic notes before admitting project review', async () => {
+    let finish!: () => void;
+    let notesSignal!: AbortSignal;
+    const notes = runWithLocalInferenceCoordinator({
+      key: Symbol('notes'),
+      task: 'notesWriter',
+      run: (signal) =>
+        new Promise<string>((resolve) => {
+          notesSignal = signal;
+          finish = () => resolve('notes');
+        }),
+    });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    const reviewRun = vi.fn(async () => 'review');
+    const review = runWithLocalInferenceCoordinator({
+      key: Symbol('review'),
+      task: 'projectScopeReview',
+      run: reviewRun,
+    });
+    expect(notesSignal.aborted).toBe(false);
+    expect(reviewRun).not.toHaveBeenCalled();
+    finish();
+    await expect(notes).resolves.toBe('notes');
+    await expect(review).resolves.toBe('review');
+  });
+
   it('serializes foreground requests and reports content-free queue timing', async () => {
     const events: string[] = [];
     let releaseFirst!: () => void;

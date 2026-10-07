@@ -3802,6 +3802,7 @@ export const saveMeetingAnalysisSecondaryFieldsIfCurrent = (input: {
   sourceRevision: string;
   eligibilityRevision: string;
   userNotesHash: string;
+  generatedTitle?: { expectedTitle: string; title: string };
   valueSignalsJson?: string | null;
   midJson?: string | null;
 }): boolean =>
@@ -3819,10 +3820,34 @@ export const saveMeetingAnalysisSecondaryFieldsIfCurrent = (input: {
       updates.push('mid_json = ?');
       values.push(input.midJson);
     }
+    let titleUpdated = false;
+    if (input.generatedTitle) {
+      const current = getMeeting(input.meetingId) as
+        | PersistedMeeting
+        | undefined;
+      const analysis = parseAnalysisDocumentV3Json(current?.analysis_json);
+      const title = input.generatedTitle.title.trim();
+      if (
+        current?.title === input.generatedTitle.expectedTitle &&
+        meetingTitleNeedsGeneration(current.title) &&
+        analysis &&
+        !analysis.title &&
+        title.length <= 120 &&
+        !meetingTitleNeedsGeneration(title)
+      ) {
+        updates.push('title = ?', 'analysis_json = ?');
+        values.push(title, JSON.stringify({ ...analysis, title }));
+        titleUpdated = true;
+      }
+    }
     if (updates.length === 0) return true;
     const result = db
       .prepare(`UPDATE meetings SET ${updates.join(', ')} WHERE id = ?`)
       .run(...values, String(input.meetingId));
+    if (titleUpdated && result.changes === 1) {
+      const updated = getMeeting(input.meetingId) as PersistedMeeting;
+      refreshMeetingFts(updated);
+    }
     return result.changes === 1;
   })();
 

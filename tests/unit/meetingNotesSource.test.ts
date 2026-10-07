@@ -51,6 +51,31 @@ it('rejects a source span that splits a surrogate pair', () => {
   ).toThrow('invalid_source_span');
 });
 
+it('resolves reordered and sparse source indexes with the same span validation', () => {
+  const source = createNotesSource(
+    JSON.stringify({
+      segments: [
+        { speaker: 'Me', text: 'Outline' },
+        { speaker: 'Them', text: 'Review' },
+      ],
+    }),
+  );
+  const reordered = { ...source, segments: [...source.segments].reverse() };
+  expect(resolveSourceSpan(reordered, { segment: 0, start: 0, end: 7 })).toBe(
+    'Outline',
+  );
+  const sparse = {
+    ...source,
+    segments: [{ ...source.segments[0], index: 10 }],
+  };
+  expect(resolveSourceSpan(sparse, { segment: 10, start: 0, end: 7 })).toBe(
+    'Outline',
+  );
+  expect(() =>
+    resolveSourceSpan(sparse, { segment: 0, start: 0, end: 7 }),
+  ).toThrow('invalid_source_span');
+});
+
 it('keeps source revisions sensitive to speaker and canonical text changes', () => {
   const first = createNotesSource(
     JSON.stringify({ segments: [{ speaker: 'Me', text: 'Ship it.' }] }),

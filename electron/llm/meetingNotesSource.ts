@@ -105,7 +105,11 @@ export const resolveSourceSpan = (
   source: NotesSource,
   span: SourceSpan,
 ): string => {
-  const segment = source.segments.find((entry) => entry.index === span.segment);
+  const indexed = source.segments[span.segment];
+  const segment =
+    indexed?.index === span.segment
+      ? indexed
+      : source.segments.find((entry) => entry.index === span.segment);
   if (
     !segment ||
     !Number.isInteger(span.segment) ||

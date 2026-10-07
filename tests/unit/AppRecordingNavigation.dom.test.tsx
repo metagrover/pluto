@@ -458,7 +458,7 @@ describe('App recording navigation', () => {
     });
 
     const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
+      'textarea[aria-label="Ask about this meeting"]',
     );
     expect(input).not.toBeNull();
     await act(async () => {
@@ -526,7 +526,7 @@ describe('App recording navigation', () => {
       ),
     ).toBeNull();
     expect(
-      container.querySelector('textarea[placeholder="Ask about this meeting"]'),
+      container.querySelector('textarea[aria-label="Ask about this meeting"]'),
     ).not.toBeNull();
 
     await act(async () => root.unmount());

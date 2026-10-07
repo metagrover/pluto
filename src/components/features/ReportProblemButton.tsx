@@ -40,7 +40,7 @@ export function ReportProblemButton({
   );
 }
 
-function ReportProblemDialog({
+export function ReportProblemDialog({
   area,
   entityId,
   onClose,

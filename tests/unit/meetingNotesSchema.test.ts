@@ -43,11 +43,62 @@ const audit = {
   })),
 };
 const validate = (
-  contract: 'draft' | 'compact_draft' | 'audit' | 'editor',
+  contract: 'draft' | 'compact_draft' | 'audit' | 'editor' | 'corrections',
   value: unknown,
 ) => validator.validate(buildNotesResponseSchema(contract, ['R0']), value);
 
 describe('local notes wire schemas', () => {
+  it('requires the title in the whole-meeting notes response', () => {
+    const schema = buildNotesResponseSchema('compact_draft', ['P0', 'P0.0']);
+    const sections = [
+      {
+        title: 'Roadmap',
+        items: [
+          {
+            kind: 'point',
+            text: 'The roadmap was reviewed.',
+            owner: null,
+            due: null,
+            sources: ['P0.0'],
+          },
+        ],
+      },
+    ];
+    const title = { text: 'Roadmap Review', sources: ['P0.0'] };
+    expect(validator.validate(schema, { title, sections })).toBe(true);
+    expect(validator.validate(schema, { title: null, sections })).toBe(false);
+    expect(validator.validate(schema, { sections })).toBe(false);
+    expect(
+      validator.validate(schema, {
+        title: { ...title, sources: ['P0'] },
+        sections,
+      }),
+    ).toBe(false);
+    expect(
+      validator.validate(schema, {
+        title,
+        sections: [
+          {
+            ...sections[0],
+            items: [
+              {
+                kind: 'point',
+                text: 'The roadmap was reviewed.',
+                sources: ['P0.0'],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      validator.validate(schema, {
+        title: { ...title, sources: ['P9.0'] },
+        sections,
+      }),
+    ).toBe(false);
+  });
+
   it('expands a compact writer draft with title-specific evidence and empty metadata', () => {
     const value = {
       title: { text: 'Quarterly Planning', sources: ['R0'] },
@@ -443,4 +494,43 @@ describe('local notes wire schemas', () => {
   ])('rejects malformed audit structure %#', (value) => {
     expect(validate('audit', value)).toBe(false);
   });
+});
+
+it('constrains correction-only output to edits and validates their exact source mappings', () => {
+  const value = {
+    changes: [{ op: 'replace', target: 's0:item:0', value: item }],
+    dispositions: [],
+    terminology: [],
+  };
+  expect(validate('corrections', value)).toBe(true);
+  expect(validate('corrections', { ...value, title: text })).toBe(true);
+  expect(
+    validate('corrections', { changes: [], dispositions: [], terminology: [] }),
+  ).toBe(true);
+  expect(validate('corrections', { ...value, verdicts: [] })).toBe(false);
+  expect(validate('corrections', { ...value, sections: [] })).toBe(false);
+  expect(
+    validate('corrections', {
+      ...value,
+      changes: [
+        {
+          op: 'replace',
+          target: 's0:item:0',
+          value: { ...item, sources: ['R99'] },
+        },
+      ],
+    }),
+  ).toBe(false);
+  expect(
+    parseEditedNotes({
+      raw: wire.decode(JSON.stringify(value)),
+      source: fixture.source,
+      originalDraft: fixture.draft,
+    }).draft,
+  ).toEqual(
+    parseEditedNotes({
+      raw: JSON.stringify(fixture.draft),
+      source: fixture.source,
+    }).draft,
+  );
 });

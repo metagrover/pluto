@@ -331,25 +331,11 @@ function requiresWithdrawalContext(
   );
 }
 
-export function findNotesGuardrailIssues(
+export function createNotesGuardrailChecker(
   source: NotesSource,
-  draft: NotesDraft,
   allowedSpans?: readonly SourceSpan[],
-  diagnosticCodes?: readonly NotesGuardrailIssue['code'][],
-): NotesGuardrailIssue[] {
+) {
   const entries = sentences(source, allowedSpans);
-  const actions = draft.sections
-    .flatMap((section) => section.items)
-    .filter((item) => item.kind === 'action');
-  const context = [
-    ...(draft.overview ? [draft.overview] : []),
-    ...draft.sections.flatMap((section) =>
-      section.items.filter(
-        (item) => item.kind === 'point' || item.kind === 'decision',
-      ),
-    ),
-  ];
-  const issues = new Map<string, NotesGuardrailIssue>();
   const sourceCandidates = candidates(entries);
   // Exact repeats may cite either occurrence. Keep deadlines and recipients in
   // this identity, and never share evidence across a cancellation/renewal.
@@ -376,90 +362,125 @@ export function findNotesGuardrailIssues(
     repeatedSources.set(candidate, sources);
     previousRepeats.set(key, candidate);
   }
-  for (const candidate of sourceCandidates) {
-    const matching = actions.flatMap((item) =>
-      repeatedSources
-        .get(candidate)!
-        .some((span) => item.sources.some((ref) => overlaps(span, ref)))
-        ? item.text
-            .split(TASK_BOUNDARY)
-            .filter((clause) =>
-              matchesTask(candidate.task, `${clause} ${item.due ?? ''}`, true),
-            )
-        : [],
-    );
-    const cancellation = entries.find(
-      (entry) =>
-        entry.order > candidate.order &&
-        cancels(entry, candidate, sourceCandidates),
-    );
-    // A later explicit renewal is authoritative for the same speaking owner
-    // and task. An unrelated promise cannot reactivate cancelled work.
-    if (
-      cancellation &&
-      sourceCandidates.some(
-        (later) =>
-          later.order > cancellation.order &&
-          later.speaker === candidate.speaker &&
-          matchesTask(candidate.task, later.task) &&
-          matchesTask(later.task, candidate.task),
-      )
-    )
-      continue;
-    let code: NotesGuardrailIssue['code'] | null = null;
-    if (cancellation) {
-      if (matching.length) code = 'conflicting_action';
-      else if (
-        requiresWithdrawalContext(cancellation, candidate) &&
-        !context.some(
-          (block) =>
-            block.sources.some((span) => overlaps(span, cancellation.span)) ||
-            (/\b(?:withdraw|retract|cancel|take[n]? back|no longer|replac|supersed)\w*\b/i.test(
-              block.text,
-            ) &&
-              actions.some((action) =>
-                action.sources.some((span) =>
-                  overlaps(span, cancellation.span),
+  return (
+    draft: NotesDraft,
+    diagnosticCodes?: readonly NotesGuardrailIssue['code'][],
+  ): NotesGuardrailIssue[] => {
+    const actions = draft.sections
+      .flatMap((section) => section.items)
+      .filter((item) => item.kind === 'action');
+    const context = [
+      ...(draft.overview ? [draft.overview] : []),
+      ...draft.sections.flatMap((section) =>
+        section.items.filter(
+          (item) => item.kind === 'point' || item.kind === 'decision',
+        ),
+      ),
+    ];
+    const issues = new Map<string, NotesGuardrailIssue>();
+    for (const candidate of sourceCandidates) {
+      const matching = actions.flatMap((item) =>
+        repeatedSources
+          .get(candidate)!
+          .some((span) => item.sources.some((ref) => overlaps(span, ref)))
+          ? item.text
+              .split(TASK_BOUNDARY)
+              .filter((clause) =>
+                matchesTask(
+                  candidate.task,
+                  `${clause} ${item.due ?? ''}`,
+                  true,
                 ),
-              )),
+              )
+          : [],
+      );
+      const cancellation = entries.find(
+        (entry) =>
+          entry.order > candidate.order &&
+          cancels(entry, candidate, sourceCandidates),
+      );
+      // A later explicit renewal is authoritative for the same speaking owner
+      // and task. An unrelated promise cannot reactivate cancelled work.
+      if (
+        cancellation &&
+        sourceCandidates.some(
+          (later) =>
+            later.order > cancellation.order &&
+            later.speaker === candidate.speaker &&
+            matchesTask(candidate.task, later.task) &&
+            matchesTask(later.task, candidate.task),
         )
+      )
+        continue;
+      let code: NotesGuardrailIssue['code'] | null = null;
+      if (cancellation) {
+        if (matching.length) code = 'conflicting_action';
+        else if (
+          requiresWithdrawalContext(cancellation, candidate) &&
+          !context.some(
+            (block) =>
+              block.sources.some((span) => overlaps(span, cancellation.span)) ||
+              (/\b(?:withdraw|retract|cancel|take[n]? back|no longer|replac|supersed)\w*\b/i.test(
+                block.text,
+              ) &&
+                actions.some((action) =>
+                  action.sources.some((span) =>
+                    overlaps(span, cancellation.span),
+                  ),
+                )),
+          )
+        ) {
+          // Coverage diagnostic only: citations do not prove the wording or the
+          // reason is faithful. The source audit and semantic acceptance still do.
+          code = 'missing_cancellation_context';
+        }
+      } else if (!matching.length) {
+        code = 'missing_action';
+      } else if (
+        candidate.condition &&
+        !matching.some((clause) => {
+          const condition = CONDITION.exec(clause);
+          if (!condition) return false;
+          const expectedOperator = CONDITION.exec(candidate.condition!)![0];
+          const expectedBody = candidate.condition!.replace(CONDITION, '');
+          const actualBody = clause.slice(
+            condition.index + condition[0].length,
+          );
+          const expectedNegative =
+            /^unless$/i.test(expectedOperator) !== NEGATION.test(expectedBody);
+          const actualNegative =
+            /^unless$/i.test(condition[0]) !== NEGATION.test(actualBody);
+          if (expectedNegative !== actualNegative) return false;
+          const words = new Set(conditionTokens(actualBody));
+          return conditionTokens(expectedBody).every((word) => words.has(word));
+        })
       ) {
-        // Coverage diagnostic only: citations do not prove the wording or the
-        // reason is faithful. The source audit and semantic acceptance still do.
-        code = 'missing_cancellation_context';
+        code = 'missing_condition';
       }
-    } else if (!matching.length) {
-      code = 'missing_action';
-    } else if (
-      candidate.condition &&
-      !matching.some((clause) => {
-        const condition = CONDITION.exec(clause);
-        if (!condition) return false;
-        const expectedOperator = CONDITION.exec(candidate.condition!)![0];
-        const expectedBody = candidate.condition!.replace(CONDITION, '');
-        const actualBody = clause.slice(condition.index + condition[0].length);
-        const expectedNegative =
-          /^unless$/i.test(expectedOperator) !== NEGATION.test(expectedBody);
-        const actualNegative =
-          /^unless$/i.test(condition[0]) !== NEGATION.test(actualBody);
-        if (expectedNegative !== actualNegative) return false;
-        const words = new Set(conditionTokens(actualBody));
-        return conditionTokens(expectedBody).every((word) => words.has(word));
-      })
-    ) {
-      code = 'missing_condition';
+      // Filter before the bounded diagnostic collection: omission warnings must
+      // not hide a later unsafe action when checking an individual commitment.
+      if (code && (!diagnosticCodes || diagnosticCodes.includes(code))) {
+        const sources = [
+          ...candidate.sources,
+          ...(cancellation ? [cancellation.span] : []),
+        ].map((span) => ({ ...span }));
+        const issue = { code, sources };
+        issues.set(JSON.stringify(issue), issue);
+        if (issues.size >= 32) break;
+      }
     }
-    // Filter before the bounded diagnostic collection: omission warnings must
-    // not hide a later unsafe action when checking an individual commitment.
-    if (code && (!diagnosticCodes || diagnosticCodes.includes(code))) {
-      const sources = [
-        ...candidate.sources,
-        ...(cancellation ? [cancellation.span] : []),
-      ].map((span) => ({ ...span }));
-      const issue = { code, sources };
-      issues.set(JSON.stringify(issue), issue);
-      if (issues.size >= 32) break;
-    }
-  }
-  return [...issues.values()];
+    return [...issues.values()];
+  };
+}
+
+export function findNotesGuardrailIssues(
+  source: NotesSource,
+  draft: NotesDraft,
+  allowedSpans?: readonly SourceSpan[],
+  diagnosticCodes?: readonly NotesGuardrailIssue['code'][],
+): NotesGuardrailIssue[] {
+  return createNotesGuardrailChecker(source, allowedSpans)(
+    draft,
+    diagnosticCodes,
+  );
 }

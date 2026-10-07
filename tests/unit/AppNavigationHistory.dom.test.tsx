@@ -90,6 +90,7 @@ const flush = async () => {
 
 describe('App Navigation History', () => {
   let openSettingsFromMenu: (() => void) | undefined;
+  let reportProblemFromMenu: (() => void) | undefined;
   const meeting = {
     id: 'meeting-1',
     title: 'Weekly Sync',
@@ -100,6 +101,7 @@ describe('App Navigation History', () => {
 
   beforeEach(() => {
     openSettingsFromMenu = undefined;
+    reportProblemFromMenu = undefined;
     window.__PLUTO_BROWSER_PREVIEW__ = false;
     Object.defineProperty(window, 'ipcRenderer', {
       configurable: true,
@@ -131,10 +133,133 @@ describe('App Navigation History', () => {
           if (channel === 'PLUTO_NATIVE_MENU_OPEN_SETTINGS') {
             openSettingsFromMenu = listener;
           }
+          if (channel === 'PLUTO_NATIVE_MENU_REPORT_PROBLEM') {
+            reportProblemFromMenu = listener;
+          }
           return () => {};
         }),
       },
     });
+  });
+
+  it.each([900, 1200])(
+    'can restore the sidebar with a visible control at %i pixels',
+    async (width) => {
+      const originalWidth = window.innerWidth;
+      Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: width,
+      });
+      const { default: App } = await import('../../src/App');
+      const container = document.createElement('div');
+      document.body.append(container);
+      const root = createRoot(container);
+      try {
+        await act(async () => {
+          root.render(<App />);
+          await flush();
+        });
+        const toggle = container.querySelector(
+          '[aria-controls="app-sidebar"]',
+        ) as HTMLButtonElement;
+        const sidebar = container.querySelector('#app-sidebar')!;
+        expect(toggle.getAttribute('aria-expanded')).toBe(
+          String(width >= 1024),
+        );
+        if (width >= 1024) {
+          await act(async () => {
+            window.dispatchEvent(
+              new KeyboardEvent('keydown', { key: 'b', metaKey: true }),
+            );
+          });
+        }
+        expect(toggle.getAttribute('aria-label')).toBe('Show sidebar');
+        expect(sidebar.className).toContain('-translate-x-full');
+        expect(toggle.className).toContain('no-drag');
+        expect(toggle.closest('[aria-hidden="true"]')).toBeNull();
+        expect(toggle.closest('main')).not.toBeNull();
+        expect(sidebar.contains(toggle)).toBe(false);
+        expect(toggle.textContent).toBe('');
+        await act(async () => toggle.click());
+        expect(toggle.getAttribute('aria-expanded')).toBe('true');
+        expect(sidebar.className).not.toContain('-translate-x-full');
+        await act(async () => toggle.click());
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+        await act(async () => toggle.click());
+        expect(toggle.getAttribute('aria-label')).toBe('Hide sidebar');
+        await act(async () => {
+          container
+            .querySelector('main')!
+            .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+        expect(toggle.getAttribute('aria-label')).toBe('Show sidebar');
+        await act(async () => toggle.click());
+        const backdrop = container.querySelector('.lg\\:hidden.bg-black\\/20')!;
+        await act(async () => {
+          backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+        expect(
+          container.querySelector('[data-testid="dashboard"]'),
+        ).not.toBeNull();
+      } finally {
+        act(() => root.unmount());
+        container.remove();
+        Object.defineProperty(window, 'innerWidth', {
+          configurable: true,
+          value: originalWidth,
+        });
+      }
+    },
+  );
+
+  it('opens the shared report dialog from native Help', async () => {
+    const showModal = vi
+      .spyOn(HTMLDialogElement.prototype, 'showModal')
+      .mockImplementation(function () {
+        this.open = true;
+      });
+    const close = vi
+      .spyOn(HTMLDialogElement.prototype, 'close')
+      .mockImplementation(function () {
+        this.open = false;
+      });
+    const { default: App } = await import('../../src/App');
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App />);
+        await flush();
+      });
+      await act(async () => {
+        reportProblemFromMenu?.();
+        await flush();
+      });
+      expect(document.querySelector('dialog[open]')).not.toBeNull();
+      expect(window.ipcRenderer.invoke).toHaveBeenCalledWith(
+        'BUG_REPORT_PREPARE',
+        {
+          area: 'general',
+          entityId: undefined,
+        },
+      );
+      expect(document.body.textContent).toContain('Email support');
+      await act(async () => {
+        (
+          document.querySelector(
+            '[aria-label="Close report"]',
+          ) as HTMLButtonElement
+        ).click();
+      });
+      expect(document.querySelector('dialog')).toBeNull();
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+      showModal.mockRestore();
+      close.mockRestore();
+    }
   });
 
   it('opens Settings from the native menu while a meeting is selected', async () => {

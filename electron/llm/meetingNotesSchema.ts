@@ -1,3 +1,4 @@
+import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
 import type { NotesResponseContract } from './meetingNotesTypes';
 
 type Schema = Record<string, unknown>;
@@ -39,7 +40,20 @@ export const buildNotesResponseSchema = (
     sources,
   };
   if (contract === 'compact_draft') {
-    const compactSources = { ...sources, maxItems: 3 };
+    const paragraphs =
+      NOTES_EXPERIMENTS_ENABLED &&
+      sourceLabels.length > 0 &&
+      sourceLabels.every((label) => /^P\d+(?:\.\d+)?$/.test(label));
+    const turnLabels = paragraphs
+      ? sourceLabels.filter((label) => /^P\d+\.\d+$/.test(label))
+      : [];
+    const compactSources = {
+      ...sources,
+      ...(turnLabels.length
+        ? { items: { type: 'string', enum: turnLabels } }
+        : {}),
+      maxItems: 3,
+    };
     const compactTitle = object(
       {
         text: { type: 'string', minLength: 1, maxLength: 120 },
@@ -62,14 +76,19 @@ export const buildNotesResponseSchema = (
     );
     return object(
       {
-        title: {
-          anyOf: [compactTitle, { type: 'null' }],
-        },
+        // Whole-meeting requests produce the document title with the notes,
+        // rather than needing a separate model request after publication.
+        title: paragraphs
+          ? compactTitle
+          : { anyOf: [compactTitle, { type: 'null' }] },
         sections: {
           ...array(
             object({
               title: { type: 'string', minLength: 1, maxLength: 12_000 },
-              items: { ...array(compactItem), minItems: 1 },
+              items: {
+                ...array(compactItem),
+                minItems: 1,
+              },
             }),
           ),
           maxItems: 64,
@@ -143,8 +162,25 @@ export const buildNotesResponseSchema = (
       signals: array(string),
     }),
   );
-  if (contract === 'audit')
-    return object({
+  const recentWin: Schema = {
+    anyOf: [
+      object(
+        {
+          win: text(false),
+          impact: text(false),
+          ownership: {
+            type: 'string',
+            enum: ['personal', 'shared', 'other', 'unknown'],
+          },
+          owner: nullableString,
+        },
+        ['win', 'impact'],
+      ),
+      { type: 'null' },
+    ],
+  };
+  if (contract === 'audit' || contract === 'corrections') {
+    const audit = object({
       changes: array({
         anyOf: [
           object({
@@ -170,6 +206,28 @@ export const buildNotesResponseSchema = (
       dispositions,
       terminology,
     });
+    if (NOTES_EXPERIMENTS_ENABLED && contract === 'corrections') {
+      const { verdicts: _verdicts, ...properties } = audit.properties as Record<
+        string,
+        Schema
+      >;
+      properties.title = { anyOf: [text(false), { type: 'null' }] };
+      properties.recentWin = recentWin;
+      properties.overview = { anyOf: [text(false), { type: 'null' }] };
+      properties.meetingType = {
+        type: 'string',
+        enum: [
+          'one_on_one',
+          'team_sync',
+          'brainstorm',
+          'presentation',
+          'general',
+        ],
+      };
+      return object(properties, ['changes', 'dispositions', 'terminology']);
+    }
+    return audit;
+  }
   return object(
     {
       title: { anyOf: [text(false), { type: 'null' }] },
@@ -185,23 +243,7 @@ export const buildNotesResponseSchema = (
       },
       overview: { anyOf: [text(false), { type: 'null' }] },
       sections: { ...array(section(false)), maxItems: 64 },
-      recentWin: {
-        anyOf: [
-          object(
-            {
-              win: text(false),
-              impact: text(false),
-              ownership: {
-                type: 'string',
-                enum: ['personal', 'shared', 'other', 'unknown'],
-              },
-              owner: nullableString,
-            },
-            ['win', 'impact'],
-          ),
-          { type: 'null' },
-        ],
-      },
+      recentWin,
       ...(contract === 'editor' ? { dispositions, terminology } : {}),
     },
     contract === 'editor'

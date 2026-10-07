@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { estimateNotesTokens } from '../../electron/llm/meetingNotesBudget';
 import { continueNotesEditor } from '../../scripts/lib/notesReplayContinuation';
 
 const source =
@@ -71,5 +72,59 @@ describe('diagnostic context continuation', () => {
       continueNotesEditor({ ...previous, answer: 'x'.repeat(100000) }, editor)
         .reason,
     ).toBe('continuation_capacity');
+  });
+  it('budgets message contents and chat delimiters rather than HTTP JSON escaping', () => {
+    const messages = continueNotesEditor(previous, editor).messages;
+    const capacity = messages.reduce(
+      (total, message) => total + estimateNotesTokens(message.content) + 32,
+      editor.options.num_predict + 512,
+    );
+    const atCapacity = (num_ctx: number) => ({
+      ...editor,
+      options: { ...editor.options, num_ctx },
+    });
+    const prior = (num_ctx: number) => ({
+      ...previous,
+      request: { ...writer, options: { ...writer.options, num_ctx } },
+    });
+    expect(
+      continueNotesEditor(prior(capacity), atCapacity(capacity)).reason,
+    ).toBe('continued_exact_source');
+    expect(
+      continueNotesEditor(prior(capacity - 1), atCapacity(capacity - 1)).reason,
+    ).toBe('continuation_capacity');
+  });
+  it('uses a measured unchanged prefix while keeping estimates for new messages', () => {
+    const messages = continueNotesEditor(previous, editor).messages;
+    const inputTokens = 10;
+    const capacity =
+      inputTokens +
+      32 +
+      messages
+        .slice(1)
+        .reduce(
+          (total, message) => total + estimateNotesTokens(message.content) + 32,
+          editor.options.num_predict + 512,
+        );
+    const current = {
+      ...editor,
+      options: { ...editor.options, num_ctx: capacity },
+    };
+    const prior = {
+      ...previous,
+      request: { ...writer, options: { ...writer.options, num_ctx: capacity } },
+    };
+    expect(continueNotesEditor({ ...prior, inputTokens }, current).reason).toBe(
+      'continued_exact_source',
+    );
+    for (const inputTokens of [
+      undefined,
+      0,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ])
+      expect(
+        continueNotesEditor({ ...prior, inputTokens }, current).reason,
+      ).toBe('continuation_capacity');
   });
 });

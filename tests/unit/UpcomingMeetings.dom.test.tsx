@@ -2,7 +2,7 @@
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   CalendarEvent,
@@ -130,6 +130,11 @@ const render = (
   return { container, root };
 };
 
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-08-30T12:00:00.000Z'));
+});
+
 afterEach(() => {
   document.body.innerHTML = '';
   vi.restoreAllMocks();
@@ -138,6 +143,46 @@ afterEach(() => {
 });
 
 describe('UpcomingMeetings', () => {
+  it('excludes ended meetings from prep rows and the disclosure count', () => {
+    installMatchMedia(false);
+    vi.setSystemTime(new Date(meeting(0).end));
+    const agenda = render({
+      events: Array.from({ length: 5 }, (_, index) => meeting(index)),
+    });
+    expect(agenda.container.textContent).not.toContain('Product review');
+    expect(
+      agenda.container.querySelector(
+        'button[aria-label="Show 1 more meeting"]',
+      ),
+    ).not.toBeNull();
+    expect(
+      agenda.container
+        .querySelector('[aria-label="Next meeting"]')
+        ?.closest('article')?.textContent,
+    ).toContain('Go-to-market planning');
+    act(() => agenda.root.unmount());
+  });
+
+  it('removes a meeting at its end without reloading the calendar', () => {
+    vi.setSystemTime(new Date(Date.parse(meeting(0).end) - 1_000));
+    const agenda = render({ events: [meeting(0)] });
+    expect(agenda.container.textContent).toContain('Product review');
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(agenda.container.textContent).not.toContain('Product review');
+    expect(agenda.container.textContent).toContain('No meetings today');
+    act(() => agenda.root.unmount());
+  });
+
+  it('expires stale prep rows when the app regains focus', () => {
+    const agenda = render({ events: [meeting(0)] });
+    vi.setSystemTime(new Date(meeting(0).end));
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(
+      agenda.container.querySelector('[data-testid="upcoming-meeting-row"]'),
+    ).toBeNull();
+    act(() => agenda.root.unmount());
+  });
+
   it('formats durations in minutes below an hour and hours with remaining minutes', () => {
     const durations = [30, 60, 115, 120, 500];
     const events = durations.map((minutes, index) => ({
@@ -210,6 +255,40 @@ describe('UpcomingMeetings', () => {
     ).toHaveLength(5);
     act(() => root.unmount());
   });
+
+  it.each([false, true])(
+    'caps the expanded agenda at eight meetings (large layout: %s)',
+    (largeLayout) => {
+      installMatchMedia(largeLayout);
+      const events = Array.from({ length: 14 }, (_, index) => ({
+        ...meeting(index),
+        start: new Date(Date.UTC(2026, 7, 30 + index, 17, 30)).toISOString(),
+        end: new Date(Date.UTC(2026, 7, 30 + index, 18, 30)).toISOString(),
+      }));
+      const { container, root } = render({ events });
+      const collapsedLimit = largeLayout ? 5 : 3;
+      const more = container.querySelector<HTMLButtonElement>(
+        `button[aria-label="Show ${8 - collapsedLimit} more meetings"]`,
+      );
+      expect(more).not.toBeNull();
+      act(() => more?.click());
+      const rows = container.querySelectorAll(
+        '[data-testid="upcoming-meeting-row"]',
+      );
+      expect(rows).toHaveLength(8);
+      expect(rows[7].textContent).toContain('Meeting 8');
+      expect(container.textContent).not.toContain('Meeting 9');
+
+      const less = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Show fewer meetings"]',
+      );
+      act(() => less?.click());
+      expect(
+        container.querySelectorAll('[data-testid="upcoming-meeting-row"]'),
+      ).toHaveLength(collapsedLimit);
+      act(() => root.unmount());
+    },
+  );
 
   it('uses one calm agenda hierarchy with subordinate calendar metadata', () => {
     const longCalendar = {

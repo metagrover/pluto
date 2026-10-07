@@ -59,6 +59,11 @@ export default defineConfig(({ command }) => ({
           );
         },
         vite: {
+          define: {
+            'process.env.PLUTO_NOTES_EXPERIMENTS': JSON.stringify(
+              command === 'build' ? '0' : '1',
+            ),
+          },
           build: {
             outDir:
               command === 'build' ? 'dist-electron-package' : 'dist-electron',

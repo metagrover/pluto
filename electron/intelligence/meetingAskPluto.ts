@@ -25,8 +25,8 @@ import {
 export const MEETING_ASK_PLUTO_TURN_LIMIT = 6;
 export const MEETING_ASK_PLUTO_TURN_CHAR_LIMIT = 1200;
 const MEETING_ASK_PLUTO_EVIDENCE_LIMIT = 18;
-const LIVE_MEETING_ASK_PLUTO_EVIDENCE_LIMIT = 34;
-const LIVE_MEETING_ASK_PLUTO_TRANSCRIPT_LIMIT = 24;
+const LIVE_MEETING_ASK_PLUTO_EVIDENCE_LIMIT = 522;
+const LIVE_MEETING_ASK_PLUTO_TRANSCRIPT_LIMIT = 512;
 const SAVED_MEETING_TRANSCRIPT_EVIDENCE_LIMIT = 5;
 
 export interface MeetingAskPlutoEvidenceItem {
@@ -485,9 +485,17 @@ export const buildLiveMeetingAskPlutoContext = (
   const scope = buildLiveScope(liveContext);
   const evidenceItems: MeetingAskPlutoEvidenceItem[] = [];
 
-  for (const segment of liveContext.transcript.slice(
-    -LIVE_MEETING_ASK_PLUTO_TRANSCRIPT_LIMIT,
-  )) {
+  let liveCharacters = 0;
+  const boundedTranscript = liveContext.transcript
+    .slice(-LIVE_MEETING_ASK_PLUTO_TRANSCRIPT_LIMIT)
+    .reverse()
+    .filter((segment) => {
+      if (liveCharacters + segment.text.length > 12_000) return false;
+      liveCharacters += segment.text.length;
+      return true;
+    })
+    .reverse();
+  for (const segment of boundedTranscript) {
     const text = asString(segment.text);
     if (!text) continue;
     const seconds = Math.max(0, Math.round(segment.timestampMs / 1_000));

@@ -1,3 +1,4 @@
+import { PanelLeft } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { openMeetingPrep } from './api/meetingPrep';
@@ -129,6 +130,7 @@ import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
 import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecutionTab';
 import { AllMeetingsTab } from './components/features/AllMeetingsTab';
 import { LocalSourcesTab } from './components/features/LocalSourcesTab';
+import { ReportProblemDialog } from './components/features/ReportProblemButton';
 
 import {
   SettingsTab,
@@ -340,6 +342,20 @@ function App() {
     Boolean(previewParam) ||
       (!window.__PLUTO_BROWSER_PREVIEW__ && window.innerWidth >= 1024),
   );
+  useEffect(() => {
+    if (!sidebarVisible) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (
+        target.closest('main') &&
+        !target.closest('[aria-controls="app-sidebar"]')
+      ) {
+        setSidebarVisible(false);
+      }
+    };
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, [sidebarVisible]);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchEntitiesResults, setSearchEntitiesResults] = useState<Entity[]>(
     [],
@@ -389,6 +405,7 @@ function App() {
   const [settingsInitialTab, setSettingsInitialTab] =
     useState<SettingsTabId>('personal');
   const [settingsNavigationToken, setSettingsNavigationToken] = useState(0);
+  const [reportProblemOpen, setReportProblemOpen] = useState(false);
   const [calendarAutoNameEnabled, setCalendarAutoNameEnabled] = useState(true);
   const [calendarPromptEnabled, setCalendarPromptEnabled] = useState(true);
   const [silenceAutoStopDuration, setSilenceAutoStopDuration] =
@@ -413,8 +430,15 @@ function App() {
         setSelectedMeetingId(null);
       },
     );
+    const unsubscribeReport = window.ipcRenderer.on(
+      'PLUTO_NATIVE_MENU_REPORT_PROBLEM',
+      () => setReportProblemOpen(true),
+    );
     window.ipcRenderer.send('PLUTO_NATIVE_MENU_RENDERER_READY');
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      unsubscribeReport();
+    };
   }, []);
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
@@ -2046,15 +2070,30 @@ function App() {
     await refreshPermissions();
   };
 
+  const reportProblemDialog = reportProblemOpen && (
+    <ReportProblemDialog
+      area="general"
+      onClose={() => setReportProblemOpen(false)}
+    />
+  );
+
   if (setupNeeded === null)
     return (
-      <div className="app-init-drag h-screen w-screen bg-pro-bg flex flex-col gap-4 items-center justify-center text-pro-text-muted/40 font-medium animate-pulse text-xs">
-        <div className="w-8 h-8 rounded-full border-2 border-pro-accent border-t-transparent animate-spin mb-4" />
-        <span>Initializing Neural Engine...</span>
-      </div>
+      <>
+        <div className="app-init-drag h-screen w-screen bg-pro-bg flex flex-col gap-4 items-center justify-center text-pro-text-muted/40 font-medium animate-pulse text-xs">
+          <div className="w-8 h-8 rounded-full border-2 border-pro-accent border-t-transparent animate-spin mb-4" />
+          <span>Initializing Neural Engine...</span>
+        </div>
+        {reportProblemDialog}
+      </>
     );
   if (setupNeeded)
-    return <SetupWizard onComplete={() => setSetupNeeded(false)} />;
+    return (
+      <>
+        <SetupWizard onComplete={() => setSetupNeeded(false)} />
+        {reportProblemDialog}
+      </>
+    );
 
   const workspace = (
     <div className="flex h-screen w-screen bg-pro-bg text-pro-text-main font-sans overflow-hidden hover:cursor-default selection:bg-pro-accent/20">
@@ -2216,11 +2255,24 @@ function App() {
               : 'rounded-l-[2.5rem] border-l border-pro-border/10'
           }`}
         >
-          <WindowDragRegion
-            className={`h-10 w-full shrink-0 z-50 ${
+          <div
+            className={`relative flex h-12 w-full shrink-0 items-center pl-[88px] ${sidebarVisible ? 'lg:pl-3' : ''} ${
               activeTab === 'chat' ? 'bg-pro-bg' : 'bg-transparent'
             }`}
-          />
+          >
+            <WindowDragRegion className="absolute inset-0" />
+            <button
+              type="button"
+              aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+              aria-expanded={sidebarVisible}
+              aria-controls="app-sidebar"
+              title={`${sidebarVisible ? 'Hide' : 'Show'} sidebar (⌘B / Ctrl+B)`}
+              onClick={() => setSidebarVisible((visible) => !visible)}
+              className={`no-drag relative flex h-8 w-8 items-center justify-center rounded-md text-pro-text-muted hover:bg-pro-surface hover:text-pro-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent ${sidebarVisible ? 'invisible lg:visible' : ''}`}
+            >
+              <PanelLeft size={18} aria-hidden="true" />
+            </button>
+          </div>
           <div className="pointer-events-none absolute right-5 top-3 z-[60] rounded-full border border-pro-border/60 bg-pro-surface/90 px-2.5 py-1 text-[11px] font-medium text-pro-text-muted shadow-sm backdrop-blur">
             {llmProvider === 'ollama'
               ? 'Local · Ollama'
@@ -2602,7 +2654,12 @@ function App() {
     </div>
   );
 
-  return <RuntimeReadinessGate>{workspace}</RuntimeReadinessGate>;
+  return (
+    <>
+      <RuntimeReadinessGate>{workspace}</RuntimeReadinessGate>
+      {reportProblemDialog}
+    </>
+  );
 }
 
 export default App;

@@ -9,7 +9,7 @@ describe('createSerializedTaskGate', () => {
       ask_pluto: 30,
       manual_notes: 20,
       automatic_notes: 10,
-      project_review: 15,
+      project_review: 8,
       meeting_secondary: 5,
       background: 0,
     });

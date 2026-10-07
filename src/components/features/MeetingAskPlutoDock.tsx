@@ -7,7 +7,7 @@ import {
   Square,
 } from 'lucide-react';
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChatTurnAnchor } from '../../hooks/useChatTurnAnchor';
@@ -24,6 +24,11 @@ import {
   createMeetingAskPlutoRequestId,
   describeMeetingAskPlutoRequest,
 } from '../../utils/askPlutoDiagnostics';
+import {
+  LIVE_MEETING_COMMANDS,
+  LIVE_MEETING_SHORTCUT_HELP,
+  parseLiveMeetingCommand,
+} from '../../utils/liveMeetingCommands';
 import { MEETING_ASK_PLUTO_LIMITS } from '../../utils/meetingAskPlutoRequest';
 import { Logo } from '../Brand/Logo';
 
@@ -140,6 +145,28 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   onMinimizedChange,
 }) => {
   const [query, setQuery] = useState('');
+  const [commandIndex, setCommandIndex] = useState(0);
+  const [commandsDismissed, setCommandsDismissed] = useState(false);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const commandListId = useId();
+  const hasCommands = Boolean(liveContext) && LIVE_MEETING_COMMANDS.length > 0;
+  const filteredCommands = LIVE_MEETING_COMMANDS.filter((command) =>
+    command.name.startsWith(query.toLowerCase()),
+  );
+  const showsCommands =
+    hasCommands &&
+    !commandsDismissed &&
+    /^\/[a-z-]*$/i.test(query) &&
+    filteredCommands.length > 0;
+  const selectedCommandIndex = Math.min(
+    commandIndex,
+    filteredCommands.length - 1,
+  );
+  const chooseCommand = (name: string) => {
+    setQuery(`${name} `);
+    setCommandsDismissed(true);
+    composerRef.current?.focus();
+  };
   const [localMessages, setLocalMessages] = useState<
     MeetingAskPlutoConversationMessage[]
   >([]);
@@ -272,6 +299,11 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   const submitQuestion = async (value: string) => {
     const trimmed = value.trim();
     if (!trimmed || isAsking) return;
+    if (liveContext && parseLiveMeetingCommand(trimmed).kind === 'unknown') {
+      setError(LIVE_MEETING_SHORTCUT_HELP);
+      setIsMinimized(false);
+      return;
+    }
 
     const requestId = createMeetingAskPlutoRequestId();
     const previousRequestId = activeRequestIdRef.current;
@@ -386,7 +418,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
         >
           <MessageCircle className="h-4 w-4" />
           <span className="meeting-ask-pluto-dock__restore-copy">
-            <strong>Ask Pluto</strong>
+            <strong>Ask Pluto{liveContext ? ' · Beta' : ''}</strong>
             <span>{isAsking ? 'Answering…' : 'Active conversation'}</span>
           </span>
           <ChevronUp className="h-4 w-4" />
@@ -396,7 +428,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
       {showsConversation ? (
         <div className="meeting-ask-pluto-dock__header">
           <div className="meeting-ask-pluto-dock__header-copy">
-            <span>Ask Pluto</span>
+            <span>Ask Pluto{liveContext ? ' · Beta' : ''}</span>
             <span>{scopeTitle}</span>
           </div>
           <button
@@ -445,7 +477,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                     >
                       {message.content}
                     </ReactMarkdown>
-                    {message.packet?.citations.length ? (
+                    {!liveContext && message.packet?.citations.length ? (
                       <details className="meeting-ask-pluto-dock__evidence">
                         <summary>View evidence</summary>
                         <div>Check these excerpts against the answer.</div>
@@ -455,7 +487,8 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                           </blockquote>
                         ))}
                       </details>
-                    ) : message.packet?.claims.length &&
+                    ) : !liveContext &&
+                      message.packet?.claims.length &&
                       message.packet.trustStatus === 'needs_review' ? (
                       <span className="meeting-ask-pluto-dock__evidence-note">
                         No supporting evidence cited.
@@ -519,6 +552,32 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
         </p>
       ) : null}
 
+      {showsCommands && (!isMinimized || !hasConversation) ? (
+        <div
+          id={commandListId}
+          className="meeting-ask-pluto-dock__commands"
+          role="listbox"
+          tabIndex={-1}
+          aria-label="Meeting shortcuts"
+        >
+          {filteredCommands.map((command, index) => (
+            <button
+              key={command.name}
+              id={`${commandListId}-${index}`}
+              type="button"
+              role="option"
+              tabIndex={-1}
+              aria-selected={index === selectedCommandIndex}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => chooseCommand(command.name)}
+            >
+              <span>{command.name}</span>
+              <span>{command.description}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {!isMinimized || !hasConversation ? (
         <form
           className="meeting-ask-pluto-dock__composer"
@@ -528,10 +587,52 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
           }}
         >
           <textarea
+            ref={composerRef}
             value={query}
-            onFocus={() => setIsMinimized(false)}
-            onChange={(event) => setQuery(event.target.value)}
+            role={hasCommands ? 'combobox' : undefined}
+            aria-label="Ask about this meeting"
+            aria-autocomplete={hasCommands ? 'list' : undefined}
+            aria-expanded={hasCommands ? showsCommands : undefined}
+            aria-controls={showsCommands ? commandListId : undefined}
+            aria-activedescendant={
+              showsCommands
+                ? `${commandListId}-${selectedCommandIndex}`
+                : undefined
+            }
+            onFocus={() => {
+              setIsMinimized(false);
+              setCommandsDismissed(false);
+            }}
+            onBlur={() => setCommandsDismissed(true)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setCommandIndex(0);
+              setCommandsDismissed(false);
+            }}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
+              if (showsCommands) {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setCommandsDismissed(true);
+                  return;
+                }
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setCommandIndex(
+                    (selectedCommandIndex +
+                      (event.key === 'ArrowDown' ? 1 : -1) +
+                      filteredCommands.length) %
+                      filteredCommands.length,
+                  );
+                  return;
+                }
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  chooseCommand(filteredCommands[selectedCommandIndex].name);
+                  return;
+                }
+              }
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 void submitQuestion(query);
@@ -539,7 +640,13 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
             }}
             rows={calculatedRows}
             maxLength={MEETING_ASK_PLUTO_LIMITS.queryChars}
-            placeholder="Ask about this meeting"
+            placeholder={
+              liveContext
+                ? hasCommands
+                  ? 'Ask about this meeting (beta), or type /'
+                  : 'Ask a specific question about this meeting (beta)'
+                : 'Ask about this meeting'
+            }
           />
           <button
             type={isAsking ? 'button' : 'submit'}

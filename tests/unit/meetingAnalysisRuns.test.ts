@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
 
 import type { NotesStageEvent } from '../../electron/llm/meetingNotesRunMetrics';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
@@ -24,6 +25,7 @@ describe('meeting analysis run coordinator', () => {
   it('keeps draft previews in memory only and clears them at publication', async () => {
     let running = false;
     let current = true;
+    const checkCurrent = vi.fn(() => current);
     const publish = vi.fn().mockImplementation(() => {
       running = false;
       return true;
@@ -57,7 +59,7 @@ describe('meeting analysis run coordinator', () => {
         },
         updateMeetingAnalysisRunStatus: () => true,
         updateMeetingAnalysisRunStatusIfCurrent: () => true,
-        isMeetingAnalysisRunCurrent: () => current,
+        isMeetingAnalysisRunCurrent: checkCurrent,
         publishMeetingNotesIfCurrent: publish,
         getAllEntities: () => [],
         getMeetingNotesIdentityProjection: () => ({
@@ -85,11 +87,14 @@ describe('meeting analysis run coordinator', () => {
               { title: { text: 'Preview only', sources: [] }, items: [] },
             ],
           };
-          options?.onDraft?.(draft);
+          checkCurrent.mockClear();
+          for (let index = 0; index < 20; index++) options?.onDraft?.(draft);
+          expect(checkCurrent).not.toHaveBeenCalled();
           expect(
             coordinator.getMeetingNotesPreview('preview-meeting')?.sections[0]
               .title,
           ).toBe('Preview only');
+          expect(checkCurrent).toHaveBeenCalledOnce();
           expect(publish).not.toHaveBeenCalled();
           current = false;
           expect(
@@ -377,91 +382,132 @@ describe('meeting analysis run coordinator', () => {
     );
   });
 
-  it('generates a bounded fallback title when published notes omit a generic meeting title', async () => {
-    let running = false;
-    const publish = vi.fn().mockImplementation(() => {
-      running = false;
-      return true;
-    });
-    const generateTitle = vi.fn().mockResolvedValue('Quarterly Roadmap Review');
-    const coordinator = createMeetingAnalysisRunCoordinator({
-      db: {
-        getMeeting: () => ({
-          id: 'recovered-meeting',
-          title: 'Recovered recording',
-          transcript_json: JSON.stringify({
-            segments: [{ speaker: 'Them', text: 'We reviewed the roadmap.' }],
+  it.each(['success', 'failure', 'superseded', 'inline'])(
+    'publishes notes with an inline title or without waiting for a fallback (%s)',
+    async (outcome) => {
+      let running = false;
+      const publish = vi.fn().mockImplementation(() => {
+        running = false;
+        return true;
+      });
+      let resolveTitle!: (title: string) => void;
+      let rejectTitle!: (error: Error) => void;
+      let current = true;
+      const saveTitle = vi.fn().mockReturnValue(true);
+      const generateTitle = vi.fn(
+        () =>
+          new Promise<string>((resolve, reject) => {
+            resolveTitle = resolve;
+            rejectTitle = reject;
           }),
-          transcript_status: 'validated',
-          transcript_integrity_json: JSON.stringify({ verified: true }),
-          user_notes: '',
-        }),
-        getMeetingAnalysisPublicationRevisions: () => ({
-          sourceRevision: 'source',
-          eligibilityRevision: 'eligibility',
-          userNotesHash: 'notes',
-        }),
-        getMeetingAnalysisRun: () =>
-          running
-            ? {
-                run_id: 'title-run',
-                input_revision: 'revision',
-                notes_status: 'running',
-              }
-            : null,
-        beginMeetingAnalysisRun: () => {
-          running = true;
-        },
-        updateMeetingAnalysisRunStatus: () => true,
-        updateMeetingAnalysisRunStatusIfCurrent: () => true,
-        isMeetingAnalysisRunCurrent: () => true,
-        publishMeetingNotesIfCurrent: publish,
-        getAllEntities: () => [],
-        getMeetingNotesIdentityProjection: () => ({
-          speakerDisplayNames: {},
-          trustedUserTerms: [],
-        }),
-      },
-      getSettings: async () => ({ llm_provider: 'ollama' }),
-      createRunId: () => 'title-run',
-      getProvider: async () => ({
-        name: 'ollama',
-        generateTitle,
-        generateStructuredAnalysis: async () => ({
-          analysis_schema_version: 3,
-          overview: 'The quarterly roadmap was reviewed.',
-          topics: [],
-          all_action_items: [],
-          all_decisions: [],
-          meeting_type: 'general',
-          quality: {
-            format_pass: true,
-            retry_count: 0,
-            fallback_used: false,
-            issues: [],
+      );
+      const coordinator = createMeetingAnalysisRunCoordinator({
+        db: {
+          getMeeting: () => ({
+            id: 'recovered-meeting',
+            title: 'Recovered recording',
+            transcript_json: JSON.stringify({
+              segments: [{ speaker: 'Them', text: 'We reviewed the roadmap.' }],
+            }),
+            transcript_status: 'validated',
+            transcript_integrity_json: JSON.stringify({ verified: true }),
+            user_notes: '',
+          }),
+          getMeetingAnalysisPublicationRevisions: () => ({
+            sourceRevision: 'source',
+            eligibilityRevision: 'eligibility',
+            userNotesHash: 'notes',
+          }),
+          getMeetingAnalysisRun: () =>
+            running
+              ? {
+                  run_id: 'title-run',
+                  input_revision: 'revision',
+                  notes_status: 'running',
+                }
+              : null,
+          beginMeetingAnalysisRun: () => {
+            running = true;
           },
+          updateMeetingAnalysisRunStatus: () => true,
+          updateMeetingAnalysisRunStatusIfCurrent: () => true,
+          isMeetingAnalysisRunCurrent: () => current,
+          saveMeetingAnalysisSecondaryFieldsIfCurrent: saveTitle,
+          publishMeetingNotesIfCurrent: publish,
+          getAllEntities: () => [],
+          getMeetingNotesIdentityProjection: () => ({
+            speakerDisplayNames: {},
+            trustedUserTerms: [],
+          }),
+        },
+        getSettings: async () => ({ llm_provider: 'ollama' }),
+        createRunId: () => 'title-run',
+        getProvider: async () => ({
+          name: 'ollama',
+          generateTitle,
+          generateStructuredAnalysis: async () => ({
+            analysis_schema_version: 3,
+            ...(outcome === 'inline'
+              ? { title: 'Quarterly Roadmap Review' }
+              : {}),
+            overview: 'The quarterly roadmap was reviewed.',
+            topics: [],
+            all_action_items: [],
+            all_decisions: [],
+            meeting_type: 'general',
+            quality: {
+              format_pass: true,
+              retry_count: 0,
+              fallback_used: false,
+              issues: [],
+            },
+          }),
         }),
-      }),
-    });
+      });
 
-    await coordinator.generateAndPublishMeetingNotes({
-      meetingId: 'recovered-meeting',
-      requestId: 'title-request',
-      template: 'auto',
-      reason: 'automatic',
-    });
+      await coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'recovered-meeting',
+        requestId: 'title-request',
+        template: 'auto',
+        reason: 'automatic',
+      });
 
-    expect(generateTitle).toHaveBeenCalledWith(
-      'The quarterly roadmap was reviewed.',
-    );
-    expect(publish).toHaveBeenCalledWith(
-      expect.objectContaining({
-        analysis: expect.objectContaining({
-          title: 'Quarterly Roadmap Review',
-        }),
-      }),
-    );
-  });
+      if (outcome === 'inline') {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        expect(publish).toHaveBeenCalledOnce();
+        expect(publish.mock.calls[0][0].analysis.title).toBe(
+          'Quarterly Roadmap Review',
+        );
+        expect(generateTitle).not.toHaveBeenCalled();
+        expect(saveTitle).not.toHaveBeenCalled();
+        return;
+      }
+      expect(generateTitle).toHaveBeenCalledWith(
+        'The quarterly roadmap was reviewed.',
+      );
+      expect(publish).toHaveBeenCalledOnce();
+      expect(publish.mock.calls[0][0].analysis.title).toBeUndefined();
+      expect(saveTitle).not.toHaveBeenCalled();
+      if (outcome === 'failure') rejectTitle(new Error('title unavailable'));
+      else {
+        if (outcome === 'superseded') current = false;
+        resolveTitle('Quarterly Roadmap Review');
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (outcome === 'success') {
+        expect(saveTitle).toHaveBeenCalledWith(
+          expect.objectContaining({
+            runId: 'title-run',
+            generatedTitle: {
+              expectedTitle: 'Recovered recording',
+              title: 'Quarterly Roadmap Review',
+            },
+          }),
+        );
+      } else expect(saveTitle).not.toHaveBeenCalled();
+      expect(publish).toHaveBeenCalledOnce();
+    },
+  );
 
   it('applies the optional review budget only to the local Ollama provider', () => {
     expect(shouldUseMeetingNotesOptionalReviewBudget('Ollama (Local)')).toBe(
@@ -472,6 +518,46 @@ describe('meeting analysis run coordinator', () => {
     expect(shouldUseMeetingNotesOptionalReviewBudget('Anthropic Claude')).toBe(
       false,
     );
+  });
+
+  it('retains exact completed writers for two hours without extending model residency', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    const precompute = vi.fn().mockResolvedValue('generated');
+    const { source, draft } = makeDirectNotesFixture();
+    try {
+      const coordinator = createMeetingAnalysisRunCoordinator({
+        db: {
+          getMeeting: vi.fn(),
+          getMeetingAnalysisPublicationRevisions: vi.fn(),
+          getMeetingAnalysisRun: vi.fn(),
+          beginMeetingAnalysisRun: vi.fn(),
+          updateMeetingAnalysisRunStatus: vi.fn(),
+          updateMeetingAnalysisRunStatusIfCurrent: vi.fn(),
+          isMeetingAnalysisRunCurrent: vi.fn(),
+          publishMeetingNotesIfCurrent: vi.fn(),
+          getAllEntities: () => [],
+        },
+        getSettings: async () => ({ llm_provider: 'ollama' }),
+        getProvider: async () => ({
+          name: 'ollama',
+          generateStructuredAnalysis: vi.fn(),
+          precomputeStructuredAnalysisLeaf: precompute,
+        }),
+      });
+      await coordinator.precomputeIncrementalMeetingNotes({
+        source,
+        userNotes: '',
+        signal: new AbortController().signal,
+      });
+      const cache = precompute.mock.calls[0][3].stageCache;
+      cache.set('exact-writer-key', draft);
+      clock.mockReturnValue(90 * 60 * 1000);
+      expect(cache.get('exact-writer-key')).toEqual(draft);
+      clock.mockReturnValue(2 * 60 * 60 * 1000);
+      expect(cache.get('exact-writer-key')).toBeUndefined();
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('precomputes a live leaf with the same source-independent cache identity used at publication', async () => {
@@ -1264,6 +1350,7 @@ describe('meeting analysis run coordinator', () => {
         expect.objectContaining({
           compactWriterContract: true,
           knownTerms: ['Ogletree'],
+          hierarchyAuditStrategy: 'deterministic_only',
           trustedUserTerms: [],
           entityHints: ['Ogletree'],
           workClass: 'manual_notes',

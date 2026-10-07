@@ -319,7 +319,7 @@ describe('UnifiedLLMProvider', () => {
     expect(requestBodies).toHaveLength(1);
     expect(requestBodies[0]).toMatchObject({
       model: 'phi4-mini:3.8b',
-      keep_alive: '1h',
+      keep_alive: '2h',
     });
   });
 
@@ -660,18 +660,17 @@ describe('UnifiedLLMProvider', () => {
     ).rejects.toThrow('project_scope_response_incomplete');
   });
 
-  it('lets visible project scope preempt resumable notes and yield to chat', async () => {
-    const signals: AbortSignal[] = [];
+  it('keeps project review behind notes while chat can preempt notes', async () => {
     const controller = new AbortController();
+    const signals: AbortSignal[] = [];
     const fetchMock = installFetchMock((_url, init) => {
-      if (signals.length >= 2)
+      if (signals.length)
         return jsonResponse({
           response: validAnalysisMarkdown,
           done: true,
           done_reason: 'stop',
         });
       signals.push(init!.signal!);
-      if (init!.signal!.aborted) return Promise.reject(init!.signal!.reason);
       return new Promise<Response>((_resolve, reject) =>
         init!.signal!.addEventListener(
           'abort',
@@ -683,7 +682,7 @@ describe('UnifiedLLMProvider', () => {
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'gemma4:12b',
     });
-    const knowledge = (
+    const notes = (
       provider as unknown as {
         generateText(options: {
           prompt: string;
@@ -699,32 +698,26 @@ describe('UnifiedLLMProvider', () => {
       })
       .catch((error) => error);
     let review: Promise<unknown> | undefined;
-    let analysis: Promise<unknown> | undefined;
     try {
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      review = provider
-        .synthesizeKnowledgeDocument('review', {
-          purpose: 'projectScope',
-          signal: controller.signal,
-        })
-        .catch((error) => error);
-      await vi.waitFor(() => expect(signals[0].aborted).toBe(true), {
-        timeout: 500,
+      review = provider.synthesizeKnowledgeDocument('review', {
+        purpose: 'projectScope',
+        signal: controller.signal,
       });
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-      analysis = provider.answerAskPluto('question', { mode: 'fast' });
-      await expect(review).resolves.toMatchObject({
+      await Promise.resolve();
+      expect(signals[0].aborted).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await expect(
+        provider.answerAskPluto('question', { mode: 'fast' }),
+      ).resolves.toBe(validAnalysisMarkdown);
+      await expect(notes).resolves.toMatchObject({
         name: 'AbortError',
         message: 'foreground_preempted',
       });
-      await expect(analysis).resolves.toBe(validAnalysisMarkdown);
-      await expect(knowledge).resolves.toMatchObject({
-        name: 'AbortError',
-        message: 'foreground_preempted',
-      });
+      await expect(review).resolves.toBe(validAnalysisMarkdown);
     } finally {
       controller.abort();
-      await Promise.allSettled([knowledge, review, analysis]);
+      await Promise.allSettled([notes, review]);
     }
   });
 
@@ -806,13 +799,48 @@ describe('UnifiedLLMProvider', () => {
       ollama_model: 'qwen3.5:9b',
     });
 
-    await provider.answerAskPluto('What are we discussing?', { live: true });
+    const responseSchema = {
+      type: 'object',
+      properties: { points: { type: 'array' } },
+    };
+    await provider.answerAskPluto('What are we discussing?', {
+      live: true,
+      jsonMode: true,
+      responseSchema,
+    });
 
     expect(requestBody.think).toBe(false);
+    expect(requestBody.format).toEqual(responseSchema);
     expect(requestBody.options).toMatchObject({
       num_ctx: 4096,
       num_predict: 768,
     });
+  });
+
+  it('uses plain text without JSON grammar for live answer editing', async () => {
+    let requestBody: Record<string, unknown> = {};
+    installFetchMock((_url, init) => {
+      requestBody = parseRequestBody(init);
+      return jsonResponse({
+        message: { content: 'Revised answer' },
+        done: true,
+        done_reason: 'stop',
+      });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+    await provider.answerAskPluto('Edit this grounded answer as plain text.', {
+      live: true,
+      jsonMode: false,
+    });
+    expect(requestBody.format).toBeUndefined();
+    expect(JSON.stringify(requestBody.messages)).toContain(
+      'requested output format',
+    );
+    expect(JSON.stringify(requestBody.messages)).not.toContain(
+      'requested JSON format',
+    );
   });
 
   it('finishes live Ask Pluto on Ollama done without waiting for transport close', async () => {

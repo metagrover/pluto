@@ -152,7 +152,7 @@ describe('App Search Pluto navigation', () => {
           return null;
         }),
         send: vi.fn(),
-        on: vi.fn(),
+        on: vi.fn(() => () => {}),
         off: vi.fn(),
       },
     });

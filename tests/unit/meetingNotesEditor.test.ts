@@ -490,3 +490,154 @@ it('documents valid hierarchy cancellation and deduplication contracts', () => {
     'Preserve the id of each retained inherited commitment',
   );
 });
+
+it('applies correction-only edits through the existing acceptance path and preserves untouched blocks', () => {
+  const { source, draft } = makeDirectNotesFixture();
+  const original = structuredClone(draft);
+  const raw = JSON.stringify({
+    changes: [
+      {
+        op: 'replace',
+        target: draft.sections[0].items[0].id,
+        value: {
+          ...draft.sections[0].items[0],
+          text: 'Milo will send the outline.',
+        },
+      },
+    ],
+    dispositions: [],
+    terminology: [],
+  });
+  const edited = parseEditedNotes({ raw, source, originalDraft: draft });
+  // The same commitment normalizer runs for complete and correction-only editors.
+  const complete = structuredClone(draft);
+  complete.sections[0].items[0].text = 'Milo will send the outline.';
+  expect(edited.draft).toEqual(
+    parseEditedNotes({ raw: JSON.stringify(complete), source }).draft,
+  );
+  expect(edited.draft.sections[0].title).toEqual(original.sections[0].title);
+  expect(draft).toEqual(original);
+  const unchanged = parseEditedNotes({
+    raw: JSON.stringify({ changes: [], dispositions: [], terminology: [] }),
+    source,
+    originalDraft: draft,
+  });
+  expect(unchanged.draft).toEqual(
+    parseEditedNotes({ raw: JSON.stringify(draft), source }).draft,
+  );
+});
+
+it('rejects invented targets, duplicate corrections, references and unsupported commitments', () => {
+  const { source, draft } = makeDirectNotesFixture();
+  const replace = {
+    op: 'replace',
+    target: draft.sections[0].items[0].id,
+    value: {
+      ...draft.sections[0].items[0],
+      text: 'Milo will send the outline.',
+    },
+  };
+  const parse = (changes: unknown[]) =>
+    parseEditedNotes({
+      raw: JSON.stringify({ changes, dispositions: [], terminology: [] }),
+      source,
+      originalDraft: draft,
+    });
+  expect(() =>
+    parseEditedNotes({ raw: 'not json', source, originalDraft: draft }),
+  ).toThrow('notes_audit_invalid');
+  expect(() => parse([{ op: 'remove', target: 'invented' }])).toThrow();
+  expect(() => parse([replace, replace])).toThrow();
+  expect(() =>
+    parse([
+      {
+        ...replace,
+        value: {
+          ...replace.value,
+          sources: [{ segment: 99, start: 0, end: 2 }],
+        },
+      },
+    ]),
+  ).toThrow();
+  expect(() =>
+    parse([
+      {
+        ...replace,
+        value: {
+          ...replace.value,
+          text: 'Milo will book the hotel by Monday.',
+          due: 'Monday',
+        },
+      },
+    ]),
+  ).toThrow();
+});
+
+it('routes correction-only reviews through the production source and publication checks', async () => {
+  const { source, draft, expectedAction } = makeDirectNotesFixture();
+  const result = await generateMeetingNotes({
+    source,
+    context: {
+      userNotes: '',
+      template: 'auto',
+      trustedUserTerms: [],
+      entityHints: [],
+    },
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16384,
+    reviewProtocol: 'editor',
+    correctionOnlyReview: true,
+    generate: async (request) => {
+      if (request.task === 'notesWriter') return JSON.stringify(draft);
+      expect(request.responseContract).toBe('corrections');
+      expect(request.prompt).toContain('Read every original source turn');
+      return JSON.stringify({ changes: [], dispositions: [], terminology: [] });
+    },
+  });
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining(expectedAction),
+  ]);
+});
+
+it('accepts correction-only compact editors without forcing a rewrite of the existing title', async () => {
+  const { source, draft, expectedAction } = makeDirectNotesFixture();
+  const title = {
+    text: 'Outline follow-up',
+    sources: draft.sections[0].title.sources,
+  };
+  const result = await generateMeetingNotes({
+    source,
+    context: {
+      userNotes: '',
+      template: 'auto',
+      trustedUserTerms: [],
+      entityHints: [],
+    },
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16384,
+    compactWriterContract: true,
+    compactSourceSpeakers: true,
+    correctionOnlyReview: true,
+    reviewProtocol: 'editor',
+    generate: async (request) =>
+      request.task === 'notesWriter'
+        ? JSON.stringify({
+            title,
+            sections: [
+              {
+                title: 'Outline',
+                items: draft.sections[0].items.map(
+                  ({ id: _id, ...item }) => item,
+                ),
+              },
+            ],
+          })
+        : JSON.stringify({ changes: [], dispositions: [], terminology: [] }),
+  });
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining(expectedAction),
+  ]);
+  expect(result.title).toBe(title.text);
+});

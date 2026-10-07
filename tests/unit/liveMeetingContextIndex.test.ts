@@ -252,6 +252,7 @@ describe('live meeting context index', () => {
         ?.segments.map(({ speaker }) => speaker),
     ).toEqual(['Me', 'Call audio', 'Me', 'Call audio']);
     expect(selected.segments.map(({ speaker }) => speaker)).toEqual([
+      'Me',
       'Call audio',
       'Me',
       'Call audio',
@@ -278,6 +279,12 @@ describe('live meeting context index', () => {
   });
 
   it.each([
+    ['What are the decisions so far?', 'decision'],
+    ['List the action items', 'action'],
+    ['List the agreed action items, stated owners, and deadlines.', 'action'],
+    ['Did we agree to daily meetings or asynchronous follow-up?', 'decision'],
+    ['What did I miss?', 'recent_range'],
+    ['What should I ask next?', 'advice'],
     ['What did we decide?', 'decision'],
     ['What are the next steps?', 'action'],
     ['Did Riley understand the proposal?', 'clarification'],
@@ -288,4 +295,267 @@ describe('live meeting context index', () => {
   ] as const)('routes %s without a model call', (query, expected) => {
     expect(classifyLiveMeetingQuery(query, ['Riley'])).toBe(expected);
   });
+
+  it('includes short agreements and corrections when the meeting fits the budget', () => {
+    const index = createLiveMeetingContextIndex();
+    const turns = [
+      segment('proposal', 1000, 'Should we use the blue design?'),
+      segment('agreement', 2000, 'Yes, let us use that.'),
+      segment('owner', 3000, 'Morgan will implement it.'),
+      segment('qualification', 4000, 'But only after approval.'),
+    ];
+    index.ingest('meeting-1', turns);
+    expect(
+      index
+        .select('meeting-1', 'What are the decisions?')
+        .segments.map((s) => s.id),
+    ).toEqual(turns.map((s) => s.id));
+  });
+
+  it('prioritizes distinctive decision topics and equivalent async wording', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest('meeting-1', [
+      ...Array.from({ length: 60 }, (_, i) =>
+        segment(
+          `noise-${i}`,
+          i * 1000,
+          'We agreed to keep the current design.',
+        ),
+      ),
+      segment(
+        'cadence',
+        70000,
+        'We can work asynchronously instead of daily meetings.',
+      ),
+      segment('confirmation', 71000, 'That works for me.'),
+    ]);
+    const selected = index.select(
+      'meeting-1',
+      'Did we agree to daily meetings or async follow-up?',
+      4,
+    );
+    expect(selected.intent).toBe('decision');
+    expect(selected.segments.map((s) => s.id)).toContain('cadence');
+  });
+
+  it('retrieves early decisions and actions from long meetings using plural requests', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest('meeting-1', [
+      segment('decision', 1000, 'We agreed to keep the current design.'),
+      segment('action', 2000, 'Morgan will prepare the checklist.'),
+      ...Array.from({ length: 80 }, (_, i) =>
+        segment(`noise-${i}`, 3000 + i, 'Colors and spacing look fine.'),
+      ),
+    ]);
+    expect(
+      index
+        .select('meeting-1', 'What are the decisions?')
+        .segments.map((s) => s.id),
+    ).toContain('decision');
+    expect(
+      index.select('meeting-1', 'List action items').segments.map((s) => s.id),
+    ).toContain('action');
+  });
+
+  it('keeps many matching commitments ahead of unrelated neighboring turns', () => {
+    const index = createLiveMeetingContextIndex();
+    const turns = Array.from({ length: 10 }, (_, i) => [
+      segment(`action-${i}`, i * 3000, `We will finish checklist ${i}.`),
+      segment(`noise-${i}-a`, i * 3000 + 1000, 'Colors look fine.'),
+      segment(`noise-${i}-b`, i * 3000 + 2000, 'Spacing looks fine.'),
+    ]).flat();
+    index.ingest('meeting-1', turns);
+    expect(
+      index
+        .select('meeting-1', 'List action items')
+        .segments.filter((s) => s.id.startsWith('action-')),
+    ).toHaveLength(10);
+  });
+
+  it('prioritizes an earlier blocker when asking what to ask next', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest('meeting-1', [
+      segment(
+        'blocked',
+        1000,
+        'The migration is blocked waiting for approval.',
+      ),
+      ...Array.from({ length: 80 }, (_, i) =>
+        segment(`noise-${i}`, 3000 + i, 'Colors and spacing look fine.'),
+      ),
+    ]);
+    expect(
+      index
+        .select('meeting-1', 'What should I ask next?')
+        .segments.map((s) => s.id),
+    ).toContain('blocked');
+  });
+
+  it('includes salient agreements in a long catch-up instead of relying on uniform sampling', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest(
+      'meeting-1',
+      Array.from({ length: 100 }, (_, i) =>
+        segment(
+          `turn-${i}`,
+          i * 1000,
+          i === 37
+            ? 'We agreed to keep the compact design.'
+            : 'Colors and spacing look fine.',
+        ),
+      ),
+    );
+    expect(
+      index.select('meeting-1', 'What did I miss?').segments.map((s) => s.id),
+    ).toContain('turn-37');
+    expect(
+      index.select('meeting-1', 'What did I miss?', 1).segments,
+    ).toHaveLength(1);
+  });
+});
+
+describe('live exchange selection', () => {
+  it('retains a fragmented question, confirmation and subsequent correction together', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest('fragmented', [
+      ...Array.from({ length: 80 }, (_, i) =>
+        segment(`old-${i}`, i * 1000, 'Old unrelated discussion.'),
+      ),
+      segment('question', 100000, 'Should we meet daily?'),
+      segment('reply-a', 101000, 'Actually asynchronous'),
+      segment('reply-b', 102000, 'updates are fine.'),
+      segment('confirm', 103000, 'Yes, let us do that.'),
+      ...Array.from({ length: 80 }, (_, i) =>
+        segment(`later-${i}`, 200000 + i * 1000, 'Later unrelated discussion.'),
+      ),
+    ]);
+    const selected = index.select(
+      'fragmented',
+      'Did we agree to daily meetings or asynchronous updates?',
+    );
+    expect(selected.segments.map((s) => s.id)).toEqual(
+      expect.arrayContaining(['question', 'reply-a', 'reply-b', 'confirm']),
+    );
+  });
+  it('does not anchor next-question advice to an old resolved exchange', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest('fragmented', [
+      segment('old', 1000, 'The release is blocked waiting for approval.'),
+      segment('resolved', 2000, 'That has now been approved.'),
+      segment(
+        'current',
+        20 * 60000,
+        'Which onboarding check should we run next?',
+      ),
+      segment(
+        'current-reply',
+        20 * 60000 + 1000,
+        'We still need to choose the device test.',
+      ),
+    ]);
+    expect(
+      index
+        .select('fragmented', 'What should I ask next?')
+        .segments.map((s) => s.id),
+    ).toEqual(['current', 'current-reply']);
+  });
+  it('limits an unspecified catch-up to recent discussion while preserving explicit ranges', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest('catch-up', [
+      segment('early', 0, 'We approved the catering budget.'),
+      segment('middle', 6 * 60000, 'The venue booking is confirmed.'),
+      segment(
+        'latest',
+        10 * 60000,
+        'The shuttle is delayed; guests need a pickup update.',
+      ),
+    ]);
+    expect(
+      index.select('catch-up', 'What did I miss?').segments.map((s) => s.id),
+    ).toEqual(['latest']);
+    expect(
+      index
+        .select('catch-up', 'Catch me up on the last 5 minutes')
+        .segments.map((s) => s.id),
+    ).toEqual(['middle', 'latest']);
+    expect(
+      index
+        .select('catch-up', 'Summarize the whole meeting')
+        .segments.map((s) => s.id),
+    ).toContain('early');
+  });
+  it('retains context for a paraphrased question with no lexical matches', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest('synonyms', [
+      segment('visit', 0, 'The visit remains tentative.'),
+    ]);
+    expect(
+      index.select('synonyms', 'Appointment status?').segments.map((s) => s.id),
+    ).toEqual(['visit']);
+  });
+  it('keeps an action correction without filling the budget with unrelated exchanges', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest('action-focus', [
+      segment('promise', 0, 'I will send the revised contract on Monday.'),
+      segment('correction', 46000, 'Correction: Thursday, not Monday.'),
+      ...Array.from({ length: 20 }, (_, i) =>
+        segment(
+          `other-${i}`,
+          120000 + i * 60000,
+          'The cafeteria serves soup and salad.',
+        ),
+      ),
+    ]);
+    const selected = index.select(
+      'action-focus',
+      'What action items were agreed?',
+    ).segments;
+    expect(selected.map((s) => s.id)).toEqual(
+      expect.arrayContaining(['promise', 'correction']),
+    );
+    expect(selected.length).toBeLessThanOrEqual(8);
+  });
+  it('bounds source characters without destroying canonical IDs or timestamps', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest(
+      'large',
+      Array.from({ length: 1000 }, (_, i) =>
+        segment(`id-${i}`, i * 1000, `Discussion ${i} ${'detail '.repeat(15)}`),
+      ),
+    );
+    const selected = index.select('large', 'What did I miss?').segments;
+    expect(
+      selected.reduce((total, s) => total + s.text.length, 0),
+    ).toBeLessThanOrEqual(12000);
+    expect(selected.length).toBeLessThanOrEqual(512);
+    expect(selected.every((s) => s.id === `id-${s.timestampMs / 1000}`)).toBe(
+      true,
+    );
+    expect(selected.at(-1)?.id).toBe('id-999');
+  });
+});
+
+it('retains explicit promises beyond the four highest-ranked exchanges', () => {
+  const index = createLiveMeetingContextIndex();
+  const verbs = [
+    'send',
+    'review',
+    'arrange',
+    'book',
+    'upload',
+    'deliver',
+    'check',
+  ];
+  const promises = Array.from({ length: 7 }, (_, i) =>
+    segment(
+      `promise-${i}`,
+      i * 120_000,
+      `I will ${verbs[i]} the workshop document ${i}.`,
+    ),
+  );
+  index.ingest('promises', promises);
+  const selection = index.select('promises', 'List the explicit action items.');
+  expect(selection.segments.map((s) => s.id)).toEqual(
+    promises.map((s) => s.id),
+  );
 });

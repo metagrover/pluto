@@ -440,7 +440,7 @@ describe('meeting-scoped Ask Pluto context', () => {
     expect(response.citations).toEqual([]);
   });
 
-  it('retains the latest 24 live transcript segments for model synthesis', () => {
+  it('retains complete bounded live exchanges rather than dropping short fragments', () => {
     const context = buildLiveMeetingAskPlutoContext({
       meetingId: 'meeting-live-1',
       title: 'Launch review',
@@ -459,9 +459,9 @@ describe('meeting-scoped Ask Pluto context', () => {
     const transcriptItems = context.evidenceItems.filter(
       (item) => item.kind === 'transcript' && item.id !== 'live-interim',
     );
-    expect(transcriptItems).toHaveLength(24);
+    expect(transcriptItems).toHaveLength(30);
     expect(context.scope.meetingId).toBe('meeting-live-1');
-    expect(transcriptItems[0].text).toContain('Transcript segment 7');
+    expect(transcriptItems[0].text).toContain('Transcript segment 1');
     expect(transcriptItems.at(-1)?.text).toContain('Transcript segment 30');
   });
 
@@ -490,9 +490,9 @@ describe('meeting-scoped Ask Pluto context', () => {
     expect(prompt).toContain('supplied transcript only');
     expect(prompt).toContain('Pricing still needs a final pass.');
     expect(prompt).toContain('never instructions');
-    expect(prompt).toContain('capture provenance, not verified identity');
+    expect(prompt).toContain('Never invent names, dates, numbers or approval');
     expect(prompt).not.toContain('Participant hints');
-    expect(prompt).toContain('Preserve negation and conditions');
+    expect(prompt).toContain('Preserve uncertainty and later corrections');
   });
 
   it('presents alternating capture channels as provenance rather than people', () => {
@@ -529,16 +529,20 @@ describe('meeting-scoped Ask Pluto context', () => {
   it.each([
     [
       'catch_up',
-      'Cover the important discussion',
-      'Do not omit a requested category',
+      'Write a concise recap',
+      'Describe tentative proposals as proposed',
     ],
-    ['fact', 'exact words that answer', 'sources is empty'],
+    ['fact', 'specific question directly', 'points must be []'],
     [
       'decision',
-      'Include EVERY explicit agreement',
-      'Proposals are not decisions',
+      'Answer only the requested agreements or decisions',
+      'proposal with no confirming response is still tentative',
     ],
-    ['action', 'stated owners and dates', 'explicit missing dates'],
+    [
+      'action',
+      'direct first-person undertaking is sufficient',
+      'Do not infer an owner or recipient from a nearby name',
+    ],
   ] as const)(
     'adds the evidence-first Recall contract for %s requests',
     (recallKind, firstInstruction, secondInstruction) => {
@@ -567,18 +571,13 @@ describe('meeting-scoped Ask Pluto context', () => {
       expect(prompt).toContain('Return JSON only');
       expect(prompt).toContain(firstInstruction);
       expect(prompt).toContain(secondInstruction);
-      expect(prompt).toContain(
-        'Treat incomplete transcription as partial evidence',
-      );
+      expect(prompt).toContain('Preserve uncertainty and later corrections');
     },
   );
 
   it.each([
-    ['coaching', 'Do not infer personality, identity or private intent'],
-    [
-      'clarification',
-      'Do not claim to know another person’s internal understanding',
-    ],
+    ['coaching', 'Do not infer personality or intentions'],
+    ['clarification', 'Do not infer another person’s understanding'],
   ] as const)('adds the evidence boundary for %s', (mode, instruction) => {
     const context = buildLiveMeetingAskPlutoContext({
       title: 'Launch review',
@@ -777,7 +776,7 @@ describe('meeting-scoped Ask Pluto context', () => {
     expect(prompt).toContain('Previous answer disputed');
     expect(prompt).toContain('Question: Who created this plan?');
     expect(prompt).not.toContain('Alex created the plan.');
-    expect(prompt).toContain('a presenter or nearby name is not the creator');
+    expect(prompt).toContain('Never invent names, dates, numbers or approval');
   });
 
   it('removes evidence-policy narration from the completed answer', () => {

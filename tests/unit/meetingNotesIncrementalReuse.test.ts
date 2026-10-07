@@ -79,7 +79,8 @@ it('reuses compact live work in the real bounded final plan, without skipping fi
   const prefixSource = makeSyntheticNotesSource(
     finalSource.segments.slice(0, 420),
   );
-  const stageCache = new NotesStageCache();
+  let now = 0;
+  const stageCache = new NotesStageCache(() => now, 2 * 60 * 60 * 1000);
   const generate = vi.fn(async (request) => {
     if (request.task === 'notesAudit') return reviewedDraft(request.prompt);
     const span = descriptors(request.prompt)[0]!;
@@ -126,6 +127,9 @@ it('reuses compact live work in the real bounded final plan, without skipping fi
   generate.mockClear();
   await expect(precomputeNextMeetingNotesLeaf(input)).resolves.toBe('reused');
   expect(generate).not.toHaveBeenCalled();
+  // A closed writer can outlive the old one-hour retention while final
+  // review and changed-source invalidation still run normally.
+  now = 90 * 60 * 1000;
   const onPlan = vi.fn();
   const previews: NotesDraft[] = [];
   const physicalCallsAtPreview: number[] = [];

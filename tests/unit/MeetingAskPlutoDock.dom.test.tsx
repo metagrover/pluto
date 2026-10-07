@@ -137,6 +137,101 @@ describe('MeetingAskPlutoDock', () => {
     vi.restoreAllMocks();
   });
 
+  it('offers specific questions in the live beta without advertising shortcuts', async () => {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<MeetingAskPlutoDock liveContext={liveContext} />);
+      await flushPromises();
+    });
+    const input = container.querySelector('textarea')!;
+    expect(input.placeholder).toContain('specific question');
+    expect(input.placeholder).toContain('beta');
+    expect(input.getAttribute('role')).toBeNull();
+    expect(input.getAttribute('aria-autocomplete')).toBeNull();
+    await typeInto(input, '/');
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+    await typeInto(input, 'What are the input options?');
+    await act(async () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+      await flushPromises();
+    });
+    expect(invoke).toHaveBeenCalledWith(
+      'intelligence:meeting-chat',
+      expect.objectContaining({
+        query: 'What are the input options?',
+        scope: expect.objectContaining({ type: 'live_meeting' }),
+      }),
+    );
+    expect(
+      container.querySelector('.meeting-ask-pluto-dock__header-copy')
+        ?.textContent,
+    ).toContain('Beta');
+    await act(async () => root.unmount());
+  });
+
+  it.each(['/recap', '/catch-me-up', '/decisions', '/actions', '/ask-next'])(
+    'keeps retired shortcut %s out of the menu and does not submit it',
+    async (command) => {
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(<MeetingAskPlutoDock liveContext={liveContext} />);
+      });
+      const input = container.querySelector('textarea')!;
+      expect(input.placeholder).toContain('beta');
+      await typeInto(input, command);
+      expect(container.querySelector('[role="listbox"]')).toBeNull();
+      await act(async () => {
+        container
+          .querySelector('form')!
+          .dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+          );
+      });
+      expect(input.value).toBe(command);
+      expect(invoke).not.toHaveBeenCalled();
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        'Ask a specific question',
+      );
+      await act(async () => root.unmount());
+    },
+  );
+
+  it('preserves an unknown shortcut and explains the beta scope without sending', async () => {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<MeetingAskPlutoDock liveContext={liveContext} />);
+    });
+    const input = container.querySelector('textarea')!;
+    await typeInto(input, '/unknown details');
+    await act(async () => {
+      container
+        .querySelector('form')!
+        .dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+    });
+    expect(input.value).toBe('/unknown details');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Shortcuts are unavailable in this beta',
+    );
+    expect(invoke).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it('keeps the live beta label out of saved meeting chat', async () => {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<MeetingAskPlutoDock meeting={makeMeeting()} />);
+    });
+    const input = container.querySelector('textarea')!;
+    expect(input.placeholder).not.toContain('beta');
+    await typeInto(input, '/');
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+    await act(async () => root.unmount());
+  });
+
   it('submits a meeting-scoped question with collapsed supporting evidence', async () => {
     const root = createRoot(container);
 
@@ -150,9 +245,7 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     expect(input).not.toBeNull();
 
     await typeInto(input!, 'What did we decide?');
@@ -196,47 +289,60 @@ describe('MeetingAskPlutoDock', () => {
     await act(async () => root.unmount());
   });
 
-  it('distinguishes an uncited generated answer from a conversation-only reply', async () => {
-    const root = createRoot(container);
-    const packet = {
-      ...response,
-      trustStatus: 'needs_review' as const,
-      citations: [],
-    };
-    await act(async () => {
-      root.render(
-        <MeetingAskPlutoDock
-          liveContext={liveContext}
-          conversation={[
-            { id: 'answer', role: 'assistant', content: packet.answer, packet },
-          ]}
-        />,
+  it.each([true, false])(
+    'keeps source metadata out of live answers (cited: %s)',
+    async (cited) => {
+      const root = createRoot(container);
+      const packet = {
+        ...response,
+        trustStatus: 'needs_review' as const,
+        citations: cited ? response.citations : [],
+      };
+      await act(async () => {
+        root.render(
+          <MeetingAskPlutoDock
+            liveContext={liveContext}
+            conversation={[
+              {
+                id: 'answer',
+                role: 'assistant',
+                content: packet.answer,
+                packet,
+              },
+            ]}
+          />,
+        );
+        await flushPromises();
+      });
+      expect(container.textContent).toContain(packet.answer);
+      expect(container.textContent).not.toContain(
+        'No supporting evidence cited.',
       );
-      await flushPromises();
-    });
-    expect(container.textContent).toContain('No supporting evidence cited.');
-    expect(container.querySelector('details')).toBeNull();
-    await act(async () => {
-      root.render(
-        <MeetingAskPlutoDock
-          liveContext={liveContext}
-          conversation={[
-            {
-              id: 'social',
-              role: 'assistant',
-              content: 'Thanks.',
-              packet: { ...packet, answer: 'Thanks.', claims: [] },
-            },
-          ]}
-        />,
+      expect(container.textContent).not.toContain('View evidence');
+      expect(container.querySelector('blockquote')).toBeNull();
+      expect(container.querySelector('details')).toBeNull();
+      await act(async () => {
+        root.render(
+          <MeetingAskPlutoDock
+            liveContext={liveContext}
+            conversation={[
+              {
+                id: 'social',
+                role: 'assistant',
+                content: 'Thanks.',
+                packet: { ...packet, answer: 'Thanks.', claims: [] },
+              },
+            ]}
+          />,
+        );
+        await flushPromises();
+      });
+      expect(container.textContent).not.toContain(
+        'No supporting evidence cited.',
       );
-      await flushPromises();
-    });
-    expect(container.textContent).not.toContain(
-      'No supporting evidence cited.',
-    );
-    await act(async () => root.unmount());
-  });
+      await act(async () => root.unmount());
+    },
+  );
 
   it('streams only the active answer before replacing it with the final packet', async () => {
     const root = createRoot(container);
@@ -257,9 +363,7 @@ describe('MeetingAskPlutoDock', () => {
       'intelligence:meeting-chat:delta',
       expect.any(Function),
     );
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     await typeInto(input!, 'What did we decide?');
     await act(async () => {
       input!.form?.dispatchEvent(
@@ -584,9 +688,7 @@ describe('MeetingAskPlutoDock', () => {
     );
     expect(container.textContent).not.toContain('Meeting only');
 
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     expect(input).not.toBeNull();
     expect(input?.getAttribute('rows')).toBe('1');
 
@@ -601,9 +703,7 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     expect(input).not.toBeNull();
 
     await typeInto(input!, Array.from({ length: 10 }, () => 'line').join('\n'));
@@ -640,9 +740,7 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     expect(input).not.toBeNull();
 
     await typeInto(input!, 'help me understand whats going on');
@@ -690,9 +788,7 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     await typeInto(input!, 'What did we decide?');
     await act(async () => {
       input!.form?.dispatchEvent(
@@ -728,9 +824,7 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     await typeInto(input!, 'What did we decide?');
     await act(async () => {
       input!.form?.dispatchEvent(
@@ -763,9 +857,7 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     expect(input).not.toBeNull();
 
     await typeInto(input!, 'What did we decide?');
@@ -908,9 +1000,7 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     await typeInto(input!, 'What did we decide?');
     await act(async () => {
       input!.form?.dispatchEvent(
@@ -948,9 +1038,7 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     await typeInto(input!, 'What is happening?');
     await act(async () => {
       input!.form?.dispatchEvent(
@@ -1047,9 +1135,7 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     expect(input).not.toBeNull();
 
     await typeInto(input!, 'What did we decide?');
@@ -1123,9 +1209,7 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
 
-    const input = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Ask about this meeting"]',
-    );
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
     await typeInto(input!, 'Why?');
     await act(async () => {
       input!.form?.dispatchEvent(

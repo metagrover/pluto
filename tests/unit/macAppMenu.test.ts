@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildMacApplicationMenuTemplate,
+  buildPlutoHelpMenu,
   updateResultDialog,
 } from '../../electron/macAppMenu';
 
@@ -8,9 +9,11 @@ describe('macOS application menu', () => {
   it('keeps native menus and routes Settings and update actions', () => {
     const openSettings = vi.fn();
     const checkForUpdates = vi.fn();
+    const reportProblem = vi.fn();
     const menu = buildMacApplicationMenuTemplate({
       openSettings,
       checkForUpdates,
+      reportProblem,
     });
     expect(menu[0].label).toBe('Pluto');
     const appItems = menu[0].submenu as Electron.MenuItemConstructorOptions[];
@@ -36,6 +39,7 @@ describe('macOS application menu', () => {
       'editMenu',
       'viewMenu',
       'windowMenu',
+      'help',
     ]);
     expect(appItems.map((item) => item.role).filter(Boolean)).toEqual([
       'about',
@@ -45,6 +49,29 @@ describe('macOS application menu', () => {
       'unhide',
       'quit',
     ]);
+  });
+
+  it('routes the same report action from application and tray Help menus', () => {
+    const reportProblem = vi.fn();
+    const appMenu = buildMacApplicationMenuTemplate({
+      openSettings: vi.fn(),
+      checkForUpdates: vi.fn(),
+      reportProblem,
+    });
+    const helpMenus = [
+      appMenu.find((item) => item.role === 'help'),
+      buildPlutoHelpMenu(reportProblem),
+    ];
+    for (const help of helpMenus) {
+      const items = help?.submenu as Electron.MenuItemConstructorOptions[];
+      expect(items[0].label).toBe('Report a problem…');
+      items[0].click?.(
+        {} as Electron.MenuItem,
+        {} as Electron.BrowserWindow,
+        {} as Electron.KeyboardEvent,
+      );
+    }
+    expect(reportProblem).toHaveBeenCalledTimes(2);
   });
 
   it('describes each update result without installing anything', () => {

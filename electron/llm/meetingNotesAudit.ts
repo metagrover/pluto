@@ -10,6 +10,7 @@ import type {
   NotesProseReviewItem,
 } from './analysisTypes';
 import { createEditorTerminologyArtifact } from './meetingNotesEditorTerminology';
+import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
 import { classifySuspectNotesProse } from './meetingNotesProseQuality';
 import { resolveSourceSpan } from './meetingNotesSource';
 import {
@@ -240,7 +241,10 @@ export const parseNotesDraft = (raw: string): NotesDraft => {
   };
 };
 
-export const parseCompactNotesDraft = (raw: string): NotesDraft => {
+export const parseCompactNotesDraft = (
+  raw: string,
+  maxSourceSpans = 3,
+): NotesDraft => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -278,20 +282,34 @@ export const parseCompactNotesDraft = (raw: string): NotesDraft => {
       throw new MeetingNotesError('notes_writer_invalid');
     }
     const items = section.items.map((item) => {
+      const optionalMetadata =
+        NOTES_EXPERIMENTS_ENABLED &&
+        maxSourceSpans > 3 &&
+        isRecord(item) &&
+        ['kind', 'text', 'sources'].every((key) => Object.hasOwn(item, key)) &&
+        Object.keys(item).every((key) =>
+          ['kind', 'text', 'sources', 'owner', 'due'].includes(key),
+        );
       if (
         !isRecord(item) ||
-        !exactKeys(item, ['kind', 'text', 'owner', 'due', 'sources']) ||
+        (!exactKeys(item, ['kind', 'text', 'owner', 'due', 'sources']) &&
+          !optionalMetadata) ||
         !['point', 'action', 'decision', 'question'].includes(
           String(item.kind),
         ) ||
         typeof item.text !== 'string' ||
         !item.text.trim() ||
         item.text.length > 12_000 ||
-        (item.owner !== null && typeof item.owner !== 'string') ||
-        (item.due !== null && typeof item.due !== 'string') ||
+        (item.owner !== null &&
+          typeof item.owner !== 'string' &&
+          !(optionalMetadata && item.owner === undefined)) ||
+        (item.due !== null &&
+          typeof item.due !== 'string' &&
+          !(optionalMetadata && item.due === undefined)) ||
         !Array.isArray(item.sources) ||
         item.sources.length === 0 ||
-        item.sources.length > 3 ||
+        item.sources.length >
+          (NOTES_EXPERIMENTS_ENABLED ? maxSourceSpans : 3) ||
         item.sources.some((source) => parseSpan(source) === null)
       ) {
         throw new MeetingNotesError('notes_writer_invalid');
@@ -300,8 +318,8 @@ export const parseCompactNotesDraft = (raw: string): NotesDraft => {
         kind: item.kind,
         text: item.text,
         sources: item.sources,
-        owner: item.owner,
-        due: item.due,
+        owner: item.owner ?? null,
+        due: item.due ?? null,
       };
     });
     const titleSources = [
@@ -326,7 +344,12 @@ export const parseCompactNotesDraft = (raw: string): NotesDraft => {
           parsed.title.text.length <= 120 &&
           Array.isArray(parsed.title.sources) &&
           parsed.title.sources.length > 0 &&
-          parsed.title.sources.length <= 3 &&
+          parsed.title.sources.length <=
+            (NOTES_EXPERIMENTS_ENABLED && maxSourceSpans > 3
+              ? 96
+              : NOTES_EXPERIMENTS_ENABLED
+                ? maxSourceSpans
+                : 3) &&
           parsed.title.sources.every((source) => parseSpan(source) !== null)
         ? {
             id: 'title',
@@ -840,73 +863,14 @@ const applyTerminologyToProse = (
   };
 };
 
-export const applyNotesAudit = ({
-  source,
-  draft,
-  audit,
-  terminology,
-  qualityPolicy = 'strict',
-  allowedSources,
-  inherited = [],
-}: {
-  source: NotesSource;
-  draft: NotesDraft;
-  audit: NotesAudit;
-  terminology?: AuditTerminologyContext;
-  qualityPolicy?: 'strict' | 'advisory';
-  allowedSources?: SourceSpan[];
-  inherited?: NotesItem[];
-}): AuditedNotes => {
-  const issues: string[] = [];
-  const checkSources = (spans: SourceSpan[]) => {
-    validateSources(source, spans);
-    if (
-      allowedSources &&
-      spans.some(
-        (span) =>
-          !allowedSources.some(
-            (allowed) =>
-              allowed.segment === span.segment &&
-              allowed.start === span.start &&
-              allowed.end === span.end,
-          ),
-      )
-    )
-      throw new MeetingNotesError('invalid_notes_audit');
-  };
-  const next = structuredClone(draft);
-  for (const proposal of allowedSources ? audit.terminology : []) {
-    if (
-      proposal.segmentIndexes.some(
-        (index) =>
-          !source.segments.some((segment) => segment.index === index) ||
-          (allowedSources &&
-            !allowedSources.some((span) => span.segment === index)),
-      )
-    )
-      throw new MeetingNotesError('invalid_notes_audit');
-  }
-  const initialIds = new Set(blocksForDraft(next).map((block) => block.id));
-  if (initialIds.size !== blocksForDraft(next).length) {
-    throw new MeetingNotesError('invalid_notes_audit');
-  }
-  for (const block of blocksForDraft(next)) checkSources(block.sources);
-
-  const verdicts = new Map<string, AuditVerdict>();
-  for (const verdict of audit.verdicts) {
-    if (
-      !isSafeId(verdict.target) ||
-      verdicts.has(verdict.target) ||
-      !['supported', 'uncertain', 'unsupported'].includes(verdict.status)
-    ) {
-      throw new MeetingNotesError('invalid_notes_audit');
-    }
-    checkSources(verdict.sources);
-    verdicts.set(verdict.target, structuredClone(verdict));
-  }
-
+/** Shared mutation validation for full audits and correction-only editors. */
+export const applyNotesChanges = (
+  next: NotesDraft,
+  changes: NotesAudit['changes'],
+  checkSources: (spans: SourceSpan[]) => void,
+): void => {
   const changedTargets = new Set<string>();
-  for (const change of audit.changes) {
+  for (const change of changes) {
     if (!isRecord(change) || typeof change.op !== 'string') {
       throw new MeetingNotesError('invalid_notes_audit');
     }
@@ -974,6 +938,74 @@ export const applyNotesAudit = ({
     }
     throw new MeetingNotesError('invalid_notes_audit');
   }
+};
+
+export const applyNotesAudit = ({
+  source,
+  draft,
+  audit,
+  terminology,
+  qualityPolicy = 'strict',
+  allowedSources,
+  inherited = [],
+}: {
+  source: NotesSource;
+  draft: NotesDraft;
+  audit: NotesAudit;
+  terminology?: AuditTerminologyContext;
+  qualityPolicy?: 'strict' | 'advisory';
+  allowedSources?: SourceSpan[];
+  inherited?: NotesItem[];
+}): AuditedNotes => {
+  const issues: string[] = [];
+  const checkSources = (spans: SourceSpan[]) => {
+    validateSources(source, spans);
+    if (
+      allowedSources &&
+      spans.some(
+        (span) =>
+          !allowedSources.some(
+            (allowed) =>
+              allowed.segment === span.segment &&
+              allowed.start === span.start &&
+              allowed.end === span.end,
+          ),
+      )
+    )
+      throw new MeetingNotesError('invalid_notes_audit');
+  };
+  const next = structuredClone(draft);
+  for (const proposal of allowedSources ? audit.terminology : []) {
+    if (
+      proposal.segmentIndexes.some(
+        (index) =>
+          !source.segments.some((segment) => segment.index === index) ||
+          (allowedSources &&
+            !allowedSources.some((span) => span.segment === index)),
+      )
+    )
+      throw new MeetingNotesError('invalid_notes_audit');
+  }
+  const initialIds = new Set(blocksForDraft(next).map((block) => block.id));
+  if (initialIds.size !== blocksForDraft(next).length) {
+    throw new MeetingNotesError('invalid_notes_audit');
+  }
+  for (const block of blocksForDraft(next)) checkSources(block.sources);
+
+  const verdicts = new Map<string, AuditVerdict>();
+  for (const verdict of audit.verdicts) {
+    if (
+      !isSafeId(verdict.target) ||
+      verdicts.has(verdict.target) ||
+      !['supported', 'uncertain', 'unsupported'].includes(verdict.status)
+    ) {
+      throw new MeetingNotesError('invalid_notes_audit');
+    }
+    checkSources(verdict.sources);
+    verdicts.set(verdict.target, structuredClone(verdict));
+  }
+
+  applyNotesChanges(next, audit.changes, checkSources);
 
   // Complete contract validation precedes semantic removal. In particular, a
   // rejected heading must not hide a missing child verdict or invalid reference.
@@ -1140,7 +1172,7 @@ export const acceptEditedNotes = ({
     validateSources(source, block.sources);
     const evidence = sourceText(source, block.sources);
     if (
-      (block.text.match(/\bR\d+\b/g) ?? []).some(
+      (block.text.match(/\b[RP]\d+\b/g) ?? []).some(
         (label) => !evidence.includes(label),
       )
     ) {

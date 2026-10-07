@@ -14,7 +14,7 @@ export function createMeetingNotesPreviewStore() {
       draft: NotesDraft,
       isCurrent: () => boolean,
     ) {
-      if (!isCurrent()) return;
+      // Revision checks run when a preview is read, not for every streamed update.
       const preview: MeetingNotesPreview = {
         runId,
         sections: draft.sections.map((section) => ({

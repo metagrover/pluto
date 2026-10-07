@@ -107,6 +107,7 @@ export const UpcomingMeetings = ({
   onPrepare,
 }: UpcomingMeetingsProps) => {
   const [expanded, setExpanded] = useState(false);
+  const [now, setNow] = useState(Date.now);
   const [usesLargeLayout, setUsesLargeLayout] = useState(matchesLargeDashboard);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -124,10 +125,14 @@ export const UpcomingMeetings = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const collapsedLimit = usesLargeLayout ? 5 : 3;
-  const visibleEvents = expanded ? events : events.slice(0, collapsedLimit);
-  const hiddenCount = Math.max(0, events.length - collapsedLimit);
-  const today = new Date();
-  const hasMeetingsToday = events.some((event) =>
+  const upcomingEvents = events.filter((event) => Date.parse(event.end) > now);
+  const visibleEvents = upcomingEvents.slice(0, expanded ? 8 : collapsedLimit);
+  const hiddenCount = Math.max(
+    0,
+    Math.min(upcomingEvents.length, 8) - collapsedLimit,
+  );
+  const today = new Date(now);
+  const hasMeetingsToday = upcomingEvents.some((event) =>
     isSameLocalDay(new Date(event.start), today),
   );
   const selectedList =
@@ -139,6 +144,29 @@ export const UpcomingMeetings = ({
   const hasConnectedCalendar =
     selectedList.length > 0 &&
     (snapshot?.state === 'ready' || events.length > 0);
+
+  useEffect(() => {
+    const nextEnd = Math.min(
+      ...events
+        .map((event) => Date.parse(event.end))
+        .filter((end) => end > now),
+    );
+    const timer = window.setTimeout(
+      () => setNow(Date.now()),
+      Math.max(0, Math.min(nextEnd - Date.now(), 60_000)),
+    );
+    return () => window.clearTimeout(timer);
+  }, [events, now]);
+
+  useEffect(() => {
+    const updateNow = () => setNow(Date.now());
+    window.addEventListener('focus', updateNow);
+    document.addEventListener('visibilitychange', updateNow);
+    return () => {
+      window.removeEventListener('focus', updateNow);
+      document.removeEventListener('visibilitychange', updateNow);
+    };
+  }, []);
 
   useEffect(() => {
     if (
@@ -387,7 +415,7 @@ export const UpcomingMeetings = ({
           <p className="pb-5 text-[11px] font-medium leading-5 text-pro-text-muted">
             Calendar context isn’t available on this device.
           </p>
-        ) : events.length ? (
+        ) : upcomingEvents.length ? (
           <>
             {!hasMeetingsToday ? (
               <p className="mb-4 text-[12px] font-medium text-pro-text-muted">

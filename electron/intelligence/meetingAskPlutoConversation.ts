@@ -1,4 +1,5 @@
 import type { MeetingAskPlutoTurn } from '../../src/types/askPluto';
+import { parseLiveMeetingCommand } from '../../src/utils/liveMeetingCommands';
 import {
   type ConversationRetrievalPolicy,
   type ConversationTurnMode,
@@ -99,6 +100,17 @@ export const resolveMeetingAskPlutoConversation = ({
   query: string;
   turns: MeetingAskPlutoTurn[];
 }): MeetingAskPlutoConversationResolution => {
+  const shortcut = parseLiveMeetingCommand(query);
+  if (shortcut.kind === 'command') {
+    return {
+      relation: 'new_topic',
+      turnMode: 'lookup',
+      retrievalPolicy: 'fresh',
+      retrievalQuery: shortcut.question,
+      routingQuery: query.trim(),
+      priorEvidenceHintCount: 0,
+    };
+  }
   const normalizedQuery = normalize(query);
   const exchange = latestCompletedExchange(turns);
   const decision = decideConversationTurn({
