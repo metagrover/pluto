@@ -3,8 +3,8 @@ import {
   ArrowUpRight,
   Brain,
   ChevronDown,
+  History,
   MessageSquarePlus,
-  PanelRight,
   Sparkles,
   Square,
   Trash2,
@@ -212,6 +212,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   );
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [historyBusyId, setHistoryBusyId] = useState<string | null>(null);
   const [anchoredUserMessageId, setAnchoredUserMessageId] = useState<
     string | null
@@ -248,11 +249,21 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     `msg-${Date.now()}-${messageCounterRef.current++}`;
 
   const refreshWorkspaceThreads = useCallback(async () => {
-    if (!window.ipcRenderer) return [];
-    const result = await listWorkspaceChatThreads();
-    const threads = Array.isArray(result) ? result : [];
-    setWorkspaceThreads(threads);
-    return threads;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const result = await listWorkspaceChatThreads();
+      if (!Array.isArray(result)) throw new Error('Invalid conversation list');
+      setWorkspaceThreads(result);
+      return result;
+    } catch (error) {
+      setHistoryError(
+        'Could not load conversations. Close and reopen history to try again.',
+      );
+      throw error;
+    } finally {
+      setHistoryLoading(false);
+    }
   }, []);
 
   const loadWorkspaceThread = useCallback(
@@ -302,19 +313,15 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   }, []);
 
   useEffect(() => {
-    if (
-      !visible ||
-      !window.ipcRenderer ||
-      workspaceHydratedRef.current ||
-      messages.length > 0
-    ) {
+    if (!visible || !window.ipcRenderer || workspaceHydratedRef.current) {
       return;
     }
     workspaceHydratedRef.current = true;
     void refreshWorkspaceThreads()
       .then(async (threads) => {
         const latest = threads.find((thread) => thread.archivedAt === null);
-        if (latest) await loadWorkspaceThread(latest.id);
+        if (latest && messages.length === 0)
+          await loadWorkspaceThread(latest.id);
       })
       .catch(() => {
         // Persistence is additive. Chat remains available if an older preview
@@ -931,8 +938,10 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   };
 
   useEffect(() => {
-    if (historyOpen) historyCloseRef.current?.focus({ preventScroll: true });
-  }, [historyOpen]);
+    if (!historyOpen) return;
+    historyCloseRef.current?.focus({ preventScroll: true });
+    void refreshWorkspaceThreads().catch(() => undefined);
+  }, [historyOpen, refreshWorkspaceThreads]);
 
   if (!visible) return null;
 
@@ -998,7 +1007,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             aria-expanded={historyOpen}
             className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40"
           >
-            <PanelRight aria-hidden="true" className="h-[18px] w-[18px]" />
+            <History aria-hidden="true" className="h-[18px] w-[18px]" />
           </button>
         </div>
       </div>
@@ -1067,8 +1076,15 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   {historyError}
                 </p>
               ) : null}
-              {activeThreads.length === 0 ? (
-                <div className="mx-2 mt-6 border-t border-pro-border/60 pt-7">
+              {historyLoading && activeThreads.length === 0 ? (
+                <p
+                  role="status"
+                  className="px-2 py-2 text-[13px] text-pro-text-muted"
+                >
+                  Loading conversations…
+                </p>
+              ) : activeThreads.length === 0 && !historyError ? (
+                <div className="mx-2 pt-7">
                   <h3 className="font-serif text-[19px] font-medium text-pro-text-main">
                     No conversations yet
                   </h3>

@@ -17,6 +17,13 @@ export const ChatGptConnectionSettings = () => {
   const [busy, setBusy] = useState(false);
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ready = Boolean(
+    status?.enabled && status.running && status.pluginReady,
+  );
+  const pluginLabel =
+    status?.pluginName === 'pluto-notes-development'
+      ? 'Pluto (Development)'
+      : 'Pluto';
 
   useEffect(() => {
     let mounted = true;
@@ -92,6 +99,120 @@ export const ChatGptConnectionSettings = () => {
             computer.
           </p>
         </div>
+        <div className="border-y border-pro-border/60 py-4">
+          <h4 className="mb-4 text-[13px] font-semibold text-pro-text-main">
+            {ready
+              ? 'Your next steps in ChatGPT'
+              : 'Here’s what happens after you connect'}
+          </h4>
+          <ol className="space-y-4 text-xs leading-relaxed text-pro-text-muted">
+            <li className="flex gap-3">
+              <span
+                aria-hidden="true"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-pro-bg font-semibold text-pro-text-main"
+              >
+                1
+              </span>
+              <div>
+                <p className="font-medium text-pro-text-main">
+                  Restart ChatGPT once
+                </p>
+                <p>
+                  Pluto installs the connection and opens ChatGPT. To load it,
+                  fully quit ChatGPT (⌘Q), then reopen it. Opening another
+                  window isn’t enough.
+                </p>
+              </div>
+            </li>
+            <li className="flex gap-3">
+              <span
+                aria-hidden="true"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-pro-bg font-semibold text-pro-text-main"
+              >
+                2
+              </span>
+              <div>
+                <p className="font-medium text-pro-text-main">
+                  Start a new Work chat
+                </p>
+                <p>
+                  In ChatGPT, choose{' '}
+                  <strong className="font-semibold text-pro-text-main">
+                    Work
+                  </strong>{' '}
+                  and start a new chat on this Mac. You can also use “Start a
+                  ChatGPT chat” here after connecting.
+                </p>
+              </div>
+            </li>
+            <li className="flex gap-3">
+              <span
+                aria-hidden="true"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-pro-accent/10 font-semibold text-pro-accent"
+              >
+                3
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-pro-text-main">
+                  Type @ and select {pluginLabel}
+                </p>
+                <p>
+                  Choose Pluto from the menu that appears, then ask about your
+                  meetings.
+                </p>
+                <figure className="mt-3">
+                  <div className="rounded-xl border border-pro-accent/40 bg-pro-bg p-3 text-pro-text-main">
+                    <span className="inline-flex rounded-md bg-pro-accent/10 px-2 py-1 font-semibold text-pro-accent">
+                      @{pluginLabel}
+                    </span>
+                    <p className="mt-2">
+                      What did we decide in my latest meeting?
+                    </p>
+                  </div>
+                  <figcaption className="mt-1.5 text-[11px] text-pro-text-muted">
+                    Example message · select Pluto before sending
+                  </figcaption>
+                </figure>
+              </div>
+            </li>
+          </ol>
+        </div>
+        {ready ? (
+          <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-pro-text-main">
+              <strong className="font-semibold">
+                Just connected or updated?
+              </strong>{' '}
+              Restart ChatGPT first, then open your chat below. Keep Pluto
+              running with access enabled.
+            </p>
+            <button
+              type="button"
+              className={`${actionClass} border-pro-accent/50 text-pro-accent`}
+              onClick={() => {
+                setError(null);
+                void openChatGpt().catch(() => {
+                  setError(
+                    'ChatGPT could not be opened. Install the ChatGPT desktop app on this computer, then try again.',
+                  );
+                });
+              }}
+            >
+              Start a ChatGPT chat
+            </button>
+            <details className="text-xs leading-relaxed text-pro-text-muted">
+              <summary className="cursor-pointer rounded font-medium text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent">
+                Can’t find Pluto in ChatGPT?
+              </summary>
+              <p className="mt-2">
+                Your plugin appears under Plugins → Personal on this Mac. If
+                ChatGPT restores an older screen, start a new Work chat and
+                mention Pluto using @. You need a ChatGPT desktop app with local
+                plugin support.
+              </p>
+            </details>
+          </div>
+        ) : null}
         <p role="status" className="text-xs font-medium text-pro-text-main">
           {loading
             ? 'Checking local service…'
@@ -129,7 +250,7 @@ export const ChatGptConnectionSettings = () => {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            className={actionClass}
+            className={`${actionClass} ${!status?.enabled ? 'border-pro-accent/50 text-pro-accent' : ''}`}
             disabled={
               loading || !status || busy || (!status.enabled && !consent)
             }
@@ -158,43 +279,6 @@ export const ChatGptConnectionSettings = () => {
             Connection help
           </button>
         </div>
-        {status?.enabled && status.running && status.pluginReady ? (
-          <div className="space-y-3">
-            <ol className="list-decimal space-y-1 pl-4 text-xs leading-relaxed text-pro-text-muted">
-              <li>
-                After connecting or updating, fully quit ChatGPT (⌘Q) once to
-                load the plugin.
-              </li>
-              <li>Click Start a ChatGPT chat below to open a new Work chat.</li>
-              <li>
-                Type @ and select{' '}
-                {status.pluginName === 'pluto-notes-development'
-                  ? 'Pluto (Development)'
-                  : 'Pluto'}
-                , then ask “What did we decide in my latest meeting?”
-              </li>
-            </ol>
-            <p className="text-xs leading-relaxed text-pro-text-muted">
-              Keep Pluto running with access enabled. Your plugin appears under
-              Plugins → Personal on this Mac. If ChatGPT restores an older
-              screen, start a new Work chat and mention Pluto using @.
-            </p>
-            <button
-              type="button"
-              className={actionClass}
-              onClick={() => {
-                setError(null);
-                void openChatGpt().catch(() => {
-                  setError(
-                    'ChatGPT could not be opened. Install the ChatGPT desktop app on this computer, then try again.',
-                  );
-                });
-              }}
-            >
-              Start a ChatGPT chat
-            </button>
-          </div>
-        ) : null}
         {error || status?.error ? (
           <p role="alert" className="text-xs leading-relaxed text-red-500">
             {error ??

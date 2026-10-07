@@ -3015,7 +3015,6 @@ export const searchMeetingSummaries = (
 };
 
 export const getMeeting = (id: string | number) => {
-  recoverExpiredTranscriptValidationRetries();
   return db.prepare('SELECT * FROM meetings WHERE id = ?').get(String(id));
 };
 
@@ -3372,29 +3371,36 @@ export const getMeetingNotesIdentityProjection = (
         ? resolvePersonIdentityId(binding.personId)
         : null,
     }));
-  const people = [
-    ...new Set(
-      getEntitiesByType('person').map(({ id }) => resolvePersonIdentityId(id)),
-    ),
-  ].flatMap((id) => {
-    const person = getEntity(id);
-    return person?.type === 'person' ? [{ id, name: person.name }] : [];
-  });
   const storedSelfPersonId = identityStore.getSelfPersonId();
   const storedCapture = identityStore.getCapture(String(meetingId));
+  const currentSelfPersonId = storedSelfPersonId
+    ? resolvePersonIdentityId(storedSelfPersonId)
+    : null;
+  const captureSelfPersonId = storedCapture.selfPersonId
+    ? resolvePersonIdentityId(storedCapture.selfPersonId)
+    : null;
+  // Display names only need people referenced by this meeting's saved identity.
+  const people = [
+    ...new Set([
+      ...bindings.map((binding) => binding.personId),
+      currentSelfPersonId,
+      captureSelfPersonId,
+    ]),
+  ].flatMap((id) => {
+    const person = id ? getEntity(id) : null;
+    return person?.type === 'person'
+      ? [{ id: person.id, name: person.name }]
+      : [];
+  });
   return buildMeetingNotesIdentityProjection({
     transcriptJson: meeting.transcript_json,
     bindings,
     people,
     capture: {
       ...storedCapture,
-      selfPersonId: storedCapture.selfPersonId
-        ? resolvePersonIdentityId(storedCapture.selfPersonId)
-        : null,
+      selfPersonId: captureSelfPersonId,
     },
-    currentSelfPersonId: storedSelfPersonId
-      ? resolvePersonIdentityId(storedSelfPersonId)
-      : null,
+    currentSelfPersonId,
   });
 };
 

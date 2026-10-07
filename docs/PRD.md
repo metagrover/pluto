@@ -276,16 +276,15 @@ Slack is included in the provider URL allowlist.
 
 | Operation | Provider | Rationale |
 |-----------|----------|-----------|
-| Entity extraction | Cloud (Gemini) | Speed + structured output quality |
-| Document synthesis | Cloud (Gemini) | Long-context handling |
+| Entity extraction | Ollama or OpenRouter | Local by default; cloud by explicit choice |
+| Document synthesis | Ollama or OpenRouter | Local by default; cloud by explicit choice |
 | Quick queries | Local (Ollama) | Privacy for casual "ask Pluto" |
 
 > **Privacy guarantee:** Audio never leaves device. Only text sent to cloud (opt-in).
 
 **Supported Providers:**
-- 🏠 **Local:** Ollama (Llama 3.2, Mistral, Phi-3)
-- ☁️ **Cloud:** Gemini, OpenAI, Claude (user's API keys)
-- 🔌 **Custom:** OpenAI-compatible endpoints
+- **Local:** Ollama
+- **Cloud:** OpenRouter (user’s API key)
 
 ---
 

@@ -4394,14 +4394,6 @@ app.whenReady().then(async () => {
     const meeting = value as db.PersistedMeeting | undefined;
     if (!meeting) return meeting;
     const run = db.getMeetingAnalysisRun(meeting.id);
-    let identityState: unknown = null;
-    try {
-      identityState = handleIdentityRequest('GET_MEETING_IDENTITY', {
-        meetingId: String(meeting.id),
-      });
-    } catch {
-      // ignore
-    }
     const speakerDisplayNames = db.getMeetingNotesIdentityProjection(
       meeting.id,
     ).speakerDisplayNames;
@@ -4410,7 +4402,6 @@ app.whenReady().then(async () => {
       ...meeting,
       speaker_display_names: speakerDisplayNames,
       meeting_entities: meetingEntities,
-      identity_state: identityState,
       analysis_run_json: JSON.stringify(
         run
           ? {
@@ -9575,7 +9566,7 @@ app.whenReady().then(async () => {
     app.dock.setIcon(dockIcon);
   }
 
-  const resizedIcon = icon.resize({ width: 16, height: 16 });
+  const resizedIcon = icon.resize({ width: 18, height: 18 });
 
   tray = new Tray(resizedIcon);
   tray.setToolTip('Pluto');

@@ -1651,3 +1651,12 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Status:** Accepted by the owner's release instruction.
 - **Decision:** Keep the 24K, paragraph/speaker wire, correction-only editor, larger chunk and writer-context continuation experiments available only outside production builds. Vite folds the shared research gate to false and removes their branches from the shipped bundle. Private harnesses, outputs and research documents are outside the packaging allowlist.
 - **Extends:** “Budget writer-only notes against the provider prompt.” The production context remains 16,384 tokens, the source chunk cap remains 8,000 characters and the Ollama batch remains 128. The accepted deterministic-only review policy is unchanged. No experiment is promoted by this release.
+
+
+## 2026-10-07 - Limit provider setup to Ollama and OpenRouter pending acceptance testing
+
+- **Status:** Accepted by direct owner request.
+- **Supersedes:** The Settings availability of direct OpenAI, Gemini, and Claude transports in “2026-09-16 - Keep Pluto memory local while allowing explicit cloud inference.” Its consent, credential, and privacy requirements remain in force.
+- **Decision:** Offer only Ollama and OpenRouter in provider setup and current user-facing setup documentation. Hide direct OpenAI, Gemini, and Claude selection, model fields, and credential controls until their complete key-entry and live inference flows receive acceptance testing.
+- **Compatibility:** Retain provider implementations and saved settings/credentials. This is a setup-surface restriction, not a migration or automatic provider switch; previously configured providers are not silently rerouted. Settings directs those users to choose an available provider explicitly.
+- **Revisit:** Restore each direct provider only after testing credential entry, secure storage, validation and error recovery, and representative inference workflows end to end. Automated or mocked tests alone do not establish live-provider acceptance.

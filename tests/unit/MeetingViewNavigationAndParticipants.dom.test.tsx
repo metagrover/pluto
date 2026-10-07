@@ -5,9 +5,23 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MeetingView } from '../../src/components/features/MeetingView';
+import { buildMeetingTranscriptTurns } from '../../src/components/features/meetingTranscriptPresentation';
+import type * as TranscriptPresentation from '../../src/components/features/meetingTranscriptPresentation';
+import { getMeetingEntities } from '../../src/api/knowledgeGraph';
 import type { Meeting } from '../../src/types';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+vi.mock(
+  '../../src/components/features/meetingTranscriptPresentation',
+  async (importOriginal) => {
+    const original = await importOriginal<typeof TranscriptPresentation>();
+    return {
+      ...original,
+      buildMeetingTranscriptTurns: vi.fn(original.buildMeetingTranscriptTurns),
+    };
+  },
+);
 
 vi.mock('../../src/api/intelligence', () => ({
   getMeetingAlerts: vi.fn(async () => []),
@@ -112,6 +126,92 @@ describe('MeetingView Navigation and Participants', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+  });
+
+  it('shows saved notes and names without fetching identity or entities again, and loads identity when participants open', async () => {
+    const meeting = {
+      ...mockMeeting,
+      speaker_display_names: { 'Speaker 1': 'Avery Davis' },
+      meeting_entities: [],
+    };
+    vi.mocked(getMeetingEntities).mockClear();
+    vi.mocked(buildMeetingTranscriptTurns).mockClear();
+    const render = async (
+      selectedMeeting = meeting,
+      transcriptVisible = false,
+    ) => {
+      await act(async () =>
+        root.render(
+          <MeetingView
+            selectedMeeting={selectedMeeting}
+            editingTitle={false}
+            setEditingTitle={vi.fn()}
+            titleValue={selectedMeeting.title}
+            setTitleValue={vi.fn()}
+            fetchMeetings={vi.fn()}
+            handleCopySummary={vi.fn()}
+            copySuccess={false}
+            handleDeleteMeeting={vi.fn()}
+            highlightEntities={(text) => text}
+            transcriptVisible={transcriptVisible}
+            setTranscriptVisible={vi.fn()}
+          />,
+        ),
+      );
+    };
+    await render();
+    expect(container.textContent).toContain('Architecture updates discussed.');
+    expect(
+      container.querySelector('[data-meeting-skeleton="notes-loading"]'),
+    ).toBeNull();
+    expect(window.ipcRenderer.invoke).not.toHaveBeenCalledWith(
+      'GET_MEETING_IDENTITY',
+      expect.anything(),
+    );
+    expect(getMeetingEntities).not.toHaveBeenCalled();
+    expect(buildMeetingTranscriptTurns).not.toHaveBeenCalled();
+
+    // A detail refresh must replace the saved name without requiring a full identity fetch.
+    await render({
+      ...meeting,
+      speaker_display_names: { 'Speaker 1': 'Avery Updated' },
+    });
+    const invoke = vi.mocked(window.ipcRenderer.invoke);
+    const originalInvoke = invoke.getMockImplementation()!;
+    let resolveIdentity!: (value: unknown) => void;
+    invoke.mockImplementation((channel, ...args) =>
+      channel === 'GET_MEETING_IDENTITY'
+        ? new Promise((resolve) => {
+            resolveIdentity = resolve;
+          })
+        : originalInvoke(channel, ...args),
+    );
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>(
+          '[data-meeting-participants-trigger]',
+        )!
+        .click(),
+    );
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith(
+      'GET_MEETING_IDENTITY',
+      { meetingId: meeting.id },
+    );
+    expect(container.textContent).toContain('Avery Updated');
+    await act(async () =>
+      resolveIdentity(
+        await originalInvoke('GET_MEETING_IDENTITY', { meetingId: meeting.id }),
+      ),
+    );
+    expect(container.textContent).toContain('Avery Davis');
+    expect(getMeetingEntities).not.toHaveBeenCalled();
+    expect(buildMeetingTranscriptTurns).not.toHaveBeenCalled();
+    invoke.mockImplementation(originalInvoke);
+    await render(meeting, true);
+    expect(container.textContent).toContain(
+      'Thanks, I have some updates on architecture.',
+    );
+    expect(buildMeetingTranscriptTurns).toHaveBeenCalled();
   });
 
   it('renders topline back button when onBack is provided and calls onBack on click', async () => {

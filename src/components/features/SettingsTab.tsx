@@ -12,7 +12,6 @@ import {
   Sparkles,
   Sun,
   Trash2,
-  Zap,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CalendarIntegrationSnapshot } from '../../../electron/calendar/types';
@@ -79,10 +78,7 @@ interface SettingsTabProps {
 
 const providerOptions = [
   { id: 'ollama', name: 'Ollama', detail: 'Local', icon: Cpu },
-  { id: 'openai', name: 'OpenAI', detail: 'GPT', icon: Cloud },
   { id: 'openrouter', name: 'OpenRouter', detail: 'Multi-model', icon: Cloud },
-  { id: 'gemini', name: 'Gemini', detail: 'Google', icon: Zap },
-  { id: 'claude', name: 'Claude', detail: 'Anthropic', icon: Cloud },
 ] as const;
 
 interface ThemeOptionPreview {
@@ -388,12 +384,7 @@ export const SettingsTab = ({
   }, []);
 
   useEffect(() => {
-    for (const provider of [
-      'openai',
-      'openrouter',
-      'gemini',
-      'claude',
-    ] as const) {
+    for (const provider of ['openrouter'] as const) {
       void window.ipcRenderer
         .invoke('PROVIDER_CREDENTIAL_STATUS', provider)
         .then((status: ProviderCredentialStatus) =>
@@ -409,7 +400,7 @@ export const SettingsTab = ({
     setCredentialDraft('');
     setCredentialEditing(false);
     setCredentialError(null);
-    if (llmProvider === 'ollama') return;
+    if (llmProvider !== 'openrouter') return;
     void window.ipcRenderer
       .invoke('GET_SETTING', `${llmProvider}_model`)
       .then((value) => setCloudModel(typeof value === 'string' ? value : ''));
@@ -1206,25 +1197,17 @@ export const SettingsTab = ({
                   />
                 </SettingsRow>
               </>
-            ) : (
+            ) : llmProvider === 'openrouter' ? (
               <>
                 <SettingsRow
                   htmlFor="cloud-model"
                   label="Model"
-                  helper={
-                    llmProvider === 'openrouter'
-                      ? 'Use an OpenRouter author/model ID, such as openai/gpt-4o-mini.'
-                      : 'Choose a tested model or enter an advanced provider model ID.'
-                  }
+                  helper="Use an OpenRouter author/model ID, such as openai/gpt-4o-mini."
                 >
                   <Input
                     id="cloud-model"
                     type="text"
-                    placeholder={
-                      llmProvider === 'openrouter'
-                        ? 'openai/gpt-4o-mini'
-                        : 'Provider default'
-                    }
+                    placeholder="openai/gpt-4o-mini"
                     value={cloudModel}
                     onChange={(event) => {
                       const value = event.target.value;
@@ -1351,6 +1334,12 @@ export const SettingsTab = ({
                   </div>
                 </SettingsRow>
               </>
+            ) : (
+              <p className="px-4 py-3 text-xs leading-relaxed text-pro-text-muted">
+                Setup for your previously selected provider is temporarily
+                hidden. Choose Ollama or OpenRouter above to configure a model.
+                Your saved provider settings and credentials have been retained.
+              </p>
             )}
           </Section>
         </div>

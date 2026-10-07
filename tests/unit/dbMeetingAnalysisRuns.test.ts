@@ -13,6 +13,7 @@ import {
   beginMeetingAnalysisRun,
   claimMeetingDownstreamProcessing,
   deleteMeeting,
+  db as database,
   getMeeting,
   getMeetingAnalysisPublicationRevisions,
   getMeetingAnalysisRun,
@@ -208,6 +209,28 @@ describe('meeting analysis run publication', () => {
       speakerDisplayNames: { Them: 'Alex' },
       trustedUserTerms: ['Alex'],
     });
+    const prepare = vi.spyOn(database, 'prepare');
+    let readsBefore: number;
+    try {
+      getMeetingNotesIdentityProjection(meetingId);
+      readsBefore = prepare.mock.calls.length;
+      for (let index = 0; index < 30; index++) {
+        upsertEntity({
+          id: `unrelated-person-${index}`,
+          type: 'person',
+          name: `Unrelated person ${index}`,
+          dedupe_by_name: false,
+        });
+      }
+      prepare.mockClear();
+      expect(getMeetingNotesIdentityProjection(meetingId)).toEqual({
+        speakerDisplayNames: { Them: 'Alex' },
+        trustedUserTerms: ['Alex'],
+      });
+      expect(prepare.mock.calls.length).toBe(readsBefore);
+    } finally {
+      prepare.mockRestore();
+    }
     expect(
       getMeetingAnalysisPublicationRevisions(getMeeting(meetingId))
         ?.sourceRevision,

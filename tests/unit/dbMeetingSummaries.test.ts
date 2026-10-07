@@ -11,6 +11,7 @@ vi.mock('electron', () => ({
 
 import {
   db as database,
+  getMeeting,
   getMeetingDashboardPreviews,
   getMeetingProcessingStatuses,
   getMeetingSummaries,
@@ -36,6 +37,48 @@ const detailOnlyFields = [
 ];
 
 describe('meeting summary read model', () => {
+  it('reads saved detail without running recovery or changing an expired retry', () => {
+    const id = 'read-only-detail';
+    saveMeeting({
+      id,
+      title: 'Saved notes',
+      enhanced_notes: 'Keep these notes.',
+    });
+    const integrity = JSON.stringify({
+      retry: {
+        runId: 'expired',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        deadlineAt: '2026-01-01T00:01:00.000Z',
+        stage: 'saving',
+      },
+    });
+    database
+      .prepare(
+        'UPDATE meetings SET transcript_status = ?, transcript_integrity_json = ? WHERE id = ?',
+      )
+      .run('validating', integrity, id);
+    const prepare = vi.spyOn(database, 'prepare');
+    try {
+      expect(getMeeting(id)).toMatchObject({
+        enhanced_notes: 'Keep these notes.',
+        transcript_status: 'validating',
+        transcript_integrity_json: integrity,
+      });
+      expect(prepare).toHaveBeenCalledTimes(1);
+      prepare.mockRestore();
+      // List refresh still performs recovery; opening notes is a pure read.
+      expect(getMeetingSummaries(id)[0].transcript_status).toBe(
+        'needs_attention',
+      );
+      expect(getMeeting(id)).toMatchObject({
+        enhanced_notes: 'Keep these notes.',
+      });
+    } finally {
+      prepare.mockRestore();
+      database.prepare('DELETE FROM meetings WHERE id = ?').run(id);
+    }
+  });
+
   it('only loads retry candidates and preserves recovery for active, expired and malformed leases', () => {
     const now = Date.now();
     const retry = {

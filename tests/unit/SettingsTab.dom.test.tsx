@@ -270,6 +270,43 @@ describe('SettingsTab', () => {
     act(() => root.unmount());
   });
 
+  it.each(['ollama', 'openai', 'gemini', 'claude'] as const)(
+    'offers only supported setup controls with %s previously selected',
+    async (provider) => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      await act(async () =>
+        root.render(
+          <SettingsTab
+            {...defaultProps}
+            llmProvider={provider}
+            initialTab="intelligence"
+          />,
+        ),
+      );
+      const labels = Array.from(container.querySelectorAll('button')).map(
+        (button) => button.textContent?.trim(),
+      );
+      expect(labels).toContain('Ollama');
+      expect(labels).toContain('OpenRouter');
+      for (const hidden of ['OpenAI', 'Gemini', 'Claude'])
+        expect(labels).not.toContain(hidden);
+      expect(container.querySelector('#api-key')).toBeNull();
+      expect(container.querySelector('#cloud-model')).toBeNull();
+      for (const hidden of ['openai', 'gemini', 'claude']) {
+        expect(window.ipcRenderer.invoke).not.toHaveBeenCalledWith(
+          'PROVIDER_CREDENTIAL_STATUS',
+          hidden,
+        );
+      }
+      expect(defaultProps.setLlmProvider).not.toHaveBeenCalled();
+      if (provider !== 'ollama')
+        expect(container.textContent).toContain('temporarily hidden');
+      act(() => root.unmount());
+    },
+  );
+
   it('shows configured credentials as a non-copyable masked hint', async () => {
     const invoke = vi.fn(async (channel: string, provider?: string) => {
       if (channel === 'GET_SETTING') return '';

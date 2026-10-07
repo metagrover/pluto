@@ -1214,6 +1214,113 @@ describe('Ask Pluto request lifecycle', () => {
     if (pendingResolve) pendingResolve(null);
   });
 
+  it('loads history with an existing conversation without replacing its messages', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'intelligence:workspace-chat:list-threads')
+        return [
+          {
+            id: 'saved-thread',
+            title: 'Saved conversation',
+            archivedAt: null,
+            createdAt: '2026-09-28T10:00:00.000Z',
+            updatedAt: '2026-09-28T10:00:00.000Z',
+            memory: { corrections: [], unresolvedQuestions: [] },
+          },
+        ];
+      return [];
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+    await act(async () =>
+      root.render(
+        <AskPluto
+          visible
+          onClose={vi.fn()}
+          onOpenMeeting={vi.fn()}
+          onOpenArtifact={vi.fn()}
+          messages={[
+            { id: 'current', role: 'user', content: 'Current conversation' },
+          ]}
+        />,
+      ),
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      'intelligence:workspace-chat:list-threads',
+      { includeArchived: false },
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'intelligence:workspace-chat:list-messages',
+      expect.anything(),
+    );
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>('[aria-label="Conversation history"]')
+        ?.click(),
+    );
+    expect(document.querySelector('#ask-pluto-history')?.textContent).toContain(
+      'Saved conversation',
+    );
+    expect(container.textContent).toContain('Current conversation');
+    expect(
+      document.querySelector('#ask-pluto-history')?.textContent,
+    ).not.toContain('No conversations yet');
+  });
+
+  it('shows a failed history load and retries on opening instead of claiming history is empty', async () => {
+    let resolveThreads: ((threads: unknown[]) => void) | undefined;
+    let fail = true;
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'intelligence:workspace-chat:list-threads') {
+        if (fail) throw new Error('Temporary failure');
+        return new Promise<unknown[]>((resolve) => {
+          resolveThreads = resolve;
+        });
+      }
+      return [];
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+    await act(async () =>
+      root.render(
+        <AskPluto
+          visible
+          onClose={vi.fn()}
+          onOpenMeeting={vi.fn()}
+          onOpenArtifact={vi.fn()}
+        />,
+      ),
+    );
+    const drawer = document.querySelector('#ask-pluto-history');
+    expect(drawer?.textContent).toContain('Could not load conversations');
+    expect(drawer?.textContent).not.toContain('No conversations yet');
+    fail = false;
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>('[aria-label="Conversation history"]')
+        ?.click(),
+    );
+    expect(drawer?.textContent).toContain('Loading conversations');
+    expect(drawer?.textContent).not.toContain('No conversations yet');
+    await act(async () =>
+      resolveThreads?.([
+        {
+          id: 'recovered',
+          title: 'Recovered conversation',
+          archivedAt: null,
+          createdAt: '2026-09-28T10:00:00.000Z',
+          updatedAt: '2026-09-28T10:00:00.000Z',
+          memory: { corrections: [], unresolvedQuestions: [] },
+        },
+      ]),
+    );
+    expect(drawer?.textContent).toContain('Recovered conversation');
+    expect(drawer?.textContent).not.toContain('Could not load conversations');
+  });
+
   it('restores the latest durable workspace conversation', async () => {
     const invoke = vi.fn((channel: string) => {
       if (channel === 'intelligence:workspace-chat:list-threads') {

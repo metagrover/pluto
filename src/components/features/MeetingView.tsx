@@ -1032,46 +1032,62 @@ const SelectedMeetingView = ({
   const editConflicts = parseAnalysisEditConflictsJson(
     selectedMeeting.analysis_edit_conflicts_json,
   );
-  let transcriptSegments: TranscriptSegment[] = [];
-  try {
-    transcriptSegments = parseTranscriptSegments(
-      selectedMeeting.transcript_json,
-    ) as TranscriptSegment[];
-  } catch (error) {
-    console.error('Failed to parse transcript', error);
-  }
-  const readableTranscriptSegments = buildTranscriptSegmentsForPresentation(
-    selectedMeeting.transcript_json,
-    transcriptSegments,
+  const transcriptSegments = useMemo(() => {
+    try {
+      return parseTranscriptSegments(
+        selectedMeeting.transcript_json,
+      ) as TranscriptSegment[];
+    } catch (error) {
+      console.error('Failed to parse transcript', error);
+      return [];
+    }
+  }, [selectedMeeting.transcript_json]);
+  const readableTranscriptSegments = useMemo(
+    () =>
+      buildTranscriptSegmentsForPresentation(
+        selectedMeeting.transcript_json,
+        transcriptSegments,
+      ),
+    [selectedMeeting.transcript_json, transcriptSegments],
   );
   const displayNames =
     speakerDisplayNamesByMeeting[String(selectedMeeting.id)] ??
     selectedMeeting.speaker_display_names ??
     meetingIdentityState?.speakerDisplayNames ??
     EMPTY_SPEAKER_DISPLAY_NAMES;
-  const rawTranscriptTurns = buildMeetingTranscriptTurns(
-    readableTranscriptSegments,
-  );
-  const speakerSummaries = rawTranscriptTurns.reduce<
-    Record<string, { turnCount: number; excerpt: string }>
-  >((summaries, turn) => {
-    const speaker = String(turn.speaker ?? '');
-    if (!speaker) return summaries;
-    const text = turn.segments
-      .map((segment) => segment.text.trim())
-      .filter(Boolean)
-      .join(' ');
-    const current = summaries[speaker];
-    summaries[speaker] = {
-      turnCount: (current?.turnCount ?? 0) + 1,
-      excerpt:
-        current?.excerpt ??
-        (text.length > 180 ? `${text.slice(0, 179).trimEnd()}…` : text),
-    };
+  const speakerSummaries = useMemo(() => {
+    const summaries: Record<string, { turnCount: number; excerpt: string }> =
+      {};
+    if (!isSpeakerModalOpen) return summaries;
+    for (const turn of buildMeetingTranscriptTurns(
+      readableTranscriptSegments,
+    )) {
+      const speaker = String(turn.speaker ?? '');
+      if (!speaker) continue;
+      const text = turn.segments
+        .map((segment) => segment.text.trim())
+        .filter(Boolean)
+        .join(' ');
+      const current = summaries[speaker];
+      summaries[speaker] = {
+        turnCount: (current?.turnCount ?? 0) + 1,
+        excerpt:
+          current?.excerpt ??
+          (text.length > 180 ? `${text.slice(0, 179).trimEnd()}…` : text),
+      };
+    }
     return summaries;
-  }, {});
-  const reviewableSpeakers = selectReviewableAnonymousSpeakers(
-    Object.keys(speakerSummaries),
+  }, [isSpeakerModalOpen, readableTranscriptSegments]);
+  const reviewableSpeakers = useMemo(
+    () =>
+      selectReviewableAnonymousSpeakers([
+        ...new Set(
+          readableTranscriptSegments.map((segment) =>
+            String(segment.speaker ?? ''),
+          ),
+        ),
+      ]),
+    [readableTranscriptSegments],
   );
   const reviewableSpeakerKey = reviewableSpeakers.join('\u0000');
   const unidentifiedSpeakerCount = reviewableSpeakers.filter(
@@ -1093,8 +1109,12 @@ const SelectedMeetingView = ({
       applyMeetingSpeakerDisplayNames(readableTranscriptSegments, displayNames),
     [readableTranscriptSegments, displayNames],
   );
-  const transcriptTurns = buildMeetingTranscriptTurns(
-    displayedTranscriptSegments,
+  const transcriptTurns = useMemo(
+    () =>
+      transcriptVisible
+        ? buildMeetingTranscriptTurns(displayedTranscriptSegments)
+        : [],
+    [transcriptVisible, displayedTranscriptSegments],
   );
   useEffect(() => {
     if (!citationTarget) return;
@@ -1143,6 +1163,12 @@ const SelectedMeetingView = ({
   );
 
   useEffect(() => {
+    if (selectedMeeting.speaker_display_names) {
+      updateSpeakerDisplayNames(selectedMeeting.speaker_display_names);
+    }
+  }, [selectedMeeting.speaker_display_names, updateSpeakerDisplayNames]);
+
+  useEffect(() => {
     let cancelled = false;
     const meetingId = String(selectedMeeting.id);
     if (!meetingId || !window?.ipcRenderer?.invoke) {
@@ -1150,11 +1176,22 @@ const SelectedMeetingView = ({
     }
 
     void Promise.all([
-      getMeetingIdentity(meetingId).catch((error) => {
+      // Names are already included in the detail read. Full identity context is
+      // only needed for participant profiles and speaker review.
+      (selectedMeeting.speaker_display_names &&
+      !transcriptVisible &&
+      !isParticipantsOpen &&
+      !isSpeakerModalOpen
+        ? Promise.resolve(null)
+        : getMeetingIdentity(meetingId)
+      ).catch((error) => {
         console.error('Failed to load speaker identity for meeting:', error);
         return null;
       }),
-      getMeetingEntities(meetingId).catch((error) => {
+      (selectedMeeting.meeting_entities !== undefined
+        ? Promise.resolve(selectedMeeting.meeting_entities)
+        : getMeetingEntities(meetingId)
+      ).catch((error) => {
         console.error('Failed to load meeting entities:', error);
         return [];
       }),
@@ -1180,7 +1217,11 @@ const SelectedMeetingView = ({
   }, [
     selectedMeeting.id,
     selectedMeeting.transcript_validated_at,
-    reviewableSpeakers.length,
+    selectedMeeting.meeting_entities,
+    selectedMeeting.speaker_display_names,
+    transcriptVisible,
+    isParticipantsOpen,
+    isSpeakerModalOpen,
   ]);
 
   useEffect(() => {
@@ -1242,8 +1283,6 @@ const SelectedMeetingView = ({
     selectedMeeting.transcript_validated_at,
   ]);
   const hasTranscriptContent = transcriptTurns.length > 0;
-  const transcriptClipboardText =
-    formatMeetingTranscriptForClipboard(transcriptTurns);
   const resolvedParticipants = useMemo(
     () =>
       resolveMeetingParticipants({
@@ -2142,7 +2181,11 @@ const SelectedMeetingView = ({
               <button
                 type="button"
                 data-copy-transcript
-                onClick={() => handleCopySummary(transcriptClipboardText)}
+                onClick={() =>
+                  handleCopySummary(
+                    formatMeetingTranscriptForClipboard(transcriptTurns),
+                  )
+                }
                 disabled={!hasTranscriptContent}
                 aria-label={
                   copySuccess ? 'Transcript copied' : 'Copy transcript'

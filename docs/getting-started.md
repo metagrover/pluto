@@ -66,7 +66,7 @@ intelligence work without a cloud provider or API key.
 
 ### Cloud intelligence
 
-Choose **OpenAI**, **Anthropic Claude**, **Google Gemini**, or **OpenRouter** in
+Choose **OpenRouter** in
 **Settings → Intelligence** and add your own API key. Cloud requests need an
 internet connection and may incur provider charges. They send the text and
 context needed for the operation, which can include transcripts, notes, and

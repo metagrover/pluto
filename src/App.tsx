@@ -2232,16 +2232,12 @@ function App() {
         />
       ) : (
         <main
-          className={`flex-1 flex flex-col bg-pro-bg h-full relative z-10 overflow-hidden content-shift ${
-            selectedMeetingId
-              ? 'meeting-app-shell'
-              : 'rounded-l-[2.5rem] border-l border-pro-border/10'
+          className={`flex-1 flex flex-col h-full relative z-10 overflow-hidden content-shift ${
+            selectedMeetingId ? 'meeting-app-shell bg-pro-bg' : 'bg-pro-surface'
           }`}
         >
           <div
-            className={`relative flex h-12 w-full shrink-0 items-center ${!window.__PLUTO_BROWSER_PREVIEW__ && window.plutoRuntimePlatform?.platform === 'darwin' ? 'pl-[88px]' : 'pl-3'} ${sidebarVisible ? 'lg:pl-3' : ''} ${
-              activeTab === 'chat' ? 'bg-pro-bg' : 'bg-transparent'
-            }`}
+            className={`relative flex h-12 w-full shrink-0 items-center ${!window.__PLUTO_BROWSER_PREVIEW__ && window.plutoRuntimePlatform?.platform === 'darwin' ? 'pl-[88px]' : 'pl-3'} ${sidebarVisible ? 'lg:pl-3' : ''}`}
           >
             <WindowDragRegion className="absolute inset-0" />
             <button
@@ -2271,17 +2267,22 @@ function App() {
                   ? handleStartRecording
                   : handleReturnToRecording
               }
-              className="no-drag absolute right-5 top-2 z-[60] inline-flex h-8 items-center gap-2 rounded-md border border-pro-border bg-pro-surface px-3 text-[13px] font-medium text-pro-text-main hover:bg-pro-bg disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+              className="no-drag absolute right-5 top-2 z-[60] inline-flex h-8 items-center gap-2 rounded-lg border border-pro-accent/25 bg-pro-accent/[0.07] px-3 text-[13px] font-medium text-pro-text-main transition-colors duration-150 enabled:hover:border-pro-accent/40 enabled:hover:bg-pro-accent/[0.12] enabled:active:bg-pro-accent/[0.18] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent motion-reduce:transition-none"
             >
               {captureAction.command === 'start' && (
-                <Plus size={15} aria-hidden="true" />
+                <Plus
+                  size={16}
+                  strokeWidth={2.25}
+                  className="text-pro-accent"
+                  aria-hidden="true"
+                />
               )}
               {captureAction.label}
             </button>
           )}
           <div
             ref={contentScrollRef}
-            className={`min-h-0 flex-1 flex flex-col scroll-smooth relative overflow-y-scroll ${
+            className={`min-h-0 flex-1 flex flex-col scroll-smooth relative overflow-y-scroll ${selectedMeetingId ? '' : 'mx-2 rounded-t-xl border border-b-0 border-pro-border/60 bg-pro-bg [.pluto-site_&]:border-pro-border/40'} ${
               preMeetingBriefVisible
                 ? 'px-4 py-6 md:px-8'
                 : selectedMeetingId

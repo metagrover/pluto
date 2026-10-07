@@ -80,6 +80,43 @@ describe('ChatGptConnectionSettings', () => {
     expect(container.textContent).not.toMatch(/ChatGPT connected/i);
   });
 
+  it('shows the complete handoff before consent or connection', async () => {
+    const container = await render();
+    const guide = container.querySelector('ol')!;
+    expect(guide.querySelectorAll('li')).toHaveLength(3);
+    expect(guide.textContent).toContain('Restart ChatGPT once');
+    expect(guide.textContent).toContain('Start a new Work chat');
+    expect(guide.textContent).toContain('Type @ and select Pluto');
+    expect(guide.textContent).toContain(
+      'What did we decide in my latest meeting?',
+    );
+    expect(
+      guide.compareDocumentPosition(button(container, 'Connect to ChatGPT')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(api.setChatGptConnectionEnabled).not.toHaveBeenCalled();
+    expect(api.openChatGpt).not.toHaveBeenCalled();
+  });
+
+  it('uses the installed development plugin name in the guide', async () => {
+    api.getChatGptConnectionStatus.mockResolvedValue(
+      snapshot({
+        enabled: true,
+        running: true,
+        pluginReady: true,
+        pluginName: 'pluto-notes-development',
+      }),
+    );
+    const container = await render();
+    expect(container.textContent).toContain(
+      'Type @ and select Pluto (Development)',
+    );
+    expect(container.querySelector('figure')?.textContent).toContain(
+      '@Pluto (Development)',
+    );
+    expect(container.textContent).toContain('Your next steps in ChatGPT');
+  });
+
   it('locks the control while enabling and recovers after a failure', async () => {
     let reject!: (error: Error) => void;
     api.setChatGptConnectionEnabled.mockReturnValue(
