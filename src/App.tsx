@@ -34,11 +34,12 @@ import {
   createMeetingNotesTemplateSettingsSnapshot,
 } from '../electron/llm/meetingNotesTemplates';
 import {
+  confirmRecordingCalendarEvent,
   connectCalendar,
   getCalendarState,
   getMeetingCalendarContext,
+  listActiveCalendarCandidates,
   listCalendarDay,
-  matchActiveCalendarEvent,
   openCalendarSystemSettings,
   refreshCalendar,
   selectCalendar,
@@ -112,10 +113,7 @@ import {
 } from './services/selectedMeetingDetail';
 import type { AppTheme } from './types/theme';
 import { calendarAgendaWindow } from './utils/calendarAgenda';
-import {
-  getCalendarRosterNames,
-  isMatchedActiveCalendarResult,
-} from './utils/calendarRoster';
+import { getCalendarRosterNames } from './utils/calendarRoster';
 import { hasConferenceLink } from './utils/conferenceUrl';
 import { meetingTitleNeedsGeneration } from './utils/meetingTitle';
 
@@ -405,6 +403,22 @@ function App() {
   const [activeCalendarEvent, setActiveCalendarEvent] =
     useState<CalendarEvent | null>(null);
   const activeCalendarEventRef = useRef<CalendarEvent | null>(null);
+  const meetingTitleEditedRef = useRef(false);
+  const [currentRecordingId, setCurrentRecordingId] = useState<string | null>(
+    null,
+  );
+  const currentRecordingIdRef = useRef<string | null>(null);
+  const [calendarSuggestions, setCalendarSuggestions] = useState<
+    CalendarEvent[]
+  >([]);
+  const [selectedCalendarSuggestion, setSelectedCalendarSuggestion] =
+    useState('');
+  const [calendarSuggestionDismissed, setCalendarSuggestionDismissed] =
+    useState(false);
+  const [calendarSuggestionBusy, setCalendarSuggestionBusy] = useState(false);
+  const [calendarSuggestionError, setCalendarSuggestionError] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     if (!window.ipcRenderer?.on || !window.ipcRenderer?.send) return;
@@ -1247,6 +1261,7 @@ function App() {
         notes: currentNotes,
       };
       activeCalendarEventRef.current = event;
+      meetingTitleEditedRef.current = false;
       // The recorder is invoked through an effect-updated ref. Commit the
       // calendar title first so its start/stop callbacks capture this event.
       flushSync(() => {
@@ -1390,8 +1405,11 @@ function App() {
         setParticipantInput('');
       }
     } else if (!recording && wasRecording) {
+      currentRecordingIdRef.current = null;
       activeCalendarEventRef.current = null;
       setActiveCalendarEvent(null);
+      setCurrentRecordingId(null);
+      setCalendarSuggestions([]);
     }
   };
 
@@ -1412,29 +1430,19 @@ function App() {
     setZenVisible(true);
     setSelectedMeetingId(null);
     setFinalizingMeeting(null);
+    currentRecordingIdRef.current = null;
+    setCurrentRecordingId(null);
+    meetingTitleEditedRef.current = false;
+    setCalendarSuggestions([]);
+    setSelectedCalendarSuggestion('');
+    setCalendarSuggestionDismissed(false);
+    setCalendarSuggestionError(null);
 
     if (activeCalendarEventRef.current) {
       setMeetingTitle(activeCalendarEventRef.current.title || 'Meeting');
       setMeetingParticipants([]);
       setParticipantInput('');
       return;
-    }
-
-    if (calendarAutoNameEnabled) {
-      try {
-        const result = await matchActiveCalendarEvent();
-        if (isMatchedActiveCalendarResult(result)) {
-          const matchedEvent = result.event;
-          activeCalendarEventRef.current = matchedEvent;
-          setActiveCalendarEvent(matchedEvent);
-          setMeetingTitle(matchedEvent.title || 'Meeting');
-          setMeetingParticipants([]);
-          setParticipantInput('');
-          return;
-        }
-      } catch (err) {
-        console.warn('[Calendar] Auto-match failed:', err);
-      }
     }
 
     activeCalendarEventRef.current = null;
@@ -1477,18 +1485,74 @@ function App() {
     setZenVisible(true);
   };
   const showZenMode = activeRecording && zenVisible;
-  const resolvedActiveCalendarEvent =
-    activeCalendarEvent ||
-    (recordingStartedAtMs
-      ? (calendarEvents.find((event) => {
-          const start = new Date(event.start).getTime();
-          const end = new Date(event.end).getTime();
-          return (
-            start <= recordingStartedAtMs + 15 * 60_000 &&
-            end >= recordingStartedAtMs - 5 * 60_000
-          );
-        }) ?? null)
-      : null);
+  const resolvedActiveCalendarEvent = activeCalendarEvent;
+  useEffect(() => {
+    if (
+      !isRecording ||
+      !currentRecordingId ||
+      recordingStartedAtMs === null ||
+      activeCalendarEvent ||
+      !calendarAutoNameEnabled ||
+      calendarSuggestionDismissed
+    )
+      return;
+    let cancelled = false;
+    void listActiveCalendarCandidates(
+      new Date(recordingStartedAtMs).toISOString(),
+    )
+      .then((events) => {
+        if (cancelled) return;
+        setCalendarSuggestions(events);
+        setSelectedCalendarSuggestion(
+          events.length === 1 ? events[0].occurrenceKey : '',
+        );
+      })
+      .catch((error) => {
+        if (!cancelled)
+          console.warn('[Calendar] Suggestions unavailable:', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isRecording,
+    currentRecordingId,
+    recordingStartedAtMs,
+    activeCalendarEvent,
+    calendarAutoNameEnabled,
+    calendarSuggestionDismissed,
+  ]);
+
+  const handleAddCalendarSuggestion = async () => {
+    if (
+      !currentRecordingId ||
+      !selectedCalendarSuggestion ||
+      calendarSuggestionBusy
+    )
+      return;
+    const meetingId = currentRecordingId;
+    setCalendarSuggestionBusy(true);
+    setCalendarSuggestionError(null);
+    try {
+      const event = await confirmRecordingCalendarEvent(
+        meetingId,
+        selectedCalendarSuggestion,
+      );
+      if (currentRecordingIdRef.current !== meetingId) return;
+      activeCalendarEventRef.current = event;
+      setActiveCalendarEvent(event);
+      if (!meetingTitleEditedRef.current) {
+        setMeetingTitle(event.title?.trim() || 'Meeting');
+      }
+      setCalendarSuggestions([]);
+    } catch (error) {
+      setCalendarSuggestionError(
+        error instanceof Error ? error.message : 'Could not add this meeting.',
+      );
+    } finally {
+      setCalendarSuggestionBusy(false);
+    }
+  };
   const activeCalendarRosterNames = resolvedActiveCalendarEvent
     ? getCalendarRosterNames(resolvedActiveCalendarEvent)
     : [];
@@ -2135,7 +2199,9 @@ function App() {
               ? new Date(resolvedActiveCalendarEvent.end).getTime()
               : null
           }
-          onRecordingStarted={(startedAtMs) => {
+          onRecordingStarted={(startedAtMs, meetingId) => {
+            currentRecordingIdRef.current = meetingId;
+            setCurrentRecordingId(meetingId);
             setRecordingStartedAtMs(startedAtMs);
             setLiveTranscript([]);
             setLiveConversation(null);
@@ -2207,7 +2273,10 @@ function App() {
           }}
           onBackHome={handleBackHomeFromZen}
           meetingTitle={meetingTitle}
-          setMeetingTitle={setMeetingTitle}
+          setMeetingTitle={(value) => {
+            meetingTitleEditedRef.current = true;
+            setMeetingTitle(value);
+          }}
           meetingParticipants={meetingParticipants}
           setMeetingParticipants={setMeetingParticipants}
           participantInput={participantInput}
@@ -2221,6 +2290,25 @@ function App() {
           liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}
           calendarEvent={resolvedActiveCalendarEvent}
+          calendarSuggestion={
+            calendarSuggestions.length > 0 &&
+            calendarAutoNameEnabled &&
+            !calendarSuggestionDismissed &&
+            !resolvedActiveCalendarEvent
+              ? {
+                  events: calendarSuggestions,
+                  selectedOccurrenceKey: selectedCalendarSuggestion,
+                  busy: calendarSuggestionBusy,
+                  error: calendarSuggestionError,
+                  onSelect: setSelectedCalendarSuggestion,
+                  onAdd: () => void handleAddCalendarSuggestion(),
+                  onDismiss: () => {
+                    setCalendarSuggestionDismissed(true);
+                    setCalendarSuggestions([]);
+                  },
+                }
+              : null
+          }
           onOpenMeeting={(id) => {
             setZenVisible(false);
             handleOpenMeeting(id);

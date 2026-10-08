@@ -113,7 +113,7 @@ interface AudioManagerProps {
   onInterimTranscript?: (text: string) => void;
   onCaptureHealthChange?: (health: CaptureHealthState) => void;
   onLiveTranscriptIntegrityChange?: (state: LiveTranscriptIntegrity) => void;
-  onRecordingStarted?: (startedAtMs: number) => void;
+  onRecordingStarted?: (startedAtMs: number, meetingId: string) => void;
   userNotes?: string;
   userTitle?: string;
   participants?: string[];
@@ -382,6 +382,31 @@ export const AudioManager = ({
       hintCount: 0,
     },
   });
+  const vocabularyRequestGenerationRef = useRef(0);
+  const applyTranscriptionVocabulary = (vocabulary: unknown) => {
+    const vocab = vocabulary as TranscriptionVocabularySelection;
+    const initialPrompt =
+      typeof vocab?.initialPrompt === 'string' &&
+      vocab.initialPrompt.length <= 240
+        ? vocab.initialPrompt
+        : null;
+    const hintCount = Number.isInteger(vocab?.provenance?.hintCount)
+      ? Math.max(0, Math.min(12, vocab.provenance.hintCount))
+      : 0;
+    const terms = Array.isArray(vocab?.terms)
+      ? vocab.terms
+          .filter((term): term is string => typeof term === 'string')
+          .slice(0, 12)
+      : [];
+    transcriptionVocabularyRef.current = {
+      initialPrompt,
+      terms,
+      provenance: {
+        policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
+        hintCount: initialPrompt ? hintCount : 0,
+      },
+    };
+  };
   const liveTranscriptResponsivenessRef = useRef(
     createLiveTranscriptResponsivenessRuntime({
       now: () => performance.now(),
@@ -409,6 +434,24 @@ export const AudioManager = ({
   const stopInFlightRef = useRef(false);
   const startInFlightRef = useRef(false);
   const currentMeetingIdRef = useRef<string | null>(null);
+  const confirmedHintKey = transcriptionParticipantHints.join('\u0000');
+  const participantHintKey = participants.join('\u0000');
+  useEffect(() => {
+    if (!isRecording || !confirmedHintKey) return;
+    const generation = ++vocabularyRequestGenerationRef.current;
+    void window.ipcRenderer
+      .invoke('GET_TRANSCRIPTION_VOCABULARY', {
+        participants: buildTranscriptionParticipantHints(
+          participants,
+          transcriptionParticipantHints,
+        ),
+      })
+      .then((vocabulary: unknown) => {
+        if (generation === vocabularyRequestGenerationRef.current)
+          applyTranscriptionVocabulary(vocabulary);
+      })
+      .catch(() => console.warn('[Pluto] Calendar vocabulary unavailable'));
+  }, [isRecording, confirmedHintKey, participantHintKey]);
   const captureJournalStateRef = useRef<JournalManifestState | null>(null);
   const captureJournalRawChunksRef = useRef(
     new Map<string, JournalRawChunkState>(),
@@ -946,6 +989,7 @@ export const AudioManager = ({
         window.ipcRenderer.invoke('NATIVE_AUDIO_START');
       void nativeAudioStartPromise.catch(() => undefined);
 
+      const vocabularyGeneration = ++vocabularyRequestGenerationRef.current;
       void window.ipcRenderer
         .invoke('GET_TRANSCRIPTION_VOCABULARY', {
           participants: buildTranscriptionParticipantHints(
@@ -954,28 +998,9 @@ export const AudioManager = ({
           ),
         })
         .then((vocabulary: unknown) => {
-          const vocab = vocabulary as TranscriptionVocabularySelection;
-          const initialPrompt =
-            typeof vocab?.initialPrompt === 'string' &&
-            vocab.initialPrompt.length <= 240
-              ? vocab.initialPrompt
-              : null;
-          const hintCount = Number.isInteger(vocab?.provenance?.hintCount)
-            ? Math.max(0, Math.min(12, vocab.provenance.hintCount))
-            : 0;
-          const terms = Array.isArray(vocab?.terms)
-            ? vocab.terms
-                .filter((term): term is string => typeof term === 'string')
-                .slice(0, 12)
-            : [];
-          transcriptionVocabularyRef.current = {
-            initialPrompt,
-            terms,
-            provenance: {
-              policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
-              hintCount: initialPrompt ? hintCount : 0,
-            },
-          };
+          if (vocabularyGeneration !== vocabularyRequestGenerationRef.current)
+            return;
+          applyTranscriptionVocabulary(vocabulary);
           console.log(
             '[Pluto] Transcription vocabulary ready',
             transcriptionVocabularyRef.current.provenance,
@@ -1507,14 +1532,10 @@ export const AudioManager = ({
           'MEETING_PREP_RECORDING_STARTED',
           meetingId,
         );
-      onRecordingStarted?.(startTimeRef.current);
+      onRecordingStarted?.(startTimeRef.current, meetingId);
       isRecordingRef.current = true;
       setIsRecording(true);
       publishCaptureLifecycle({ state: 'recording', meetingId });
-      if (!calendarEvent)
-        void window.ipcRenderer
-          ?.invoke('CALENDAR_ASSOCIATE_START', { meetingId })
-          .catch(() => {});
 
       silenceWatchdogRef.current?.disarm();
       const watchdog = createSilenceWatchdog({

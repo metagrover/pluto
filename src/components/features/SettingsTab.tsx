@@ -1007,8 +1007,8 @@ export const SettingsTab = ({
             </SettingsRow>
 
             <SettingsRow
-              label="Auto-name meetings from calendar"
-              helper="Automatically title new recordings and attach attendees from matching calendar events."
+              label="Suggest calendar meetings"
+              helper="Suggest matching calendar invites during a recording. An invite is linked only when you add it."
               actionControl
             >
               <Toggle
