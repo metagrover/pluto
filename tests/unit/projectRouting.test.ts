@@ -474,19 +474,12 @@ describe('filing new work under established projects', () => {
     expect(roots[0].alternateNames).toEqual([]);
   });
 
-  it.each([
-    'invalid-json',
-    'provider-error',
-    'invalid-evidence',
-    'rejected-write',
-  ])(
+  it.each(['invalid-json', 'invalid-evidence', 'rejected-write'])(
     'automatically recovers from %s without changed evidence',
     async (failure) => {
       const { deps, response } = fixture();
       if (failure === 'invalid-json')
         deps.generate.mockResolvedValueOnce('invalid');
-      if (failure === 'provider-error')
-        deps.generate.mockRejectedValueOnce(new Error('provider unavailable'));
       if (failure === 'invalid-evidence')
         deps.generate.mockResolvedValueOnce(
           JSON.stringify({
@@ -577,6 +570,26 @@ describe('filing new work under established projects', () => {
       });
       expect(deps.saveMembership).not.toHaveBeenCalled();
       expect(deps.getState()).toBeNull();
+    },
+  );
+  it('stops a provider outage without consuming per-project retries', async () => {
+    const { deps } = fixture();
+    const error = new Error('provider unavailable');
+    deps.generate.mockRejectedValueOnce(error);
+    await expect(routeProjectCandidate(deps)).rejects.toBe(error);
+    expect(deps.getState()).toBeNull();
+    expect(deps.saveMembership).not.toHaveBeenCalled();
+    expect(deps.generate).toHaveBeenCalledOnce();
+  });
+
+  it.each(['null', '[]', '42', '"legacy"', 'invalid'])(
+    'tolerates non-object candidate metadata %s',
+    async (metadata) => {
+      const { deps, projects } = fixture();
+      projects[1].metadata = metadata;
+      await expect(routeProjectCandidate(deps)).resolves.toMatchObject({
+        grouped: 1,
+      });
     },
   );
 });

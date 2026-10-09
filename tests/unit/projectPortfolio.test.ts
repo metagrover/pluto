@@ -67,6 +67,25 @@ describe('project portfolio', () => {
       'Generated guess',
     ]);
   });
+  it.each(['pinned', 'completed'] as const)(
+    'does not send a %s project back to suggestions after one meeting',
+    (kind) => {
+      const project = entry('Chosen project', 'qualified');
+      const meta = JSON.parse(project.metadata!);
+      meta.projectQualification.source = 'extraction';
+      if (kind === 'pinned') meta.projectStarred = true;
+      if (kind === 'completed') project.status = 'completed';
+      project.metadata = JSON.stringify(meta);
+      const result = buildProjectPortfolio([project]);
+      expect(result.suggested).toEqual([]);
+      expect(result.radarTopics).toEqual([]);
+      expect(
+        (kind === 'pinned' ? result.starred : result.completed).map(
+          (item) => item.id,
+        ),
+      ).toEqual([project.id]);
+    },
+  );
   it('keeps cross-conversation synthesized themes in the main portfolio', () => {
     const theme = {
       ...entry('Durable theme', 'qualified'),

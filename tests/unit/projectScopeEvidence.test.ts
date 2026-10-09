@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { selectProjectReviewSources } from '../../electron/projectScopeEvidence';
+import {
+  rankProjectReviewSources,
+  selectProjectReviewSources,
+} from '../../electron/projectScopeEvidence';
 
 const filler =
   'The calendar invitation was updated for the next team meeting. ';
@@ -165,4 +168,29 @@ it('supports a smaller routing budget while retaining relevant evidence', () => 
       source.text.includes('Archive permission validation continues'),
     ),
   ).toBe(true);
+});
+
+it('ranks the catalog once without clipping source documents or excluding later homes', () => {
+  const sources = [
+    ...Array.from({ length: 25 }, (_, index) => ({
+      id: `office-${index}`,
+      text: 'Office furniture and regional lease renewal.',
+    })),
+    {
+      id: 'archive',
+      text: `${filler.repeat(80)}Archive pilot permission validation for partner collections.`,
+    },
+  ];
+  const ranked = rankProjectReviewSources(
+    sources,
+    'Archive permission validation',
+  );
+  expect(ranked).toHaveLength(sources.length);
+  expect(ranked[0]).toBe(sources[25]);
+  expect(ranked[0].text).toBe(sources[25].text);
+  expect(
+    selectProjectReviewSources(sources, 'Archive permission validation', {
+      maxSources: 1,
+    })[0].id,
+  ).toBe(ranked[0].id);
 });

@@ -4,7 +4,10 @@ import {
   readProjectPortfolioDisposition,
   readProjectQualification,
 } from '../src/utils/projectQualification';
-import { selectProjectReviewSources } from './projectScopeEvidence';
+import {
+  rankProjectReviewSources,
+  selectProjectReviewSources,
+} from './projectScopeEvidence';
 import type { ProjectThemeSource } from './projectThemeSynthesis';
 import { isSerializedTaskPreemption } from './serializedTaskGate';
 
@@ -51,7 +54,10 @@ interface Dependencies {
 }
 const metadata = (project: Project) => {
   try {
-    return JSON.parse(project.metadata || '{}') as Record<string, unknown>;
+    const parsed = JSON.parse(project.metadata || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
   } catch {
     return {};
   }
@@ -194,6 +200,11 @@ export async function routeProjectCandidate(
   }));
   const state = deps.getState();
   const attempts = state?.version === 1 ? { ...state.attempts } : {};
+  // Hash large histories once per pass, not once per candidate.
+  const rootHashes = rootContext.map((root) => ({
+    id: root.id,
+    hash: createHash('sha256').update(JSON.stringify(root)).digest('hex'),
+  }));
   const hashes = new Map<string, string>();
   const hashFor = (project: Project) => {
     const cached = hashes.get(project.id);
@@ -201,9 +212,9 @@ export async function routeProjectCandidate(
     const hash = createHash('sha256')
       .update(
         JSON.stringify({
-          routingRevision: 3,
+          routingRevision: 4,
           project,
-          roots: rootContext.filter((root) => root.id !== project.id),
+          roots: rootHashes.filter((root) => root.id !== project.id),
           sources: projectSources(project.id).map((source) => ({
             id: source.id,
             notes: source.notes,
@@ -290,19 +301,16 @@ export async function routeProjectCandidate(
         ...root.sources.map((source) => source.notes),
       ].join('\n'),
     }));
-  const rankedRootIds = selectProjectReviewSources(rootDocuments, query, {
-    maxSources: 8,
-    maxChars: 2000,
-  }).map((root) => root.id);
+  const rankedRoots = rankProjectReviewSources(rootDocuments, query);
+  const rankedRootIds = rankedRoots.slice(0, 8).map((root) => root.id);
   // Keep preferred homes in view even when their terminology differs.
   const pinnedIds = new Set(
     rootContext.filter((root) => root.pinned).map((root) => root.id),
   );
-  const preferredRootIds = selectProjectReviewSources(
-    rootDocuments.filter((root) => pinnedIds.has(root.id)),
-    query,
-    { maxSources: 8, maxChars: 2000 },
-  ).map((root) => root.id);
+  const preferredRootIds = rankedRoots
+    .filter((root) => pinnedIds.has(root.id))
+    .slice(0, 8)
+    .map((root) => root.id);
   const selectedRoots = [
     ...new Set([...preferredRootIds, ...rankedRootIds]),
   ].map((id) => {
@@ -392,6 +400,8 @@ CANDIDATE:\n${JSON.stringify({ id: project.id, name: project.name, outcome: read
         deferred: true,
       };
     }
+    // A provider outage affects the whole queue; do not retry it per candidate.
+    if (!(error instanceof SyntaxError)) throw error;
     return finish(0, true);
   }
   // Re-read identities and evidence after inference. User corrections always win.
