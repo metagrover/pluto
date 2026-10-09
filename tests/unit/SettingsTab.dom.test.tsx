@@ -143,37 +143,18 @@ describe('SettingsTab', () => {
     act(() => root.unmount());
   });
 
-  it('persists the silence duration selected from the themed menu', async () => {
+  it('explains that quiet breaks do not stop recording and removes the silence setting', async () => {
     const container = document.createElement('div');
-    document.body.append(container);
     const root = createRoot(container);
-    const setDuration = vi.fn();
     await act(async () =>
-      root.render(
-        <SettingsTab
-          {...defaultProps}
-          initialTab="meetings"
-          silenceAutoStopDuration="disabled"
-          setSilenceAutoStopDuration={setDuration}
-        />,
-      ),
+      root.render(<SettingsTab {...defaultProps} initialTab="meetings" />),
     );
-    await act(async () =>
-      container
-        .querySelector<HTMLButtonElement>(
-          '[aria-label="Auto-stop on prolonged silence duration"]',
-        )!
-        .click(),
+    expect(container.textContent).toContain(
+      'Quiet breaks and the scheduled end time do not stop recording.',
     );
-    const option = [
-      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
-    ].find((item) => item.textContent === '30 seconds (Default)')!;
-    await act(async () => option.click());
-    expect(setDuration).toHaveBeenCalledWith('0.5');
-    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith('SET_SETTING', {
-      key: 'silence_auto_stop_duration',
-      value: '0.5',
-    });
+    expect(container.textContent).not.toContain(
+      'Auto-stop on prolonged silence',
+    );
     act(() => root.unmount());
   });
   it('shows one focused category at a time', () => {

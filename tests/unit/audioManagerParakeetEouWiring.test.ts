@@ -244,7 +244,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
       microphonePcmIndex,
     );
     const recordingStartedIndex = source.indexOf(
-      'onRecordingStarted?.(startTimeRef.current)',
+      'onRecordingStarted?.(startTimeRef.current, meetingId)',
       startIndex,
     );
     const recordingStateIndex = source.indexOf(
@@ -294,7 +294,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
       source.indexOf(
         'startMicMediaRecorderRef.current = startMicMediaRecorder',
       ),
-      source.indexOf('onRecordingStarted?.(startTimeRef.current)'),
+      source.indexOf('onRecordingStarted?.(startTimeRef.current, meetingId)'),
     );
     expect(recorderStartBlock).not.toContain(
       'systemPcmChunksRef.current = [];',

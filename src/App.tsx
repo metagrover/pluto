@@ -2,10 +2,6 @@ import { PanelLeft, Plus } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { openMeetingPrep } from './api/meetingPrep';
-import {
-  type SilenceAutoStopDuration,
-  resolveSilenceAutoStopDuration,
-} from './autoStop/silenceWatchdog';
 import { resolveCaptureAction } from './services/captureLifecycle';
 import './App.css';
 
@@ -393,8 +389,6 @@ function App() {
   const [reportProblemOpen, setReportProblemOpen] = useState(false);
   const [calendarAutoNameEnabled, setCalendarAutoNameEnabled] = useState(true);
   const [calendarPromptEnabled, setCalendarPromptEnabled] = useState(true);
-  const [silenceAutoStopDuration, setSilenceAutoStopDuration] =
-    useState<SilenceAutoStopDuration>('0.5');
   const [fasterNotesEnabled, setFasterNotesEnabled] = useState(true);
   const [meetingNotesTemplateSettings, setMeetingNotesTemplateSettings] =
     useState<MeetingNotesTemplateSettingsSnapshot>(() =>
@@ -979,11 +973,6 @@ function App() {
         if (val !== null) setCalendarPromptEnabled(val !== 'false');
       });
     window.ipcRenderer
-      .invoke('GET_SETTING', 'silence_auto_stop_duration')
-      .then((val) => {
-        setSilenceAutoStopDuration(resolveSilenceAutoStopDuration(val));
-      });
-    window.ipcRenderer
       .invoke('GET_SETTING', 'faster_notes_enabled')
       .then((val) => {
         if (val !== null) setFasterNotesEnabled(val !== 'false');
@@ -1230,17 +1219,6 @@ function App() {
       'SET_SETTING',
       'calendar_prompt_enabled',
       String(enabled),
-    );
-  };
-
-  const handleSilenceAutoStopDurationChange = (
-    duration: SilenceAutoStopDuration,
-  ) => {
-    setSilenceAutoStopDuration(duration);
-    window.ipcRenderer.invoke(
-      'SET_SETTING',
-      'silence_auto_stop_duration',
-      duration,
     );
   };
 
@@ -2192,13 +2170,7 @@ function App() {
           onInterimTranscript={setInterimTranscript}
           onCaptureHealthChange={setCaptureHealth}
           onLiveTranscriptIntegrityChange={setLiveTranscriptIntegrity}
-          silenceAutoStopDuration={silenceAutoStopDuration}
           fasterNotesEnabled={fasterNotesEnabled}
-          calendarEndTimeMs={
-            resolvedActiveCalendarEvent
-              ? new Date(resolvedActiveCalendarEvent.end).getTime()
-              : null
-          }
           onRecordingStarted={(startedAtMs, meetingId) => {
             currentRecordingIdRef.current = meetingId;
             setCurrentRecordingId(meetingId);
@@ -2612,8 +2584,6 @@ function App() {
                 setCalendarAutoNameEnabled={handleCalendarAutoNameToggle}
                 calendarPromptEnabled={calendarPromptEnabled}
                 setCalendarPromptEnabled={handleCalendarPromptToggle}
-                silenceAutoStopDuration={silenceAutoStopDuration}
-                setSilenceAutoStopDuration={handleSilenceAutoStopDurationChange}
                 fasterNotesEnabled={fasterNotesEnabled}
                 setFasterNotesEnabled={setFasterNotesEnabled}
                 meetingNotesTemplateSettings={meetingNotesTemplateSettings}

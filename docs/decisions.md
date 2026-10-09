@@ -1670,6 +1670,14 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Compatibility:** Retain provider implementations and saved settings/credentials. This is a setup-surface restriction, not a migration or automatic provider switch; previously configured providers are not silently rerouted. Settings directs those users to choose an available provider explicitly.
 - **Revisit:** Restore each direct provider only after testing credential entry, secure storage, validation and error recovery, and representative inference workflows end to end. Automated or mocked tests alone do not establish live-provider acceptance.
 
+
+## 2026-10-08 - Preserve recordings through quiet breaks
+
+- **Status:** Accepted.
+- **Supersedes:** The inactivity grace and silence fallback in “2026-10-05 - End detected calls promptly and cap the silence fallback at 30 seconds,” and the silence-based auto-stop portion of “2026-09-04 - Proactive calendar session auto-naming, start prompts, and silence-based auto-stop.”
+- **Decision:** Silence, missing audio, another active app, and scheduled calendar end times do not end a recording. Remove the silence watchdog and its setting; existing stored silence preferences are ignored without modifying user data. The auto-end toggle continues to control stopping on detected app exit or browser call-tab closure after a call has been tracked.
+- **Evidence:** Browser closure requires no supported call tab in any inspected browser and no matched desktop call app. Missing browser inspection remains inconclusive. Ambiguous detection keeps recording; users can stop manually when an app or tab remains open after a call.
+- **Preservation:** Confirmed exits retain the shared stop callback, capture-journal sealing, and transcript finalization. No recordings, transcripts, or historical stop reasons are rewritten.
 ## 2026-10-08 - Retrieve project homes before review and recover failed reconciliation
 
 - **Supersedes:** The catalog-order parent limit and unchanged-failure retry behavior in “2026-09-30 - Route single-conversation work to established projects.” Its evidence, protected-identity, and reversible-storage requirements remain in force.
@@ -1686,3 +1694,11 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Correctness:** An explicit retry applies to one request, not every continuation of its polling loop. Provider failures stop the pass and retain their original error instead of consuming retries on every candidate. Invalid model responses and rejected matches still receive the bounded retry allowance. Starred and completed projects do not regress to single-meeting suggestions; Primary and Other initiatives filters display their respective projects, and dormant projects appear once.
 - **Cost:** Rank candidate homes once without generating unused excerpts, reuse history hashes across candidates, and avoid nested phrase scans for long retrieval queries.
 - **Verification boundary:** Regression tests cover retry continuation, provider outages, explicit portfolio choices, duplicate display, filter behavior, and evidence ranking. Fictional browser fixtures exercise pending reconciliation, topic actions, and error recovery at desktop sizes. Real-provider matching and live-profile cleanup remain separate acceptance work.
+
+
+## 2026-10-09 - Scope call-end evidence to the locked source
+
+- **Status:** Accepted as PR #857 review remediation.
+- **Supersedes:** The all-running-apps browser-closure rule in “2026-10-08 - Preserve recordings through quiet breaks.” Its no-silence-stop rule and shared finalization path remain unchanged.
+- **Decision:** Return a stable source-app identity alongside the provider display name when locking a call. Subsequent auto-end polls inspect that browser or desktop app only. Idle or active unrelated apps cannot suppress its closure or provide exit evidence for it. Failed process inspection is unknown, not an empty process list.
+- **Boundary:** Source identity is app-level, so multiple supported meeting tabs in the same browser remain conservative. Leaving a meeting while its tab stays open still requires manual stopping. Optional Chrome Accessibility departure evidence, two-observation confirmation for Chrome/Zoom, and a non-destructive quiet check-in remain in the [linked departure-detection follow-up](follow-ups/meeting-departure-detection.md); PR #857 does not complete that broader work.

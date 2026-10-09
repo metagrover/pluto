@@ -40,6 +40,7 @@ describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
           ? {
               active: true,
               appName,
+              sourceApp: appName === 'Chrome' ? 'Google Chrome' : 'Zoom',
               confidence: 'medium',
               reason:
                 appName === 'Zoom'
@@ -50,7 +51,10 @@ describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
               active: false,
               appName: null,
               confidence: 'low',
-              reason: 'no-call-app-running',
+              reason:
+                appName === 'Chrome'
+                  ? 'browser-call-tab-closed'
+                  : 'no-call-app-running',
             };
       }
       return true;
@@ -76,6 +80,10 @@ describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(detectionCount).toBe(2);
+    expect(invoke).toHaveBeenCalledWith(
+      'DETECT_ACTIVE_CALL',
+      appName === 'Chrome' ? 'Google Chrome' : 'Zoom',
+    );
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(GRACE_SHORT_MS);
@@ -87,9 +95,9 @@ describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
   });
 });
 
-describe('short call-end grace', () => {
+describe('quiet meeting breaks', () => {
   it.each(['inactive', 'resumed', 'unavailable', 'exited'])(
-    'handles %s during the 20-second inactivity grace',
+    'handles %s after a quiet break without an inactivity deadline',
     async (outcome) => {
       vi.useFakeTimers();
       const stopSession = vi.fn();
@@ -140,16 +148,8 @@ describe('short call-end grace', () => {
         );
       } else {
         expect(stopSession).not.toHaveBeenCalled();
-        await act(async () => vi.advanceTimersByTimeAsync(14_998));
+        await act(async () => vi.advanceTimersByTimeAsync(30 * 60_000));
         expect(stopSession).not.toHaveBeenCalled();
-        await act(async () => vi.advanceTimersByTimeAsync(1));
-        if (outcome === 'inactive') {
-          expect(stopSession).toHaveBeenCalledExactlyOnceWith(
-            'auto:audio_inactive_timeout',
-          );
-        } else {
-          expect(stopSession).not.toHaveBeenCalled();
-        }
       }
       await act(async () => root.unmount());
     },

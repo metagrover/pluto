@@ -240,6 +240,147 @@ describe('createActiveCallDetector', () => {
     expect(runAudioProbe).toHaveBeenCalledTimes(2);
   });
 
+  it.each(['desktop', 'browser'])(
+    'does not report a closed tab when a silent %s meeting is still open',
+    async (kind) => {
+      setPlatform('darwin');
+      const detector = createDetector({
+        processes: [
+          {
+            pid: 601,
+            ppid: 1,
+            name: 'google chrome',
+            command:
+              '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          },
+          kind === 'desktop'
+            ? {
+                pid: 602,
+                ppid: 1,
+                name: 'Microsoft Teams',
+                command:
+                  '/Applications/Microsoft Teams.app/Contents/MacOS/Microsoft Teams',
+              }
+            : {
+                pid: 602,
+                ppid: 1,
+                name: 'Safari',
+                command: '/Applications/Safari.app/Contents/MacOS/Safari',
+              },
+        ],
+        runAudioProbe: vi.fn(async () => false),
+        browserProviders:
+          kind === 'browser' ? new Map([['Safari', 'google-meet']]) : new Map(),
+      });
+      expect(await detector()).toMatchObject({
+        active: false,
+        reason: 'call-app-running-without-target-audio',
+      });
+    },
+  );
+
+  it.each(['Microsoft Teams', 'Slack', 'Zoom', 'Safari'])(
+    'detects the tracked Chrome tab closing while %s remains open',
+    async (otherApp) => {
+      setPlatform('darwin');
+      const providers = new Map<string, 'google-meet'>([
+        ['Google Chrome', 'google-meet'],
+      ]);
+      const processes: StubProcess[] = [
+        { pid: 701, ppid: 1, name: 'google chrome', command: 'google chrome' },
+        { pid: 702, ppid: 1, name: otherApp, command: otherApp },
+        { pid: 703, ppid: 702, name: 'cpthost', command: 'cpthost' },
+      ];
+      const probe = vi.fn(async () => true);
+      const detector = createDetector({
+        processes,
+        runAudioProbe: probe,
+        browserProviders: providers,
+      });
+      const joined = await detector();
+      expect(joined).toMatchObject({
+        active: true,
+        appName: 'Google Meet',
+        sourceApp: 'Google Chrome',
+      });
+      providers.delete('Google Chrome');
+      if (otherApp === 'Safari') providers.set('Safari', 'google-meet');
+      probe.mockClear();
+      expect(await detector(joined.sourceApp)).toMatchObject({
+        active: false,
+        reason: 'browser-call-tab-closed',
+      });
+      expect(probe).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['Google Chrome', 'Zoom'])(
+    'detects the tracked %s process exiting despite another active app',
+    async (sourceApp) => {
+      setPlatform('darwin');
+      const detector = createDetector({
+        processes: [
+          {
+            pid: 801,
+            ppid: 1,
+            name: 'Microsoft Teams',
+            command: 'Microsoft Teams',
+          },
+        ],
+        runAudioProbe: vi.fn(async () => true),
+      });
+      expect(await detector(sourceApp)).toMatchObject({
+        active: false,
+        reason: 'no-call-app-running',
+      });
+    },
+  );
+
+  it('keeps a silent tracked Chrome meeting open despite another browser closing', async () => {
+    setPlatform('darwin');
+    const detector = createDetector({
+      processes: [
+        { pid: 901, ppid: 1, name: 'google chrome', command: 'google chrome' },
+        { pid: 902, ppid: 1, name: 'Safari', command: 'Safari' },
+      ],
+      runAudioProbe: vi.fn(async () => false),
+      browserProviders: new Map([['Google Chrome', 'google-meet']]),
+    });
+    expect(await detector('Google Chrome')).toMatchObject({
+      active: false,
+      reason: 'call-app-running-without-target-audio',
+    });
+  });
+
+  it('treats a failed process inspection as unknown instead of call exit', async () => {
+    setPlatform('darwin');
+    const detector = createActiveCallDetector({
+      getRunningProcesses: async () => null,
+      runAudioProbe: vi.fn(async () => false),
+    });
+    expect(await detector('Zoom')).toMatchObject({
+      active: false,
+      reason: 'process-inspection-unavailable',
+    });
+  });
+
+  it.each(['Google Meet', '', {}, 12])(
+    'rejects invalid call source %j without inspecting apps',
+    async (sourceApp) => {
+      setPlatform('darwin');
+      const processes = vi.fn(async () => []);
+      const detector = createActiveCallDetector({
+        getRunningProcesses: processes,
+        runAudioProbe: vi.fn(),
+      });
+      expect(await detector(sourceApp)).toMatchObject({
+        active: false,
+        reason: 'invalid-call-source',
+      });
+      expect(processes).not.toHaveBeenCalled();
+    },
+  );
+
   it('reports when browser meeting-tab inspection is unavailable', async () => {
     setPlatform('darwin');
     const runAudioProbe = vi.fn(async () => true);
@@ -261,7 +402,7 @@ describe('createActiveCallDetector', () => {
       }),
     });
 
-    const result = await detector();
+    const result = await detector('Google Chrome');
 
     expect(result.active).toBe(false);
     expect(result.reason).toBe('browser-tab-inspection-unavailable');

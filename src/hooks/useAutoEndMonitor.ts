@@ -31,6 +31,7 @@ export const useAutoEndMonitor = ({
   const graceTimerRef = useRef<number | null>(null);
   const graceActiveRef = useRef(false);
   const trackedAppRef = useRef<string | null>(null);
+  const trackedSourceAppRef = useRef<string | null>(null);
   const pollInFlightRef = useRef(false);
   const dismissTimeoutRef = useRef<number | null>(null);
 
@@ -58,6 +59,7 @@ export const useAutoEndMonitor = ({
     if (!isRecording || !autoEndEnabled) {
       clearGraceTimer();
       trackedAppRef.current = null;
+      trackedSourceAppRef.current = null;
       pollInFlightRef.current = false;
       return;
     }
@@ -70,7 +72,12 @@ export const useAutoEndMonitor = ({
       pollInFlightRef.current = true;
 
       try {
-        const result = await window.ipcRenderer.invoke('DETECT_ACTIVE_CALL');
+        const result = trackedSourceAppRef.current
+          ? await window.ipcRenderer.invoke(
+              'DETECT_ACTIVE_CALL',
+              trackedSourceAppRef.current,
+            )
+          : await window.ipcRenderer.invoke('DETECT_ACTIVE_CALL');
         if (cancelled) return;
 
         const action = autoEndDecision({
@@ -93,6 +100,8 @@ export const useAutoEndMonitor = ({
         switch (action.type) {
           case 'lock_app':
             trackedAppRef.current = action.appName;
+            trackedSourceAppRef.current =
+              typeof result?.sourceApp === 'string' ? result.sourceApp : null;
             void window.ipcRenderer.invoke('LOG_AUTO_END_EVENT', {
               reason_code: 'call_app_locked',
               app_name: action.appName,
@@ -182,6 +191,7 @@ export const useAutoEndMonitor = ({
       window.clearInterval(intervalId);
       clearGraceTimer();
       trackedAppRef.current = null;
+      trackedSourceAppRef.current = null;
     };
   }, [isRecording, autoEndEnabled]);
 

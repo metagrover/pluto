@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  SILENCE_AUTO_STOP_TIMEOUT_MS,
-  createSilenceWatchdog,
-} from '../../src/autoStop/silenceWatchdog';
+import { autoEndDecision } from '../../src/autoEnd/decision';
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
@@ -12,30 +9,21 @@ import {
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 describe('auto-stop triggering and journal sealing contract', () => {
-  it('triggers auto-stop on silence watchdog timeout and preserves end_reason in meeting persistence', async () => {
-    let triggeredReason: string | null = null;
-    let autoStopCalled = false;
-
-    let currentTime = 1_000_000;
-    const watchdog = createSilenceWatchdog({
-      silenceTimeoutMs: SILENCE_AUTO_STOP_TIMEOUT_MS,
-      calendarEndTimeMs: 500_000, // already passed
-      isConferenceSilent: () => true,
-      onTriggerAutoStop: (reason) => {
-        triggeredReason = reason;
-        autoStopCalled = true;
+  it('preserves the confirmed call-exit reason through journal sealing and persistence', async () => {
+    const action = autoEndDecision({
+      poll: {
+        active: false,
+        appName: null,
+        confidence: 'low',
+        reason: 'no-call-app-running',
       },
-      now: () => currentTime,
+      trackedApp: 'Zoom',
+      graceActive: false,
     });
-
-    // Advance to the 30-second silence deadline
-    currentTime += 30_000;
-    const check = watchdog.checkSilence();
-    expect(check.shouldStop).toBe(true);
-    expect(check.reason).toBe('auto:calendar_silence_timeout');
-
-    // Simulate auto-stop invocation
-    const endReason = check.reason!;
+    expect(action.type).toBe('start_grace');
+    if (action.type !== 'start_grace')
+      throw new Error('Expected confirmed call exit');
+    const endReason = `auto:${action.reasonCode}`;
 
     // 2. Begin recording finalization with snapshot
     const recordingStartedAtMs = 600_000;
@@ -103,7 +91,7 @@ describe('auto-stop triggering and journal sealing contract', () => {
 
     expect(persistFn).toHaveBeenCalledTimes(1);
     const savedMeeting = persistFn.mock.calls[0]?.[0];
-    expect(savedMeeting.end_reason).toBe('auto:calendar_silence_timeout');
+    expect(savedMeeting.end_reason).toBe('auto:call_app_exited');
     expect(savedMeeting.duration_seconds).toBe(400);
   });
 });

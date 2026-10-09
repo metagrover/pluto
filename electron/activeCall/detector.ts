@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 export type ActiveCallState = {
+  /** Stable matcher identity; display names can refer to multiple apps. */
+  sourceApp?: string;
   active: boolean;
   appName: string | null;
   pidCount: number | null;
@@ -58,7 +60,7 @@ type RunAudioProbeOptions = {
 type CreateActiveCallDetectorArgs = {
   browserInspectionEnabled?: () => boolean;
   runAudioProbe: (options: RunAudioProbeOptions) => Promise<boolean>;
-  getRunningProcesses?: () => Promise<RunningProcessInfo[]>;
+  getRunningProcesses?: () => Promise<RunningProcessInfo[] | null>;
   detectBrowserCallProviders?: (
     matchedApps: MatchedCallApp[],
   ) => Promise<Map<string, CallProvider> | BrowserProviderDetection>;
@@ -180,8 +182,8 @@ const toDisplayLabel = (rawAppName: string): string => {
   return BROWSER_DISPLAY_LABELS[normalized] || rawAppName;
 };
 
-const getRunningProcesses = async (): Promise<RunningProcessInfo[]> => {
-  return await new Promise<RunningProcessInfo[]>((resolve) => {
+const getRunningProcesses = async (): Promise<RunningProcessInfo[] | null> => {
+  return await new Promise<RunningProcessInfo[] | null>((resolve) => {
     let stdout = '';
     let stderr = '';
     const ps = spawn('ps', ['-axo', 'pid=,ppid=,comm=']);
@@ -197,7 +199,7 @@ const getRunningProcesses = async (): Promise<RunningProcessInfo[]> => {
     ps.on('close', (code) => {
       if (code !== 0) {
         console.error('[Pluto] Failed to read process list:', stderr);
-        return resolve([]);
+        return resolve(null);
       }
       const processes = stdout
         .split('\n')
@@ -224,7 +226,7 @@ const getRunningProcesses = async (): Promise<RunningProcessInfo[]> => {
 
     ps.on('error', (err) => {
       console.error('[Pluto] Failed to spawn process list probe:', err);
-      resolve([]);
+      resolve(null);
     });
   });
 };
@@ -399,7 +401,7 @@ export const createActiveCallDetector = ({
   getRunningProcesses: getRunningProcessesOverride,
   detectBrowserCallProviders: detectBrowserCallProvidersOverride,
 }: CreateActiveCallDetectorArgs) => {
-  return async (): Promise<ActiveCallState> => {
+  return async (sourceApp?: unknown): Promise<ActiveCallState> => {
     if (process.platform !== 'darwin') {
       return {
         active: false,
@@ -410,9 +412,31 @@ export const createActiveCallDetector = ({
       };
     }
 
+    // Only accept identities emitted by this detector, never a provider display name.
+    if (
+      sourceApp != null &&
+      !CALL_APP_MATCHERS.some((matcher) => matcher.label === sourceApp)
+    ) {
+      return {
+        active: false,
+        appName: null,
+        pidCount: null,
+        confidence: 'low',
+        reason: 'invalid-call-source',
+      };
+    }
     const processes = await (
       getRunningProcessesOverride ?? getRunningProcesses
     )();
+    if (processes === null) {
+      return {
+        active: false,
+        appName: null,
+        pidCount: null,
+        confidence: 'low',
+        reason: 'process-inspection-unavailable',
+      };
+    }
     const childrenByParent = new Map<number, number[]>();
     for (const proc of processes) {
       const children = childrenByParent.get(proc.ppid) ?? [];
@@ -437,29 +461,34 @@ export const createActiveCallDetector = ({
       return Array.from(expanded);
     };
 
-    const matchedApps: MatchedCallApp[] = CALL_APP_MATCHERS.map((matcher) => {
-      const hasRequiredProcess =
-        !matcher.requiredProcessPatterns ||
-        matcher.requiredProcessPatterns.some((pattern) =>
-          processes.some(
-            (proc) => pattern.test(proc.name) || pattern.test(proc.command),
-          ),
-        );
-      const directPids = (hasRequiredProcess ? processes : [])
-        .filter((proc) =>
-          matcher.patterns.some(
-            (pattern) => pattern.test(proc.name) || pattern.test(proc.command),
-          ),
-        )
-        .map((proc) => proc.pid);
-      const pids = expandWithDescendants(directPids);
-      return {
-        label: matcher.label,
-        allowSilentFallback: matcher.allowSilentFallback,
-        browserId: matcher.browserId,
-        pids,
-      };
-    }).filter((entry) => entry.pids.length > 0);
+    const matchedApps: MatchedCallApp[] = CALL_APP_MATCHERS.filter(
+      (matcher) => sourceApp == null || matcher.label === sourceApp,
+    )
+      .map((matcher) => {
+        const hasRequiredProcess =
+          !matcher.requiredProcessPatterns ||
+          matcher.requiredProcessPatterns.some((pattern) =>
+            processes.some(
+              (proc) => pattern.test(proc.name) || pattern.test(proc.command),
+            ),
+          );
+        const directPids = (hasRequiredProcess ? processes : [])
+          .filter((proc) =>
+            matcher.patterns.some(
+              (pattern) =>
+                pattern.test(proc.name) || pattern.test(proc.command),
+            ),
+          )
+          .map((proc) => proc.pid);
+        const pids = expandWithDescendants(directPids);
+        return {
+          label: matcher.label,
+          allowSilentFallback: matcher.allowSilentFallback,
+          browserId: matcher.browserId,
+          pids,
+        };
+      })
+      .filter((entry) => entry.pids.length > 0);
     const browserDetection = normalizeBrowserProviderDetection(
       browserInspectionEnabled()
         ? await (
@@ -502,6 +531,7 @@ export const createActiveCallDetector = ({
       if (externalAudioActive) {
         return {
           active: true,
+          sourceApp: matched.label,
           appName: getMatchedDisplayName(matched, browserCallProviderByLabel),
           pidCount: matched.pids.length,
           confidence: 'high',
@@ -531,6 +561,7 @@ export const createActiveCallDetector = ({
           : 'call-app-running-silent-fallback';
         return {
           active: true,
+          sourceApp: matched.label,
           appName: getMatchedDisplayName(matched, browserCallProviderByLabel),
           pidCount: matched.pids.length,
           confidence: 'medium',
@@ -540,9 +571,11 @@ export const createActiveCallDetector = ({
     }
 
     const firstMatchedApp = matchedApps[0];
-    const browserCallTabClosed =
-      Boolean(firstMatchedApp?.browserId) &&
-      !browserCallProviderByLabel.has(firstMatchedApp.label);
+    const browserCallTabClosed = matchedApps.every(
+      (matched) =>
+        Boolean(matched.browserId) &&
+        !browserCallProviderByLabel.has(matched.label),
+    );
     const browserInspectionUnavailable = matchedApps.some(
       (matched) =>
         Boolean(matched.browserId) &&
