@@ -4886,6 +4886,7 @@ app.whenReady().then(async () => {
       return {
         ...themes,
         discovered: themes.discovered + routing.grouped,
+        failed: themes.failed + routing.failed,
         remaining: themes.remaining + routing.remaining,
         routingRemaining: routing.remaining,
       };

@@ -778,7 +778,7 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
       }),
     }),
     meeting_count: 2,
-    last_mentioned_at: '2026-08-28T12:00:00Z',
+    last_mentioned_at: new Date().toISOString(),
     latest_context: 'Migration and rollout',
   });
 
@@ -899,7 +899,7 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     discoverProjectInitiativeMock.mockRejectedValue(new Error('offline'));
     await act(async () => root.render(<ProjectsExecutionTab />));
     expect(container.textContent).toContain('Project Orion');
-    expect(container.textContent).toContain('Retry synthesis');
+    expect(container.textContent).toContain('Retry updates');
     expect(container.textContent).not.toContain('No projects');
   });
 
@@ -914,7 +914,7 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     expect(discoverProjectInitiativeMock).toHaveBeenCalledOnce();
     expect(container.textContent).toContain('Report a problem');
     const retry = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Retry synthesis',
+      (button) => button.textContent === 'Retry updates',
     );
     discoverProjectInitiativeMock.mockResolvedValueOnce({
       discovered: 0,
@@ -949,7 +949,10 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
             deferred: false,
           });
         await act(async () => root.render(<ProjectsExecutionTab />));
-        expect(container.textContent).toContain('resume when Pluto is free');
+        expect(container.textContent).not.toContain(
+          'resume when Pluto is free',
+        );
+        expect(container.textContent).not.toContain('Reconciling topics');
         await act(async () => vi.advanceTimersByTimeAsync(5000));
         expect(discoverProjectInitiativeMock).toHaveBeenCalledTimes(2);
         expect(reviewProjectScopeMock).not.toHaveBeenCalled();
@@ -962,11 +965,13 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
   it('describes a synthesis failure without hiding saved context', async () => {
     discoverProjectInitiativeMock.mockRejectedValue(new Error('offline'));
     await act(async () => root.render(<ProjectsExecutionTab />));
-    expect(container.textContent).toContain('couldn’t refresh themes');
+    expect(container.textContent).toContain(
+      'Some project updates couldn’t finish.',
+    );
     expect(container.textContent).toContain('Project Orion');
   });
 
-  it('separates one-meeting auto-discoveries into suggested themes', async () => {
+  it('keeps one-meeting discoveries in one collapsed topics list', async () => {
     const suggestion = {
       ...qualified(),
       meeting_count: 1,
@@ -984,15 +989,127 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     };
     getProjectPortfolioMock.mockResolvedValue([suggestion]);
     await act(async () => root.render(<ProjectsExecutionTab />));
-    expect(container.textContent).toContain('Suggested themes');
-    expect(container.textContent).toContain(
-      'One conversation, review before adding',
+    expect(container.textContent).not.toContain('Suggested themes');
+    expect(
+      container.querySelectorAll(
+        '[data-project-id="project-1"], [data-topic-id="project-1"]',
+      ),
+    ).toHaveLength(1);
+    const topics = container.querySelector<HTMLDetailsElement>(
+      '[data-testid="topic-radar"]',
     );
+    expect(topics?.open).toBe(false);
+    expect(container.textContent).not.toContain('Needs review');
+    expect(container.querySelector('nav')?.textContent).not.toContain(
+      'Suggested',
+    );
+    await act(async () => {
+      topics!.open = true;
+    });
+    expect(topics?.textContent).toContain('Project Orion');
+    expect(
+      topics?.querySelector('[aria-label="Make Project Orion a project"]'),
+    ).not.toBeNull();
     expect(
       container.querySelector(
         '[data-testid="current-projects"] [data-project-id="project-1"]',
       ),
     ).toBeNull();
+  });
+
+  it('consumes an explicit retry once instead of renewing it on every deferred pass', async () => {
+    vi.useFakeTimers();
+    try {
+      discoverProjectInitiativeMock.mockRejectedValueOnce(new Error('offline'));
+      await act(async () => root.render(<ProjectsExecutionTab />));
+      const retry = Array.from(container.querySelectorAll('button')).find(
+        (button) => button.textContent === 'Retry updates',
+      );
+      expect(retry).toBeDefined();
+      discoverProjectInitiativeMock
+        .mockResolvedValueOnce({
+          discovered: 0,
+          remaining: 1,
+          failed: 1,
+          deferred: true,
+        })
+        .mockResolvedValueOnce({
+          discovered: 0,
+          remaining: 0,
+          failed: 1,
+          deferred: false,
+        });
+      await act(async () => retry!.click());
+      expect(discoverProjectInitiativeMock).toHaveBeenLastCalledWith({
+        retryFailed: true,
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(5000));
+      expect(discoverProjectInitiativeMock).toHaveBeenLastCalledWith({
+        retryFailed: false,
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(30000));
+      expect(discoverProjectInitiativeMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows active side projects only in their selected filter, without duplicating dormant projects', async () => {
+    const primary = {
+      ...qualified(),
+      id: 'primary',
+      metadata: JSON.stringify({
+        ...JSON.parse(qualified().metadata!),
+        projectStarred: true,
+      }),
+    };
+    const active = {
+      ...qualified(),
+      id: 'side',
+      name: 'Other active work',
+      last_mentioned_at: new Date().toISOString(),
+    };
+    const dormant = {
+      ...qualified(),
+      id: 'dormant',
+      name: 'Old work',
+      last_mentioned_at: '2020-01-01',
+    };
+    getProjectPortfolioMock.mockResolvedValue([primary, active, dormant]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    const clickFilter = async (label: string) => {
+      const button = Array.from(
+        container.querySelectorAll(
+          'nav[aria-label="Portfolio filters"] button',
+        ),
+      ).find((button) => button.textContent?.startsWith(label));
+      expect(button).toBeDefined();
+      await act(async () => (button as HTMLButtonElement).click());
+    };
+    await clickFilter('Primary');
+    expect(container.querySelector('[data-project-id="side"]')).toBeNull();
+    await clickFilter('Other initiatives');
+    expect(container.querySelector('[data-project-id="side"]')).not.toBeNull();
+    expect(container.querySelector('[data-project-id="primary"]')).toBeNull();
+    expect(
+      container.querySelectorAll('[data-project-id="dormant"]'),
+    ).toHaveLength(1);
+  });
+
+  it('keeps an entirely dormant portfolio in one collapsed list without a pinning prompt', async () => {
+    getProjectPortfolioMock.mockResolvedValue([
+      { ...qualified(), last_mentioned_at: '2020-01-01' },
+    ]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    expect(
+      container.querySelectorAll('[data-project-id="project-1"]'),
+    ).toHaveLength(1);
+    expect(
+      container.querySelector<HTMLDetailsElement>(
+        '[data-testid="dormant-projects"]',
+      )?.open,
+    ).toBe(false);
+    expect(container.textContent).not.toContain('Pin your Primary Focus');
   });
 
   it('does not start theme synthesis while a dossier is selected', async () => {
