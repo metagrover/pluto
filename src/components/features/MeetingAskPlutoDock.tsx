@@ -7,7 +7,14 @@ import {
   Square,
 } from 'lucide-react';
 import type React from 'react';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChatTurnAnchor } from '../../hooks/useChatTurnAnchor';
@@ -213,6 +220,11 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   const isComposing = query.trim().length > 0;
   const showsConversation = hasConversation && !isMinimized;
   const isExpanded = showsConversation || (isComposing && !isMinimized);
+  useLayoutEffect(() => {
+    if (showsConversation && threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    }
+  }, [showsConversation]);
   const dockClassName = [
     'meeting-ask-pluto-dock',
     'meeting-ask-pluto-dock--compact',
