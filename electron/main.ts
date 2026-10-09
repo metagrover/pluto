@@ -3313,8 +3313,8 @@ app.whenReady().then(async () => {
     },
   );
 
-  ipcMain.handle('DETECT_ACTIVE_CALL', async () => {
-    return await detectActiveCall();
+  ipcMain.handle('DETECT_ACTIVE_CALL', async (_event, sourceApp: unknown) => {
+    return await detectActiveCall(sourceApp);
   });
 
   ipcMain.handle(

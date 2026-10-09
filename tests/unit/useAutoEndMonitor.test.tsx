@@ -40,6 +40,7 @@ describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
           ? {
               active: true,
               appName,
+              sourceApp: appName === 'Chrome' ? 'Google Chrome' : 'Zoom',
               confidence: 'medium',
               reason:
                 appName === 'Zoom'
@@ -79,6 +80,10 @@ describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(detectionCount).toBe(2);
+    expect(invoke).toHaveBeenCalledWith(
+      'DETECT_ACTIVE_CALL',
+      appName === 'Chrome' ? 'Google Chrome' : 'Zoom',
+    );
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(GRACE_SHORT_MS);

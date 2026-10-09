@@ -1694,3 +1694,11 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Correctness:** An explicit retry applies to one request, not every continuation of its polling loop. Provider failures stop the pass and retain their original error instead of consuming retries on every candidate. Invalid model responses and rejected matches still receive the bounded retry allowance. Starred and completed projects do not regress to single-meeting suggestions; Primary and Other initiatives filters display their respective projects, and dormant projects appear once.
 - **Cost:** Rank candidate homes once without generating unused excerpts, reuse history hashes across candidates, and avoid nested phrase scans for long retrieval queries.
 - **Verification boundary:** Regression tests cover retry continuation, provider outages, explicit portfolio choices, duplicate display, filter behavior, and evidence ranking. Fictional browser fixtures exercise pending reconciliation, topic actions, and error recovery at desktop sizes. Real-provider matching and live-profile cleanup remain separate acceptance work.
+
+
+## 2026-10-09 - Scope call-end evidence to the locked source
+
+- **Status:** Accepted as PR #857 review remediation.
+- **Supersedes:** The all-running-apps browser-closure rule in “2026-10-08 - Preserve recordings through quiet breaks.” Its no-silence-stop rule and shared finalization path remain unchanged.
+- **Decision:** Return a stable source-app identity alongside the provider display name when locking a call. Subsequent auto-end polls inspect that browser or desktop app only. Idle or active unrelated apps cannot suppress its closure or provide exit evidence for it. Failed process inspection is unknown, not an empty process list.
+- **Boundary:** Source identity is app-level, so multiple supported meeting tabs in the same browser remain conservative. Leaving a meeting while its tab stays open still requires manual stopping. Optional Chrome Accessibility departure evidence, two-observation confirmation for Chrome/Zoom, and a non-destructive quiet check-in remain in the [linked departure-detection follow-up](follow-ups/meeting-departure-detection.md); PR #857 does not complete that broader work.
