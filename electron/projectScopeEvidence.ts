@@ -31,6 +31,9 @@ function rangeAt(center: number, width: number, length: number) {
 function rankedContexts(text: string, query: string[]) {
   const tokens = words(text);
   const querySet = new Set(query);
+  const queryPairs = new Set(
+    query.slice(1).map((word, index) => `${query[index]} ${word}`),
+  );
   const centers: number[] = [];
   for (const token of tokens) {
     if (
@@ -47,13 +50,9 @@ function rankedContexts(text: string, query: string[]) {
       );
       const unique = new Set(contextWords);
       const matches = query.filter((word) => unique.has(word)).length;
-      const phrase = query.some(
+      const phrase = contextWords.some(
         (word, index) =>
-          index > 0 &&
-          contextWords.some(
-            (value, offset) =>
-              value === query[index - 1] && contextWords[offset + 1] === word,
-          ),
+          index > 0 && queryPairs.has(`${contextWords[index - 1]} ${word}`),
       );
       // Rank actual context breadth, not how often the title was repeated. This
       // retrieves richer older discussions without guessing their qualification.
@@ -106,14 +105,7 @@ function excerpt(
     .join(EXCERPT_BREAK);
 }
 
-/** Select prompt evidence across all linked history; fullText stays local for validation. */
-export function selectProjectReviewSources(
-  sources: Source[],
-  name: string,
-  limits: { maxSources?: number; maxChars?: number } = {},
-): Source[] {
-  const maxSources = limits.maxSources ?? MAX_SOURCES;
-  const maxChars = limits.maxChars ?? MAX_SERIALIZED_EVIDENCE_CHARS;
+function rankSources(sources: Source[], name: string) {
   const query = [
     ...new Set(
       words(name)
@@ -121,7 +113,7 @@ export function selectProjectReviewSources(
         .filter((word) => word.length > 1 && !STOP_WORDS.has(word)),
     ),
   ];
-  const ranked = sources
+  return sources
     .map((source, index) => {
       const fullText = source.fullText ?? source.text;
       const contexts = rankedContexts(fullText, query);
@@ -134,8 +126,26 @@ export function selectProjectReviewSources(
       };
     })
     .filter((item) => item.fullText.trim())
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .slice(0, maxSources);
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+}
+
+/** Rank whole sources without rendering excerpts that the caller will discard. */
+export function rankProjectReviewSources(
+  sources: Source[],
+  name: string,
+): Source[] {
+  return rankSources(sources, name).map((item) => item.source);
+}
+
+/** Select prompt evidence across all linked history; fullText stays local for validation. */
+export function selectProjectReviewSources(
+  sources: Source[],
+  name: string,
+  limits: { maxSources?: number; maxChars?: number } = {},
+): Source[] {
+  const maxSources = limits.maxSources ?? MAX_SOURCES;
+  const maxChars = limits.maxChars ?? MAX_SERIALIZED_EVIDENCE_CHARS;
+  const ranked = rankSources(sources, name).slice(0, maxSources);
   let budget = Math.floor(maxChars / Math.max(1, ranked.length));
   const render = () =>
     ranked.map(({ source, fullText, contexts }) => ({

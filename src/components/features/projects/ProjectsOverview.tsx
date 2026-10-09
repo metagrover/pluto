@@ -117,7 +117,6 @@ const WARM_MONOGRAM_PALETTES: MonogramPalette[] = [
 
 function getProjectPalette(
   name: string,
-  mode: 'current' | 'suggested' | 'discussed',
   status?: string | null,
 ): MonogramPalette {
   if (status === 'completed') {
@@ -127,20 +126,6 @@ function getProjectPalette(
       border: 'border-emerald-500/25 dark:border-emerald-400/25',
     };
   }
-  if (mode === 'suggested') {
-    return {
-      bg: 'bg-amber-500/12 dark:bg-amber-400/15',
-      text: 'text-amber-900 dark:text-amber-200',
-      border: 'border-amber-500/30 dark:border-amber-400/30',
-    };
-  }
-  if (mode === 'discussed') {
-    return {
-      bg: 'bg-stone-500/8 dark:bg-stone-500/15',
-      text: 'text-stone-700 dark:text-stone-300',
-      border: 'border-stone-500/15 dark:border-stone-500/20',
-    };
-  }
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
@@ -148,14 +133,13 @@ function getProjectPalette(
   return WARM_MONOGRAM_PALETTES[hash % WARM_MONOGRAM_PALETTES.length];
 }
 
-type SynthesisState = 'idle' | 'running' | 'paused' | 'failed' | 'incomplete';
+type SynthesisState = 'idle' | 'failed' | 'incomplete';
 type PortfolioFilter =
   | 'all'
   | 'primary'
   | 'side'
   | 'current'
   | 'topics'
-  | 'suggested'
   | 'other'
   | 'completed';
 
@@ -226,7 +210,7 @@ export function ProjectsOverview({
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const shouldRetry = explicitRetry.current;
+    let shouldRetry = explicitRetry.current;
     explicitRetry.current = false;
     const refresh = async () => {
       const data = await getProjectPortfolio();
@@ -239,19 +223,17 @@ export function ProjectsOverview({
     };
     const synthesize = async () => {
       if (cancelled || activeId) return;
-      setSynthesisState('running');
+      setSynthesisState('idle');
       try {
-        const result = await discoverProjectInitiative({
-          retryFailed: shouldRetry,
-        });
+        const retryFailed = shouldRetry;
+        shouldRetry = false;
+        const result = await discoverProjectInitiative({ retryFailed });
         if (cancelled) return;
         if (result.discovered > 0) await refresh();
         if (result.deferred) {
-          setSynthesisState('paused');
           timer = setTimeout(synthesize, 5000);
         } else if (result.failed > 0) setSynthesisState('incomplete');
         else if (result.remaining > 0) {
-          setSynthesisState('paused');
           timer = setTimeout(synthesize, 5000);
         } else setSynthesisState('idle');
       } catch {
@@ -595,17 +577,14 @@ export function ProjectsOverview({
       />
     );
 
-  const renderRow = (
-    entry: ProjectPortfolioEntry,
-    mode: 'current' | 'suggested' | 'discussed',
-  ) => {
+  const renderRow = (entry: ProjectPortfolioEntry) => {
     const qualification = readProjectQualification(entry.metadata);
     const displayTitle = readProjectDisplayTitle(entry.metadata, entry.name);
     const date = activityDate(entry.last_mentioned_at);
     const currentFocus =
       entry.current_focus || qualification?.outcome || entry.latest_context;
     const monogram = getProjectMonogram(displayTitle);
-    const palette = getProjectPalette(entry.name, mode, entry.status);
+    const palette = getProjectPalette(entry.name, entry.status);
     const isRecent = isRecentActivity(entry.last_mentioned_at);
     const starred = isEntryStarred(entry);
     const isDragOver = dragOverProjectId === entry.id;
@@ -647,14 +626,6 @@ export function ProjectsOverview({
           >
             {monogram}
           </div>
-          {mode === 'suggested' && (
-            <div
-              className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500 text-white shadow-2xs"
-              title="Suggested for review"
-            >
-              <Sparkles className="h-2.5 w-2.5 fill-white/20" />
-            </div>
-          )}
           {entry.status === 'completed' && (
             <div
               className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500 text-white shadow-2xs"
@@ -668,20 +639,10 @@ export function ProjectsOverview({
         {/* Content Details */}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3
-              className={`${
-                mode === 'current' ? 'text-[15px]' : 'text-sm'
-              } font-semibold leading-snug text-pro-text-main transition-colors duration-150 group-hover/row:text-pro-accent tracking-[-0.01em]`}
-            >
+            <h3 className="text-[15px] font-semibold leading-snug text-pro-text-main transition-colors duration-150 group-hover/row:text-pro-accent tracking-[-0.01em]">
               {displayTitle}
             </h3>
 
-            {mode === 'suggested' && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10.5px] font-semibold text-amber-700 dark:text-amber-300">
-                <Sparkles className="h-2.5 w-2.5" />
-                Needs review
-              </span>
-            )}
             {entry.status === 'completed' && (
               <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 dark:text-emerald-300">
                 <CheckCircle2 className="h-2.5 w-2.5" />
@@ -706,7 +667,7 @@ export function ProjectsOverview({
             </p>
           )}
 
-          {mode === 'current' && entry.recent_change && (
+          {entry.recent_change && (
             <div className="mt-2.5 flex items-start gap-1.5 rounded-lg border border-pro-border/60 bg-pro-surface/70 px-2.5 py-1.5 text-xs text-pro-text-main/90 max-w-fit shadow-2xs">
               <span className="font-semibold text-pro-text-muted shrink-0">
                 Since last time:
@@ -715,8 +676,7 @@ export function ProjectsOverview({
             </div>
           )}
 
-          {mode === 'current' &&
-            Boolean(portfolio.initiativeTopics[entry.id]?.length) &&
+          {Boolean(portfolio.initiativeTopics[entry.id]?.length) &&
             (() => {
               const topics = portfolio.initiativeTopics[entry.id];
               const visible = topics.slice(0, 3);
@@ -770,37 +730,25 @@ export function ProjectsOverview({
             })()}
 
           <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums text-pro-text-muted">
-            {mode === 'suggested' ? (
-              <span className="inline-flex items-center rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-0.5 text-[11.5px] text-amber-800 dark:text-amber-300 font-medium">
-                One conversation, review before adding
+            <>
+              <span className="inline-flex items-center gap-1.5 font-medium text-[12px]">
+                <MessageSquare className="h-3 w-3 text-pro-text-muted/60" />
+                {entry.meeting_count} conversation
+                {entry.meeting_count === 1 ? '' : 's'}
               </span>
-            ) : mode === 'discussed' ? (
-              <span className="text-[11.5px]">
-                {qualification?.state === 'subordinate'
-                  ? 'Task or topic'
-                  : 'Project scope not established'}
-              </span>
-            ) : (
-              <>
-                <span className="inline-flex items-center gap-1.5 font-medium text-[12px]">
-                  <MessageSquare className="h-3 w-3 text-pro-text-muted/60" />
-                  {entry.meeting_count} conversation
-                  {entry.meeting_count === 1 ? '' : 's'}
+              {Boolean(entry.open_thread_count) && (
+                <span className="inline-flex items-center gap-1.5 text-[12px] before:content-['·'] before:mr-1.5 before:text-pro-border">
+                  <GitBranch className="h-3 w-3 text-pro-text-muted/60" />
+                  {entry.open_thread_count} open thread
+                  {entry.open_thread_count === 1 ? '' : 's'}
                 </span>
-                {Boolean(entry.open_thread_count) && (
-                  <span className="inline-flex items-center gap-1.5 text-[12px] before:content-['·'] before:mr-1.5 before:text-pro-border">
-                    <GitBranch className="h-3 w-3 text-pro-text-muted/60" />
-                    {entry.open_thread_count} open thread
-                    {entry.open_thread_count === 1 ? '' : 's'}
-                  </span>
-                )}
-                {entry.next_milestone && (
-                  <span className="text-[12px] before:content-['·'] before:mr-1.5 before:text-pro-border">
-                    Next: {entry.next_milestone}
-                  </span>
-                )}
-              </>
-            )}
+              )}
+              {entry.next_milestone && (
+                <span className="text-[12px] before:content-['·'] before:mr-1.5 before:text-pro-border">
+                  Next: {entry.next_milestone}
+                </span>
+              )}
+            </>
           </div>
         </div>
 
@@ -1074,11 +1022,7 @@ export function ProjectsOverview({
                         init.name,
                       );
                       const monogram = getProjectMonogram(initTitle);
-                      const palette = getProjectPalette(
-                        init.name,
-                        'current',
-                        init.status,
-                      );
+                      const palette = getProjectPalette(init.name, init.status);
                       return (
                         <button
                           key={init.id}
@@ -1119,10 +1063,6 @@ export function ProjectsOverview({
     (filter === 'all' || filter === 'side' || filter === 'current') &&
     sideProjects.length > 0;
 
-  const showEmptyPrimaryPrompt =
-    (filter === 'all' || filter === 'primary' || filter === 'current') &&
-    starredProjects.length === 0;
-
   const showCurrentAllSection =
     (filter === 'all' || filter === 'current') &&
     starredProjects.length === 0 &&
@@ -1132,9 +1072,6 @@ export function ProjectsOverview({
     (filter === 'all' || filter === 'topics' || filter === 'other') &&
     portfolio.radarTopics.length > 0;
 
-  const showSuggestedSection =
-    (filter === 'all' || filter === 'suggested') &&
-    portfolio.suggested.length > 0;
   const showCompletedSection =
     (filter === 'all' || filter === 'completed') &&
     portfolio.completed.length > 0;
@@ -1172,7 +1109,7 @@ export function ProjectsOverview({
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-[14.5px] font-semibold text-pro-text-main">
-            {portfolio.current.length} Active Initiative
+            {portfolio.current.length} project
             {portfolio.current.length === 1 ? '' : 's'}
             {portfolio.radarTopics.length > 0 && (
               <span className="font-normal text-pro-text-muted/70 text-sm ml-2">
@@ -1190,6 +1127,7 @@ export function ProjectsOverview({
           <button
             type="button"
             onClick={() => setFilter('all')}
+            aria-pressed={filter === 'all'}
             className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
               filter === 'all'
                 ? 'bg-white dark:bg-zinc-800 text-pro-text-main font-semibold shadow-xs'
@@ -1213,6 +1151,7 @@ export function ProjectsOverview({
               <button
                 type="button"
                 onClick={() => setFilter('primary')}
+                aria-pressed={filter === 'primary'}
                 className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
                   filter === 'primary'
                     ? 'bg-white dark:bg-zinc-800 text-amber-700 dark:text-amber-300 font-semibold shadow-xs'
@@ -1235,6 +1174,7 @@ export function ProjectsOverview({
                 <button
                   type="button"
                   onClick={() => setFilter('side')}
+                  aria-pressed={filter === 'side'}
                   className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
                     filter === 'side'
                       ? 'bg-white dark:bg-zinc-800 text-pro-text-main font-semibold shadow-xs'
@@ -1258,6 +1198,7 @@ export function ProjectsOverview({
             <button
               type="button"
               onClick={() => setFilter('current')}
+              aria-pressed={filter === 'current'}
               className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
                 filter === 'current'
                   ? 'bg-white dark:bg-zinc-800 text-pro-text-main font-semibold shadow-xs'
@@ -1281,6 +1222,7 @@ export function ProjectsOverview({
             <button
               type="button"
               onClick={() => setFilter('topics')}
+              aria-pressed={filter === 'topics'}
               className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
                 filter === 'topics' || filter === 'other'
                   ? 'bg-white dark:bg-zinc-800 text-pro-accent font-semibold shadow-xs'
@@ -1300,28 +1242,11 @@ export function ProjectsOverview({
             </button>
           )}
 
-          {portfolio.suggested.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setFilter('suggested')}
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
-                filter === 'suggested'
-                  ? 'bg-white dark:bg-zinc-800 text-amber-700 dark:text-amber-300 font-semibold shadow-xs'
-                  : 'text-amber-700/80 dark:text-amber-400/80 hover:text-amber-800 dark:hover:text-amber-300 hover:bg-amber-500/10 font-medium'
-              }`}
-            >
-              <Sparkles className="h-3 w-3 shrink-0" />
-              <span>Suggested</span>
-              <span className="rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[10px] tabular-nums font-semibold text-amber-800 dark:text-amber-300">
-                {portfolio.suggested.length}
-              </span>
-            </button>
-          )}
-
           {portfolio.completed.length > 0 && (
             <button
               type="button"
               onClick={() => setFilter('completed')}
+              aria-pressed={filter === 'completed'}
               className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
                 filter === 'completed'
                   ? 'bg-white dark:bg-zinc-800 text-emerald-700 dark:text-emerald-300 font-semibold shadow-xs'
@@ -1404,67 +1329,50 @@ export function ProjectsOverview({
                 data-testid="current-projects"
                 className="overflow-hidden rounded-xl border border-pro-border/60 bg-pro-surface/30 divide-y divide-pro-border/40 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
               >
-                {starredProjects.map((entry) => renderRow(entry, 'current'))}
+                {starredProjects.map((entry) => renderRow(entry))}
               </div>
             </section>
           )}
 
-          {/* EMPTY PRIMARY FOCUS PROMPT (When no projects are starred yet) */}
-          {showEmptyPrimaryPrompt && portfolio.current.length > 0 && (
-            <div className="mb-8 rounded-xl border border-dashed border-pro-border/80 bg-pro-surface/30 p-4 text-center">
-              <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 mb-2">
-                <Star className="h-4 w-4 fill-amber-400/30 text-amber-500" />
-              </div>
-              <p className="text-xs font-semibold text-pro-text-main">
-                Pin your Primary Focus
-              </p>
-              <p className="mt-0.5 text-[11.5px] text-pro-text-muted max-w-[55ch] mx-auto">
-                Click the star (★) on any initiative below to pin your 3–4 core
-                projects here for instant attention.
-              </p>
-            </div>
-          )}
-
           {/* ALL THEMES SECTION (When none starred yet) */}
-          {showCurrentAllSection && (
+          {showCurrentAllSection && activeSideProjects.length > 0 && (
             <section
               data-testid="current-projects"
               aria-label="Current projects"
               className="mb-12"
             >
               <div className="overflow-hidden rounded-xl border border-pro-border/60 bg-pro-surface/30 divide-y divide-pro-border/40 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                {(activeSideProjects.length > 0
-                  ? activeSideProjects
-                  : portfolio.current
-                ).map((entry) => renderRow(entry, 'current'))}
+                {activeSideProjects.map((entry) => renderRow(entry))}
               </div>
             </section>
           )}
 
           {/* ACTIVE INITIATIVES SECTION (When starred projects exist) */}
-          {showPrimarySection && activeSideProjects.length > 0 && (
-            <section
-              aria-labelledby="other-initiatives-heading"
-              className="mb-12"
-            >
-              <div className="mb-3.5 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <h2
-                    id="other-initiatives-heading"
-                    className="text-sm font-semibold text-pro-text-main"
-                  >
-                    Active initiatives
-                  </h2>
-                  <span className="rounded-full border border-pro-border/60 bg-pro-surface px-2 py-0.5 text-[11px] font-medium text-pro-text-muted">
-                    {activeSideProjects.length}
-                  </span>
+          {showSideSection &&
+            !showCurrentAllSection &&
+            activeSideProjects.length > 0 && (
+              <section
+                aria-labelledby="other-initiatives-heading"
+                className="mb-12"
+              >
+                <div className="mb-3.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <h2
+                      id="other-initiatives-heading"
+                      className="text-sm font-semibold text-pro-text-main"
+                    >
+                      Active initiatives
+                    </h2>
+                    <span className="rounded-full border border-pro-border/60 bg-pro-surface px-2 py-0.5 text-[11px] font-medium text-pro-text-muted">
+                      {activeSideProjects.length}
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div className="overflow-hidden rounded-xl border border-pro-border/60 bg-pro-surface/30 divide-y divide-pro-border/40 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                {activeSideProjects.map((entry) => renderRow(entry, 'current'))}
-              </div>
-            </section>
-          )}
+                <div className="overflow-hidden rounded-xl border border-pro-border/60 bg-pro-surface/30 divide-y divide-pro-border/40 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                  {activeSideProjects.map((entry) => renderRow(entry))}
+                </div>
+              </section>
+            )}
 
           {/* DORMANT INITIATIVES SECTION (Untouched for >30 days) */}
           {(showSideSection || showCurrentAllSection) &&
@@ -1487,36 +1395,35 @@ export function ProjectsOverview({
                   </span>
                 </summary>
                 <div className="border-t border-pro-border/40 divide-y divide-pro-border/40">
-                  {dormantProjects.map((entry) => renderRow(entry, 'current'))}
+                  {dormantProjects.map((entry) => renderRow(entry))}
                 </div>
               </details>
             )}
 
-          {portfolio.current.length === 0 && (
-            <div className="rounded-xl border border-pro-border/50 bg-pro-surface/20 px-6 py-12 text-center mb-10">
-              <h2 className="font-serif text-xl text-pro-text-main">
-                {search
-                  ? 'No matching focus themes'
-                  : synthesisState === 'running'
-                    ? 'Finding the themes that persist across conversations'
+          {portfolio.current.length === 0 &&
+            ['all', 'current', 'primary', 'side'].includes(filter) && (
+              <div className="rounded-xl border border-pro-border/50 bg-pro-surface/20 px-6 py-12 text-center mb-10">
+                <h2 className="font-serif text-xl text-pro-text-main">
+                  {search
+                    ? 'No matching focus themes'
                     : 'No durable themes established yet'}
-              </h2>
-              <p className="mx-auto mt-3 max-w-[58ch] text-sm leading-relaxed text-pro-text-muted">
-                {search
-                  ? 'Suggestions and discussed work remain searchable below.'
-                  : 'Pluto keeps one-off plans and topics out of your portfolio until another conversation reinforces them or you confirm them.'}
-              </p>
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch('')}
-                  className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-pro-border px-3 py-1.5 text-xs font-medium text-pro-text-main hover:bg-pro-hover"
-                >
-                  Clear search
-                </button>
-              )}
-            </div>
-          )}
+                </h2>
+                <p className="mx-auto mt-3 max-w-[58ch] text-sm leading-relaxed text-pro-text-muted">
+                  {search
+                    ? 'Suggestions and discussed work remain searchable below.'
+                    : 'Pluto keeps one-off plans and topics out of your portfolio until another conversation reinforces them or you confirm them.'}
+                </p>
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-pro-border px-3 py-1.5 text-xs font-medium text-pro-text-main hover:bg-pro-hover"
+                  >
+                    Clear search
+                  </button>
+                )}
+              </div>
+            )}
 
           {/* DISCUSSED TOPICS RADAR / WORK */}
           {showTopicRadarSection && (
@@ -1560,9 +1467,8 @@ export function ProjectsOverview({
                 )}
               </summary>
               <p className="mt-2.5 max-w-[68ch] text-xs leading-relaxed text-pro-text-muted">
-                Smaller discussion streams from meetings. File them under an
-                active initiative to organize related context, or keep them here
-                without crowding your portfolio.
+                Topics stay here until there’s enough context to connect them to
+                a project. You can also file them yourself.
               </p>
               <div className="mt-3 overflow-visible rounded-xl border border-pro-border/60 bg-pro-surface/25 divide-y divide-pro-border/40 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
                 {portfolio.radarTopics.map(renderRadarTopicRow)}
@@ -1570,74 +1476,29 @@ export function ProjectsOverview({
             </details>
           )}
 
-          {synthesisState !== 'idle' && (
-            <div
-              className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-pro-border/60 bg-pro-surface/60 px-4 py-2.5 text-xs text-pro-text-muted"
-              aria-live="polite"
-            >
-              <div className="flex items-center gap-2">
-                {synthesisState === 'running' && (
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full bg-pro-accent animate-pulse"
-                    aria-hidden="true"
-                  />
-                )}
-                <span>
-                  {synthesisState === 'failed'
-                    ? 'Pluto couldn’t refresh themes. Existing project context is unchanged.'
-                    : synthesisState === 'incomplete'
-                      ? 'Theme synthesis needs another attempt. Existing project context is unchanged.'
-                      : synthesisState === 'paused'
-                        ? 'Theme synthesis will resume when Pluto is free.'
-                        : 'Reconciling topics with existing projects and reviewing new themes.'}
-                </span>
-              </div>
-              {(synthesisState === 'failed' ||
-                synthesisState === 'incomplete') && (
+          {!loadError &&
+            (synthesisState === 'failed' ||
+              synthesisState === 'incomplete') && (
+              <div
+                className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-pro-text-muted"
+                aria-live="polite"
+              >
+                <span>Some project updates couldn’t finish.</span>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
                   <button
                     type="button"
                     className="shrink-0 rounded px-2 py-1 font-medium text-pro-accent underline underline-offset-4 hover:bg-pro-hover"
                     onClick={retry}
                   >
-                    Retry synthesis
+                    Retry updates
                   </button>
                   <ReportProblemButton
                     area="project_themes"
                     className="min-h-9 rounded px-2 py-1 font-medium text-pro-text-muted underline underline-offset-4 hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
                   />
                 </div>
-              )}
-            </div>
-          )}
-
-          {showSuggestedSection && (
-            <section className="mt-10" aria-labelledby="suggested-projects">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                  <h2
-                    id="suggested-projects"
-                    className="text-sm font-semibold text-pro-text-main"
-                  >
-                    Suggested themes
-                  </h2>
-                  <span className="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
-                    {portfolio.suggested.length} to review
-                  </span>
-                </div>
               </div>
-              <p className="mb-3 max-w-[65ch] text-xs leading-relaxed text-pro-text-muted">
-                These came from one conversation. Confirm the ones that reflect
-                real ongoing work, or dismiss them.
-              </p>
-              <div className="overflow-hidden rounded-xl border border-pro-border/60 bg-pro-surface/30 divide-y divide-pro-border/40 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                {portfolio.suggested.map((entry) =>
-                  renderRow(entry, 'suggested'),
-                )}
-              </div>
-            </section>
-          )}
+            )}
 
           {showCompletedSection && (
             <details
@@ -1654,9 +1515,7 @@ export function ProjectsOverview({
                 </div>
               </summary>
               <div className="mt-3 overflow-hidden rounded-xl border border-pro-border/60 bg-pro-surface/30 divide-y divide-pro-border/40 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                {portfolio.completed.map((entry) =>
-                  renderRow(entry, 'current'),
-                )}
+                {portfolio.completed.map((entry) => renderRow(entry))}
               </div>
             </details>
           )}
@@ -1860,7 +1719,6 @@ function QuickMergeModal({
                 const cMonogram = getProjectMonogram(cTitle);
                 const cPalette = getProjectPalette(
                   candidate.name,
-                  'current',
                   candidate.status,
                 );
 
@@ -1983,16 +1841,8 @@ function MergeConfirmModal({
   );
   const sourceMonogram = getProjectMonogram(sourceTitle);
   const destMonogram = getProjectMonogram(destTitle);
-  const sourcePalette = getProjectPalette(
-    source.name,
-    'current',
-    source.status,
-  );
-  const destPalette = getProjectPalette(
-    destination.name,
-    'current',
-    destination.status,
-  );
+  const sourcePalette = getProjectPalette(source.name, source.status);
+  const destPalette = getProjectPalette(destination.name, destination.status);
 
   if (typeof document === 'undefined') return null;
 

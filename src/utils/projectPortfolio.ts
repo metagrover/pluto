@@ -285,19 +285,23 @@ export function buildProjectPortfolio(
     const legacySingleSource =
       qualification?.state === 'qualified' &&
       qualification.source !== 'user' &&
+      !isProjectStarred(entry.metadata) &&
       !metadata.projectThemeSynthesis &&
       entry.meeting_count < 2;
 
     if (disposition === 'dismissed') {
       dismissed.push(enrichedEntry);
+    } else if (
+      qualification?.state === 'qualified' &&
+      entry.status === 'completed'
+    ) {
+      completed.push(enrichedEntry);
     } else if (legacySingleSource) {
       suggested.push(enrichedEntry);
       radarTopics.push(enrichedEntry);
     } else if (qualification?.state !== 'qualified') {
       other.push(enrichedEntry);
       if (entry.meeting_count > 0) radarTopics.push(enrichedEntry);
-    } else if (entry.status === 'completed') {
-      completed.push(enrichedEntry);
     } else {
       current.push(enrichedEntry);
       if (isProjectStarred(enrichedEntry.metadata)) {

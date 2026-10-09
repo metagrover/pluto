@@ -5,6 +5,10 @@ const fixture = vi.hoisted(() => ({
 }));
 vi.mock('electron', () => ({ app: { getPath: () => fixture.directory } }));
 import * as db from '../../electron/db';
+import {
+  type ProjectRoutingState,
+  routeProjectCandidate,
+} from '../../electron/projectRouting';
 afterAll(() => fs.rmSync(fixture.directory, { recursive: true, force: true }));
 it('counts established speakers instead of mentioned people and deduplicates merged identities', () => {
   const project = db.upsertEntity({
@@ -134,6 +138,64 @@ describe('evidence-backed routing to an existing pinned project', () => {
       name: parent.name,
       metadata: parent.metadata,
     });
+  });
+  it('retries a failed review through persistence and preserves reversible source history', async () => {
+    const { parent, candidate, membership } = routingFixture('automatic-retry');
+    const sources = [
+      {
+        id: membership.parentSourceMeetingId,
+        title: 'Parent planning',
+        notes: membership.parentEvidenceQuote,
+        candidateProjects: [{ id: parent.id, name: parent.name }],
+      },
+      {
+        id: membership.sourceMeetingId,
+        title: 'Candidate planning',
+        notes: membership.evidenceQuote,
+        candidateProjects: [{ id: candidate.id, name: candidate.name }],
+      },
+    ];
+    let state: ProjectRoutingState | null = null;
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce('invalid')
+      .mockResolvedValue(
+        JSON.stringify({ ...membership, relationship: 'alias' }),
+      );
+    const deps = {
+      listProjects: () =>
+        [parent, candidate].map((project) => db.getEntity(project.id)!),
+      getProject: db.getEntity,
+      listSources: () => sources,
+      getSource: (id: string) => sources.find((source) => source.id === id),
+      getState: () => state,
+      saveState: (next: ProjectRoutingState) => {
+        state = next;
+      },
+      saveMembership: db.saveProjectRoutingMembership,
+      generate,
+      isBusy: () => false,
+    };
+    expect(await routeProjectCandidate(deps)).toMatchObject({
+      failed: 1,
+      deferred: true,
+    });
+    expect(await routeProjectCandidate(deps)).toMatchObject({
+      grouped: 1,
+      failed: 0,
+    });
+    expect(db.resolveProjectIdentityId(candidate.id)).toBe(parent.id);
+    expect(
+      db.getProjectBrief(parent.id)?.meetings.map((meeting) => meeting.id),
+    ).toContain(membership.sourceMeetingId);
+    expect(db.getEntity(parent.id)?.metadata).toBe(parent.metadata);
+    expect(db.getMeeting(membership.sourceMeetingId)?.user_notes).toBe(
+      membership.evidenceQuote,
+    );
+    db.restoreProjectMerge(candidate.id);
+    expect(db.resolveProjectIdentityId(candidate.id)).toBe(candidate.id);
+    expect(await routeProjectCandidate(deps)).toMatchObject({ grouped: 0 });
+    expect(generate).toHaveBeenCalledTimes(2);
   });
   it('accepts parent evidence linked through a reversible alias', () => {
     const { parent, membership } = routingFixture('alias-source');

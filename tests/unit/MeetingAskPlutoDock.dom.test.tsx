@@ -1061,6 +1061,73 @@ describe('MeetingAskPlutoDock', () => {
     await act(async () => root.unmount());
   });
 
+  it('opens a minimized meeting conversation at its latest message', async () => {
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      'scrollHeight',
+    );
+    Object.defineProperty(Element.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => 1000,
+    });
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(
+          <MeetingAskPlutoDock
+            meeting={makeMeeting()}
+            conversation={[
+              { id: 'user-1', role: 'user', content: 'First question' },
+              { id: 'assistant-1', role: 'assistant', content: 'First answer' },
+              { id: 'user-2', role: 'user', content: 'Latest question' },
+              {
+                id: 'assistant-2',
+                role: 'assistant',
+                content: 'Latest answer',
+              },
+            ]}
+          />,
+        );
+      });
+
+      const thread = container.querySelector<HTMLElement>('[role="log"]')!;
+      thread.scrollTop = 0;
+      await act(async () => {
+        container
+          .querySelector<HTMLButtonElement>(
+            '[aria-label="Minimize Ask Pluto"]',
+          )!
+          .click();
+      });
+      expect(container.querySelector('[role="log"]')).toBeNull();
+
+      await act(async () => {
+        container
+          .querySelector<HTMLButtonElement>(
+            '[aria-label="Restore Ask Pluto conversation"]',
+          )!
+          .click();
+      });
+
+      expect(
+        container.querySelector<HTMLElement>('[role="log"]')?.scrollTop,
+      ).toBe(1000);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      if (originalScrollHeight) {
+        Object.defineProperty(
+          Element.prototype,
+          'scrollHeight',
+          originalScrollHeight,
+        );
+      } else {
+        Reflect.deleteProperty(Element.prototype, 'scrollHeight');
+      }
+    }
+  });
+
   it('does not move the viewport when controlled conversation content changes', async () => {
     const root = createRoot(container);
     const firstConversation: MeetingAskPlutoConversationMessage[] = [
