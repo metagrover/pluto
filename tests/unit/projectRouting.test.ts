@@ -234,7 +234,7 @@ describe('filing new work under established projects', () => {
     });
     deps.generate.mockResolvedValue('invalid');
     expect(await routeProjectCandidate(deps)).toMatchObject({
-      remaining: 1,
+      remaining: 2,
       failed: 1,
       deferred: true,
     });
@@ -368,13 +368,215 @@ describe('filing new work under established projects', () => {
     });
     expect(onDeferred).toHaveBeenCalledWith('routing_queue_remaining');
   });
-  it('retains failures for explicit retry while allowing the queue to progress', async () => {
+  it('bounds automatic retries and retains exhausted failures for explicit retry', async () => {
     const { deps } = fixture();
     deps.generate.mockResolvedValue('invalid');
     expect(await routeProjectCandidate(deps)).toMatchObject({ failed: 1 });
+    expect(await routeProjectCandidate(deps)).toMatchObject({
+      failed: 1,
+      remaining: 0,
+      deferred: false,
+    });
     await routeProjectCandidate(deps);
-    expect(deps.generate).toHaveBeenCalledTimes(1);
-    await routeProjectCandidate(deps, { retryFailed: true });
     expect(deps.generate).toHaveBeenCalledTimes(2);
+    await routeProjectCandidate(deps, { retryFailed: true });
+    expect(deps.generate).toHaveBeenCalledTimes(3);
   });
+  it('finds the relevant home beyond the first twenty established projects', async () => {
+    const { deps, projects, sources } = fixture();
+    for (let index = 0; index < 25; index++) {
+      projects.unshift({
+        ...projects[0],
+        id: `unrelated-${index}`,
+        name: `Office relocation ${index}`,
+      });
+      sources.unshift({
+        id: `unrelated-source-${index}`,
+        title: 'Office planning',
+        notes:
+          'Choose furniture and desks for the regional office lease renewal.',
+        startedAt: '2026-08-01',
+        candidateProjects: [
+          { id: `unrelated-${index}`, name: `Office relocation ${index}` },
+        ],
+      });
+    }
+    expect(await routeProjectCandidate(deps)).toMatchObject({ grouped: 1 });
+    const prompt = deps.generate.mock.calls[0][0];
+    const roots = JSON.parse(
+      prompt.split('KNOWN PROJECTS:\n')[1].split('\nCANDIDATE:')[0],
+    );
+    expect(roots).toHaveLength(8);
+    expect(roots[0].id).toBe('root');
+  });
+
+  it('keeps a pinned home available when other homes have stronger vocabulary overlap', async () => {
+    const { deps, projects, sources } = fixture();
+    sources[0].notes =
+      'Beacon delivers secure digital collections for external organizations.';
+    for (let index = 0; index < 10; index++) {
+      const meta = JSON.parse(projects[0].metadata);
+      meta.projectStarred = false;
+      meta.projectQualification.source = 'user';
+      projects.push({
+        ...projects[0],
+        id: `other-${index}`,
+        metadata: JSON.stringify(meta),
+      });
+      sources.push({
+        ...sources[1],
+        id: `other-source-${index}`,
+        candidateProjects: [
+          { id: `other-${index}`, name: 'Permissions hardening' },
+        ],
+      });
+    }
+    deps.generate.mockResolvedValue(JSON.stringify({ relationship: 'none' }));
+    await routeProjectCandidate(deps);
+    const roots = JSON.parse(
+      deps.generate.mock.calls[0][0]
+        .split('KNOWN PROJECTS:\n')[1]
+        .split('\nCANDIDATE:')[0],
+    );
+    expect(roots.some((root: { id: string }) => root.id === 'root')).toBe(true);
+    expect(roots.length).toBeLessThanOrEqual(16);
+    expect(deps.saveMembership).not.toHaveBeenCalled();
+  });
+
+  it('exposes filed workstream names separately from aliases and unrelated co-mentions', async () => {
+    const { deps, projects, sources } = fixture();
+    projects.push({
+      ...projects[1],
+      id: 'filed',
+      name: 'Collection access',
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'subordinate',
+          source: 'user',
+          reason: 'Filed',
+          assessedAt: '2026-09-01',
+          parentProjectId: 'root',
+        },
+      }),
+    });
+    sources[0].candidateProjects = [
+      { id: 'filed', name: 'Collection access' },
+      { id: 'unrelated', name: 'Office relocation' },
+    ];
+    await routeProjectCandidate(deps);
+    const roots = JSON.parse(
+      deps.generate.mock.calls[0][0]
+        .split('KNOWN PROJECTS:\n')[1]
+        .split('\nCANDIDATE:')[0],
+    );
+    expect(roots[0].workstreamNames).toEqual(['Collection access']);
+    expect(roots[0].alternateNames).toEqual([]);
+  });
+
+  it.each([
+    'invalid-json',
+    'provider-error',
+    'invalid-evidence',
+    'rejected-write',
+  ])(
+    'automatically recovers from %s without changed evidence',
+    async (failure) => {
+      const { deps, response } = fixture();
+      if (failure === 'invalid-json')
+        deps.generate.mockResolvedValueOnce('invalid');
+      if (failure === 'provider-error')
+        deps.generate.mockRejectedValueOnce(new Error('provider unavailable'));
+      if (failure === 'invalid-evidence')
+        deps.generate.mockResolvedValueOnce(
+          JSON.stringify({
+            ...response,
+            evidenceQuote: 'Fabricated evidence from a model.',
+          }),
+        );
+      if (failure === 'rejected-write')
+        deps.saveMembership.mockReturnValueOnce(false);
+      expect(await routeProjectCandidate(deps)).toMatchObject({
+        failed: 1,
+        remaining: 1,
+        deferred: true,
+      });
+      expect(await routeProjectCandidate(deps)).toMatchObject({
+        grouped: 1,
+        failed: 0,
+        remaining: 0,
+        deferred: false,
+      });
+      await routeProjectCandidate(deps);
+      expect(deps.generate).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('reviews other candidates before retrying a failed one', async () => {
+    const { deps, projects, sources } = fixture();
+    projects.push({ ...projects[1], id: 'next', name: 'Next work' });
+    sources.push({
+      ...sources[1],
+      id: 'next-source',
+      startedAt: '2026-09-01',
+      candidateProjects: [{ id: 'next', name: 'Next work' }],
+    });
+    deps.generate
+      .mockResolvedValueOnce('invalid')
+      .mockResolvedValueOnce(JSON.stringify({ relationship: 'none' }));
+    await routeProjectCandidate(deps);
+    expect(await routeProjectCandidate(deps)).toMatchObject({ remaining: 1 });
+    const candidate = JSON.parse(
+      deps.generate.mock.calls[1][0].split('CANDIDATE:\n')[1],
+    );
+    expect(candidate.id).toBe('next');
+  });
+
+  it('retries legacy failed records and resets exhausted retries when evidence changes', async () => {
+    const { deps, sources } = fixture();
+    deps.generate.mockResolvedValue('invalid');
+    await routeProjectCandidate(deps);
+    const state = deps.getState()!;
+    state.attempts.new.failureCount = undefined;
+    expect(await routeProjectCandidate(deps)).toMatchObject({
+      failed: 1,
+      remaining: 0,
+    });
+    await routeProjectCandidate(deps);
+    expect(deps.generate).toHaveBeenCalledTimes(2);
+    sources[1].notes += ' Partner validation is required before launch.';
+    expect(await routeProjectCandidate(deps)).toMatchObject({
+      failed: 1,
+      remaining: 1,
+    });
+    expect(deps.generate).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not retry a valid decision to keep projects separate', async () => {
+    const { deps } = fixture();
+    deps.generate.mockResolvedValue(JSON.stringify({ relationship: 'none' }));
+    await routeProjectCandidate(deps);
+    await routeProjectCandidate(deps, { retryFailed: true });
+    expect(deps.generate).toHaveBeenCalledTimes(1);
+    expect(deps.saveMembership).not.toHaveBeenCalled();
+  });
+
+  it.each(['rename-parent', 'complete-parent', 'complete-candidate'])(
+    'defers when %s occurs during review',
+    async (change) => {
+      const { deps, projects, response } = fixture();
+      deps.generate.mockImplementation(async () => {
+        if (change === 'rename-parent') projects[0].name = 'Different outcome';
+        if (change === 'complete-parent') projects[0].status = 'completed';
+        if (change === 'complete-candidate') projects[1].status = 'completed';
+        return JSON.stringify(response);
+      });
+      expect(await routeProjectCandidate(deps)).toMatchObject({
+        grouped: 0,
+        deferred: true,
+      });
+      expect(deps.saveMembership).not.toHaveBeenCalled();
+      expect(deps.getState()).toBeNull();
+    },
+  );
 });
