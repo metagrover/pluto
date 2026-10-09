@@ -240,6 +240,45 @@ describe('createActiveCallDetector', () => {
     expect(runAudioProbe).toHaveBeenCalledTimes(2);
   });
 
+  it.each(['desktop', 'browser'])(
+    'does not report a closed tab when a silent %s meeting is still open',
+    async (kind) => {
+      setPlatform('darwin');
+      const detector = createDetector({
+        processes: [
+          {
+            pid: 601,
+            ppid: 1,
+            name: 'google chrome',
+            command:
+              '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          },
+          kind === 'desktop'
+            ? {
+                pid: 602,
+                ppid: 1,
+                name: 'Microsoft Teams',
+                command:
+                  '/Applications/Microsoft Teams.app/Contents/MacOS/Microsoft Teams',
+              }
+            : {
+                pid: 602,
+                ppid: 1,
+                name: 'Safari',
+                command: '/Applications/Safari.app/Contents/MacOS/Safari',
+              },
+        ],
+        runAudioProbe: vi.fn(async () => false),
+        browserProviders:
+          kind === 'browser' ? new Map([['Safari', 'google-meet']]) : new Map(),
+      });
+      expect(await detector()).toMatchObject({
+        active: false,
+        reason: 'call-app-running-without-target-audio',
+      });
+    },
+  );
+
   it('reports when browser meeting-tab inspection is unavailable', async () => {
     setPlatform('darwin');
     const runAudioProbe = vi.fn(async () => true);

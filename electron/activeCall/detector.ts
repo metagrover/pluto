@@ -541,8 +541,8 @@ export const createActiveCallDetector = ({
 
     const firstMatchedApp = matchedApps[0];
     const browserCallTabClosed =
-      Boolean(firstMatchedApp?.browserId) &&
-      !browserCallProviderByLabel.has(firstMatchedApp.label);
+      matchedApps.every((matched) => Boolean(matched.browserId)) &&
+      browserCallProviderByLabel.size === 0;
     const browserInspectionUnavailable = matchedApps.some(
       (matched) =>
         Boolean(matched.browserId) &&

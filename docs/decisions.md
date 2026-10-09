@@ -1669,3 +1669,12 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Decision:** Offer only Ollama and OpenRouter in provider setup and current user-facing setup documentation. Hide direct OpenAI, Gemini, and Claude selection, model fields, and credential controls until their complete key-entry and live inference flows receive acceptance testing.
 - **Compatibility:** Retain provider implementations and saved settings/credentials. This is a setup-surface restriction, not a migration or automatic provider switch; previously configured providers are not silently rerouted. Settings directs those users to choose an available provider explicitly.
 - **Revisit:** Restore each direct provider only after testing credential entry, secure storage, validation and error recovery, and representative inference workflows end to end. Automated or mocked tests alone do not establish live-provider acceptance.
+
+
+## 2026-10-08 - Preserve recordings through quiet breaks
+
+- **Status:** Accepted.
+- **Supersedes:** The inactivity grace and silence fallback in “2026-10-05 - End detected calls promptly and cap the silence fallback at 30 seconds,” and the silence-based auto-stop portion of “2026-09-04 - Proactive calendar session auto-naming, start prompts, and silence-based auto-stop.”
+- **Decision:** Silence, missing audio, another active app, and scheduled calendar end times do not end a recording. Remove the silence watchdog and its setting; existing stored silence preferences are ignored without modifying user data. The auto-end toggle continues to control stopping on detected app exit or browser call-tab closure after a call has been tracked.
+- **Evidence:** Browser closure requires no supported call tab in any inspected browser and no matched desktop call app. Missing browser inspection remains inconclusive. Ambiguous detection keeps recording; users can stop manually when an app or tab remains open after a call.
+- **Preservation:** Confirmed exits retain the shared stop callback, capture-journal sealing, and transcript finalization. No recordings, transcripts, or historical stop reasons are rewritten.

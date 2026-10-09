@@ -33,7 +33,6 @@ import {
   cloudConsentSettingKey,
 } from '../../../electron/llm/providerCatalog';
 import { useAppUpdate } from '../../api/updater';
-import type { SilenceAutoStopDuration } from '../../autoStop/silenceWatchdog';
 import type { AppTheme } from '../../types/theme';
 import {
   OLLAMA_GENERAL_MODEL,
@@ -66,8 +65,6 @@ interface SettingsTabProps {
   setCalendarAutoNameEnabled?: (val: boolean) => void;
   calendarPromptEnabled?: boolean;
   setCalendarPromptEnabled?: (val: boolean) => void;
-  silenceAutoStopDuration?: SilenceAutoStopDuration;
-  setSilenceAutoStopDuration?: (val: SilenceAutoStopDuration) => void;
   fasterNotesEnabled?: boolean;
   setFasterNotesEnabled?: (val: boolean) => void;
   meetingNotesTemplateSettings?: MeetingNotesTemplateSettingsSnapshot;
@@ -307,8 +304,6 @@ export const SettingsTab = ({
   setCalendarAutoNameEnabled,
   calendarPromptEnabled = true,
   setCalendarPromptEnabled,
-  silenceAutoStopDuration = '0.5',
-  setSilenceAutoStopDuration,
   fasterNotesEnabled = true,
   setFasterNotesEnabled,
   meetingNotesTemplateSettings = defaultMeetingNotesTemplateSettings,
@@ -957,7 +952,7 @@ export const SettingsTab = ({
 
             <SettingsRow
               label="Auto-end recording"
-              helper="Stop automatically when the call app closes or audio goes silent."
+              helper="Stop automatically when call closure is detected. Quiet breaks and the scheduled end time do not stop recording."
               actionControl
             >
               <Toggle
@@ -1038,27 +1033,6 @@ export const SettingsTab = ({
                     'calendar_prompt_enabled',
                     next ? 'true' : 'false',
                   );
-                }}
-              />
-            </SettingsRow>
-
-            <SettingsRow
-              label="Auto-stop on prolonged silence"
-              helper="Stop recording after 30 seconds of continuous silence once the scheduled meeting ends, or when conference audio is quiet with no scheduled meeting."
-              actionControl={false}
-            >
-              <SearchSelect
-                ariaLabel="Auto-stop on prolonged silence duration"
-                value={silenceAutoStopDuration || '0.5'}
-                searchable={false}
-                options={[
-                  { value: '0.5', label: '30 seconds (Default)' },
-                  { value: 'disabled', label: 'Disabled' },
-                ]}
-                onValueChange={(value) => {
-                  const val = value as SilenceAutoStopDuration;
-                  setSilenceAutoStopDuration?.(val);
-                  persistSetting('silence_auto_stop_duration', val);
                 }}
               />
             </SettingsRow>

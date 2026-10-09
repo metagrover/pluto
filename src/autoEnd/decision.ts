@@ -1,5 +1,4 @@
 export const GRACE_SHORT_MS = 0;
-export const GRACE_LONG_MS = 20_000;
 
 export type PollInput = {
   active: boolean;
@@ -62,15 +61,6 @@ export function autoEndDecision(input: AutoEndInput): AutoEndAction {
     };
   }
 
-  // Tracked app is inactive — start grace if not already running
-  if (!graceActive) {
-    return {
-      type: 'start_grace',
-      graceMs: GRACE_LONG_MS,
-      reasonCode: 'audio_inactive_timeout',
-    };
-  }
-
-  // Grace already running, let it continue
-  return { type: 'no_op' };
+  // Silence, missing audio, or a different active app does not prove call exit.
+  return graceActive ? { type: 'cancel_grace' } : { type: 'no_op' };
 }

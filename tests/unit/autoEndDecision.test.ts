@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  GRACE_LONG_MS,
-  GRACE_SHORT_MS,
-  autoEndDecision,
-} from '../../src/autoEnd/decision';
+import { GRACE_SHORT_MS, autoEndDecision } from '../../src/autoEnd/decision';
 
 describe('autoEndDecision', () => {
   it.each([false, true])(
@@ -146,7 +142,7 @@ describe('autoEndDecision', () => {
     });
   });
 
-  it('returns start_grace (20s) when tracked app running but no audio', () => {
+  it('keeps recording when tracked app running but no audio', () => {
     const result = autoEndDecision({
       poll: {
         active: false,
@@ -157,11 +153,7 @@ describe('autoEndDecision', () => {
       trackedApp: 'Zoom',
       graceActive: false,
     });
-    expect(result).toEqual({
-      type: 'start_grace',
-      graceMs: GRACE_LONG_MS,
-      reasonCode: 'audio_inactive_timeout',
-    });
+    expect(result).toEqual({ type: 'no_op' });
   });
 
   it('returns start_grace (0s) when a tracked browser meeting tab closes', () => {
@@ -218,7 +210,7 @@ describe('autoEndDecision', () => {
   // Edge cases: Different app active (not tracked)
   // =============================================
 
-  it('returns start_grace when a different app is active (not the tracked one)', () => {
+  it('keeps recording when a different app is active (not the tracked one)', () => {
     const result = autoEndDecision({
       poll: {
         active: true,
@@ -229,14 +221,10 @@ describe('autoEndDecision', () => {
       trackedApp: 'Zoom',
       graceActive: false,
     });
-    expect(result).toEqual({
-      type: 'start_grace',
-      graceMs: GRACE_LONG_MS,
-      reasonCode: 'audio_inactive_timeout',
-    });
+    expect(result).toEqual({ type: 'no_op' });
   });
 
-  it('returns no_op when different app is active and grace already running for tracked app', () => {
+  it('cancels pending grace when a different app is active', () => {
     const result = autoEndDecision({
       poll: {
         active: true,
@@ -247,7 +235,7 @@ describe('autoEndDecision', () => {
       trackedApp: 'Zoom',
       graceActive: true,
     });
-    expect(result).toEqual({ type: 'no_op' });
+    expect(result).toEqual({ type: 'cancel_grace' });
   });
 
   // =============================================
@@ -256,9 +244,5 @@ describe('autoEndDecision', () => {
 
   it('GRACE_SHORT_MS is immediate', () => {
     expect(GRACE_SHORT_MS).toBe(0);
-  });
-
-  it('GRACE_LONG_MS is 20 seconds', () => {
-    expect(GRACE_LONG_MS).toBe(20_000);
   });
 });
