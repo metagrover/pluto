@@ -34,6 +34,9 @@ jobs:
       - name: Validate changelog fragments
         run: pnpm run changelog:check
 
+      - name: Validate database migrations
+        run: pnpm run db:verify
+
       - name: Run lint
         run: pnpm run lint
 

@@ -66,6 +66,7 @@
     "changelog:build": "node scripts/changelog.mjs build",
     "db:generate": "drizzle-kit generate --name",
     "db:check": "drizzle-kit check",
+    "db:verify": "node scripts/check_migrations.mjs && pnpm run db:check",
     "backfill:meeting-intelligence": "node scripts/backfill_meeting_title_analysis.mjs",
     "build:notifications": "node scripts/build_notifications.mjs",
     "ensure:notifications": "node scripts/build_notifications.mjs --ensure"
