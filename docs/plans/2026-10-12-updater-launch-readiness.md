@@ -1,6 +1,6 @@
 # Update reliability: separate public-launch blocker
 
-Status: candidate CI and standard-profile acceptance passed; encrypted-profile acceptance awaits macOS Keychain consent. Keep this launch blocker open until that check completes.
+Status: closed for candidate `be0946b4a55d737b84a672ee86321c36cfee4f1c`. Candidate CI, standard and encrypted profile upgrades, direct migrations, retained data/models, and real macOS permission recovery passed on October 12. Recording shutdown remains a separate gate. Re-run acceptance if application, installer, migration, or signing behavior changes before release.
 
 ## Contract
 
@@ -34,12 +34,12 @@ The October 12 check used disposable installation directories and fictional test
 - Every seeded meeting column survived exactly, including fictional transcript, user notes, generated notes, favorite flag, timestamps, and original audio path. All baseline settings were unchanged. The original audio hash and all 63 verified model-file hashes matched. The full app reused the model cache.
 - A separate copy of the saved rc.11 database was opened directly by the exact candidate: 18 migrations became 20. Meeting values remained identical; SQLite integrity and foreign-key checks passed. The standard upgraded profile passed the same checks.
 - The real installer reset Pluto's macOS permissions after the ad-hoc signature changed. The first recording attempt encountered blocked microphone access and displayed the recovery dialog. Refreshing the existing microphone grant in System Settings and restarting the selected profile restored recording: the full candidate showed healthy microphone and system audio, then finished a brief recording normally. Permission recovery can require this user action; a successful installer reset alone does not prove recording readiness.
-- Encrypted-profile acceptance is pending the user's macOS Keychain prompt. No key material or production meeting data belongs in this report or the PR.
+- Encrypted-profile acceptance passed after the user handled macOS Keychain consent. Published rc.17 created the encrypted profile; its updater installed the exact candidate and reopened that profile. After a fresh candidate restart, all seeded meeting fields matched exactly, the test setting and theme survived, the key-envelope hash was unchanged, the database remained non-plaintext, and the model capability was ready with all 63 model-file hashes unchanged. No key material or production meeting data belongs in this report or the PR.
 
 Local detailed evidence is in `/tmp/pluto-full-upgrade/acceptance.json` and the adjacent test snapshots. These are disposable local evidence, not repository fixtures. No release was published.
 
 ## Public launch gate
 
-Keep this blocker separate from recording shutdown. Close it after the exact candidate installer CI is green and a candidate upgrade between full Pluto releases has been exercised on an installed test profile, including startup/migration, retained meetings/settings/models, and macOS permission behavior. The first release containing these changes cannot retroactively replace the updater bundled inside older installed builds; users whose old updater is stuck may require the existing manual installer once.
+This blocker is closed separately from recording shutdown based on the evidence above. The unpublished candidate was tested as a full signed application using the exact CI installer, with only its download transport substituted; the final release still requires the normal exact-commit release workflow. The first release containing these changes cannot retroactively replace the updater bundled inside older installed builds; users whose old updater is stuck may require the existing manual installer once. Ad-hoc signature changes can require users to refresh permissions and restart; uninterrupted permission grants are not promised.
 
-The legacy rc.11 relaunch unexpectedly opened the default profile as described above; no production-data edits were performed. The user authorized the account-wide, Pluto-only permission reset. Public release publication is outside this verification task.
+The legacy rc.11 relaunch unexpectedly opened the default profile as described above; it was closed without manual data edits. Background startup writes were not audited. The user authorized the account-wide, Pluto-only permission reset. Public release publication is outside this verification task.
