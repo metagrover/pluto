@@ -476,6 +476,14 @@ export class UpdateChecker {
     const win = this.getWindow();
     if (win && !win.isDestroyed()) {
       try {
+        const phase = this.currentStatus.update?.phase;
+        win.setProgressBar(
+          phase && phase !== 'failed' && phase !== 'complete' ? 2 : -1,
+        );
+      } catch {
+        /* Dock feedback is best effort. */
+      }
+      try {
         win.webContents.send(
           'pluto-updater:status-changed',
           this.currentStatus,
