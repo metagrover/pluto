@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   UpdateApplyResult,
   UpdateInfo,
@@ -60,16 +60,25 @@ export const useAppUpdate = () => {
     checkedAt: Date.now(),
   });
   const [isChecking, setIsChecking] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
+  const [requestPending, setRequestPending] = useState(false);
+  const requestRef = useRef(false);
+  const activePhase = status.update?.phase;
+  const isUpdating =
+    requestPending ||
+    (!!activePhase && activePhase !== 'failed' && activePhase !== 'complete');
   const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    getUpdateStatus().then((initial) => {
-      if (mounted && initial) setStatus(initial);
-    });
+    let receivedStatus = false;
+    getUpdateStatus()
+      .then((initial) => {
+        if (mounted && !receivedStatus && initial) setStatus(initial);
+      })
+      .catch(() => {});
 
     const unsubscribe = subscribeToUpdateStatus((newStatus) => {
+      receivedStatus = true;
       if (mounted) setStatus(newStatus);
     });
 
@@ -92,15 +101,19 @@ export const useAppUpdate = () => {
   };
 
   const handleApplyUpdate = async () => {
+    if (requestRef.current || isUpdating) return;
+    requestRef.current = true;
     setUpdateError(null);
-    setIsUpdating(true);
+    setRequestPending(true);
     try {
       const result = await applyUpdate();
       if (!result.started) setUpdateError(result.error);
+      else setStatus(await getUpdateStatus());
     } catch (error) {
       setUpdateError(error instanceof Error ? error.message : String(error));
     } finally {
-      setIsUpdating(false);
+      requestRef.current = false;
+      setRequestPending(false);
     }
   };
 
@@ -108,7 +121,8 @@ export const useAppUpdate = () => {
     status,
     isChecking,
     isUpdating,
-    updateError,
+    updateError:
+      status.update?.phase === 'failed' ? status.update.message : updateError,
     checkNow: handleCheckNow,
     applyUpdate: handleApplyUpdate,
     openReleaseUrl,

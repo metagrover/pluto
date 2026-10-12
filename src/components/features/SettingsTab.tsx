@@ -1441,9 +1441,10 @@ export const SettingsTab = ({
             <SettingsRow
               label="Pluto Version"
               helper={
-                updateStatus.hasUpdate
+                updateStatus.update?.message ||
+                (updateStatus.hasUpdate
                   ? `Update ${updateStatus.latestVersion} is available. Current version: v${updateStatus.currentVersion || '0.1.0'}.`
-                  : `Pluto is up to date (v${updateStatus.currentVersion || '0.1.0'}).`
+                  : `Pluto is up to date (v${updateStatus.currentVersion || '0.1.0'}).`)
               }
               actionControl
             >

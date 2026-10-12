@@ -86,6 +86,9 @@ jobs:
           pnpm run test:installer
           pnpm exec vitest run
 
+      - name: Verify updater lifecycle
+        run: node scripts/verify_update_flow.mjs /tmp/pluto-update-flow.json
+
       - name: Build Native Runtimes
         run: pnpm run build-native
 

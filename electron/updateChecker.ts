@@ -15,7 +15,31 @@ export interface UpdateInfo {
   releaseNotes?: string;
   checkedAt: number;
   error?: string;
+  update?: { phase: UpdatePhase; message: string };
 }
+
+export type UpdatePhase =
+  | 'preparing'
+  | 'downloading'
+  | 'verifying'
+  | 'ready'
+  | 'quitting'
+  | 'installing'
+  | 'restarting'
+  | 'failed'
+  | 'complete';
+const UPDATE_MESSAGES: Record<UpdatePhase, string> = {
+  preparing: 'Preparing update…',
+  downloading: 'Downloading update… You can keep Pluto open.',
+  verifying: 'Verifying update…',
+  ready: 'Update verified. Preparing to restart…',
+  quitting:
+    'Closing Pluto to install the update. It will reopen automatically.',
+  installing: 'Installing update…',
+  restarting: 'Reopening Pluto…',
+  failed: 'Update failed. Retry when you are ready.',
+  complete: 'Pluto is up to date.',
+};
 
 export type UpdateApplyResult =
   | { started: true }
@@ -86,20 +110,16 @@ exec >> "$PLUTO_UPDATE_LOG" 2>&1
 finish() {
   status=$?
   if [[ $status != 0 ]]; then
-    printf 'Update failed (exit %s). See the update log for details.\n' "$status" > "$PLUTO_UPDATE_RESULT"
-    open -na "$PLUTO_UPDATE_APP" --args "--user-data-dir=$PLUTO_UPDATE_USER_DATA" || true
+    phase=$(cat "$PLUTO_UPDATE_PROGRESS" 2>/dev/null || echo preparing)
+    detail=$(cat "$PLUTO_UPDATE_ERROR" 2>/dev/null || echo 'See the update log for details.')
+    printf 'Update failed during %s (exit %s). %s\\n' "$phase" "$status" "$detail" > "$PLUTO_UPDATE_RESULT"
+    if [[ -e "$PLUTO_UPDATE_COMMIT" ]] && ! kill -0 "$PLUTO_UPDATE_PARENT_PID" 2>/dev/null; then
+      open -na "$PLUTO_UPDATE_APP" --args "--user-data-dir=$PLUTO_UPDATE_USER_DATA" || true
+    fi
   fi
   rm -rf "$PLUTO_UPDATE_SCRATCH"
 }
 trap finish EXIT
-for ((attempt=0; attempt<60; attempt++)); do
-  kill -0 "$PLUTO_UPDATE_PARENT_PID" 2>/dev/null || break
-  sleep 1
-done
-if kill -0 "$PLUTO_UPDATE_PARENT_PID" 2>/dev/null; then
-  echo 'Pluto did not finish shutting down. Nothing was installed.'
-  exit 1
-fi
 /bin/bash "$PLUTO_UPDATE_INSTALLER" --directory "$PLUTO_UPDATE_DIRECTORY" --tag "$PLUTO_UPDATE_TAG" --user-data-dir "$PLUTO_UPDATE_USER_DATA"
 `;
 
@@ -108,6 +128,22 @@ export class UpdateChecker {
   private intervalTimer: NodeJS.Timeout | null = null;
   private initialTimer: NodeJS.Timeout | null = null;
   private applying = false;
+  private attempt = 0;
+  private applyPromise: Promise<UpdateApplyResult> | null = null;
+  private progressTimer: ReturnType<typeof setInterval> | null = null;
+  public get isApplying(): boolean {
+    return this.applying;
+  }
+
+  private progress(phase: UpdatePhase, message = UPDATE_MESSAGES[phase]) {
+    if (
+      this.currentStatus.update?.phase === phase &&
+      this.currentStatus.update.message === message
+    )
+      return;
+    this.currentStatus = { ...this.currentStatus, update: { phase, message } };
+    this.broadcastStatus();
+  }
   private canUpdate: () => boolean;
   private getWindow: () => Electron.BrowserWindow | null;
 
@@ -129,6 +165,7 @@ export class UpdateChecker {
   }
 
   public async checkForUpdates(): Promise<UpdateInfo> {
+    if (this.applying) return this.currentStatus;
     const currentVersion = app.getVersion() || '0.1.0';
     try {
       const response = await fetch(
@@ -147,6 +184,7 @@ export class UpdateChecker {
       }
 
       const releases: unknown = await response.json();
+      if (this.applying) return this.currentStatus;
       if (!Array.isArray(releases))
         throw new Error('Invalid GitHub releases response.');
       const data = newestInstallableRelease(releases);
@@ -160,6 +198,10 @@ export class UpdateChecker {
       );
 
       this.currentStatus = {
+        update:
+          hasUpdate && this.currentStatus.update?.phase === 'complete'
+            ? undefined
+            : this.currentStatus.update,
         hasUpdate,
         currentVersion,
         latestVersion: latestTag,
@@ -179,12 +221,13 @@ export class UpdateChecker {
       this.broadcastStatus();
       return this.currentStatus;
     } catch (err) {
+      if (this.applying) return this.currentStatus;
       const message = err instanceof Error ? err.message : String(err);
       log.warn('GitHub release check failed', {
         error: message,
       });
       this.currentStatus = {
-        hasUpdate: false,
+        ...this.currentStatus,
         currentVersion,
         checkedAt: Date.now(),
         error: message,
@@ -194,10 +237,20 @@ export class UpdateChecker {
     }
   }
 
-  public async applyUpdate(): Promise<UpdateApplyResult> {
-    if (this.applying)
-      return { started: false, error: 'An update is already starting.' };
+  public applyUpdate(): Promise<UpdateApplyResult> {
+    if (this.applyPromise) return this.applyPromise;
+    if (this.applying) return Promise.resolve({ started: true });
     this.applying = true;
+    this.progress('preparing');
+    const pending = this.startUpdate(++this.attempt);
+    this.applyPromise = pending;
+    void pending.finally(() => {
+      if (this.applyPromise === pending) this.applyPromise = null;
+    });
+    return pending;
+  }
+
+  private async startUpdate(attempt: number): Promise<UpdateApplyResult> {
     let scratch: string | undefined;
     let handedOff = false;
     try {
@@ -247,6 +300,12 @@ export class UpdateChecker {
       await writeFile(installerPath, installer, { mode: 0o600 });
       await writeFile(workerPath, UPDATE_WORKER_SCRIPT, { mode: 0o600 });
       await rm(this.resultPath(), { force: true });
+      await rm(join(app.getPath('userData'), 'update-target.txt'), {
+        force: true,
+      });
+      const progressPath = join(scratch, 'progress');
+      const commitPath = join(scratch, 'commit');
+      const cancelPath = join(scratch, 'cancel');
       // Recheck after downloading: a meeting could have started meanwhile.
       if (!this.canUpdate())
         throw new Error('Stop your recording before updating.');
@@ -255,6 +314,14 @@ export class UpdateChecker {
         stdio: 'ignore',
         env: {
           ...process.env,
+          PLUTO_UPDATE_PROGRESS: progressPath,
+          PLUTO_UPDATE_COMMIT: commitPath,
+          PLUTO_UPDATE_CANCEL: cancelPath,
+          PLUTO_UPDATE_ERROR: join(scratch, 'error'),
+          PLUTO_UPDATE_TARGET: join(
+            app.getPath('userData'),
+            'update-target.txt',
+          ),
           PLUTO_UPDATE_LOG: logPath,
           PLUTO_UPDATE_RESULT: this.resultPath(),
           PLUTO_UPDATE_APP: appPath,
@@ -271,23 +338,77 @@ export class UpdateChecker {
         child.once('error', reject);
       });
       if (!this.canUpdate()) {
-        child.kill();
-        throw new Error('Stop your recording before updating.');
+        await writeFile(cancelPath, 'cancel');
       }
+      let finished = false;
+      let quitRequested = false;
+      let polling = false;
+      const poll = async () => {
+        if (polling || !this.applying) return;
+        polling = true;
+        try {
+          const phase = (
+            await readFile(progressPath, 'utf8')
+          ).trim() as UpdatePhase;
+          if (finished || !(phase in UPDATE_MESSAGES)) return;
+          if (phase === 'ready' && !quitRequested) {
+            quitRequested = true;
+            if (!this.canUpdate()) {
+              await writeFile(cancelPath, 'cancel');
+              return;
+            }
+            await writeFile(commitPath, 'install', { mode: 0o600 });
+            this.progress('quitting');
+            app.quit();
+          } else if (!quitRequested) this.progress(phase);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+            log.warn('Could not read update progress', error);
+        } finally {
+          polling = false;
+        }
+      };
+      this.progressTimer = setInterval(() => {
+        void poll();
+      }, 250);
+      this.progressTimer.unref?.();
+      const exited = () => {
+        if (finished) return;
+        finished = true;
+        if (this.progressTimer) clearInterval(this.progressTimer);
+        this.progressTimer = null;
+        void this.showPreviousUpdateFailure().then((reported) => {
+          if (!reported && this.attempt === attempt) {
+            this.applying = false;
+            this.progress(
+              'failed',
+              'The update installer stopped before completion. Retry the update.',
+            );
+          }
+        });
+      };
+      child.once('exit', exited);
+      if (child.exitCode != null || child.signalCode != null) exited();
       child.unref();
       scratch = undefined; // The detached helper owns cleanup from here.
       handedOff = true;
-      app.quit();
       return { started: true };
     } catch (error) {
       log.warn('Update could not start', error);
+      this.progress(
+        'failed',
+        error instanceof Error ? error.message : String(error),
+      );
       return {
         started: false,
         error: error instanceof Error ? error.message : String(error),
       };
     } finally {
-      if (scratch) await rm(scratch, { recursive: true, force: true });
       if (!handedOff) this.applying = false;
+      if (scratch)
+        await rm(scratch, { recursive: true, force: true }).catch((error) =>
+          log.warn('Could not remove update scratch directory', error),
+        );
     }
   }
 
@@ -295,10 +416,12 @@ export class UpdateChecker {
     return join(app.getPath('userData'), 'update-failure.txt');
   }
 
-  public async showPreviousUpdateFailure(): Promise<void> {
+  public async showPreviousUpdateFailure(): Promise<boolean> {
     try {
       const failure = await readFile(this.resultPath(), 'utf8');
       await rm(this.resultPath(), { force: true });
+      this.applying = false;
+      this.progress('failed', failure.trim());
       await dialog.showMessageBox({
         type: 'error',
         title: 'Pluto Update',
@@ -306,9 +429,28 @@ export class UpdateChecker {
         detail: `${failure.trim()}\nYour meeting data and models were preserved.\nLog: ${join(app.getPath('userData'), 'logs', 'update.log')}`,
         buttons: ['OK'],
       });
+      return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         log.warn('Could not read update result', error);
+        return false;
+      }
+      try {
+        const targetPath = join(app.getPath('userData'), 'update-target.txt');
+        const target = (await readFile(targetPath, 'utf8')).trim();
+        this.applying = false;
+        if (compareVersions(app.getVersion(), target) >= 0) {
+          this.progress('complete', `Updated to Pluto ${app.getVersion()}.`);
+          await rm(targetPath, { force: true });
+        } else
+          this.progress(
+            'failed',
+            `Update did not finish: Pluto ${app.getVersion()} is still running. Retry the update.`,
+          );
+        return true;
+      } catch {
+        return false;
+      }
     }
   }
 
@@ -327,12 +469,20 @@ export class UpdateChecker {
   public stop(): void {
     if (this.initialTimer) clearTimeout(this.initialTimer);
     if (this.intervalTimer) clearInterval(this.intervalTimer);
+    if (this.progressTimer) clearInterval(this.progressTimer);
   }
 
   private broadcastStatus(): void {
     const win = this.getWindow();
     if (win && !win.isDestroyed()) {
-      win.webContents.send('pluto-updater:status-changed', this.currentStatus);
+      try {
+        win.webContents.send(
+          'pluto-updater:status-changed',
+          this.currentStatus,
+        );
+      } catch {
+        /* Renderer shutdown cannot interrupt updater ownership. */
+      }
     }
   }
 

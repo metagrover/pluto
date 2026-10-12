@@ -53,3 +53,82 @@ it('sends Update & Restart through IPC and shows a start failure beside the acti
     act(() => root.unmount());
   }
 });
+
+it('keeps all mounted update controls busy until a terminal status and restores retry after failure', async () => {
+  let status = {
+    hasUpdate: true,
+    currentVersion: '1.0.0-rc.1',
+    latestVersion: 'v1.0.0-rc.2',
+    checkedAt: 1,
+    update: undefined as undefined | { phase: string; message: string },
+  };
+  const listeners: Array<(event: unknown, value: unknown) => void> = [];
+  const invoke = vi.fn(async (channel: string) => {
+    if (channel === 'PLUTO_UPDATER_APPLY_UPDATE') {
+      status = {
+        ...status,
+        update: { phase: 'downloading', message: 'Downloading update…' },
+      };
+      for (const listener of listeners) listener(null, status);
+      return { started: true };
+    }
+    return status;
+  });
+  Object.defineProperty(window, 'ipcRenderer', {
+    configurable: true,
+    value: {
+      invoke,
+      on: (
+        _channel: string,
+        listener: (event: unknown, status: unknown) => void,
+      ) => {
+        listeners.push(listener);
+        return () => {};
+      },
+    },
+  });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <>
+          <SidebarUpdateBadge />
+          <SidebarUpdateBadge />
+        </>,
+      ),
+    );
+    const updateButtons = () =>
+      [...container.querySelectorAll('button')].filter((button) =>
+        /Update & Restart|Updating Pluto|Retry update/.test(
+          button.textContent || '',
+        ),
+      );
+    await act(async () => {
+      updateButtons()[0].click();
+      updateButtons()[0].click();
+    });
+    expect(
+      invoke.mock.calls.filter(
+        (call) => call[0] === 'PLUTO_UPDATER_APPLY_UPDATE',
+      ),
+    ).toHaveLength(1);
+    expect(updateButtons().every((button) => button.disabled)).toBe(true);
+    expect(container.textContent).toContain('Downloading update');
+    await act(async () => {
+      status = {
+        ...status,
+        update: {
+          phase: 'failed',
+          message: 'Pluto could not close. Nothing was replaced.',
+        },
+      };
+      for (const listener of listeners) listener(null, status);
+    });
+    expect(updateButtons().every((button) => !button.disabled)).toBe(true);
+    expect(container.textContent).toContain('Retry update');
+  } finally {
+    act(() => root.unmount());
+  }
+});

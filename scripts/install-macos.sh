@@ -2,7 +2,14 @@
 # Streamed installers must be parsed completely before any action runs.
 set -euo pipefail
 main() {
-  fail() { printf 'Pluto: %s\n' "$*" >&2; exit 1; }
+  progress() {
+    [[ -z ${PLUTO_UPDATE_PROGRESS:-} ]] || { printf '%s\n' "$1" > "$PLUTO_UPDATE_PROGRESS.tmp"; mv "$PLUTO_UPDATE_PROGRESS.tmp" "$PLUTO_UPDATE_PROGRESS"; }
+  }
+  fail() {
+    printf 'Pluto: %s\n' "$*" >&2
+    [[ -z ${PLUTO_UPDATE_ERROR:-} ]] || printf '%s\n' "$*" > "$PLUTO_UPDATE_ERROR"
+    exit 1
+  }
   require_compatible_upgrade() {
     local previous=$1 candidate=$2 value index
     local old_parts=() new_parts=()
@@ -20,9 +27,11 @@ main() {
     return 0
   }
   require_pluto_closed() {
-    local pid command
+    local pid command physical_applications
+    physical_applications=$(cd "$applications" 2>/dev/null && pwd -P) || physical_applications=$applications
     for pid in $(pgrep -x Pluto || true); do
       command=$(ps -ww -p "$pid" -o args=) || continue
+      [[ "$command" == "$applications/Pluto.app/Contents/MacOS/Pluto" || "$command" == "$applications/Pluto.app/Contents/MacOS/Pluto "* || "$command" == "$physical_applications/Pluto.app/Contents/MacOS/Pluto" || "$command" == "$physical_applications/Pluto.app/Contents/MacOS/Pluto "* ]] || continue
       # ChatGPT runs the bundled bridge using Pluto's executable as Node.
       case "$command" in
         */Contents/MacOS/Pluto\ */Contents/Resources/mcp/pluto-mcp-bridge.mjs\ --connection\ *) continue ;;
@@ -53,7 +62,7 @@ main() {
   os_minor=${os_version#*.}; os_minor=${os_minor%%.*}
   (( os_major > 14 || (os_major == 14 && os_minor >= 2) )) || fail 'macOS 14.2 or later is required.'
   if ! "$verify_only"; then
-    require_pluto_closed
+    [[ -n ${PLUTO_UPDATE_PARENT_PID:-} ]] || require_pluto_closed
     if [[ $applications == /Applications && ! -w $applications && ! -e $applications/Pluto.app ]]; then applications="$HOME/Applications"; fi
     mkdir -p "$applications"
     [[ -w $applications ]] || fail "Cannot write to $applications. Use --directory with a writable Applications folder."
@@ -73,11 +82,12 @@ main() {
   trap cleanup EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  progress downloading
   printf 'Downloading Pluto from its GitHub release.\nRunning this installer trusts the unnotarized app and removes only Pluto’s quarantine.\n'
-  download() { curl --fail --location --retry 3 --connect-timeout 30 --proto '=https' --proto-redir '=https' "$1" -o "$2"; }
+  download() { curl --fail --location --retry 3 --retry-max-time 600 --connect-timeout 30 --max-time 600 --proto '=https' --proto-redir '=https' "$1" -o "$2"; }
   # The public list includes RCs; /releases/latest excludes them.
   public=false
-  if curl --fail --silent --show-error --location --retry 3 --connect-timeout 30 --proto '=https' --proto-redir '=https' \
+  if curl --fail --silent --show-error --location --retry 3 --retry-max-time 600 --connect-timeout 30 --max-time 600 --proto '=https' --proto-redir '=https' \
     'https://api.github.com/repos/metagrover/pluto/releases?per_page=1' -o "$scratch/releases.json" 2>"$scratch/api-error"; then
     public=true
     tag=$(plutil -extract 0.tag_name raw -o - "$scratch/releases.json")
@@ -96,6 +106,7 @@ main() {
   else
     gh release download "$tag" --repo metagrover/pluto --dir "$scratch" --pattern "$filename" --pattern SHA256SUMS.txt
   fi
+  progress verifying
   expected=$(awk -v name="$filename" '$2 == name { print $1 }' "$scratch/SHA256SUMS.txt")
   [[ $expected =~ ^[a-fA-F0-9]{64}$ ]] || fail 'Missing or ambiguous installer checksum.'
   actual=$(shasum -a 256 "$scratch/$filename"); actual=${actual%% *}
@@ -122,7 +133,25 @@ main() {
   ditto "$app" "$staging/Pluto.app"
   codesign --verify --deep --strict "$staging/Pluto.app"
   xattr -dr com.apple.quarantine "$staging/Pluto.app"
+  if [[ -n ${PLUTO_UPDATE_PARENT_PID:-} ]]; then
+    [[ $PLUTO_UPDATE_PARENT_PID =~ ^[1-9][0-9]*$ && -n ${PLUTO_UPDATE_COMMIT:-} ]] || fail 'Invalid update handoff.'
+    progress ready
+    for ((attempt=0; attempt<30; attempt++)); do
+      [[ ! -e ${PLUTO_UPDATE_CANCEL:-/nonexistent} ]] || fail 'Update cancelled before installation. Nothing was replaced.'
+      [[ ! -e $PLUTO_UPDATE_COMMIT ]] || break
+      kill -0 "$PLUTO_UPDATE_PARENT_PID" 2>/dev/null || fail 'Pluto exited before approving installation. Nothing was replaced.'
+      sleep 1
+    done
+    [[ -e $PLUTO_UPDATE_COMMIT ]] || fail 'Pluto did not approve installation. Nothing was replaced.'
+    progress quitting
+    for ((attempt=0; attempt<15; attempt++)); do
+      kill -0 "$PLUTO_UPDATE_PARENT_PID" 2>/dev/null || break
+      sleep 1
+    done
+    kill -0 "$PLUTO_UPDATE_PARENT_PID" 2>/dev/null && fail 'Pluto could not close for the update. Nothing was replaced. Finish saving your recording, then retry.'
+  fi
   require_pluto_closed
+  progress installing
   if [[ -e $destination ]]; then mv "$destination" "$staging/previous.app"; fi
   mv "$staging/Pluto.app" "$destination"
   installed=true
@@ -133,14 +162,16 @@ main() {
     tccutil reset All com.pluto.app || fail 'Could not reset Pluto permissions. Your app and data are preserved; reset Pluto permissions before launching.'
     tccutil reset All com.pluto.app.calendar-helper || printf 'Calendar helper permissions could not be reset automatically.\n' >&2
   fi
+  progress restarting
+  if [[ -n ${PLUTO_UPDATE_TARGET:-} ]]; then printf '%s\n' "$version" > "$PLUTO_UPDATE_TARGET"; fi
   if "$fresh_profile"; then
     mkdir -p "$HOME/Library/Application Support"
     profile=$(mktemp -d "$HOME/Library/Application Support/pluto-first-run.XXXXXX")
     printf 'Launching first-run onboarding with a separate empty profile: %s\nYour normal profile is preserved.\n' "$profile"
-    open -na "$destination" --args "--user-data-dir=$profile"
+    open -na "$destination" --args "--user-data-dir=$profile" || fail "Pluto $version was installed, but could not reopen. Open Pluto from its installation folder."
   else
     profile=${user_data_dir:-$HOME/Library/Application Support/pluto}
-    open -na "$destination" --args "--user-data-dir=$profile"
+    open -na "$destination" --args "--user-data-dir=$profile" || fail "Pluto $version was installed, but could not reopen. Open Pluto from its installation folder."
   fi
 }
 main "$@"

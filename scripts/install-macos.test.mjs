@@ -56,7 +56,7 @@ test(
     stub(
       'ps',
       `case "$3" in
-  100) echo '/Applications/Pluto.app/Contents/MacOS/Pluto' ;;
+  100) echo "$TEST_APPLICATIONS/Pluto.app/Contents/MacOS/Pluto" ;;
   101) echo '/Applications/Pluto.app/Contents/MacOS/Pluto /Applications/Pluto.app/Contents/Resources/mcp/pluto-mcp-bridge.mjs --connection /Users/test/Library/Application Support/pluto/chatgpt-connection/connection.json' ;;
   102) echo '/Users/test/Custom Apps/Pluto.app/Contents/MacOS/Pluto /Users/test/Custom Apps/Pluto.app/Contents/Resources/mcp/pluto-mcp-bridge.mjs --connection /Users/test/profile/connection.json' ;;
   103) exit 1 ;;
@@ -122,6 +122,7 @@ exec /bin/mv "$@"`,
           HOME: root,
           PATH: `${bin}:${process.env.PATH}`,
           TEST_ASSET: asset,
+          TEST_APPLICATIONS: applications,
           TEST_LOG: log,
           TEST_BIN: bin,
           ...options,

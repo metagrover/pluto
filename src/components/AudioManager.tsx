@@ -1582,7 +1582,9 @@ export const AudioManager = ({
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
       alert(
-        'Recording could not start. Check microphone and system audio access in Settings, then try again. If it keeps failing, restart Pluto.',
+        e instanceof Error && e.message.includes('An update is in progress')
+          ? 'An update is in progress. Wait for Pluto to restart before recording.'
+          : 'Recording could not start. Check microphone and system audio access in Settings, then try again. If it keeps failing, restart Pluto.',
       );
       cancelSystemAudioHealthTimeoutRef.current?.();
       cancelSystemAudioHealthTimeoutRef.current = null;

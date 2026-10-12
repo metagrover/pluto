@@ -318,3 +318,7 @@ suitable for marketing captures.
 `node scripts/verify_recording_shutdown.mjs /tmp/pluto-recording-shutdown.json` runs a disposable Electron host with synthetic audio, real MediaRecorder/AudioContext resources, and an owned helper process. It checks normal shutdown and a suppressed recorder stop event without opening the microphone or the production profile.
 
 `python3 scripts/verify_native_capture_health.py /tmp/pluto-native-health.json` compiles baseline/current AudioCap sources and taps only a muted synthetic playback process. It checks transport continuity and graceful exit; system-audio permission is required. Neither check saves captured audio. These checks supplement, rather than replace, packaged playback/device-route acceptance in the recording shutdown plan.
+
+### Packaged updater acceptance
+
+Run `node scripts/verify_update_flow.mjs /tmp/pluto-update-flow.json` on Apple Silicon macOS. It creates disposable signed Electron fixture apps and a real DMG, then exercises production update IPC, installer handoff, blocked quit/retry, repeated clicks, checksum failure/retry, replacement, and version-confirmed relaunch. Release transport and permission resets are isolated; production profiles and installed applications are untouched. The installer CI runs this check automatically. See `docs/plans/2026-10-12-updater-launch-readiness.md` for the separate launch gate and verification limits.

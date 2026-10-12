@@ -18,7 +18,7 @@ export const SidebarUpdateBadge = () => {
   const [isDismissed, setIsDismissed] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  if (!status.hasUpdate || isDismissed) {
+  if ((!status.hasUpdate && !status.update) || (isDismissed && !isUpdating)) {
     return null;
   }
 
@@ -53,6 +53,7 @@ export const SidebarUpdateBadge = () => {
 
         <button
           type="button"
+          disabled={isUpdating}
           onClick={() => setIsDismissed(true)}
           className="p-1 rounded text-pro-text-muted hover:text-pro-text-main hover:bg-pro-surface transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent shrink-0"
           title="Dismiss for this session"
@@ -63,8 +64,12 @@ export const SidebarUpdateBadge = () => {
       </div>
 
       {/* Body / Context */}
-      <p className="mt-1 text-[11px] leading-normal text-pro-text-muted">
-        A new version is ready to install.
+      <p
+        role="status"
+        aria-live="polite"
+        className="mt-1 text-[11px] leading-normal text-pro-text-muted"
+      >
+        {status.update?.message || 'A new version is ready to install.'}
       </p>
 
       {/* Primary Action Button */}
@@ -72,7 +77,7 @@ export const SidebarUpdateBadge = () => {
         <button
           type="button"
           onClick={handleUpdate}
-          disabled={isUpdating}
+          disabled={isUpdating || status.update?.phase === 'complete'}
           className="h-7 w-full rounded-md bg-pro-text-main text-pro-bg text-[11px] font-medium transition-opacity hover:opacity-90 active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent shadow-[0_1px_2px_rgba(0,0,0,0.06)]"
         >
           {isUpdating ? (
@@ -83,7 +88,13 @@ export const SidebarUpdateBadge = () => {
           ) : (
             <>
               <Download size={12} />
-              <span>Update & Restart</span>
+              <span>
+                {status.update?.phase === 'complete'
+                  ? 'Updated'
+                  : status.update?.phase === 'failed'
+                    ? 'Retry update'
+                    : 'Update & Restart'}
+              </span>
             </>
           )}
         </button>

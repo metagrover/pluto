@@ -1757,3 +1757,10 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Capture:** Refuse quit before starting cleanup while a capture lease is active. Stop and save the recording before quitting or updating.
 - **Limit:** The watchdog bounds asynchronous stalls while the main event loop remains responsive; it cannot interrupt synchronous code that blocks that loop. Packaged macOS quit/update acceptance remains required.
 
+
+## 2026-10-12 - Verify updates before requesting quit and report one shared attempt
+
+- **Status:** Accepted
+- **Extends:** “2026-10-11 - Bound background cleanup during quit” and “2026-10-11 - Isolate every source build and preserve profile identity across updates”.
+- **Decision:** Download, validate, and stage the selected release while Pluto remains open. The main process reports one shared attempt and coalesces repeated requests. Only after verified preparation does it approve handoff and request quit. The installer observes parent exit before replacement; blocked quit produces a retryable failure. Startup confirms the installed version.
+- **Consequences:** Network and verification errors leave the current app usable; the existing quit deadline remains independent from the installer's parent-exit deadline. Updater acceptance is a separate public-launch gate, with packaged lifecycle fault tests in installer CI. Existing installed builds retain their old updater until upgraded.

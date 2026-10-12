@@ -379,6 +379,10 @@ const reportProblemFromMenu = (): void => {
 
 const checkForUpdatesFromMenu = async (): Promise<void> => {
   if (checkingFromMenu || !updateChecker) return;
+  if (updateChecker.isApplying) {
+    focusPrimaryWindow();
+    return;
+  }
   checkingFromMenu = true;
   try {
     const status = await updateChecker.checkForUpdates();
@@ -2913,6 +2917,10 @@ app.whenReady().then(async () => {
         calendarOccurrenceKey,
       } = {},
     ) => {
+      if (updateChecker?.isApplying)
+        throw new Error(
+          'An update is in progress. Wait for Pluto to restart before recording.',
+        );
       if (
         captureSessionLease.current() &&
         captureSessionLease.current()?.meetingId !== meetingId

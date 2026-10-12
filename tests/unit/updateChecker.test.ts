@@ -110,6 +110,8 @@ it('selects the highest complete release, including RCs, without offering drafts
 describe('UpdateChecker', () => {
   let root: string;
   let spawned: { args: string[]; env: NodeJS.ProcessEnv } | undefined;
+  const checkers: UpdateChecker[] = [];
+  let child: EventEmitter;
   const validInstaller = '#!/bin/bash\nmain() { :; }\nmain "$@"\n';
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'pluto-updater-test-'));
@@ -122,7 +124,7 @@ describe('UpdateChecker', () => {
     spawned = undefined;
     mocks.spawn.mockImplementation((_cmd, args, options) => {
       spawned = { args, env: options.env };
-      const child = Object.assign(new EventEmitter(), {
+      child = Object.assign(new EventEmitter(), {
         unref: vi.fn(),
         kill: vi.fn(),
       });
@@ -131,6 +133,7 @@ describe('UpdateChecker', () => {
     });
   });
   afterEach(() => {
+    for (const checker of checkers.splice(0)) checker.stop();
     if (spawned?.env.PLUTO_UPDATE_SCRATCH)
       rmSync(spawned.env.PLUTO_UPDATE_SCRATCH, {
         recursive: true,
@@ -139,6 +142,7 @@ describe('UpdateChecker', () => {
     rmSync(root, { recursive: true, force: true });
   });
   const check = async (checker: UpdateChecker) => {
+    checkers.push(checker);
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => [release('v1.0.0-rc.9')],
@@ -205,10 +209,8 @@ describe('UpdateChecker', () => {
     });
     const result = await checker.applyUpdate();
     expect(mocks.spawn).toHaveBeenCalledOnce();
-    expect(result).toMatchObject({
-      started: false,
-      error: expect.stringContaining('Stop your recording'),
-    });
+    expect(result).toMatchObject({ started: true });
+    expect(existsSync(spawned!.env.PLUTO_UPDATE_CANCEL!)).toBe(true);
     expect(mocks.quit).not.toHaveBeenCalled();
   });
   it('pins the shown release, keeps the installed directory and quits only after helper launch', async () => {
@@ -222,8 +224,11 @@ describe('UpdateChecker', () => {
       PLUTO_UPDATE_PARENT_PID: String(process.pid),
     });
     expect(readFileSync(spawned!.args[0], 'utf8')).toBe(UPDATE_WORKER_SCRIPT);
-    expect(mocks.quit).toHaveBeenCalledOnce();
-    await checker.applyUpdate();
+    expect(mocks.quit).not.toHaveBeenCalled();
+    writeFileSync(spawned!.env.PLUTO_UPDATE_PROGRESS!, 'ready');
+    await vi.waitFor(() => expect(mocks.quit).toHaveBeenCalledOnce());
+    expect(existsSync(spawned!.env.PLUTO_UPDATE_COMMIT!)).toBe(true);
+    expect(await checker.applyUpdate()).toEqual({ started: true });
     expect(mocks.spawn).toHaveBeenCalledOnce();
   });
   it('keeps Pluto open if the update helper cannot spawn', async () => {
@@ -258,7 +263,49 @@ describe('UpdateChecker', () => {
     expect(mocks.spawn).toHaveBeenCalledOnce();
     expect(spawned?.env.PLUTO_UPDATE_TAG).toBe('v1.0.0-rc.15');
     expect(spawned?.env.PLUTO_UPDATE_USER_DATA).toBe(mocks.userData);
-    expect(mocks.quit).toHaveBeenCalledOnce();
+    expect(mocks.quit).not.toHaveBeenCalled();
+    checker.stop();
+  });
+  it('coalesces rapid requests and recovers blocked quit without a stale applying flag', async () => {
+    const checker = new UpdateChecker(() => null);
+    await check(checker);
+    const first = checker.applyUpdate();
+    expect(checker.applyUpdate()).toBe(first);
+    await expect(first).resolves.toEqual({ started: true });
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    writeFileSync(spawned!.env.PLUTO_UPDATE_PROGRESS!, 'ready');
+    await vi.waitFor(() => expect(mocks.quit).toHaveBeenCalledOnce());
+    writeFileSync(
+      join(root, 'update-failure.txt'),
+      'Pluto could not close. Nothing was replaced.',
+    );
+    child.emit('exit', 1);
+    await vi.waitFor(() =>
+      expect(checker.getStatus().update?.phase).toBe('failed'),
+    );
+    expect(checker.isApplying).toBe(false);
+    await expect(checker.applyUpdate()).resolves.toEqual({ started: true });
+    expect(mocks.spawn).toHaveBeenCalledTimes(2);
+  });
+  it('does not treat a successful process exit without installation evidence as completion', async () => {
+    const checker = new UpdateChecker(() => null);
+    await check(checker);
+    await checker.applyUpdate();
+    child.emit('exit', 0);
+    await vi.waitFor(() =>
+      expect(checker.getStatus().update?.phase).toBe('failed'),
+    );
+    expect(checker.isApplying).toBe(false);
+  });
+  it('confirms the installed version instead of assuming a launch request completed the update', async () => {
+    const checker = new UpdateChecker(() => null);
+    writeFileSync(join(root, 'update-target.txt'), '1.0.0-rc.9');
+    await checker.showPreviousUpdateFailure();
+    expect(checker.getStatus().update?.phase).toBe('failed');
+    mocks.version = '1.0.0-rc.9';
+    await checker.showPreviousUpdateFailure();
+    expect(checker.getStatus().update?.phase).toBe('complete');
+    expect(existsSync(join(root, 'update-target.txt'))).toBe(false);
   });
   it('shows a persisted failure once after relaunch', async () => {
     writeFileSync(join(root, 'update-failure.txt'), 'Update failed (exit 42).');
@@ -278,7 +325,6 @@ describe('UpdateChecker', () => {
 it.each([
   { mode: 'success', exit: 0 },
   { mode: 'failure', exit: 42 },
-  { mode: 'shutdown timeout', exit: 1 },
 ])(
   'the detached shell handles $mode without replacing a running app',
   ({ mode, exit }) => {
@@ -294,6 +340,7 @@ it.each([
       const reopened = join(root, 'opened');
       const result = join(root, 'failure');
       writeFileSync(worker, UPDATE_WORKER_SCRIPT);
+      writeFileSync(join(root, 'commit'), 'install');
       writeFileSync(
         installer,
         `#!/bin/bash\nprintf '%s\\n' "$@" > "$TEST_ARGS"\necho 'fixture installer result'\nexit ${mode === 'failure' ? 42 : 0}\n`,
@@ -313,6 +360,9 @@ it.each([
           PATH: `${bin}:${process.env.PATH}`,
           TEST_ARGS: argsFile,
           TEST_OPENED: reopened,
+          PLUTO_UPDATE_COMMIT: join(root, 'commit'),
+          PLUTO_UPDATE_PROGRESS: join(root, 'progress'),
+          PLUTO_UPDATE_ERROR: join(root, 'error'),
           PLUTO_UPDATE_LOG: join(root, 'update.log'),
           PLUTO_UPDATE_RESULT: result,
           PLUTO_UPDATE_APP: '/fixture Applications/Pluto.app',
