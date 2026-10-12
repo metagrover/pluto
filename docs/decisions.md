@@ -1740,3 +1740,13 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Decision:** Both `start` and `dev` launch Pluto Development with a separate bundle identifier and a persistent development profile. Explicit source overrides cannot select the installed app's profile or descendants, including symlink aliases. The installed app retains its existing production path and keys.
 - **Update continuity:** In-app updates pass the current profile explicitly to the installer and both success and failure relaunches. Normal command-line installs use the stable production profile; a separate first-run profile requires an explicit testing flag. Existing Standard or Encrypted databases retain their format and skip storage setup. Successful legacy startup records that existing choice for subsequent upgrades and missing-database detection.
 - **Recovery:** A known matching migration prefix followed by newer migrations requires a compatible app update; the database is neither downgraded nor reset. Unknown or divergent histories remain blocked. The established migration hashes, order, and timestamps are frozen in a regression fixture; schema changes must append migrations. The installer rejects version downgrades. Upgrade regressions exercise both storage modes, unchanged key envelopes and data, selected-profile relaunches, and old-build refusal without database modification.
+
+## 2026-10-11 - Bound background cleanup during quit
+
+- **Status:** Accepted
+- **Source:** Owner request on 2026-10-11
+- **Supersedes:** The shutdown deadline in “Retain local models for up to two hours with idle memory release”. The five-second Ollama request limit remains; a ten-second deadline now covers the entire shutdown, including inference admission and other background services.
+- **Decision:** Cmd+Q and updater-triggered quit share a ten-second watchdog. Normal cleanup closes the database before resuming Electron quit. If cleanup or window close stalls, exit the process; do not manually close SQLite while unfinished consumers may still access it.
+- **Capture:** Refuse quit before starting cleanup while a capture lease is active. Stop and save the recording before quitting or updating.
+- **Limit:** The watchdog bounds asynchronous stalls while the main event loop remains responsive; it cannot interrupt synchronous code that blocks that loop. Packaged macOS quit/update acceptance remains required.
+

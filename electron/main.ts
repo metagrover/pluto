@@ -1270,9 +1270,11 @@ const shutdownMainProcessConsumers = async () => {
 app.on(
   'before-quit',
   createBeforeQuitHandler({
+    canQuit: () => !isCaptureActive(),
     shutdownConsumers: shutdownMainProcessConsumers,
     closeDatabase: closeApplicationDatabase,
     quit: () => app.quit(),
+    forceQuit: () => app.exit(0),
     onError: (error) => plutoLog.error('Shutdown failed:', error),
   }),
 );
