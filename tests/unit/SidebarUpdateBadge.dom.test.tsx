@@ -132,3 +132,60 @@ it('keeps all mounted update controls busy until a terminal status and restores 
     act(() => root.unmount());
   }
 });
+
+it('does not replace a terminal failure with a late busy-status response', async () => {
+  const base = {
+    hasUpdate: true,
+    currentVersion: '1.0.0-rc.1',
+    latestVersion: 'v1.0.0-rc.2',
+    checkedAt: 1,
+  };
+  let reads = 0;
+  let resolveStatus!: (value: unknown) => void;
+  let listener!: (event: unknown, value: unknown) => void;
+  const invoke = vi.fn(async (channel: string) => {
+    if (channel === 'PLUTO_UPDATER_APPLY_UPDATE') return { started: true };
+    if (++reads === 1) return base;
+    return new Promise((resolve) => {
+      resolveStatus = resolve;
+    });
+  });
+  Object.defineProperty(window, 'ipcRenderer', {
+    configurable: true,
+    value: {
+      invoke,
+      on: (_channel: string, callback: typeof listener) => {
+        listener = callback;
+        return () => {};
+      },
+    },
+  });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<SidebarUpdateBadge />));
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent?.includes('Update & Restart'))
+        ?.click(),
+    );
+    await act(async () => {
+      listener(null, {
+        ...base,
+        update: { phase: 'failed', message: 'Quit was blocked.' },
+      });
+      resolveStatus({
+        ...base,
+        update: { phase: 'quitting', message: 'Closing Pluto…' },
+      });
+    });
+    const retry = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Retry update'),
+    );
+    expect(retry).toBeTruthy();
+    expect(retry?.disabled).toBe(false);
+  } finally {
+    act(() => root.unmount());
+  }
+});

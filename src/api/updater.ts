@@ -62,6 +62,7 @@ export const useAppUpdate = () => {
   const [isChecking, setIsChecking] = useState(false);
   const [requestPending, setRequestPending] = useState(false);
   const requestRef = useRef(false);
+  const statusRevisionRef = useRef(0);
   const activePhase = status.update?.phase;
   const isUpdating =
     requestPending ||
@@ -79,6 +80,7 @@ export const useAppUpdate = () => {
 
     const unsubscribe = subscribeToUpdateStatus((newStatus) => {
       receivedStatus = true;
+      statusRevisionRef.current += 1;
       if (mounted) setStatus(newStatus);
     });
 
@@ -93,8 +95,9 @@ export const useAppUpdate = () => {
   const handleCheckNow = async () => {
     setIsChecking(true);
     try {
+      const revision = statusRevisionRef.current;
       const result = await checkForUpdates();
-      setStatus(result);
+      if (revision === statusRevisionRef.current) setStatus(result);
     } finally {
       setIsChecking(false);
     }
@@ -108,7 +111,11 @@ export const useAppUpdate = () => {
     try {
       const result = await applyUpdate();
       if (!result.started) setUpdateError(result.error);
-      else setStatus(await getUpdateStatus());
+      else {
+        const revision = statusRevisionRef.current;
+        const latest = await getUpdateStatus();
+        if (revision === statusRevisionRef.current) setStatus(latest);
+      }
     } catch (error) {
       setUpdateError(error instanceof Error ? error.message : String(error));
     } finally {
