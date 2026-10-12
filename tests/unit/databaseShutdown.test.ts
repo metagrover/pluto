@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  createBeforeQuitHandler,
   SHUTDOWN_DEADLINE_MS,
+  createBeforeQuitHandler,
 } from '../../electron/database/shutdown';
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
