@@ -1,8 +1,8 @@
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, ipcMain } from 'electron';
-import { UpdateChecker } from '../../electron/updateChecker';
+import { BrowserWindow, app, ipcMain } from 'electron';
 import { createBeforeQuitHandler } from '../../electron/database/shutdown';
+import { UpdateChecker } from '../../electron/updateChecker';
 
 const selectedProfile = process.argv
   .find((arg) => arg.startsWith('--user-data-dir='))
