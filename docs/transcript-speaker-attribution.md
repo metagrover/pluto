@@ -91,6 +91,6 @@ Fixtures must be synthetic. Private meeting words, titles, identities, audio pat
 
 ## Related designs
 
-- [Diarization-first speaker attribution](superpowers/specs/2026-07-17-diarization-first-speaker-attribution-design.md)
-- [Live meeting trust repair](superpowers/specs/2026-08-25-live-meeting-trust-repair-design.md)
-- [Readable finalized transcripts](superpowers/specs/2026-08-24-readable-finalized-transcripts-design.md)
+- [Diarization-first speaker attribution](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-07-17-diarization-first-speaker-attribution-design.md)
+- [Live meeting trust repair](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-25-live-meeting-trust-repair-design.md)
+- [Readable finalized transcripts](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-24-readable-finalized-transcripts-design.md)

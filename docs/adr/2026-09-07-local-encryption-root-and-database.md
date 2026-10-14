@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-07
 - **Source:** [Issue #781](https://github.com/metagrover/pluto/issues/781)
-- **Design:** [Privacy-First Audio and Biometric Encryption Design](../superpowers/specs/2026-09-06-privacy-first-audio-biometric-encryption-design.md)
+- **Design:** [Privacy-First Audio and Biometric Encryption Design](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-09-06-privacy-first-audio-biometric-encryption-design.md)
 
 ## Context
 

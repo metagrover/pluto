@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-01
 - **Source:** [Issue #722](https://github.com/metagrover/pluto/issues/722)
-- **Design:** [Database lifecycle design](../superpowers/specs/2026-09-01-database-lifecycle-drizzle-design.md)
+- **Design:** [Database lifecycle design](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-09-01-database-lifecycle-drizzle-design.md)
 
 ## Context
 

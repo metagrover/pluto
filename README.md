@@ -21,6 +21,7 @@ Pluto is a local-first, open-source meeting notes app for Apple Silicon Macs.
 Record without a bot, transcribe on your Mac, and return to the people, projects,
 and follow-ups that matter.
 
+<a id="see-pluto-in-action"></a>
 <video src="https://github.com/user-attachments/assets/edbfcc31-2b37-4648-b18a-c0b14b11973d" width="960" controls></video>
 
 ## Features
@@ -170,6 +171,7 @@ sharing. Keep private meeting content and credentials out of public issues.
 
 See the [developer guide](docs/dev.md) to run Pluto from source and the
 [architecture overview](docs/architecture.md) to explore the codebase.
+The [documentation index](docs/README.md) links to the current guides.
 Bug reports and focused pull requests are welcome. Browse the
 [releases](https://github.com/metagrover/pluto/releases) for downloads and changes.
 

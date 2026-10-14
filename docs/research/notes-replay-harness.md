@@ -131,174 +131,21 @@ while the first stream remains outstanding. Summaries report the maximum number
 of outstanding physical requests. A missing terminal leaves a request outstanding;
 that ledger upper bound is not proof of simultaneous server execution.
 
-See [the measured runtime diagnosis](2026-09-08-gemma-runtime-memory.md) for the
+See [the measured runtime diagnosis](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/research/2026-09-08-gemma-runtime-memory.md) for the
 separate failed attempts, complete sequential run, and remaining quality limits.
 
-## Historical evidence and cleanup
+## Saved live-to-final cache inspection
 
-The recorded development runs predate removal of the experimental application
-changes from PR #794. Their manifests identify the code that actually ran; they
-are not fresh inference evidence for the cleaned branch. Exact response replay
-must reject a changed code hash. Do not rewrite manifests or relax that check to
-reuse older results against a different implementation.
+```sh
+pnpm exec tsx scripts/inspect_notes_live_reuse.ts /absolute/private/sources.json
+```
 
-## Development latency comparisons
+This reads an existing source export and reconstructs cache keys with synthetic
+responses. It does not open the database, invoke a model, or reproduce live
+capture timing. Keep reports private. Exact-key reuse tests establish cache
+behavior, not real-recording hit rates or model quality.
 
-The same frozen ten-row schedule can now run selected cases without rereading
-the production database. Unselected rows remain explicit `not_selected` entries.
-These options affect only the diagnostic process:
-
-- `NOTES_REPLAY_CASES=9,10`: selected one-based case numbers, always serial.
-- `NOTES_REPLAY_MODE=production|markdown`: existing structured pipeline (default)
-  or a single-pass provisional Markdown comparison. Neither publishes notes.
-- `NOTES_REPLAY_MODEL=gemma4:12b|qwen3.5:4b`: installed model, digest verified.
-  “production” names the pipeline, not approval of an overridden model.
-- `NOTES_REPLAY_CONTEXT=16384|24576|32768`: default 16K; Markdown is fixed at 16K.
-- `NOTES_REPLAY_KV_CACHE_TYPE=f16|q8_0`: isolated daemon only, default f16.
-  The launcher enables flash attention and checks actual K/V types in its log.
-- `NOTES_REPLAY_LOAD_MODE=mmap|none`: isolated loading comparison, default mmap.
-  The actual load mode must match the requested profile.
-
-Do not promote these diagnostic overrides to application defaults merely because
-a run completes. In particular, the 32K Gemma trials hit the resource guard.
-The guard is unchanged; failed startup and incomplete output stay in the ledger.
-
-Markdown packs every original source segment into lossless labelled passages.
-It does not discard the transcript middle or tail. Mechanical citation triage
-does not establish entailment, correct ownership, coverage, or note quality.
-Provisional fragments stay in private evidence files, never the application UI,
-database, or downstream commitments. Input truncation and context shifting are
-explicitly disabled; over-capacity source is rejected.
-
-Development evidence on the 16GB Mac found a genuine latency/quality tradeoff:
-the historical structured Gemma run took 8m40s for one 31-minute meeting.
-Single-pass Gemma Markdown with 16K/q8 completed the eight eligible cases without
-a resource stop; the two long cases took 2m23s and 1m50s. Source review still found
-ownership, omission, and action/decision errors. The smaller-model Markdown
-comparison was faster but also made material factual errors. A smaller-model
-structured comparison took 2m21s for the 31-minute case and passed pipeline
-validation, yet still omitted an important deadline and used ambiguous ownership.
-None of those results is quality approval or an average production latency.
-
-Measure first answer text separately from reasoning and complete output.
-Streaming changes when text appears, not the amount of inference required.
-Keep physical token/timing metrics, resource outcomes, pipeline acceptance,
-source-grounded review, and actual UI publication as separate measurements.
-
-The minified-wire 16K/q8 development run reduced the short case from a historical
-618 generated tokens to 260 (59s to 41s). The 31-minute case still took 8m18s:
-three writers and two editors, versus the historical 8m40s with three writers and
-one editor. The optional-review budget consumed some savings on additional review.
-Do not turn reduced writer token counts into a claim of proportional end-to-end
-speedup. Larger 12,000-character leaves took 7m26s but retained an ownership
-error; that change was reverted, and its next case was intentionally cancelled.
-
-The production cache regression is separate: live precomputation previously used
-the legacy full draft and a different partitioner, while final generation used
-the compact contract. A failing-then-passing test now proves reuse with the real
-bounded planner, retained final reviews, and invalidation of corrected source.
-This does not prove reuse across live-to-canonical transcription changes in an
-actual recording, nor eliminate cold generation cost for historical meetings.
-Compact precomputation also skips meetings whose current source still fits the
-direct writer/editor pair. The final short q8 smoke test completed and reproduced
-exactly offline; an f16 long-case retry stopped on resource pressure during
-startup. These are not evidence of sustained production performance.
-
-The isolated launcher holds a temporary idle-sleep assertion only for its own
-lifetime; it never changes persistent power settings or blocks explicit sleep.
-Monitoring gaps over 30 seconds, backwards wall-clock jumps, and changes between
-AC/battery stop the run. Summaries also detect gaps in historical ledgers without
-rewriting their original outcomes. A 24K attempt interrupted by macOS idle sleep
-and its retry interrupted by AC-to-battery transition are contaminated tests, not
-evidence that the 24K profile is fast, slow, or capacity-safe.
-
-Timing fields have separate meanings: `elapsedMs` and `firstAnswerMs` are host
-wall-clock milliseconds; Ollama's `*_duration` metrics remain nanoseconds.
-First answer text is not approved or visible application notes. A
-`no_recorded_gap` summary means only that the ledger has no detected gap above
-the threshold, not that a workload or quality gate passed. A completed schedule
-may still contain failed, ineligible, or unselected meetings.
-
-The uninterrupted 24K/q8 diagnostic completed the long case in 423,954 ms with
-two serial calls: 210,936 ms of prompt evaluation and 209,406 ms of decoding.
-No resource or timing-continuity stop was recorded. Exact offline replay passed,
-but manual source review still found stale timing and missing follow-ups; this
-does not promote the context profile or establish a representative average.
-
-`NOTES_REPLAY_CONTEXT_REUSE=1` is an isolated diagnostic opt-in. An immediately
-completed writer can become the exact conversation prefix for its editor only
-when source blocks and model/context match. The original source stays verbatim
-in the first message; the raw writer response and current canonical editor draft
-remain untrusted. The whole conversation must fit the conservative input/output
-budget. Otherwise the original standalone editor request is sent. Failed calls
-and meeting changes cannot seed reuse. Captures contain the actual wire messages;
-offline replay reconstructs them and checks the continuation helper's hash.
-This is a cache-reuse hypothesis, not a claimed cache hit or app default.
-
-The first continuation trial was deliberately cancelled after runtime logs
-proved full prompt reprocessing: the rendered answer prefix differed and no
-sliding-window checkpoint was available. Its partial editor is not a completed
-latency sample. `NOTES_REPLAY_CHECKPOINTS=1` permits exactly one context checkpoint
-in the isolated launcher (default zero); the historical multi-prompt RAM cache
-remains disabled. A subsequent trial restored a 170 MiB checkpoint and finished
-in 352,990 ms. Editor prompt processing was 45,315 ms versus 115,830 ms in the
-earlier standalone-editor run, with no resource stop. Different generated drafts
-and power conditions mean this is not a controlled total-latency speedup estimate.
-Offline replay reproduced the result, but missing follow-ups remained. The
-launcher initially flagged its old zero-checkpoint-only postcondition after that
-completed run; validation now checks the explicitly requested zero/one profile.
-Neither the experiment nor the validation repair changes application defaults.
-
-The broader smaller-model follow-up was stopped early on quality: the first
-eligible case omitted an approval gate and scheduled follow-up retained by the
-Gemma baseline, and the next case failed the notes guardrail. Those two outcomes
-reproduced offline. A short subsequent case completed; the next partial request
-was deliberately cancelled. This is not a completed eight-case comparison.
-
-Production now has an ephemeral section-level draft preview, not raw-token
-Markdown publication. The harness records `draft_preview_ready` events and
-`firstDraftMs` separately from physical first-answer text and final completion.
-A fresh short Gemma/q8 run produced a draft at 21,278 ms and completed at
-42,321 ms; offline result replay matched exactly. Cache regression tests expose
-two matching precomputed sections before any new model request, then the final
-section after one writer call, while retaining all three final reviews.
-Neither the short replay nor that exact-source test proves capture-to-canonical
-cache reuse in a real recording. Cold historical long-meeting completion remains
-minutes rather than instantaneous.
-
-## Saved live-to-final cache identity inspection
-
-Run `pnpm exec tsx scripts/inspect_notes_live_reuse.ts /absolute/private/sources.json`
-against an existing owner-only latest-ten export. This does not open the database,
-invoke a model, or replay historical capture/admission timing. It reconstructs the
-saved live snapshot's event-time sorting and adjacent-speaker merging, then uses
-the actual precompute/final planners and cache keys with explicitly synthetic
-responses. Positive-control tests require genuine exact-key reuse; corrected
-source must miss. Output is a private content-free report with source/code hashes.
-Synthetic guardrail outcomes are not model-quality results.
-
-The frozen ten-row inspection retained two ineligible sources in its denominator.
-Of eight eligible saved live snapshots, six fit the direct path and therefore
-skip precomputation. The two long snapshots plan four leaves, above the existing
-three-leaf limit, and also skip precomputation. No live packets were cached in
-this saved-final-snapshot probe. This does not prove that every earlier offer
-would miss: earlier prefixes, admission decisions, cache expiry and runtime
-requests were not recorded or reconstructed. The eligible snapshots came from
-recovered-channel finalization, not a fresh canonical-session capture acceptance
-test. Finalization also changes source row boundaries/text; exact-source unit
-reuse must not be presented as real capture-to-final reuse evidence.
-
-Consequently, a ten-second useful preview and ninety-second reviewed completion
-for a thirty-minute meeting remain unachieved product targets. Do not expand
-precompute limits or introduce fuzzy source matching to manufacture a hit rate.
-The next performance acceptance needs a fresh recording with content-free counts
-for admitted/completed live packets, exact final hits and invalidations, alongside
-stop-to-preview/reviewed timing and capture/resource continuity. Cold historical
-generation remains a separate workload and is currently measured in minutes.
-
-Incremental admission now registers cancellation before awaiting the memory
-probe, rechecks capture/power/thermal state after that probe, and recovers from
-probe errors without losing the next pending offer. Battery, suspend and
-non-nominal thermal events cancel active and queued incremental work. These are
-event-driven protections, not continuous memory-pressure monitoring or proof of
-packaged sleep/wake behavior.
+Historical runs describe the code revision in their manifests. Response replay
+must reject changed code hashes; do not relax that check to reuse older results
+against a different implementation. Historical timings and experiment closeouts
+remain in Git history rather than serving as current performance claims.

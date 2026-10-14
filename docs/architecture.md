@@ -27,9 +27,9 @@ This document describes the high-level architecture of Pluto's local meeting cap
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 3. Sherpa-ONNX Diarization Engine (`sherpa-onnx` C++ Runtime)          │
-│    • Models: Local CAM++ / ECAPA-TDNN ONNX embeddings                  │
-│    • Responsibility: Identifies speaker identities ("John", "Sarah")   │
+│ 3. Native FluidAudio speaker evidence                                  │
+│    • Offline diarization and speaker embeddings                       │
+│    • Evidence supports Voice ID; clusters alone do not prove identity  │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
                                     ▼
@@ -60,12 +60,14 @@ This document describes the high-level architecture of Pluto's local meeting cap
 - **Admission and release:** Serious/critical thermal pressure or low available memory leaves final validation retryable without starting inference. On macOS, availability comes from the system memory-pressure signal so reclaimable cache is not mistaken for exhaustion; raw free pages are only a fallback. Successful provider metadata records the actual int8/Core ML configuration and per-source aggregates; the native child unloads after five idle minutes.
 - **Post-meeting ownership:** `App.tsx` schedules sealed provisional meetings through the persisted final-transcription worker after the recording component releases its critical path. A new capture cancels and unloads active Parakeet work. Once the generation-guarded canonical commit succeeds, a downstream-only worker analyzes those exact committed bytes and never invokes ASR again.
 
-### 3. Local Speaker Diarization (`python/sherpa_diarization_runtime.py`)
-- **Engine:** `sherpa-onnx` (C++ ONNX Runtime)
-- **Purpose:** Computes voice feature embeddings across time windows to separate and label distinct speakers ("Speaker A", "Speaker B", or specific contacts).
-- **Why separate from transcription?**
-  - Speech recognition extracts text tokens but does **not** generate the acoustic speaker embeddings needed for multi-speaker separation.
-  - Sherpa-ONNX provides credential-free, offline local speaker attribution without requiring cloud API keys.
+### 3. Local speaker evidence (`native/parakeet-runtime/`)
+
+- **Engine:** FluidAudio offline diarization in the Swift runtime, implemented in `Sources/ParakeetRuntimeEngine/SpeakerEvidence.swift`.
+- **Purpose:** Produce speaker turns and voice embeddings from source audio. Electron requests and validates this evidence through `electron/transcription/parakeetFinalClient.ts`.
+- **Identity boundary:** A diarization cluster separates voices; it does not establish a person's identity. Voice ID and saved attribution use reviewed identity evidence. Microphone capture and calendar attendance alone do not prove who spoke.
+- **Python boundary:** Python tools are optional benchmark tooling, not the application's transcription or speaker-evidence runtime.
+
+See the [speaker-attribution contract](transcript-speaker-attribution.md) for how saved transcripts use this evidence without rewriting canonical source material.
 
 ---
 
