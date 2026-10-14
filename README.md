@@ -62,35 +62,28 @@ An internet connection is required for initial downloads.
 
 ### 1. Install Pluto
 
-Press **⌘ + Space**, type **Terminal**, and press Return. Copy this command,
-paste it into Terminal with **⌘ + V**, and press Return:
-
 ```sh
 curl -fsSL https://raw.githubusercontent.com/metagrover/pluto/master/scripts/install-macos.sh | bash
 ```
 
-Wait for Pluto to install and open. Follow setup to download its speech models
-and allow microphone and system audio access. Calendar access is optional.
+Complete setup to download speech models and allow microphone and system audio
+access. Calendar access is optional.
 
 ### 2. Set up Ollama
 
-[Download Ollama for Mac](https://ollama.com/download/mac), move it into
-**Applications**, and open it. Follow its prompt to enable the `ollama` Terminal
-command. Keep Ollama open, then run this command in Terminal:
+Install and open [Ollama](https://ollama.com/download/mac), enable its command-line
+tool, then download the models for notes and chat:
 
 ```sh
 ollama pull gemma4:12b && ollama pull phi4-mini:3.8b
 ```
 
-Wait for both downloads to finish. Pluto’s speech models handle transcription;
-Ollama’s models handle notes and chat. New Pluto setups use Ollama and these
-models by default—no settings to enter.
+Pluto uses these models by default. Keep Ollama running when using notes and chat.
 
 ### 3. Try your first recording
 
-Keep Ollama running and open Pluto. Let everyone know you’re recording, then
-click **New meeting** and start a short recording. Stop and wait for Pluto to
-finish generating notes, then open the meeting to review them and ask questions.
+Let participants know you’re recording, then click **New meeting**. After the
+meeting, stop recording to generate notes and ask follow-up questions.
 
 [Full setup guide and troubleshooting →](docs/getting-started.md)
 

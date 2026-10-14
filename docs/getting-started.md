@@ -4,7 +4,7 @@ You need an **Apple Silicon Mac (M1 or later)** running **macOS 14.2 or later**,
 and an internet connection for initial downloads. Intel Macs, Windows, and Linux
 are not currently supported.
 
-Open Terminal and run:
+## Install Pluto
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/metagrover/pluto/master/scripts/install-macos.sh | bash
