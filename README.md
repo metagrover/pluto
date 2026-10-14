@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="#get-started">Get Pluto</a> ·
-  <a href="#watch-pluto">Demo</a> ·
+  <a href="#see-pluto-in-action">Demo</a> ·
   <a href="#features">Features</a> ·
   <a href="#explore-pluto">Screenshots</a> ·
   <a href="#privacy">Privacy</a> ·
@@ -21,15 +21,9 @@ Pluto is a local-first, open-source meeting notes app for Apple Silicon Macs.
 Record without a bot, transcribe on your Mac, and return to the people, projects,
 and follow-ups that matter.
 
-## Watch Pluto
+## See Pluto in action
 
 <video src="https://github.com/user-attachments/assets/edbfcc31-2b37-4648-b18a-c0b14b11973d" width="960" controls></video>
-
-[Watch with English captions →](https://metagrover.github.io/get-pluto/#in-action) ·
-[Download the video](docs/media/pluto-demo.mp4) ·
-[Read the transcript](docs/demo.md#narration)
-
-*Actual Pluto interface with fictional demo data. English captions are available in the website player.*
 
 ## Features
 
