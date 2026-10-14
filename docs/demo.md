@@ -34,9 +34,12 @@ It gives you an answer, and shows you the meetings it came from.
 - `docs/media/pluto-demo.en.vtt` — browser-compatible English captions.
 
 The same three files live under `assets/product/` in the sibling `pluto-site`
-repository. The README’s preview links to that website player because GitHub
-README rendering does not provide a reliable native HTML video player. Keep
-the website and documentation assets synchronized when replacing the demo.
+repository. The README embeds a GitHub-hosted video attachment in a native HTML video
+player, so visitors can play it without leaving the repository page. Its
+website link remains available for English captions. Keep the website and
+documentation assets synchronized when replacing the demo, upload the new
+movie through GitHub’s Markdown attachment control, and update the README’s
+video attachment URL.
 
 ## Production notes
 
