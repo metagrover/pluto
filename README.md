@@ -23,9 +23,9 @@ and follow-ups that matter.
 
 ## Watch Pluto
 
-[![Watch the 45-second Pluto demo: meeting notes, familiar voices, projects, follow-ups, and Chat with Pluto](docs/media/pluto-demo-poster.jpg)](https://metagrover.github.io/get-pluto/#in-action)
+<video src="https://github.com/user-attachments/assets/edbfcc31-2b37-4648-b18a-c0b14b11973d" width="960" controls></video>
 
-[Watch the 45-second demo →](https://metagrover.github.io/get-pluto/#in-action) ·
+[Watch with English captions →](https://metagrover.github.io/get-pluto/#in-action) ·
 [Download the video](docs/media/pluto-demo.mp4) ·
 [Read the transcript](docs/demo.md#narration)
 
