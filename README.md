@@ -4,82 +4,126 @@
 
 <h1 align="center">Pluto</h1>
 
-<p align="center"><strong>Be in the conversation. Keep what matters.</strong></p>
-<p align="center">A local-first, open-source meeting assistant for Apple Silicon Macs.</p>
+<h2 align="center">Intelligent meeting notes <em>for Mac.</em></h2>
+
+<p align="center">Pluto takes the notes, tracks who promised what, and reminds you to follow through.</p>
 
 <p align="center">
   <a href="#get-started">Get Pluto</a> ·
+  <a href="#watch-pluto">Demo</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#explore-pluto">Screenshots</a> ·
   <a href="#privacy">Privacy</a> ·
-  <a href="docs/getting-started.md">Setup guide</a> ·
-  <a href="https://github.com/metagrover/pluto/releases">Releases</a>
+  <a href="#faq">FAQ</a>
 </p>
 
-Pluto records meetings without a bot, transcribes on your Mac, and connects
-conversations into a working memory of people, projects, and follow-ups.
+Pluto is a local-first, open-source meeting notes app for Apple Silicon Macs.
+Record without a bot, transcribe on your Mac, and return to the people, projects,
+and follow-ups that matter.
 
-![Pluto’s daily briefing with meetings, follow-ups, and a recent win](docs/screenshots/pluto-dashboard.jpg)
+## Watch Pluto
 
-*Your meetings, commitments, and recent wins in one place. Screenshots use fictional demo data.*
+[![Watch the 45-second Pluto demo: meeting notes, familiar voices, projects, follow-ups, and Chat with Pluto](docs/media/pluto-demo-poster.jpg)](https://metagrover.github.io/get-pluto/#in-action)
+
+[Watch the 45-second demo →](https://metagrover.github.io/get-pluto/#in-action) ·
+[Download the video](docs/media/pluto-demo.mp4) ·
+[Read the transcript](docs/demo.md#narration)
+
+*Actual Pluto interface with fictional demo data. English captions are available in the website player.*
+
+## Features
+
+- **Chat with Pluto about a meeting, person, or project.** Ask follow-up questions
+  in a meeting chat, focus on someone’s history, or explore a project—with
+  references back to the conversations.
+- **Keep people and projects organized.** See their past conversations,
+  decisions, and next steps in one place.
+- **Track everyone’s commitments.** Keep track of who promised what across
+  conversations, including your own follow-ups. Get reminders for confirmed
+  commitments with due dates.
+- **Follow project milestones.** Keep milestones, decisions, and open work
+  connected to the meetings behind them.
+- **Recognize familiar voices with Voice ID.** Confirm speaker matches and
+  correct them when needed, so you can follow who said what.
+- **Record without a bot.** Capture your microphone and Mac’s audio directly,
+  then review transcripts, notes, and next steps.
+- **Choose where AI runs.** Use local models through Ollama or an optional cloud provider.
+- **Bring notes into ChatGPT.** Enable the optional connection on the same Mac.
+  [See what’s shared →](#privacy)
+
+## How it works
+
+1. **Record.** Start a meeting in Pluto and carry on with your conversation.
+2. **Review.** Stop recording, let Pluto transcribe and generate notes, then check
+   the decisions and next steps.
+3. **Pick up the thread.** Ask a question or explore the people and projects
+   connected to your meetings.
+
+Let participants know when you record. Generated notes, answers, and speaker
+matches can be wrong—review the source when it matters.
 
 ## Get started
 
 You’ll need an **Apple Silicon Mac (M1 or later)** with **macOS 14.2 or later**.
+An internet connection is required for initial downloads.
 
 ### 1. Install Pluto
 
-Open Terminal, paste this command, and press Return:
+Press **⌘ + Space**, type **Terminal**, and press Return. Copy this command,
+paste it into Terminal with **⌘ + V**, and press Return:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/metagrover/pluto/master/scripts/install-macos.sh | bash
 ```
 
-Pluto installs and opens. Follow setup to choose your storage options, download
-speech models, and allow microphone and system audio access.
+Wait for Pluto to install and open. Follow setup to download its speech models
+and allow microphone and system audio access. Calendar access is optional.
 
-### 2. Set up local AI
+### 2. Set up Ollama
 
-[Download Ollama for Mac](https://ollama.com/download/mac), open it, and complete
-its command-line setup. Then run these commands in Terminal to download the
-models for meeting notes and chat:
+[Download Ollama for Mac](https://ollama.com/download/mac), move it into
+**Applications**, and open it. Follow its prompt to enable the `ollama` Terminal
+command. Keep Ollama open, then run this command in Terminal:
 
 ```sh
-ollama pull gemma4:12b
-ollama pull phi4-mini:3.8b
+ollama pull gemma4:12b && ollama pull phi4-mini:3.8b
 ```
 
-Keep Ollama running. In Pluto’s **Settings → Intelligence**, use **Ollama** with
-**Gemma 4 12B** for analysis and **Phi-4 Mini** for fast chat—the defaults for new
-setups. These are separate from the speech models downloaded during setup.
+Wait for both downloads to finish. Pluto’s speech models handle transcription;
+Ollama’s models handle notes and chat. New Pluto setups use Ollama and these
+models by default—no settings to enter.
 
-Prefer a cloud provider? Choose one in **Settings → Intelligence** and add your
-API key instead of setting up Ollama.
+### 3. Try your first recording
 
-### 3. Try your first meeting
+Keep Ollama running and open Pluto. Let everyone know you’re recording, then
+click **New meeting** and start a short recording. Stop and wait for Pluto to
+finish generating notes, then open the meeting to review them and ask questions.
 
-Click **New meeting**, record a short conversation, and stop when you’re done.
-Once processing finishes, review the notes and next steps, then ask a question
-about the conversation. Let participants know when you record.
+[Full setup guide and troubleshooting →](docs/getting-started.md)
 
-[Full setup guide and troubleshooting →](docs/getting-started.md) ·
-[Download a DMG instead →](https://github.com/metagrover/pluto/releases)
+## Explore Pluto
 
-## From conversation to context
+See how Pluto helps you return to a conversation.
 
-Start with a meeting. Return to the decisions, connect them to earlier
-conversations, and carry that context into whatever comes next.
+### Meeting notes, decisions, and next steps
 
-### Keep the decisions, not just the recording
-
-Review notes and next steps. Confirm familiar speakers with Voice ID, and follow
-People and Projects across conversations.
+Review notes and next steps, then ask Pluto follow-up questions in the meeting’s
+chat. Confirm familiar speakers with Voice ID and correct matches when needed.
 
 ![Meeting decisions and next steps in Pluto](docs/screenshots/pluto-meeting.jpg)
 
-### Ask. Then check the source.
+### Ask Pluto and check the source
 
-Ask about your meeting history and follow the references back to the conversation.
+Ask across your meeting history, or focus the chat on a person or project.
+Follow references back to the conversations behind the answer.
 
 ![Ask Pluto answering across meetings with supporting references](docs/screenshots/pluto-chat.jpg)
+
+### People, projects, and follow-through
+
+Open a person’s page to catch up on your conversations and their commitments.
+Open a project’s page to review its decisions, milestones, and open work.
+Track commitments for everyone involved, with reminders for confirmed due dates.
 
 ### Pick up the thread in ChatGPT
 
@@ -90,7 +134,7 @@ The optional Pluto plugin brings meeting notes into ChatGPT on the same Mac.
 
 *The ChatGPT conversation above is illustrative.*
 
-### Make yourself at home
+### Themes and appearance
 
 Choose Light, Dark, Terracotta, Pluto, Aubergine, or follow your Mac’s appearance.
 
@@ -98,23 +142,44 @@ Choose Light, Dark, Terracotta, Pluto, Aubergine, or follow your Mac’s appeara
 
 ## Privacy
 
-- **Your recordings and transcripts stay on your Mac** when you use local
-  intelligence. Cloud AI is optional and sends relevant text to your chosen provider.
+- **Capture and transcription run on your Mac.** Local intelligence also stays
+  on your Mac. Optional cloud AI sends the text needed for each operation to your
+  chosen provider, which can include transcripts, notes, and retrieved context.
 - **Database encryption is optional at setup.** Audio files are not encrypted
   by default. [Storage details →](docs/getting-started.md#privacy-and-data)
 - **ChatGPT access is optional.** Enabling it makes all meeting notes available
   to read. Retrieved notes go to OpenAI; raw transcripts and audio are excluded.
   Disabling stops future reads; notes already shared remain in ChatGPT.
 
-Let people know when you record. Generated notes, answers, and speaker matches
-can be wrong—review the source when it matters.
+## FAQ
+
+### Can I use Pluto offline?
+
+Yes, after downloading the speech and Ollama models, local recording,
+transcription, notes, and chat work without a cloud provider or API key. Cloud AI
+and the optional ChatGPT connection need an internet connection.
+
+### Do I need a subscription?
+
+Pluto is free and open source. You can use local intelligence without an API key.
+If you choose cloud AI or ChatGPT, their own pricing and access requirements apply.
+
+### Does Pluto support Intel Macs, Windows, or Linux?
+
+Currently, Pluto supports Apple Silicon Macs only.
+
+### Where can I get help?
+
+Start with the [setup guide and troubleshooting](docs/getting-started.md).
+In Pluto, **Help → Report a Problem** prepares a report you can review before
+sharing. Keep private meeting content and credentials out of public issues.
 
 ## Build and contribute
 
 See the [developer guide](docs/dev.md) to run Pluto from source and the
 [architecture overview](docs/architecture.md) to explore the codebase.
-Bug reports and focused pull requests are welcome. **Help → Report a Problem**
-in Pluto prepares a reviewable report; keep private meeting content out of public issues.
+Bug reports and focused pull requests are welcome. Browse the
+[releases](https://github.com/metagrover/pluto/releases) for downloads and changes.
 
 ## License
 

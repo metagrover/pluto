@@ -14,13 +14,15 @@ Users usually open Pluto in a re-entry moment: before, during, or after a conver
 
 ## Product Purpose
 
-Pluto is a local-first, open-source desktop second brain that captures meeting audio, transcribes locally, extracts entities and commitments, and turns accumulated context into a trustworthy working memory.
+Pluto is a local-first, open-source meeting notes app for Apple Silicon Macs. It records meetings, transcribes audio on your Mac, and helps you review decisions, track who promised what, and follow up.
 
 The product exists to transform conversations from isolated events into a connected knowledge system organized by people, projects, themes, decisions, action items, and evidence. Success means users can focus on the conversation, then return later to a concise current read, accountable follow-ups, cited answers, and useful pre-meeting context without manually curating every note.
 
 ## Positioning
 
-Pluto treats meetings as durable evidence for a connected working memory rather than as isolated recordings or summaries. Its differentiator is the combination of local capture and transcription, evidence-grounded synthesis, and continuity across people, projects, commitments, and recurring conversations, with paths back to the underlying source.
+Lead with “Intelligent meeting notes for Mac.” Explain the value in familiar terms: Pluto takes the notes, tracks who promised what, and reminds you to follow through. People and project pages bring related conversations together, and answers link back to the meetings behind them.
+
+Use concrete tasks in public copy and onboarding. Avoid “second brain,” “connected memory,” and “dossiers” as explanations of the product; readers should not need to learn a metaphor before understanding what Pluto does. Keep local storage, optional cloud processing, and reviewable source evidence explicit where relevant.
 
 ## Operating Context
 
