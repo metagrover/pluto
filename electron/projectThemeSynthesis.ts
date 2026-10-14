@@ -5,6 +5,7 @@ import {
   readProjectQualification,
 } from '../src/utils/projectQualification';
 import { readProjectPortfolioDisposition } from '../src/utils/projectQualification';
+import { projectIdentityName } from './projectIdentityMatching';
 import { isSerializedTaskPreemption } from './serializedTaskGate';
 
 export const PROJECT_THEME_SYNTHESIS_VERSION = 3;
@@ -339,8 +340,8 @@ export async function synthesizeProjectThemes(
         Number(isProjectStarred(a.metadata)),
     )
     .slice(0, 80);
-  const fullSources = deps
-    .listSources()
+  const collectedSources = deps.listSources();
+  const fullSources = collectedSources
     .filter(
       (source) =>
         source.notes.trim() &&
@@ -401,6 +402,7 @@ export async function synthesizeProjectThemes(
         : [];
     });
   const sourceHash = createHash('sha256')
+    .update('project-identity-matching-v1')
     .update(evidenceHash(fullSources))
     .update(JSON.stringify(corrections))
     .update(
@@ -692,11 +694,34 @@ ${JSON.stringify(
       continue;
     if (!requestedProject && !confirmedProject && historicalMatch.length > 1)
       continue;
+    // A theme may predate extraction, or the model may omit candidate IDs.
+    // Reuse an unambiguous label variant only across its saved linked sources.
+    const namedMatches = knownProjects.filter(
+      (project) =>
+        projectIdentityName(project.name) === projectIdentityName(theme.name) &&
+        sourceMeetingIds.filter((sourceId) =>
+          collectedSources
+            .find((source) => source.id === sourceId)
+            ?.candidateProjects.some(
+              (candidate) => candidate.id === project.id,
+            ),
+        ).length >= 2 &&
+        !parseMetadata(project.metadata).projectAutoGroupingOptOut,
+    );
+    if (
+      !requestedProject &&
+      !confirmedProject &&
+      !filedParent &&
+      !historicalMatch.length &&
+      namedMatches.length > 1
+    )
+      continue;
     const id =
       requestedProject?.id ||
       filedParent?.id ||
       confirmedProject?.id ||
       historicalMatch[0]?.id ||
+      namedMatches[0]?.id ||
       themeId(candidateProjectIds, theme.name);
     const existing = deps.getProject(id);
     if (projectIds.includes(id)) continue;

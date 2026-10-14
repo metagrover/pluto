@@ -81,6 +81,51 @@ function fixture() {
 }
 
 describe('filing new work under established projects', () => {
+  it('repairs a label-wrapper duplicate with shared saved evidence before inference', async () => {
+    const { deps, projects, sources } = fixture();
+    projects[0].name = 'Cedar Atlas';
+    projects[1].name = 'Project Cedar Atlas';
+    sources[1].candidateProjects.push({ id: 'root', name: 'Cedar Atlas' });
+    expect(await routeProjectCandidate(deps)).toMatchObject({
+      grouped: 1,
+      failed: 0,
+    });
+    expect(deps.generate).not.toHaveBeenCalled();
+    expect(deps.saveMembership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'new',
+        parentProjectId: 'root',
+        relationship: 'alias',
+        sourceMeetingId: 'recent',
+        parentSourceMeetingId: 'recent',
+      }),
+    );
+  });
+
+  it('does not equate a label variant without shared saved sources', async () => {
+    const { deps, projects } = fixture();
+    projects[0].name = 'Cedar Atlas';
+    projects[1].name = 'Project Cedar Atlas';
+    deps.generate.mockResolvedValue(JSON.stringify({ relationship: 'none' }));
+    await routeProjectCandidate(deps);
+    expect(deps.generate).toHaveBeenCalledOnce();
+    expect(deps.saveMembership).not.toHaveBeenCalled();
+  });
+
+  it('reviews ambiguous label variants instead of selecting an arbitrary parent', async () => {
+    const { deps, projects, sources } = fixture();
+    projects[0].name = 'Cedar Atlas';
+    projects[1].name = 'Project Cedar Atlas';
+    projects.push({ ...projects[0], id: 'second' });
+    sources[1].candidateProjects.push(
+      { id: 'root', name: 'Cedar Atlas' },
+      { id: 'second', name: 'Cedar Atlas' },
+    );
+    deps.generate.mockResolvedValue(JSON.stringify({ relationship: 'none' }));
+    await routeProjectCandidate(deps);
+    expect(deps.generate).toHaveBeenCalledOnce();
+    expect(deps.saveMembership).not.toHaveBeenCalled();
+  });
   it('reviews visible project suggestions before newer unassessed topics', async () => {
     const { deps, projects, sources } = fixture();
     projects.push({ ...projects[1], id: 'unassessed', metadata: '{}' });

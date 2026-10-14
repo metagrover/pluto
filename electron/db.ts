@@ -165,6 +165,7 @@ import type { PrepMeetingOption } from './meetingPrep';
 import { createMeetingPrepStore, findCalendarInviteeName } from './meetingPrep';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
 import { createPrepAttendeeStore } from './prepAttendees';
+import { projectIdentityName } from './projectIdentityMatching';
 import type { ProjectRoutingMembership } from './projectRouting';
 import type { SynthesizedProjectTheme } from './projectThemeSynthesis';
 import { createSecureSettingsManager } from './secureSettings';
@@ -6470,6 +6471,19 @@ export const resolvePersonIdentityId = (personId: string): string => {
   throw new Error('person_alias_cycle');
 };
 
+const parseProjectMetadata = (
+  metadata: string | null,
+): Record<string, unknown> => {
+  try {
+    const value = JSON.parse(metadata || '{}');
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : {};
+  } catch {
+    return {};
+  }
+};
+
 export const upsertEntity = (entity: {
   id?: string; // Optional ID to force update on specific entity
   type: EntityType;
@@ -6507,6 +6521,55 @@ export const upsertEntity = (entity: {
         SELECT * FROM entities WHERE type = ? AND normalized_name = ?
       `)
       .get(entity.type, normalizedName) as Entity | undefined;
+  }
+
+  // Extraction can arrive after cross-conversation synthesis. Reuse a uniquely
+  // named home only when its saved sources also ground this extraction.
+  const extractedQualification = readProjectQualification(
+    entity.metadata ? JSON.stringify(entity.metadata) : null,
+  );
+  if (
+    !existing &&
+    !entity.id &&
+    entity.type === 'project' &&
+    entity.dedupe_by_name !== false &&
+    extractedQualification?.source === 'extraction' &&
+    extractedQualification.state === 'qualified' &&
+    extractedQualification.sourceMeetingId
+  ) {
+    const source = getMeeting(extractedQualification.sourceMeetingId) as
+      | PersistedMeeting
+      | undefined;
+    const notes =
+      source &&
+      buildMeetingNotesEvidenceDocument(
+        source,
+        getMeetingNotesIdentityProjection(source.id).speakerDisplayNames,
+      );
+    if (notes?.hasUsableNotes) {
+      const matches = (
+        db
+          .prepare(`
+        SELECT e.* FROM entities e JOIN meeting_entities me ON me.entity_id = e.id
+        WHERE e.type = 'project' AND me.meeting_id = ?
+        AND NOT EXISTS (SELECT 1 FROM project_aliases pa WHERE pa.project_id = e.id AND pa.active = 1)
+      `)
+          .all(extractedQualification.sourceMeetingId) as Entity[]
+      ).filter(
+        (project) =>
+          projectIdentityName(project.name) ===
+            projectIdentityName(entity.name) &&
+          project.status !== 'completed' &&
+          readProjectQualification(project.metadata)?.state === 'qualified' &&
+          !readProjectQualification(project.metadata)?.parentProjectId &&
+          readProjectPortfolioDisposition(project.metadata) !== 'dismissed' &&
+          !parseProjectMetadata(project.metadata).projectAutoGroupingOptOut,
+      );
+      if (matches.length === 1) {
+        existing = matches[0];
+        matchedProjectAlias = true;
+      }
+    }
   }
 
   if (existing?.type === 'project') {
@@ -6601,6 +6664,21 @@ export const upsertEntity = (entity: {
   }
 
   if (existing) {
+    if (
+      existing.type === 'project' &&
+      extractedQualification?.source === 'extraction'
+    ) {
+      const previous = parseProjectMetadata(existing.metadata);
+      const qualification = readProjectQualification(existing.metadata);
+      entity.metadata = {
+        ...previous,
+        ...entity.metadata,
+        ...(qualification?.source === 'user' ||
+        qualification?.source === 'review'
+          ? { projectQualification: qualification }
+          : {}),
+      };
+    }
     // Update existing entity
     const stmt = db.prepare(`
       UPDATE entities SET

@@ -72,6 +72,154 @@ it('counts established speakers instead of mentioned people and deduplicates mer
   );
 });
 describe('evidence-backed routing to an existing pinned project', () => {
+  it('reuses a synthesized home when extraction later adds a project label wrapper', () => {
+    const meetingId = 'late-extraction-source';
+    db.saveMeeting({
+      id: meetingId,
+      title: 'Cedar review',
+      user_notes: 'Cedar Atlas will launch an accessible archive kiosk.',
+    });
+    const qualification = {
+      version: 1,
+      state: 'qualified',
+      source: 'review',
+      reason: 'Two conversations support the outcome',
+      assessedAt: '2026-10-01',
+    };
+    const home = db.upsertEntity({
+      type: 'project',
+      name: 'Cedar Atlas',
+      metadata: {
+        projectQualification: qualification,
+        projectThemeSynthesis: {
+          version: 3,
+          currentFocus: 'Prepare the archive kiosk',
+        },
+        custom: 'keep',
+      },
+    });
+    db.addMeetingEntity({ meeting_id: meetingId, entity_id: home.id });
+    const extracted = db.upsertEntity({
+      type: 'project',
+      name: 'Project Cedar Atlas',
+      metadata: {
+        projectQualification: {
+          ...qualification,
+          source: 'extraction',
+          sourceMeetingId: meetingId,
+        },
+        context: 'Archive kiosk',
+      },
+    });
+    expect(extracted.id).toBe(home.id);
+    expect(extracted.name).toBe(home.name);
+    expect(JSON.parse(extracted.metadata!)).toMatchObject({
+      custom: 'keep',
+      projectThemeSynthesis: { currentFocus: 'Prepare the archive kiosk' },
+      projectQualification: { source: 'review' },
+    });
+    expect(
+      db.getProjectPortfolio().filter((p) => p.name.includes('Cedar Atlas')),
+    ).toHaveLength(1);
+  });
+
+  it('keeps the same label separate when the extraction has no shared saved source', () => {
+    const home = db.upsertEntity({
+      type: 'project',
+      name: 'Maple Atlas',
+      metadata: {
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'review',
+          reason: 'Established',
+          assessedAt: '2026-10-01',
+        },
+      },
+    });
+    db.saveMeeting({
+      id: 'unrelated-extraction-source',
+      title: 'Other review',
+      user_notes: 'A separate archive effort is being discussed.',
+    });
+    const extracted = db.upsertEntity({
+      type: 'project',
+      name: 'Project Maple Atlas',
+      metadata: {
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'extraction',
+          reason: 'Established',
+          assessedAt: '2026-10-01',
+          sourceMeetingId: 'unrelated-extraction-source',
+        },
+      },
+    });
+    expect(extracted.id).not.toBe(home.id);
+  });
+
+  it('repairs a historical duplicate through reversible membership persistence', async () => {
+    const qualification = {
+      version: 1,
+      state: 'qualified',
+      source: 'extraction',
+      reason: 'Established',
+      assessedAt: '2026-10-01',
+    };
+    const home = db.upsertEntity({
+      type: 'project',
+      name: 'Birch Atlas',
+      metadata: {
+        projectQualification: qualification,
+        projectThemeSynthesis: { version: 3 },
+      },
+    });
+    const duplicate = db.upsertEntity({
+      type: 'project',
+      name: 'Project Birch Atlas',
+      dedupe_by_name: false,
+      metadata: { projectQualification: qualification },
+    });
+    const notes =
+      'Birch Atlas will deliver an accessible archive kiosk with two exhibit screens.';
+    const sources = ['birch-plan', 'birch-review'].map((id) => ({
+      id,
+      title: 'Archive discussion',
+      notes,
+      candidateProjects: [
+        { id: home.id, name: home.name },
+        { id: duplicate.id, name: duplicate.name },
+      ],
+    }));
+    for (const source of sources) {
+      db.saveMeeting({ id: source.id, title: source.title, user_notes: notes });
+      for (const project of source.candidateProjects)
+        db.addMeetingEntity({ meeting_id: source.id, entity_id: project.id });
+    }
+    const generate = vi.fn(async () => {
+      throw new Error('provider should not be needed');
+    });
+    const result = await routeProjectCandidate({
+      listProjects: () =>
+        db
+          .getProjectPortfolio()
+          .filter((p) => p.id === home.id || p.id === duplicate.id),
+      listSources: () => sources,
+      getProject: db.getEntity,
+      getSource: (id) => sources.find((s) => s.id === id),
+      getState: () => null,
+      saveState: () => {},
+      saveMembership: db.saveProjectRoutingMembership,
+      isBusy: () => false,
+      generate,
+    });
+    expect(result.grouped).toBe(1);
+    expect(generate).not.toHaveBeenCalled();
+    expect(db.resolveProjectIdentityId(duplicate.id)).toBe(home.id);
+    expect(db.getProjectBrief(home.id)?.meetings).toHaveLength(2);
+    expect(db.getEntity(duplicate.id)).toBeDefined();
+  });
   function routingFixture(suffix: string) {
     const qualification = {
       version: 1,

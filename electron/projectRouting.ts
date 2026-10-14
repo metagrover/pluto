@@ -4,6 +4,7 @@ import {
   readProjectPortfolioDisposition,
   readProjectQualification,
 } from '../src/utils/projectQualification';
+import { projectIdentityName } from './projectIdentityMatching';
 import {
   rankProjectReviewSources,
   selectProjectReviewSources,
@@ -158,6 +159,8 @@ export async function routeProjectCandidate(
       (a, b) =>
         Number(readProjectQualification(b.metadata)?.state === 'qualified') -
           Number(readProjectQualification(a.metadata)?.state === 'qualified') ||
+        Number(!!metadata(a).projectThemeSynthesis) -
+          Number(!!metadata(b).projectThemeSynthesis) ||
         (Date.parse(projectSources(b.id)[0].startedAt || '') || 0) -
           (Date.parse(projectSources(a.id)[0].startedAt || '') || 0),
     );
@@ -212,7 +215,7 @@ export async function routeProjectCandidate(
     const hash = createHash('sha256')
       .update(
         JSON.stringify({
-          routingRevision: 4,
+          routingRevision: 5,
           project,
           roots: rootHashes.filter((root) => root.id !== project.id),
           sources: projectSources(project.id).map((source) => ({
@@ -271,6 +274,47 @@ export async function routeProjectCandidate(
       deferred: remaining > 0,
     };
   };
+  // Repair extraction-after-synthesis duplicates without requiring inference.
+  // Name equivalence alone is insufficient: both identities must already be
+  // linked to the same saved notes, and persistence still validates the quotes.
+  const equivalentRoots = roots.filter(
+    (root) =>
+      root.id !== project.id &&
+      projectIdentityName(root.name) === projectIdentityName(project.name) &&
+      projectSources(project.id).some((source) =>
+        projectSources(root.id).some(
+          (parentSource) => parentSource.id === source.id,
+        ),
+      ),
+  );
+  if (
+    !metadata(project).projectThemeSynthesis &&
+    equivalentRoots.length === 1
+  ) {
+    const parent = equivalentRoots[0];
+    const source = projectSources(project.id).find((source) =>
+      projectSources(parent.id).some(
+        (parentSource) => parentSource.id === source.id,
+      ),
+    )!;
+    const quote = normalized(source.notes).slice(0, 600);
+    if (grounded(source, quote)) {
+      const grouped = Number(
+        deps.saveMembership({
+          projectId: project.id,
+          parentProjectId: parent.id,
+          relationship: 'alias',
+          sourceMeetingId: source.id,
+          evidenceQuote: quote,
+          parentSourceMeetingId: source.id,
+          parentEvidenceQuote: quote,
+          expectedMetadata: project.metadata,
+          expectedParentMetadata: parent.metadata,
+        }),
+      );
+      return finish(grouped, grouped === 0);
+    }
+  }
   const candidateSources = selectProjectReviewSources(
     projectSources(project.id).map((source) => ({
       id: source.id,

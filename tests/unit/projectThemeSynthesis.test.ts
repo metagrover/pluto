@@ -88,6 +88,92 @@ const makeDeps = () => {
 };
 
 describe('cross-conversation project theme synthesis', () => {
+  it('reuses a grounded existing label variant even when the model omits candidate IDs', async () => {
+    const { deps } = makeDeps();
+    const existing = {
+      id: 'candidate-1',
+      type: 'project',
+      name: 'Project Cedar Atlas',
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'extraction',
+          reason: 'Grounded outcome',
+          assessedAt: '2026-09-01',
+        },
+      }),
+    };
+    const linked = sources.map((source) => ({
+      ...source,
+      candidateProjects: [{ id: existing.id, name: existing.name }],
+    }));
+    deps.generate.mockResolvedValue(
+      JSON.stringify({
+        themes: [
+          {
+            ...response.themes[0],
+            name: 'Cedar Atlas',
+            candidateProjectIds: [],
+          },
+        ],
+      }),
+    );
+    await synthesizeProjectThemes({
+      ...deps,
+      listSources: () => linked,
+      getSource: (id) => linked.find((source) => source.id === id),
+      getProject: (id) => (id === existing.id ? existing : undefined),
+      listProjects: () => [existing],
+    });
+    expect(deps.saveTheme).toHaveBeenCalledWith(
+      expect.objectContaining({ id: existing.id, name: existing.name }),
+    );
+  });
+
+  it('keeps the synthesized identity when its extracted candidate list is empty', async () => {
+    const { deps } = makeDeps();
+    const existing = {
+      id: 'existing-theme',
+      type: 'project',
+      name: 'Cedar Atlas',
+      metadata: JSON.stringify({
+        projectThemeSynthesis: { version: 3, candidateProjectIds: [] },
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'review',
+          reason: 'Grounded outcome',
+          assessedAt: '2026-09-01',
+        },
+      }),
+    };
+    const linked = sources.map((source) => ({
+      ...source,
+      candidateProjects: [{ id: existing.id, name: existing.name }],
+    }));
+    deps.generate.mockResolvedValue(
+      JSON.stringify({
+        themes: [
+          {
+            ...response.themes[0],
+            name: 'Project Cedar Atlas',
+            candidateProjectIds: [],
+          },
+        ],
+      }),
+    );
+    await synthesizeProjectThemes({
+      ...deps,
+      listSources: () => linked,
+      getSource: (id) => linked.find((source) => source.id === id),
+      getProject: (id) => (id === existing.id ? existing : undefined),
+      listProjects: () => [existing],
+    });
+    expect(deps.saveTheme).toHaveBeenCalledWith(
+      expect.objectContaining({ id: existing.id, name: existing.name }),
+    );
+  });
   it('promotes a notes-grounded theme only when two conversations support it', async () => {
     const fixture = makeDeps();
     const result = await synthesizeProjectThemes(fixture.deps);
