@@ -304,6 +304,29 @@ describe('ParakeetFinalClient', () => {
     });
   });
 
+  it('lets the runtime detect the spoken language instead of forcing English', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+    const ready = client.prepare();
+    child.respond(prepared(String(child.writes[0].id)));
+    await ready;
+
+    const transcription = client.transcribe({
+      meetingId: 'russian-call',
+      role: 'final_validation',
+      source: 'mix',
+      audioPath: '/user/recordings/russian-call.wav',
+      language: 'en',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(2));
+    expect(child.writes[1]).toMatchObject({
+      method: 'transcribe',
+      language: null,
+    });
+    child.respond(success(String(child.writes[1].id)));
+    await transcription;
+  });
+
   it('rejects paths outside the approved audio root before writing', async () => {
     const child = new FakeChild();
     const client = new ParakeetFinalClient({ paths, spawn: () => child });

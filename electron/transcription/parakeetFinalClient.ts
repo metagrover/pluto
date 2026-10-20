@@ -476,7 +476,9 @@ export class ParakeetFinalClient {
           id,
           method: 'transcribe',
           audioPath: request.audioPath,
-          language: request.language,
+          // A language hint makes FluidAudio drop tokens outside that script,
+          // so an 'en' hint turns Cyrillic speech into <unk>. Let v3 detect it.
+          language: null,
           vocabulary: request.vocabulary ?? [],
           ...(request.capability ? { capability: request.capability } : {}),
         });
