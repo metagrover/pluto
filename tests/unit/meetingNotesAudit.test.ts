@@ -25,6 +25,47 @@ import { rebaseMeetingNotesEdits } from '../../src/utils/meetingNotesEditRebase'
 import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
 
 it.each([
+  ['The decision is to keep the introduction static.', undefined],
+  ['We decided to keep the introduction static.', undefined],
+  ['I decided to keep the introduction static.', 'Tariq'],
+])(
+  'does not turn a decision reporter into its individual owner: %s',
+  (text, owner) => {
+    const source = createNotesSource(
+      JSON.stringify([{ speaker: 'Tariq', text }]),
+    );
+    const sources = [{ segment: 0, start: 0, end: text.length }];
+    const draft = parseNotesDraft(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: { text: 'Introduction', sources },
+            items: [
+              {
+                kind: 'decision',
+                text: 'Keep the introduction static.',
+                owner: null,
+                due: null,
+                sources,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const before = structuredClone({ source, draft });
+    const analysis = projectAuditedNotes(
+      acceptEditedNotes({ source, draft, compactNormalization: true }),
+    );
+    expect(analysis.all_decisions).toHaveLength(1);
+    expect(analysis.all_decisions[0]!.decided_by).toBe(owner);
+    expect({ source, draft }).toEqual(before);
+  },
+);
+
+it.each([
   'valid',
   'unknown member',
   'self',

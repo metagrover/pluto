@@ -3,7 +3,7 @@ import type { AnalysisProvider, MeetingType } from './analysisTypes';
 import type { REVIEW_RETRY_INSTRUCTIONS } from './meetingNotesSemanticReview';
 
 // Shared by generation metadata and persistent run/cache identity.
-export const NOTES_PROMPT_VERSION = 'notes-v87';
+export const NOTES_PROMPT_VERSION = 'notes-v88';
 export const NOTES_OLLAMA_MODEL = OLLAMA_GENERAL_MODEL;
 export const NOTES_EDITOR_PROMPT_VERSION = NOTES_PROMPT_VERSION;
 

@@ -1238,7 +1238,7 @@ const explicitDecisionOwner = (
         )
       )
         return [];
-      return /\b(?:the decision is|(?:we|i) (?:decided|agreed|approved|selected|chose)|proceed with)\b/i.test(
+      return /(?:^|[.!?]\s*)i (?:decided|agreed|approved|selected|chose)\b/i.test(
         text,
       )
         ? [segment.speaker]
@@ -1372,7 +1372,10 @@ export const acceptEditedNotes = ({
         if (
           item.kind === 'decision' &&
           compactNormalization &&
-          !declaredDecisionOwner &&
+          // Collective decisions remain decisions without an individual owner.
+          !/\b(?:the decision is|(?:we|i) (?:decided|agreed|approved|selected|chose)|proceed with)\b/i.test(
+            evidence,
+          ) &&
           statusExplanation.test(item.text) &&
           statusExplanation.test(evidence)
         ) {
