@@ -161,7 +161,18 @@ private actor ServiceEouManager: ParakeetEouManaging {
     func cancel() async {}
 }
 
-private struct ServiceEouDriver: ParakeetEouDriving {
+private actor ServiceEouDriver: ParakeetEouDriving {
+    private(set) var warmedPaths: [URL] = []
+    private let failWarmup: Bool
+
+    init(failWarmup: Bool = false) { self.failWarmup = failWarmup }
+
+    func warmModels(at activeModelURL: URL) async throws {
+        _ = try Data(contentsOf: activeModelURL.appendingPathComponent("model/marker"))
+        warmedPaths.append(activeModelURL)
+        if failWarmup { throw RuntimeFailure.modelPreparationFailed }
+    }
+
     func makeManager(request: ParakeetEouManagerRequest) async throws
         -> any ParakeetEouManaging
     {
@@ -312,7 +323,8 @@ final class ParakeetServiceTests: XCTestCase {
             audioRoot: audioRoot,
             manifest: .fixture,
             installer: ServiceModelInstaller(),
-            inferenceDriver: driver
+            inferenceDriver: driver,
+            eouDriver: ServiceEouDriver()
         )
 
         _ = await service.handle(RuntimeRequest(
@@ -369,6 +381,7 @@ final class ParakeetServiceTests: XCTestCase {
             manifest: .fixture,
             installer: ServiceModelInstaller(),
             inferenceDriver: ServiceInferenceDriver(),
+            eouDriver: ServiceEouDriver(),
             speakerEvidenceDriver: driver
         )
 
@@ -386,6 +399,42 @@ final class ParakeetServiceTests: XCTestCase {
         XCTAssertEqual(receivedSampleCounts, [1600, 1600, 1600])
     }
 
+    func testPrepareWarmsVerifiedStreamingModelsBeforeReportingReady() async throws {
+        let modelRoot = try makeDirectory("warm-models")
+        let driver = ServiceEouDriver()
+        let service = ParakeetService(
+            modelRoot: modelRoot,
+            audioRoot: try makeDirectory("warm-audio"),
+            manifest: .fixture,
+            installer: ServiceModelInstaller(),
+            inferenceDriver: ServiceInferenceDriver(),
+            eouDriver: driver
+        )
+        let response = await service.handle(RuntimeRequest(id: "prepare", method: .prepare))
+        XCTAssertTrue(response.ok)
+        let paths = await driver.warmedPaths
+        XCTAssertEqual(paths.count, 1)
+        XCTAssertEqual(paths.first?.lastPathComponent, ModelManifest.fixture.version)
+    }
+
+    func testWarmupFailureDoesNotPublishReadyOrActivateTheModel() async throws {
+        let service = ParakeetService(
+            modelRoot: try makeDirectory("failed-warm-models"),
+            audioRoot: try makeDirectory("failed-warm-audio"),
+            manifest: .fixture,
+            installer: ServiceModelInstaller(),
+            inferenceDriver: ServiceInferenceDriver(),
+            eouDriver: ServiceEouDriver(failWarmup: true)
+        )
+        let prepared = await service.handle(RuntimeRequest(id: "prepare", method: .prepare))
+        XCTAssertEqual(prepared.error?.code, .modelPreparationFailed)
+        let open = await service.handleLive(RuntimeRequest(
+            id: "open", method: .eouOpen,
+            eou: EouRequestMetadata(streamId: "mic", source: .mic, generation: 1)
+        ))
+        XCTAssertEqual(open.response.error?.code, .invalidRequest)
+    }
+
     func testPrepareThenTranscribeUsesBoundedDeduplicatedVocabulary() async throws {
         let modelRoot = try makeDirectory("service-models")
         let audioRoot = try makeDirectory("service-audio")
@@ -397,7 +446,8 @@ final class ParakeetServiceTests: XCTestCase {
             audioRoot: audioRoot,
             manifest: .fixture,
             installer: ServiceModelInstaller(),
-            inferenceDriver: driver
+            inferenceDriver: driver,
+            eouDriver: ServiceEouDriver()
         )
 
         let prepared = await service.handle(RuntimeRequest(
@@ -437,6 +487,7 @@ final class ParakeetServiceTests: XCTestCase {
             manifest: .fixture,
             installer: ServiceModelInstaller(),
             inferenceDriver: ServiceInferenceDriver(),
+            eouDriver: ServiceEouDriver(),
             speakerEvidenceDriver: driver
         )
 
@@ -471,6 +522,7 @@ final class ParakeetServiceTests: XCTestCase {
             manifest: .fixture,
             installer: ServiceModelInstaller(),
             inferenceDriver: ServiceInferenceDriver(),
+            eouDriver: ServiceEouDriver(),
             speakerEvidenceDriver: driver
         )
 
@@ -542,6 +594,7 @@ final class ParakeetServiceTests: XCTestCase {
             installer: ServiceModelInstaller(),
             inferenceDriver: ServiceInferenceDriver(),
             liveDriver: driver,
+            eouDriver: ServiceEouDriver(),
             liveConfigurationID: .lowLatency2s
         )
 
@@ -571,7 +624,8 @@ final class ParakeetServiceTests: XCTestCase {
             audioRoot: audioRoot,
             manifest: .fixture,
             installer: ServiceModelInstaller(),
-            inferenceDriver: ServiceInferenceDriver()
+            inferenceDriver: ServiceInferenceDriver(),
+            eouDriver: ServiceEouDriver()
         )
         _ = await service.handle(RuntimeRequest(id: "prepare", method: .prepare))
 
@@ -598,7 +652,8 @@ final class ParakeetServiceTests: XCTestCase {
             manifest: .fixture,
             installer: ServiceModelInstaller(),
             inferenceDriver: ServiceInferenceDriver(),
-            liveDriver: ServiceLiveDriver()
+            liveDriver: ServiceLiveDriver(),
+            eouDriver: ServiceEouDriver()
         )
         _ = await service.handle(RuntimeRequest(id: "prepare", method: .prepare))
 
@@ -643,7 +698,8 @@ final class ParakeetServiceTests: XCTestCase {
             manifest: .fixture,
             installer: ServiceModelInstaller(),
             inferenceDriver: ServiceInferenceDriver(),
-            liveDriver: FailingServiceLiveDriver()
+            liveDriver: FailingServiceLiveDriver(),
+            eouDriver: ServiceEouDriver()
         )
         _ = await service.handle(RuntimeRequest(id: "prepare", method: .prepare))
         _ = await service.handleLive(
@@ -683,7 +739,8 @@ final class ParakeetServiceTests: XCTestCase {
             manifest: .fixture,
             installer: ServiceModelInstaller(),
             inferenceDriver: ServiceInferenceDriver(),
-            liveDriver: ServiceLiveDriver()
+            liveDriver: ServiceLiveDriver(),
+            eouDriver: ServiceEouDriver()
         )
         _ = await service.handle(RuntimeRequest(id: "prepare", method: .prepare))
         _ = await service.handleLive(RuntimeRequest(

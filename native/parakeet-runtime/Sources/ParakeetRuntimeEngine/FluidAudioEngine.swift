@@ -966,9 +966,19 @@ public actor FluidAudioEouDriver: ParakeetEouDriving {
         AppLogger.setProcessLogging(.disabled)
     }
 
+    public func warmModels(at activeModelURL: URL) async throws {
+        let backend = try await makeBackend(at: activeModelURL)
+        await backend.cleanup()
+    }
+
     public func makeManager(request: ParakeetEouManagerRequest) async throws
         -> any ParakeetEouManaging
     {
+        let backend = try await makeBackend(at: request.activeModelURL)
+        return await FluidAudioEouManager(backend: backend)
+    }
+
+    private func makeBackend(at activeModelURL: URL) async throws -> StreamingEouAsrManager {
         AppLogger.setProcessLogging(.disabled)
         let configuration = MLModelConfiguration()
         configuration.computeUnits = .cpuAndNeuralEngine
@@ -977,11 +987,11 @@ public actor FluidAudioEouDriver: ParakeetEouDriving {
             chunkSize: .ms320,
             debugFeatures: false
         )
-        try await backend.loadModels(from: request.activeModelURL.appendingPathComponent(
+        try await backend.loadModels(from: activeModelURL.appendingPathComponent(
             FluidAudioModelLayout.eouDirectoryName,
             isDirectory: true
         ))
-        return await FluidAudioEouManager(backend: backend)
+        return backend
     }
 }
 

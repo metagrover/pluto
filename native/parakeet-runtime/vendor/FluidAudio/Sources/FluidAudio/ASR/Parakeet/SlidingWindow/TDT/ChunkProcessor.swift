@@ -591,11 +591,11 @@ struct ChunkProcessor {
                 )
             }
             if mergedTokens.count > 1 {
-                mergedTokens.sort { $0.timestamp < $1.timestamp }
+                Self.clampTokenTimestamps(&mergedTokens)
             }
             mergedTokens = collapseSeamWordDuplicates(mergedTokens, vocabulary: vocabulary)
         } else if mergedTokens.count > 1 {
-            mergedTokens.sort { $0.timestamp < $1.timestamp }
+            Self.clampTokenTimestamps(&mergedTokens)
         }
 
         let allTokens = mergedTokens.map { $0.token }
@@ -840,6 +840,13 @@ struct ChunkProcessor {
         return piece.unicodeScalars.allSatisfy { scalar in
             CharacterSet.punctuationCharacters.contains(scalar)
                 || CharacterSet.symbols.contains(scalar)
+        }
+    }
+
+    // Decoder order determines text; window timestamp estimates can overlap.
+    static func clampTokenTimestamps(_ tokens: inout [TokenWindow]) {
+        for index in tokens.indices.dropFirst() {
+            tokens[index].timestamp = max(tokens[index - 1].timestamp, tokens[index].timestamp)
         }
     }
 

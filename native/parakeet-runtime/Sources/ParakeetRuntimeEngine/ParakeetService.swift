@@ -200,12 +200,16 @@ public actor ParakeetService {
             }
             let requestId = request.id
             let progressSink = preparationProgressSink
-            activeModelURL = try await modelStore.prepare(
+            activeModelURL = nil
+            let preparedModelURL = try await modelStore.prepare(
                 manifest: manifest,
                 progressHandler: { progress in
                     progressSink?(requestId, progress)
                 }
             )
+            try await eouDriver.warmModels(at: preparedModelURL)
+            try Task.checkCancellation()
+            activeModelURL = preparedModelURL
             return .prepared(
                 id: request.id,
                 modelVersion: manifest.version,
