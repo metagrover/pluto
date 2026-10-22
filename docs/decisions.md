@@ -4,6 +4,13 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-22 - Bound durable live-transcription input delay to two seconds
+
+- **Status:** Packaged short-recording check passed; sustained recording qualification remains open.
+- **Extends:** “2026-09-29 - Recover live transcription from the durable capture journal.” Its checksum verification, replay, bounded PCM queue, generation fencing and final transcription remain unchanged.
+- **Decision:** Seal microphone and system-audio capture intervals every two seconds rather than five. Live inference still consumes saved chunks; it does not bypass source durability to show text sooner.
+- **Evidence:** With the same fictional speech in the packaged app, first visible text followed system-audio speech onset by about 2.6 seconds versus 8.7 seconds with five-second intervals. The prior 14-second telemetry started from earlier microphone activity. This is a short-run observation, not a sustained latency guarantee. Shorter intervals increase journal metadata operations; capture/recovery regression checks remain required.
+
 ## 2026-10-20 - Bound established Gemma GPU placement on smaller Macs
 
 - **Status:** Candidate; packaged transcription-to-notes, review, downstream updates and fidelity qualification remain required.
