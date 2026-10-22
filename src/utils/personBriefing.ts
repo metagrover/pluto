@@ -157,14 +157,18 @@ export const selectPersonActivity = (
     const analysis = analyses.get(meeting.id);
     if (!analysis || typeof analysis !== 'object') continue;
     const record = analysis as {
-      topics?: Array<{ key_points?: Array<{ text?: unknown }> }>;
+      topics?: Array<{
+        summary?: unknown;
+        key_points?: Array<{ text?: unknown }>;
+      }>;
       all_action_items?: Array<{ text?: unknown }>;
     };
     const points = [
       ...(Array.isArray(record.topics)
-        ? record.topics.flatMap((topic) =>
-            Array.isArray(topic.key_points) ? topic.key_points : [],
-          )
+        ? record.topics.flatMap((topic) => [
+            ...(Array.isArray(topic.key_points) ? topic.key_points : []),
+            { text: topic.summary },
+          ])
         : []),
       ...(Array.isArray(record.all_action_items)
         ? record.all_action_items

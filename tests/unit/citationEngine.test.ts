@@ -25,6 +25,29 @@ describe('Citation Engine', () => {
   });
 
   describe('buildCitationChain', () => {
+    it('quotes saved person notes rather than retrieval headers', () => {
+      const note = 'Maya suggested consulting Avery about design language.';
+      const context = [
+        {
+          meeting_id: 'design',
+          meeting_title: 'Maya recommended Avery for design review',
+          mid: null,
+          evidence_text: `Confirmed conversation: Maya recommended Avery for design review (2026-09-10) [meeting:design]\nMeeting notes (historical, not proof of current status): ${note}`,
+        },
+      ] as RetrievalResult[];
+      const citations = auditCitations(
+        buildCitationChain(
+          'Maya recommended Avery for design review on 2026-09-10. [Source 1]',
+          context,
+        ),
+        context,
+      );
+      expect(citations[0]).toMatchObject({
+        evidence_span: note,
+        evidence_valid: true,
+      });
+    });
+
     it('preserves local artifact provenance in citations', () => {
       const context = [
         {
@@ -360,7 +383,7 @@ describe('Citation Engine', () => {
       },
     ] as RetrievalResult[];
 
-    it('streams synthesized prose immediately without waiting for a citation', () => {
+    it('waits for a complete sentence before streaming synthesized prose', () => {
       const deltas: string[] = [];
       const stream = createSynthesizedAnswerStream(sources, (delta) =>
         deltas.push(delta),
@@ -368,8 +391,109 @@ describe('Citation Engine', () => {
 
       stream.push('The launch plan has a clear owner');
 
-      expect(deltas.join('')).toBe('The launch plan has a clear owner');
-      expect(stream.streamedAnswer).toBe('The launch plan has a clear owner');
+      expect(deltas.join('')).toBe('');
+      stream.push('.');
+      expect(stream.streamedAnswer).toBe('The launch plan has a clear owner.');
+    });
+
+    it('withholds invented personal agreement and elapsed time, including streamed prefixes', () => {
+      const context = [
+        {
+          ...sources[0],
+          evidence_text:
+            'The dashboard navigation will use a persistent left sidebar. The previous layout decision was reversed. Use a compact top bar instead.',
+        },
+      ];
+      const deltas: string[] = [];
+      const stream = createSynthesizedAnswerStream(
+        context,
+        (delta) => deltas.push(delta),
+        undefined,
+        'Alex',
+      );
+      stream.push('You previously agreed on a persistent left sidebar');
+      stream.push('. The decision was reversed within one week. ');
+      stream.push('Use a compact top bar instead.');
+      const result = stream.finalize(
+        'You previously agreed on a persistent left sidebar. The decision was reversed within one week. Use a compact top bar instead.',
+      );
+      expect(deltas.join('')).toBe('Use a compact top bar instead.');
+      expect(result.answer).toBe('Use a compact top bar instead.');
+      expect(result.outcome).toBe('partial');
+      expect(result.unsupportedClaimCount).toBe(2);
+    });
+
+    it('retains explicit personal agreement and source-stated durations', () => {
+      const result = buildSynthesizedAnswerPresentation(
+        'You agreed to use a compact top bar for two weeks.',
+        [
+          {
+            ...sources[0],
+            evidence_text:
+              'Alex agreed to use a compact top bar for two weeks.',
+          },
+        ],
+        'Alex',
+      );
+      expect(result.outcome).toBe('answered');
+      expect(result.answer).toBe(
+        'You agreed to use a compact top bar for two weeks.',
+      );
+    });
+
+    it('does not turn a named discussion into agreement', () => {
+      const result = buildSynthesizedAnswerPresentation(
+        'You previously agreed on a persistent left sidebar.',
+        [
+          {
+            ...sources[0],
+            evidence_text: 'Alex discussed a persistent left sidebar.',
+          },
+        ],
+        'Alex',
+      );
+      expect(result.outcome).toBe('no_evidence');
+      expect(result.citations).toEqual([]);
+    });
+
+    it('does not turn an older note into a status update for today', () => {
+      const context = [
+        {
+          ...sources[0],
+          evidence_text:
+            '[Occurred]: 2026-10-16T12:00:00Z\nA headcount freeze remains in effect.',
+        },
+      ];
+      expect(
+        buildSynthesizedAnswerPresentation(
+          'A headcount freeze remains in effect as of October 19, 2026.',
+          context,
+        ).outcome,
+      ).toBe('no_evidence');
+      expect(
+        buildSynthesizedAnswerPresentation(
+          'As of October 16, 2026, the notes record a headcount freeze.',
+          context,
+        ).outcome,
+      ).toBe('answered');
+    });
+
+    it('does not turn a decision into proof of implementation', () => {
+      const context = [
+        { ...sources[0], evidence_text: 'Use a compact top bar instead.' },
+      ];
+      expect(
+        buildSynthesizedAnswerPresentation(
+          'A compact top bar is now being used instead.',
+          context,
+        ).outcome,
+      ).toBe('no_evidence');
+      expect(
+        buildSynthesizedAnswerPresentation(
+          'The notes record a decision to use a compact top bar instead.',
+          context,
+        ).outcome,
+      ).toBe('answered');
     });
 
     it('keeps the full answer while stripping source markers for display', () => {
@@ -1796,5 +1920,124 @@ describe('citation wording and assignment roles', () => {
       audit('Avery repaired 15 login defects.', 'Avery fixed 2 login bugs.')
         .evidence_valid,
     ).toBe(false);
+  });
+});
+
+describe('personal recall undertaking fidelity', () => {
+  it.each([
+    [
+      'Blair will review the onboarding flow.',
+      'Avery plans to coordinate with Blair to review the onboarding flow.',
+    ],
+    [
+      'Blair is confirmed for design consultation.',
+      'Avery should consult Blair for design consultation.',
+    ],
+    [
+      'Blair will review the onboarding flow.',
+      'Blair will review the onboarding flow if the prototype is ready.',
+    ],
+    [
+      'Blair will review the onboarding flow.',
+      'Blair will be consulted to review the onboarding flow.',
+    ],
+  ])('rejects stronger or reassigned undertaking: %s', (claim, evidence) => {
+    expect(claimIsSupportedByEvidence(claim, evidence)).toBe(false);
+  });
+  it.each([
+    [
+      'Blair will review the onboarding flow.',
+      'Blair agreed to review the onboarding flow.',
+    ],
+    [
+      'Blair will review the onboarding flow if the prototype is ready.',
+      'Blair will review the onboarding flow if the prototype is ready.',
+    ],
+    [
+      'Blair can help with design consultation.',
+      'Avery should consult Blair for design consultation.',
+    ],
+  ])('retains the evidenced actor and conditions: %s', (claim, evidence) => {
+    expect(claimIsSupportedByEvidence(claim, evidence)).toBe(true);
+  });
+});
+
+it('removes an invented promise before personal recall is displayed or cited', () => {
+  const sources = [
+    {
+      meeting_id: 'design-sync',
+      meeting_title: 'Design sync',
+      mid: null,
+      evidence_text:
+        'Avery should consult Jordan for design language. Avery plans to coordinate with Blair to review the onboarding flow.',
+      score: 1,
+      score_breakdown: {
+        fts_rank: 0,
+        graph_proximity: 0,
+        recency_decay: 0,
+        mention_weight: 0,
+      },
+    },
+  ] satisfies RetrievalResult[];
+  const answer =
+    'Jordan can help with design language. Blair will review the onboarding flow.';
+  const presentation = buildSafeAnswerPresentation(
+    answer,
+    auditCitations(buildCitationChain(answer, sources), sources),
+  );
+  expect(presentation.answer).toContain('Jordan');
+  expect(presentation.answer).not.toContain('Blair will');
+  expect(presentation.unsupportedClaimCount).toBe(1);
+  expect(
+    presentation.citations.every((citation) => citation.evidence_valid),
+  ).toBe(true);
+});
+
+describe('contrast recorded within one source', () => {
+  const source = {
+    meeting_id: 'team-scope',
+    meeting_title: 'Team scope',
+    mid: null,
+    evidence_text:
+      'Maya suggests that the engineers focus on product logic and user experience while delegating infrastructure work to other team members.',
+    score: 1,
+    score_breakdown: {
+      fts_rank: 0,
+      graph_proximity: 0,
+      recency_decay: 0,
+      mention_weight: 0,
+    },
+  } satisfies RetrievalResult;
+  it('retains a closely supported contrast from a single meeting', () => {
+    const answer =
+      'Maya suggested engineers focus on product logic and user experience while delegating infrastructure work to others.';
+    const presentation = buildSafeAnswerPresentation(
+      answer,
+      auditCitations(buildCitationChain(answer, [source]), [source]),
+    );
+    expect(presentation.answer).toBe(answer);
+    expect(presentation.unsupportedClaimCount).toBe(0);
+    expect(presentation.citations[0].evidence_valid).toBe(true);
+  });
+  it('still requires multiple sources for an unsupported contrast or cross-meeting synthesis', () => {
+    for (const answer of [
+      'Maya focuses on product logic while Jordan owns infrastructure.',
+      'Maya focused on product logic in the earlier meeting while Jordan owned infrastructure later.',
+    ]) {
+      const citation = {
+        claim: answer,
+        meeting_id: source.meeting_id,
+        meeting_title: source.meeting_title,
+        evidence_span: 'Maya focuses on product logic.',
+        evidence_valid: true,
+        trust_status: 'inferred' as const,
+      };
+      expect(
+        auditAnswerGrounding(answer, [citation]).unsupportedClaimCount,
+      ).toBe(1);
+      expect(buildSafeAnswerPresentation(answer, [citation]).outcome).toBe(
+        'no_evidence',
+      );
+    }
   });
 });

@@ -3,6 +3,8 @@ import {
   bisectNotesSourceSpans,
   calculateNotesRequestBudget,
   estimateNotesTokens,
+  notesContextTokens,
+  notesWriterPolicy,
   partitionNotesSource,
   planNotesCapacity,
 } from '../../electron/llm/meetingNotesBudget';
@@ -220,3 +222,29 @@ it('prefers a whitespace boundary when bisecting one oversized source span', () 
     [{ segment: 0, start: 6, end: text.length }],
   ]);
 });
+
+it.each([undefined, null, '', 'ollama'])(
+  'uses the bounded compact writer without model review for local/default provider %s',
+  (provider) => {
+    expect(notesWriterPolicy(provider)).toEqual({
+      compactWriterContract: true,
+      hierarchyAuditStrategy: 'deterministic_only',
+    });
+    expect(notesContextTokens(provider)).toBe(16_384);
+  },
+);
+
+it.each(['chatgpt', 'openai', 'openrouter', 'claude', 'gemini'])(
+  'preserves the existing compact writer contract for %s',
+  (provider) => {
+    expect(notesWriterPolicy(provider)).toEqual({
+      compactWriterContract: true,
+    });
+    expect(notesWriterPolicy(provider)).not.toHaveProperty(
+      'hierarchyAuditStrategy',
+    );
+    expect(notesContextTokens(provider)).toBe(
+      provider === 'chatgpt' ? 131_072 : 16_384,
+    );
+  },
+);

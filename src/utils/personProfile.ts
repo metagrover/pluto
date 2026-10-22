@@ -60,19 +60,57 @@ export const parsePersonProfile = (value: unknown): PersonProfileClaim[] => {
       )
         return [];
       seen.add(key);
-      return [
-        {
-          section: claim.section as PersonProfileSection,
-          title:
-            typeof claim.title === 'string'
-              ? claim.title.trim().slice(0, 100)
-              : '',
-          summary: claim.summary.trim(),
-          citations,
-        },
-      ];
+      const uncertainTiming =
+        claim.section === 'priorities' &&
+        /\b(deadline|due date|timing)\b/i.test(claim.summary) &&
+        /\b(maybe|uncertain|unclear|unconfirmed|tentative)\b/i.test(
+          claim.summary,
+        );
+      const parsed: PersonProfileClaim = {
+        section: uncertainTiming
+          ? 'unknowns'
+          : (claim.section as PersonProfileSection),
+        title: uncertainTiming
+          ? 'Timing needs clarification'
+          : typeof claim.title === 'string'
+            ? claim.title.trim().slice(0, 100)
+            : '',
+        summary: uncertainTiming
+          ? `Timing is unconfirmed. ${claim.summary.trim()}`
+          : claim.summary.trim(),
+        citations,
+      };
+      return [parsed];
     })
     .slice(0, 32);
+};
+
+export const mergePersonProfiles = (
+  claims: PersonProfileClaim[],
+): PersonProfileClaim[] => {
+  const merged = new Map<string, PersonProfileClaim>();
+  for (const raw of claims) {
+    const claim = parsePersonProfile([raw])[0];
+    if (!claim) continue;
+    const key = `${claim.section}:${claim.summary.toLocaleLowerCase()}`;
+    const existing = merged.get(key);
+    if (!existing) {
+      if (merged.size < 32) merged.set(key, claim);
+      continue;
+    }
+    for (const citation of claim.citations) {
+      if (
+        existing.citations.length < 4 &&
+        !existing.citations.some(
+          (source) =>
+            source.meeting_id === citation.meeting_id &&
+            source.quote === citation.quote,
+        )
+      )
+        existing.citations.push(citation);
+    }
+  }
+  return [...merged.values()];
 };
 
 export const readPersonProfile = (

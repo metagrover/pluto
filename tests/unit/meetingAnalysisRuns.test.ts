@@ -24,113 +24,120 @@ describe('meeting analysis run coordinator', () => {
     id: autoTemplate.id,
     revision: autoTemplate.revision,
   };
-  it('keeps draft previews in memory only and clears them at publication', async () => {
-    let running = false;
-    let current = true;
-    const checkCurrent = vi.fn(() => current);
-    const publish = vi.fn().mockImplementation(() => {
-      running = false;
-      return true;
-    });
-    const coordinator = createMeetingAnalysisRunCoordinator({
-      db: {
-        getMeeting: () => ({
-          id: 'preview-meeting',
-          transcript_json: JSON.stringify({
-            segments: [{ speaker: 'Them', text: 'We agreed to ship.' }],
+  it.each([undefined, 'ollama', 'chatgpt'])(
+    'keeps draft previews in memory and applies the production writer policy (%s)',
+    async (providerName) => {
+      let running = false;
+      let current = true;
+      const checkCurrent = vi.fn(() => current);
+      const publish = vi.fn().mockImplementation(() => {
+        running = false;
+        return true;
+      });
+      const coordinator = createMeetingAnalysisRunCoordinator({
+        db: {
+          getMeeting: () => ({
+            id: 'preview-meeting',
+            transcript_json: JSON.stringify({
+              segments: [{ speaker: 'Them', text: 'We agreed to ship.' }],
+            }),
+            transcript_status: 'validated',
+            transcript_integrity_json: JSON.stringify({ verified: true }),
+            user_notes: '',
           }),
-          transcript_status: 'validated',
-          transcript_integrity_json: JSON.stringify({ verified: true }),
-          user_notes: '',
-        }),
-        getMeetingAnalysisPublicationRevisions: () => ({
-          sourceRevision: 'source',
-          eligibilityRevision: 'eligibility',
-          userNotesHash: 'notes',
-        }),
-        getMeetingAnalysisRun: () =>
-          running
-            ? {
-                run_id: 'preview-run',
-                input_revision: 'revision',
-                notes_status: 'running',
-              }
-            : null,
-        beginMeetingAnalysisRun: () => {
-          running = true;
+          getMeetingAnalysisPublicationRevisions: () => ({
+            sourceRevision: 'source',
+            eligibilityRevision: 'eligibility',
+            userNotesHash: 'notes',
+          }),
+          getMeetingAnalysisRun: () =>
+            running
+              ? {
+                  run_id: 'preview-run',
+                  input_revision: 'revision',
+                  notes_status: 'running',
+                }
+              : null,
+          beginMeetingAnalysisRun: () => {
+            running = true;
+          },
+          updateMeetingAnalysisRunStatus: () => true,
+          updateMeetingAnalysisRunStatusIfCurrent: () => true,
+          isMeetingAnalysisRunCurrent: checkCurrent,
+          publishMeetingNotesIfCurrent: publish,
+          getAllEntities: () => [],
+          getMeetingNotesIdentityProjection: () => ({
+            speakerDisplayNames: { Them: 'Alex' },
+            trustedUserTerms: ['Alex'],
+          }),
         },
-        updateMeetingAnalysisRunStatus: () => true,
-        updateMeetingAnalysisRunStatusIfCurrent: () => true,
-        isMeetingAnalysisRunCurrent: checkCurrent,
-        publishMeetingNotesIfCurrent: publish,
-        getAllEntities: () => [],
-        getMeetingNotesIdentityProjection: () => ({
-          speakerDisplayNames: { Them: 'Alex' },
-          trustedUserTerms: ['Alex'],
+        getSettings: async () => ({ llm_provider: providerName }),
+        createRunId: () => 'preview-run',
+        getProvider: async () => ({
+          name: providerName || 'ollama',
+          generateStructuredAnalysis: async (
+            transcript,
+            _notes,
+            _template,
+            options,
+          ) => {
+            expect(transcript).toBe('Alex: We agreed to ship.');
+            expect(options?.source?.segments[0]?.speaker).toBe('Alex');
+            expect(options?.trustedUserTerms).toEqual(['Alex']);
+            expect(options?.compactWriterContract).toBe(true);
+            expect(options?.hierarchyAuditStrategy).toBe(
+              providerName === 'chatgpt' ? undefined : 'deterministic_only',
+            );
+            const draft = {
+              meetingType: 'general' as const,
+              overview: null,
+              sections: [
+                { title: { text: 'Preview only', sources: [] }, items: [] },
+              ],
+            };
+            checkCurrent.mockClear();
+            for (let index = 0; index < 20; index++) options?.onDraft?.(draft);
+            expect(checkCurrent).not.toHaveBeenCalled();
+            expect(
+              coordinator.getMeetingNotesPreview('preview-meeting')?.sections[0]
+                .title,
+            ).toBe('Preview only');
+            expect(checkCurrent).toHaveBeenCalledOnce();
+            expect(publish).not.toHaveBeenCalled();
+            current = false;
+            expect(
+              coordinator.getMeetingNotesPreview('preview-meeting'),
+            ).toBeNull();
+            current = true;
+            options?.onDraft?.(draft);
+            return {
+              analysis_schema_version: 3,
+              overview: 'Reviewed notes.',
+              topics: [],
+              all_action_items: [],
+              all_decisions: [],
+              meeting_type: 'general',
+              quality: {
+                format_pass: true,
+                retry_count: 0,
+                fallback_used: false,
+                issues: [],
+              },
+            };
+          },
         }),
-      },
-      getSettings: async () => ({ llm_provider: 'ollama' }),
-      createRunId: () => 'preview-run',
-      getProvider: async () => ({
-        name: 'ollama',
-        generateStructuredAnalysis: async (
-          transcript,
-          _notes,
-          _template,
-          options,
-        ) => {
-          expect(transcript).toBe('Alex: We agreed to ship.');
-          expect(options?.source?.segments[0]?.speaker).toBe('Alex');
-          expect(options?.trustedUserTerms).toEqual(['Alex']);
-          const draft = {
-            meetingType: 'general' as const,
-            overview: null,
-            sections: [
-              { title: { text: 'Preview only', sources: [] }, items: [] },
-            ],
-          };
-          checkCurrent.mockClear();
-          for (let index = 0; index < 20; index++) options?.onDraft?.(draft);
-          expect(checkCurrent).not.toHaveBeenCalled();
-          expect(
-            coordinator.getMeetingNotesPreview('preview-meeting')?.sections[0]
-              .title,
-          ).toBe('Preview only');
-          expect(checkCurrent).toHaveBeenCalledOnce();
-          expect(publish).not.toHaveBeenCalled();
-          current = false;
-          expect(
-            coordinator.getMeetingNotesPreview('preview-meeting'),
-          ).toBeNull();
-          current = true;
-          options?.onDraft?.(draft);
-          return {
-            analysis_schema_version: 3,
-            overview: 'Reviewed notes.',
-            topics: [],
-            all_action_items: [],
-            all_decisions: [],
-            meeting_type: 'general',
-            quality: {
-              format_pass: true,
-              retry_count: 0,
-              fallback_used: false,
-              issues: [],
-            },
-          };
-        },
-      }),
-    });
-    await coordinator.generateAndPublishMeetingNotes({
-      meetingId: 'preview-meeting',
-      requestId: 'preview-request',
-      template: 'auto',
-      reason: 'manual',
-    });
-    expect(coordinator.getMeetingNotesPreview('preview-meeting')).toBeNull();
-    expect(publish).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(publish.mock.calls)).not.toContain('Preview only');
-  });
+      });
+      await coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'preview-meeting',
+        requestId: 'preview-request',
+        template: 'auto',
+        reason: 'manual',
+      });
+      expect(coordinator.getMeetingNotesPreview('preview-meeting')).toBeNull();
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(publish.mock.calls)).not.toContain('Preview only');
+    },
+  );
 
   it('publishes grounded speaker references for later identity projection', async () => {
     let running = false;
@@ -244,7 +251,7 @@ describe('meeting analysis run coordinator', () => {
     );
   });
 
-  it('allows an in-flight run to publish and build references when speaker identity projection updates mid-generation', async () => {
+  it('refuses an in-flight local approval when speaker identity trust changes mid-generation', async () => {
     let running = false;
     let projection = {
       speakerDisplayNames: {} as Record<string, string>,
@@ -345,43 +352,15 @@ describe('meeting analysis run coordinator', () => {
       }),
     });
 
-    const result = await coordinator.generateAndPublishMeetingNotes({
-      meetingId: 'parallel-meeting',
-      requestId: 'parallel-request',
-      template: 'auto',
-      reason: 'automatic',
-    });
-
-    expect(result.status).toBe('published');
-    expect(publish).toHaveBeenCalledWith(
-      expect.objectContaining({
-        analysis: expect.objectContaining({
-          generation_metadata: expect.objectContaining({
-            speaker_references: {
-              schema_version: 1,
-              blocks: expect.objectContaining({
-                overview: [
-                  {
-                    speaker: 'Remote Speaker 1',
-                    sourceName: 'Remote Speaker 1',
-                    start: 0,
-                    end: 16,
-                  },
-                ],
-                'all_action_items:0:assignee': [
-                  {
-                    speaker: 'Remote Speaker 1',
-                    sourceName: 'Remote Speaker 1',
-                    start: 0,
-                    end: 16,
-                  },
-                ],
-              }),
-            },
-          }),
-        }),
+    await expect(
+      coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'parallel-meeting',
+        requestId: 'parallel-request',
+        template: 'auto',
+        reason: 'automatic',
       }),
-    );
+    ).rejects.toThrow('meeting_notes_superseded');
+    expect(publish).not.toHaveBeenCalled();
   });
 
   it.each(['success', 'failure', 'superseded', 'inline'])(
@@ -1221,6 +1200,14 @@ describe('meeting analysis run coordinator', () => {
 
   it.each([
     [
+      'memory capacity',
+      Object.assign(new Error('private capacity detail'), {
+        name: 'LocalModelMemoryError',
+      }),
+      'failed',
+      'notes_memory_capacity',
+    ],
+    [
       'residency discovery',
       new Error('ollama_residency_discovery_failed'),
       'failed',
@@ -1374,11 +1361,14 @@ describe('meeting analysis run coordinator', () => {
         expect.objectContaining({
           compactWriterContract: true,
           knownTerms: ['Ogletree'],
-          hierarchyAuditStrategy: 'deterministic_only',
           trustedUserTerms: [],
           entityHints: ['Ogletree'],
           workClass: 'manual_notes',
         }),
+      );
+      expect(generateStructuredAnalysis.mock.calls[0]?.[3]).toHaveProperty(
+        'hierarchyAuditStrategy',
+        'deterministic_only',
       );
       // The persisted/reusable run identity must invalidate pre-schema outputs.
       const fingerprint = createHash('sha256')
@@ -2197,6 +2187,10 @@ describe('published notes do not regenerate from secondary vocabulary', () => {
         },
       }),
     };
+    const projection = {
+      speakerDisplayNames: {} as Record<string, string>,
+      trustedUserTerms: [] as string[],
+    };
     const writer = vi.fn().mockRejectedValue(new Error('writer_called'));
     const begin = vi.fn();
     const current = vi.fn(
@@ -2213,6 +2207,7 @@ describe('published notes do not regenerate from secondary vocabulary', () => {
     const coordinator = createMeetingAnalysisRunCoordinator({
       db: {
         getMeeting: () => meeting,
+        getMeetingNotesIdentityProjection: () => projection,
         getMeetingAnalysisPublicationRevisions: () => revisions,
         getMeetingAnalysisRun: () => run,
         beginMeetingAnalysisRun: begin,
@@ -2235,6 +2230,7 @@ describe('published notes do not regenerate from secondary vocabulary', () => {
     });
     return {
       coordinator,
+      projection,
       getProvider,
       settings,
       revisions,
@@ -2251,6 +2247,62 @@ describe('published notes do not regenerate from secondary vocabulary', () => {
     requestId: 'offline',
     reason: 'automatic' as const,
   };
+
+  it('does not reuse a local approval when an identical speaker label becomes explicitly confirmed', async () => {
+    const f = setup('complete', 'ollama');
+    await expect(
+      f.coordinator.generateAndPublishMeetingNotes(request),
+    ).resolves.toMatchObject({ status: 'published' });
+    f.projection.speakerDisplayNames = { Them: 'Them' };
+    await expect(
+      f.coordinator.generateAndPublishMeetingNotes({
+        ...request,
+        requestId: 'confirmed',
+      }),
+    ).rejects.toThrow('writer_called');
+    expect(f.writer).toHaveBeenCalledTimes(1);
+  });
+  it('reuses the same nonempty confirmed mapping independently of insertion order', async () => {
+    const f = setup('complete', 'ollama');
+    f.projection.speakerDisplayNames = {
+      'Remote Speaker 2': 'Briar',
+      'Remote Speaker 1': 'Ellis',
+    };
+    const identityRevision = createHash('sha256')
+      .update(
+        JSON.stringify([
+          ['Remote Speaker 1', 'Ellis'],
+          ['Remote Speaker 2', 'Briar'],
+        ]),
+        'utf8',
+      )
+      .digest('hex');
+    const analysis = JSON.parse(f.meeting.analysis_json);
+    analysis.generation_metadata.generation_options = {
+      speaker_identity_revision: identityRevision,
+    };
+    f.meeting.analysis_json = JSON.stringify(analysis);
+    await f.coordinator.generateAndPublishMeetingNotes(request);
+    f.projection.speakerDisplayNames = {
+      'Remote Speaker 1': 'Ellis',
+      'Remote Speaker 2': 'Briar',
+    };
+    await f.coordinator.generateAndPublishMeetingNotes({
+      ...request,
+      requestId: 'same-trust',
+    });
+    expect(f.writer).not.toHaveBeenCalled();
+  });
+
+  it('keeps an unchanged empty identity projection reusable for local notes', async () => {
+    const f = setup('complete', 'ollama');
+    await f.coordinator.generateAndPublishMeetingNotes(request);
+    await f.coordinator.generateAndPublishMeetingNotes({
+      ...request,
+      requestId: 'unchanged',
+    });
+    expect(f.writer).not.toHaveBeenCalled();
+  });
 
   it('reuses an existing published run despite names added by secondary extraction', async () => {
     const f = setup();

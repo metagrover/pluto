@@ -226,9 +226,9 @@ export class ParakeetFinalClient {
         idleTimeoutMs: options.idleTimeoutMs,
         diagnostic: options.diagnostic,
       });
-    this.runtimeHost.transport.onFailure(() => {
+    this.runtimeHost.transport.onFailure((code) => {
       this.preparePromise = null;
-      this.preparedCapability = null;
+      if (code !== 'parakeet_process_unloaded') this.preparedCapability = null;
     });
     this.runtimeHost.transport.onEvent((event) => {
       if (event.event !== 'prepare_progress') return;

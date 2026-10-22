@@ -327,3 +327,38 @@ describe('meeting regeneration failure presentation', () => {
     });
   });
 });
+
+it('explains memory refusal without offering an unchanged automatic retry', () => {
+  expect(
+    resolveMeetingFailurePresentation({
+      retryableFinalTranscription: false,
+      speakerAttributionFailure: false,
+      resourcePolicyDenied: false,
+      captureRecoveryRequired: false,
+      captureGap: false,
+      hasExistingAnalysis: false,
+      downstreamFailed: true,
+      downstreamFailureCode: 'notes_memory_capacity',
+    }),
+  ).toMatchObject({
+    title: 'Local model needs more memory',
+    detail:
+      'Your transcript is safe. Close other apps and try again when more memory is available.',
+    actionLabel: null,
+  });
+});
+
+it('keeps memory refusals actionable in the regeneration error dialog', () => {
+  expect(
+    resolveMeetingRegenerationFailurePresentation({
+      kind: 'request_failed',
+      error: new Error('notes_memory_capacity'),
+      hasExistingNotes: true,
+    }),
+  ).toEqual({
+    title: 'Local model needs more memory',
+    detail:
+      'Close other apps and try again when more memory is available. Your current notes are unchanged.',
+    canRetry: false,
+  });
+});

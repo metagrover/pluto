@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  mergePersonProfiles,
   parsePersonProfile,
   readPersonProfile,
 } from '../../src/utils/personProfile';
@@ -16,6 +17,23 @@ const claim = {
 };
 
 describe('person profile read boundary', () => {
+  it('merges duplicate claims without losing later chunk citations or exceeding the citation cap', () => {
+    const result = mergePersonProfiles(
+      Array.from({ length: 6 }, (_, index) => ({
+        ...claim,
+        citations: [{ ...claim.citations[0], meeting_id: `meeting-${index}` }],
+      })),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].citations.map((source) => source.meeting_id)).toEqual([
+      'meeting-0',
+      'meeting-1',
+      'meeting-2',
+      'meeting-3',
+    ]);
+    expect(claim.citations).toHaveLength(1);
+  });
+
   it('omits malformed, unknown, uncited, oversized, and duplicate claims', () => {
     expect(
       parsePersonProfile([
@@ -77,4 +95,30 @@ describe('person profile read boundary', () => {
       ),
     ).toEqual([]);
   });
+});
+
+it('keeps tentative or unclear timing out of urgent priorities without inventing a date', () => {
+  const result = parsePersonProfile([
+    {
+      ...claim,
+      section: 'priorities',
+      title: 'Urgent delivery',
+      summary: "Avery suggested a 'maybe lavender' deadline.",
+    },
+  ]);
+  expect(result[0]).toMatchObject({
+    section: 'unknowns',
+    title: 'Timing needs clarification',
+  });
+  expect(result[0].summary).toContain('Timing is unconfirmed.');
+  expect(result[0].citations).toEqual(claim.citations);
+  expect(
+    parsePersonProfile([
+      {
+        ...claim,
+        section: 'priorities',
+        summary: 'Avery confirmed a Friday deadline.',
+      },
+    ])[0].section,
+  ).toBe('priorities');
 });

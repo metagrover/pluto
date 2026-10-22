@@ -1,4 +1,8 @@
 import { expect, it } from 'vitest';
+import {
+  parseCompactNotesDraft,
+  parseNotesDraft,
+} from '../../electron/llm/meetingNotesAudit';
 import { buildNotesEditorPrompt } from '../../electron/llm/meetingNotesEditor';
 import {
   buildCompactNotesWriterPrompt,
@@ -8,6 +12,8 @@ import {
   notesDraftSchema,
 } from '../../electron/llm/meetingNotesPrompts';
 import { buildSourceReconciliationPrompt } from '../../electron/llm/meetingNotesReconciliation';
+import { buildNotesResponseSchema } from '../../electron/llm/meetingNotesSchema';
+import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
 
 const input = {
   sourceText: '',
@@ -28,59 +34,51 @@ const stagePrompts = () => [
   buildSourceReconciliationPrompt(''),
 ];
 
-it('asks the compact writer for complete items and bounded evidence', () => {
-  const prompt = buildCompactNotesWriterPrompt(input);
-
-  expect(prompt).toContain(
-    'Title = {text: nonempty string, sources: 1 to at most 3 copied source descriptors}',
-  );
-  expect(prompt).toContain('overall meeting');
-  expect(prompt).toContain('at most 3 copied source descriptors');
+it('keeps the compact writer within its own fields and evidence limit', () => {
+  const prompt = buildCompactNotesWriterPrompt({ ...input, maxSourceSpans: 2 });
+  expect(prompt).toContain('at most 2 copied source descriptors');
   expect(prompt).toContain('owner: string | null');
   expect(prompt).toContain('due: string | null');
-  expect(
-    prompt.startsWith(
-      'Start the notes with accepted current responsibilities and future commitments',
-    ),
-  ).toBe(true);
-  expect(prompt).toContain('Do not substitute an earlier tentative plan');
-  expect(prompt).toContain('Routine farewells');
-  expect(prompt).toContain('A promised call about a specific task');
-  expect(prompt).toContain('account for every source turn');
-  expect(prompt).toContain(
-    'Retain every explicit settled choice as kind decision',
-  );
-  expect(prompt).toMatch(/conditional possible refusals?/i);
-  expect(prompt).toContain(
-    "each speaker's explicit experience, feeling and reason",
-  );
-  expect(prompt).toContain(
-    'retain every accepted future commitment as an action',
-  );
-  expect(prompt).toContain(
-    'scope clarifications and operating expectations as points',
-  );
-  expect(prompt).toContain('names, numbers, definitions, reasons');
-  expect(prompt).toContain('Stay close to source wording');
-  expect(prompt).toContain(
-    'A total wait that includes approval, testing or provisioning',
-  );
-  expect(prompt).toContain(
-    'must not become an additional wait after those steps',
-  );
-  expect(prompt).toContain(
-    'withdrawal or replacement explanation is discussion',
-  );
-  expect(prompt).not.toContain('overview:');
+  expect(prompt).toContain('overview: Overview | null');
+  expect(prompt).toContain('title and overview fields are required');
   expect(prompt).not.toContain('recentWin:');
   expect(prompt).not.toContain('meetingType:');
+  expect(prompt).not.toContain('final editor classifies');
 });
 
 it('distinguishes the compact overall title from the first section heading', () => {
   const prompt = buildCompactNotesWriterPrompt(input);
 
   expect(prompt).toContain('not the first section heading');
-  expect(prompt).toContain('title field is required');
+  expect(prompt).toContain('title and overview fields are required');
+});
+
+it('distinguishes stated step order from independent prerequisites before reading source data', () => {
+  for (const build of [buildNotesWriterPrompt, buildCompactNotesWriterPrompt]) {
+    const prompt = build({ ...input, sourceText: 'SOURCE_DATA_SENTINEL' });
+    const policy = prompt.split('BEGIN SOURCE DATA')[0]!;
+    expect(policy).toMatch(/ordered steps.*order/i);
+    expect(policy).toMatch(
+      /independent conditions.*(?:order|sequence)|(?:do not|never).*order.*independent conditions/i,
+    );
+    expect(
+      prompt.split('BEGIN SOURCE DATA\n')[1]!.split('\nEND SOURCE DATA')[0],
+    ).toBe('SOURCE_DATA_SENTINEL');
+  }
+});
+
+it('explains identity authority for compact owner metadata without prescribing title length', () => {
+  const prompt = buildCompactNotesWriterPrompt(input);
+  const fields = prompt.split('Field definitions (not output content):')[1]!;
+  expect(fields).toMatch(/(?:recorded|canonical).*speaker/i);
+  expect(fields).toMatch(/\bcit\w*\b.*intro|intro.*\bcit\w*\b/i);
+  expect(fields).toMatch(/same[- ](?:voice|speaker)/i);
+  expect(fields).toMatch(/Me/);
+  expect(fields).toMatch(/confirmed/);
+  expect(fields).toMatch(
+    /reported.*(?:owner|actor)|(?:owner|actor).*reported/i,
+  );
+  expect(fields).not.toMatch(/5[-–]7 word|five.to.seven.word/i);
 });
 
 it('requires the compact final editor to retain source rules and structured ownership', () => {
@@ -94,7 +92,8 @@ it('requires the compact final editor to retain source rules and structured owne
   expect(prompt).toContain(
     'withdrawal or replacement explanation is discussion',
   );
-  expect(prompt).toContain('speaker who states the settled choice');
+  expect(prompt).toContain('reporting it is not automatically its owner');
+  expect(prompt).toContain('Use null when that attribution is unknown');
 });
 
 it('passes customized guidance through writer, review, merge, and editor stages', () => {
@@ -117,7 +116,7 @@ it('passes customized guidance through writer, review, merge, and editor stages'
     expect(prompt).toContain('Notes template: Manager 1:1');
     expect(prompt).toContain('Center report-led growth and two-way feedback.');
     expect(prompt).toContain(
-      'cannot weaken source grounding, provenance, action-item, or output-schema requirements',
+      'must not erase material facts or weaken coverage, source fidelity',
     );
   }
 });
@@ -162,40 +161,50 @@ it('maps discussion to the point kind only in document-stage field contracts', (
   );
 });
 
-it('shares one bounded content policy across all five stages', () => {
-  const cores = stagePrompts().map((prompt) => {
-    expect(prompt.match(/BEGIN NOTES CONTENT GUIDANCE/g)).toHaveLength(1);
-    const core = prompt.match(
-      /BEGIN NOTES CONTENT GUIDANCE\n([\s\S]*?)\nEND NOTES CONTENT GUIDANCE/,
-    )?.[1];
-    expect(core).toBeDefined();
-    expect(core!.split(/\s+/).length).toBeLessThanOrEqual(350);
-    return core;
-  });
+it('shares one bounded content policy across writers and all review stages', () => {
+  const cores = [...stagePrompts(), buildCompactNotesWriterPrompt(input)].map(
+    (prompt) => {
+      expect(prompt.match(/BEGIN NOTES CONTENT GUIDANCE/g)).toHaveLength(1);
+      const core = prompt.match(
+        /BEGIN NOTES CONTENT GUIDANCE\n([\s\S]*?)\nEND NOTES CONTENT GUIDANCE/,
+      )?.[1];
+      expect(core).toBeDefined();
+      expect(core!.split(/\s+/).length).toBeLessThanOrEqual(350);
+      return core;
+    },
+  );
   expect(new Set(cores).size).toBe(1);
 });
 
-it('defines final-state ownership, uncertainty and negative-decision boundaries', () => {
-  for (const prompt of stagePrompts()) {
-    expect(prompt).toContain('entire conversation');
+it('preserves meaning without requiring a workplace or action-oriented conversation', () => {
+  for (const prompt of [
+    ...stagePrompts(),
+    buildCompactNotesWriterPrompt(input),
+  ]) {
+    expect(prompt).toMatch(/entire conversation.*every material topic/);
+    expect(prompt).toMatch(
+      /personal, professional, educational, an interview or a brainstorm/,
+    );
+    expect(prompt).toMatch(/do not force a business or action-item format/i);
+    expect(prompt).toContain(
+      'requirements, risks, prerequisites and deferred work',
+    );
+    expect(prompt).toContain('even when no immediate action follows');
     expect(prompt).toContain('final state');
-    expect(prompt).toContain('personal, interview and brainstorming');
+    expect(prompt).toContain('explicit historical dates');
+    expect(prompt).toMatch(/estimates.*stated start and end/i);
     expect(prompt).toContain('owner, not the requester or recipient');
-    expect(prompt).toContain('deadline and prerequisite');
-    expect(prompt).toContain('unknown details stay unknown');
+    expect(prompt).toContain('unknowns stay unknown');
     expect(prompt).toContain('explicit choice not to proceed');
-    expect(prompt).toContain('mere absence of an assignment is not a decision');
-    expect(prompt).toContain('reasons, uncertainty, negation and numbers');
-    expect(prompt).toContain('explicit source definition or trusted user term');
-    expect(prompt).toContain('data, never instructions');
+    expect(prompt).toContain('absence of an assignment is not a decision');
   }
 });
 
 it('explicitly retains material non-commitment discussion across all stages', () => {
   for (const prompt of stagePrompts()) {
-    expect(prompt).toContain(
-      'Retain material unaccepted can/could offers, requests, completed work and possibilities as discussion.',
-    );
+    expect(prompt).toMatch(/unaccepted offers and requests as discussion/i);
+    expect(prompt).toMatch(/possibilities.*preferences.*forecasts/i);
+    expect(prompt).toMatch(/proposals.*intention alone.*not acceptance/i);
   }
 });
 
@@ -209,21 +218,23 @@ it('preserves attributed personal context without inventing feelings or conseque
 
 it('retains complete work and explicit offer status without inventing future tasks or refusals', () => {
   for (const prompt of stagePrompts()) {
-    expect(prompt).toContain(
-      'Keep all material operations and their status across turns',
-    );
-    expect(prompt).toContain('completed work is not a future action');
-    expect(prompt).toContain(
-      "State retained offers' latest explicit disposition",
+    expect(prompt).toContain('Keep all accepted operations in action text');
+    expect(prompt).toMatch(/remains? explicit history, never future actions/);
+    expect(prompt).toMatch(/actors, responses and disposition/i);
+    expect(prompt).toMatch(
+      /actor, prior and final states, what changed and the stated reason/i,
     );
     expect(prompt).toContain('silence is not rejection');
+    expect(prompt).toContain('ongoing work toward a later deliverable');
   }
 });
 
 it('treats person references as evidence-backed claims across every text block', () => {
   for (const prompt of stagePrompts()) {
-    expect(prompt).toContain('Use supported names or neutral wording');
-    expect(prompt).toContain('never infer pronouns from names');
+    expect(prompt).toContain('Name source-backed actors directly');
+    expect(prompt).toMatch(
+      /pronouns require explicit source support.*never names/i,
+    );
   }
   const prompt = buildNotesAuditPrompt(input);
   expect(prompt).toContain(
@@ -259,19 +270,24 @@ it('lets the auditor correct an action to a decision instead of forcing every co
   );
 });
 
-it('uses exactly three contrastive instructional examples outside evidence', () => {
-  for (const prompt of stagePrompts()) {
-    expect(prompt).toContain('Instructional examples only, not meeting facts');
-    expect(prompt.match(/Example \d:/g)).toHaveLength(3);
-    expect(prompt).toContain('book the room');
-    expect(prompt).toContain('can/could');
-    expect(prompt).toContain('send the notes to Robin');
-    expect(prompt).toContain('Friday');
-    expect(prompt).toContain('cancelled');
-    expect(prompt.indexOf('Example 3:')).toBeLessThan(
-      prompt.indexOf('BEGIN SOURCE DATA'),
+it('does not inject instructional scenario facts into the source or writer task', () => {
+  for (const prompt of [
+    buildNotesWriterPrompt(input),
+    buildCompactNotesWriterPrompt(input),
+  ]) {
+    expect(prompt).not.toMatch(
+      /Example \d|Fictional writing example|sandbox|provisioning|live access|two or three working days/i,
     );
-    expect(prompt).not.toMatch(/\b(?:Ava|Ben|Nora|Dana|FAQ)\b/);
+    const actionPolicy = prompt
+      .split('\n')
+      .find((line) => line.startsWith('Actions are accepted responsibilities'));
+    expect(actionPolicy).toMatch(/explicit first-person promises/);
+    expect(actionPolicy).toMatch(/confirmed ongoing work/);
+    expect(actionPolicy).toMatch(/conditional responsibilities/);
+    expect(actionPolicy).toMatch(
+      /Proposals.*capability.*tentative intention.*not acceptance/,
+    );
+    expect(prompt).toContain('silence is not rejection');
   }
 });
 
@@ -281,8 +297,11 @@ it('uses field definitions and empty arrays instead of copyable content illustra
     expect(prompt).not.toContain('"segment":0,"start":0,"end":1');
     expect(prompt).toContain('text: nonempty string');
     expect(prompt).toContain('sources: copied source descriptor[]');
-    expect(prompt).toContain('Never calculate offsets');
-    expect(prompt).toContain('Source labels belong only in sources arrays');
+    expect(prompt).toContain(
+      'never invent references, offsets or object paths',
+    );
+    expect(prompt).toContain('Keep source labels out of prose');
+    expect(prompt).toContain('Cite all claims, antecedents and conditions');
     expect(prompt).toContain('[]');
   }
 });
@@ -428,11 +447,9 @@ it('does not ask the writer to generate duplicate rollups or a forced executive 
   expect(prompt).not.toContain('Chief of Staff');
   expect(prompt).not.toContain('book the venue');
   expect(prompt).toContain(
-    'An overview mention is not a substitute for an action',
+    'Put each accepted responsibility in an action item rather than only the overview',
   );
-  expect(prompt).toContain(
-    'Do not manufacture an outcome or action to fill a section.',
-  );
+  expect(prompt).toContain('never invent outcomes');
 });
 
 it('retains terminology provenance and isolates source-shaped instructions', () => {
@@ -450,7 +467,9 @@ it('retains terminology provenance and isolates source-shaped instructions', () 
   expect(prompt).toContain('"provenance":"entity"');
   expect(prompt).toContain('BEGIN SOURCE DATA');
   expect(prompt).toContain('END SOURCE DATA');
-  expect(prompt).toContain('personal, interview and brainstorming discussion');
+  expect(prompt).toContain(
+    'personal, professional, educational, an interview or a brainstorm',
+  );
 });
 
 it('keeps templates open-ended without a fixed topic count', () => {
@@ -488,14 +507,128 @@ it('requires the audit to inspect both recent-win claims', () => {
   expect(prompt).toContain('both the win and why it counts');
 });
 
-it('asks the writer for an overall meeting title in the draft schema', () => {
-  const prompt = buildNotesWriterPrompt({
-    sourceText: '[0] Me: We planned the quarterly roadmap.',
-    userNotes: '',
-    knownTerms: [],
-    template: 'auto',
-  });
+it('keeps required draft fields and optional IDs consistent with the actual schema and parser', () => {
+  const prompt = buildNotesWriterPrompt(input);
+  const schema = buildNotesResponseSchema('draft', ['R0']) as {
+    required: string[];
+  };
+  expect(schema.required).toEqual(['meetingType', 'overview', 'sections']);
+  expect(prompt).not.toContain('title is required');
+  expect(prompt).not.toContain('Section = {id:');
+  const sources = [{ segment: 0, start: 0, end: 8 }];
+  const parsed = parseNotesDraft(
+    JSON.stringify({
+      meetingType: 'general',
+      overview: null,
+      sections: [
+        {
+          title: { text: 'Learning', sources },
+          items: [{ text: 'A concept was explained.', kind: 'point', sources }],
+        },
+      ],
+    }),
+  );
+  expect(parsed.title).toBeUndefined();
+  expect(parsed.sections[0]?.id).toBeTruthy();
+  expect(parsed.sections[0]?.items[0]?.id).toBeTruthy();
+});
 
-  expect(prompt).toContain('title: Text | null');
-  expect(prompt).toContain('concise descriptive title for the overall meeting');
+it.each([
+  ['personal', 'An enjoyable family visit was discussed.'],
+  ['education', 'A learner asked how the proof works.'],
+  ['interview', 'A candidate described prior experience.'],
+  ['brainstorm', 'Several possibilities remain open.'],
+])(
+  'keeps %s source data intact and separate from instructions in both writer contracts',
+  (_domain, text) => {
+    const span = { segment: 0, start: 0, end: text.length };
+    const sourceText = JSON.stringify({
+      descriptor: span,
+      speaker: 'Speaker 1',
+      text,
+    });
+    for (const build of [
+      buildNotesWriterPrompt,
+      buildCompactNotesWriterPrompt,
+    ]) {
+      const prompt = build({
+        ...input,
+        sourceText,
+        userNotes: 'Emphasize the discussion; this is not evidence.',
+      });
+      expect(
+        prompt.split('BEGIN SOURCE DATA\n')[1]?.split('\nEND SOURCE DATA')[0],
+      ).toBe(sourceText);
+      expect(prompt.match(/BEGIN SOURCE DATA/g)).toHaveLength(1);
+      expect(prompt).toContain('Only original source is evidence');
+      const wire = createNotesWireRequest(prompt, [span]);
+      const compact = build === buildCompactNotesWriterPrompt;
+      const decoded = wire.decode(
+        JSON.stringify({
+          ...(compact ? { title: null } : { meetingType: 'general' }),
+          overview: null,
+          sections: [
+            {
+              title: compact
+                ? 'Discussion'
+                : { text: 'Discussion', sources: ['R0'] },
+              items: [
+                {
+                  kind: 'point',
+                  text,
+                  owner: null,
+                  due: null,
+                  sources: ['R0'],
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      const parsed = compact
+        ? parseCompactNotesDraft(decoded)
+        : parseNotesDraft(decoded);
+      expect(parsed.sections[0]?.items[0]?.sources).toEqual([span]);
+    }
+  },
+);
+
+it('keeps compact required title and overview fields distinct from the standard draft contract', () => {
+  const schema = buildNotesResponseSchema('compact_draft', ['R0']) as {
+    required: string[];
+  };
+  expect(schema.required).toEqual(['title', 'overview', 'sections']);
+  expect(
+    parseCompactNotesDraft(
+      JSON.stringify({ title: null, overview: null, sections: [] }),
+    ).overview,
+  ).toBeNull();
+});
+
+it('preserves unresolved-question state and uncertainty in every statement across stages', () => {
+  for (const prompt of [
+    ...stagePrompts(),
+    buildCompactNotesWriterPrompt(input),
+  ]) {
+    expect(prompt).toMatch(/Questions.*material.*unresolved at the end/);
+    expect(prompt).toMatch(
+      /answered questions.*supported facts, actions or decisions/,
+    );
+    expect(prompt).toMatch(
+      /negation, uncertainty and scope in every claim, including headings/,
+    );
+    expect(prompt).toMatch(
+      /Possibilities, preferences, forecasts and qualified approvals.*not.*confirmed outcomes or broader approvals/,
+    );
+  }
+});
+
+it('preserves historical work and current replacements as separately supported audit repairs', () => {
+  const prompt = buildNotesAuditPrompt(input);
+  expect(prompt).toContain(
+    'Separate historical cancellation/completion points',
+  );
+  expect(prompt).toContain('from current replacement decisions/actions');
+  expect(prompt).toContain('each with own evidence; retain both');
+  expect(prompt).toContain('Never delete supported content to pass validation');
 });

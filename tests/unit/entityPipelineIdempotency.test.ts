@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { afterAll, describe, expect, it, vi } from 'vitest';
+import { isPersonalAction } from '../../src/utils/actionCommitment';
 
 const testDatabase = vi.hoisted(() => ({
   directory: `/tmp/pluto-entity-pipeline-idempotency-${process.pid}-${Math.random()
@@ -251,7 +252,7 @@ describe('extracted action idempotency', () => {
   });
 
   it.each(['confirmed', 'rejected'] as const)(
-    'retires a prior %s meeting commitment when regeneration replaces the snapshot',
+    'preserves a prior %s user decision when the source operation is unchanged',
     async (commitmentState) => {
       const meetingId = `meeting-repeat-${commitmentState}`;
       saveMeeting({ id: meetingId, title: 'Repeat extraction fixture' });
@@ -275,10 +276,10 @@ describe('extracted action idempotency', () => {
         return metadata.source_meeting_id === meetingId;
       });
       expect(actions).toHaveLength(1);
-      expect(actions[0].id).not.toBe(reviewed.id);
+      expect(actions[0].id).toBe(reviewed.id);
       expect(JSON.parse(actions[0].metadata ?? '{}')).toMatchObject({
         full_description: 'Send   the rollout note.',
-        commitment_state: 'possible',
+        commitment_state: commitmentState,
         origin: 'extraction',
         source_meeting_id: meetingId,
       });
@@ -286,20 +287,20 @@ describe('extracted action idempotency', () => {
         JSON.parse(getEntity(reviewed.id)?.metadata ?? '{}'),
       ).toMatchObject({
         commitment_state: commitmentState,
-        meeting_regeneration_retired_at: expect.any(String),
       });
       const associations = getMeetingEntities(meetingId);
       expect(associations).toHaveLength(1);
       expect(associations[0].mention_count).toBe(1);
-      expect(replay.created).toBe(1);
-      expect(replay.linked).toBe(1);
-      expect(
-        getActionItemsByStatus('active').map((entity) => entity.id),
-      ).not.toContain(reviewed.id);
+      expect(replay.created).toBe(0);
+      expect(replay.updated).toBe(1);
+      expect(replay.linked).toBe(0);
+      expect(JSON.parse(getEntity(reviewed.id)!.metadata!)).not.toHaveProperty(
+        'meeting_regeneration_retired_at',
+      );
     },
   );
 
-  it('retires completed commitments from the previous meeting generation', async () => {
+  it('preserves completed user history when regeneration rephrases the source operation', async () => {
     const meetingId = 'meeting-completed-replacement';
     saveMeeting({ id: meetingId, title: 'Completed replacement fixture' });
     const first = await processExtractedEntities(
@@ -316,10 +317,10 @@ describe('extracted action idempotency', () => {
 
     expect(
       getActionItemsByStatus('completed').map((entity) => entity.id),
-    ).not.toContain(first.entities[0].id);
+    ).toContain(first.entities[0].id);
     expect(
       JSON.parse(getEntity(first.entities[0].id)?.metadata ?? '{}'),
-    ).toMatchObject({ meeting_regeneration_retired_at: expect.any(String) });
+    ).not.toHaveProperty('meeting_regeneration_retired_at');
   });
 
   it('retires the previous set when successful regeneration finds no commitments', async () => {
@@ -567,3 +568,211 @@ describe('extracted action idempotency', () => {
     expect(second.updated).toBe(0);
   });
 });
+
+it('marks only exact actions from the saved contextual review as eligible extraction', async () => {
+  const meetingId = 'semantic-classification-source';
+  const task = {
+    text: 'Send the launch checklist',
+    assignee: 'Me',
+    evidence: 'I will send the launch checklist.',
+  };
+  saveMeeting({
+    id: meetingId,
+    title: 'Source review',
+    analysis_json: JSON.stringify({
+      all_action_items: [task],
+      generation_metadata: {
+        pipeline_version: 'writer-audit-v1',
+        source_action_review_version: 1,
+      },
+    }),
+  });
+  const extracted = {
+    ...extractedAction(task.text),
+    action_items: [
+      {
+        description: task.text,
+        assignee: task.assignee,
+        evidence: task.evidence,
+      },
+    ],
+  };
+  const result = await processExtractedEntities(extracted, meetingId);
+  const item = result.entities.find((entity) => entity.type === 'action_item')!;
+  expect(JSON.parse(item.metadata!)).toMatchObject({
+    source_action_review_version: 1,
+    commitment_state: 'possible',
+  });
+  const mismatched = await processExtractedEntities(
+    {
+      ...extracted,
+      action_items: [
+        {
+          ...extracted.action_items[0]!,
+          description: 'Invented checklist task',
+        },
+      ],
+    },
+    meetingId,
+  );
+  expect(
+    JSON.parse(
+      mismatched.entities.find((entity) => entity.type === 'action_item')!
+        .metadata!,
+    ),
+  ).not.toHaveProperty('source_action_review_version');
+});
+
+it.each(['direct', 'legacy'] as const)(
+  'requires review when regeneration encounters %s completed source history',
+  async (kind) => {
+    const meetingId = `protected-source-${kind}`;
+    saveMeeting({
+      id: meetingId,
+      title: 'Protected source',
+      analysis_json: JSON.stringify({
+        all_action_items: [
+          {
+            text: 'Email the status report',
+            assignee: 'Me',
+            evidence: 'I will email the status report.',
+          },
+        ],
+        generation_metadata: {
+          pipeline_version: 'writer-audit-v1',
+          source_action_review_version: 1,
+        },
+      }),
+    });
+    upsertEntity({
+      id: `closed-source-${kind}`,
+      type: 'action_item',
+      name: 'Send the report',
+      status: 'completed',
+      dedupe_by_name: false,
+      metadata: {
+        commitment_state: 'confirmed',
+        ...(kind === 'legacy'
+          ? { dreamingSources: [{ meetingIds: [meetingId] }] }
+          : { origin: 'extraction', source_meeting_id: meetingId }),
+      },
+    });
+    const result = await processExtractedEntities(
+      {
+        ...extractedAction('Email the status report'),
+        action_items: [
+          {
+            description: 'Email the status report',
+            assignee: 'Me',
+            evidence: 'I will email the status report.',
+          },
+        ],
+      },
+      meetingId,
+    );
+    const current = result.entities.find(
+      (entity) => entity.type === 'action_item',
+    )!;
+    expect(JSON.parse(current.metadata!)).toMatchObject({
+      source_action_review_version: 1,
+      source_regeneration_review_required: true,
+    });
+    expect(isPersonalAction(current, { selfPersonId: 'self' })).toBe(false);
+    expect(getEntity(`closed-source-${kind}`)?.status).toBe('completed');
+    expect(
+      isPersonalAction(updateActionCommitmentState(current.id, 'confirmed'), {
+        selfPersonId: 'self',
+      }),
+    ).toBe(true);
+  },
+);
+
+it('preserves an adopted open task when regeneration rephrases or omits it', async () => {
+  const meetingId = 'adopted-open-source-continuity';
+  saveMeeting({ id: meetingId, title: 'Open task continuity' });
+  const first = await processExtractedEntities(
+    extractedAction('Send the rollout note'),
+    meetingId,
+  );
+  const id = first.entities[0]!.id;
+  updateActionCommitmentState(id, 'confirmed');
+  for (const replacement of [
+    extractedAction('Send the revised rollout note'),
+    { ...extractedAction('unused'), action_items: [] },
+  ]) {
+    await processExtractedEntities(replacement, meetingId);
+    expect(getEntity(id)).toMatchObject({ status: 'active' });
+    expect(JSON.parse(getEntity(id)!.metadata!)).toMatchObject({
+      commitment_state: 'confirmed',
+    });
+    expect(JSON.parse(getEntity(id)!.metadata!)).not.toHaveProperty(
+      'meeting_regeneration_retired_at',
+    );
+    expect(
+      getActionItemsByStatus('active').map((entity) => entity.id),
+    ).toContain(id);
+  }
+});
+it('preserves explicit ownership and a user deadline when reusing a reviewed source task', async () => {
+  const meetingId = 'explicit-owner-source-continuity';
+  saveMeeting({ id: meetingId, title: 'Owned task continuity' });
+  const task = upsertEntity({
+    id: 'user-owned-source-task',
+    type: 'action_item',
+    name: 'Send the rollout note',
+    status: 'active',
+    due_date: '2026-10-20',
+    dedupe_by_name: false,
+    metadata: {
+      origin: 'extraction',
+      owner_source: 'user',
+      source_meeting_id: meetingId,
+      original_description: 'Send the rollout note',
+    },
+  });
+  const result = await processExtractedEntities(
+    extractedAction('Send the rollout note'),
+    meetingId,
+  );
+  expect(
+    result.entities.find((entity) => entity.type === 'action_item')?.id,
+  ).toBe(task.id);
+  expect(getEntity(task.id)).toMatchObject({
+    status: 'active',
+    due_date: '2026-10-20',
+  });
+  expect(JSON.parse(getEntity(task.id)!.metadata!)).not.toHaveProperty(
+    'meeting_regeneration_retired_at',
+  );
+});
+
+it.each([
+  ['Friday, May 15', '2026-05-15'],
+  ['Friday, May 15 after approval', null],
+] as const)(
+  'persists a source calendar deadline safely: %s',
+  async (due, expected) => {
+    const meetingId = `source-calendar-${expected ?? 'qualified'}`;
+    saveMeeting({
+      id: meetingId,
+      title: 'Museum planning',
+      started_at: '2026-05-11T12:00:00-07:00',
+    });
+    const result = await processExtractedEntities(
+      {
+        ...extractedAction('Send the museum programme'),
+        action_items: [
+          {
+            description: 'Send the museum programme',
+            evidence: `I will send the museum programme by ${due}.`,
+            due_date: due,
+          },
+        ],
+      },
+      meetingId,
+    );
+    expect(
+      result.entities.find((entity) => entity.type === 'action_item')?.due_date,
+    ).toBe(expected);
+  },
+);

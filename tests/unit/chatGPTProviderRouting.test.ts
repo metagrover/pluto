@@ -132,25 +132,17 @@ describe('ChatGPT intelligence routing', () => {
       const provider = new UnifiedLLMProvider('chatgpt', {
         chatgpt_model: 'account-model',
       });
-      const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+      const generation = provider.generateStructuredAnalysis('', '', 'auto', {
         source,
         ...(nearDeadline
           ? { optionalReviewDeadlineAtMs: Date.now() + 10000 }
           : {}),
       });
       const shouldReview = dailyRequests > 1 && !nearDeadline;
-      expect(result.all_action_items).toHaveLength(shouldReview ? 1 : 0);
-      expect(fetcher).toHaveBeenCalledTimes(shouldReview ? 2 : 1);
-      if (!shouldReview) {
-        expect(JSON.stringify(result.topics)).toContain(
-          'Riley agreed to send the checklist by Monday.',
-        );
-        expect(result.quality.issues).toContain(
-          'semantic_notes_review_unavailable',
-        );
-      } else {
-        expect(result.all_action_items[0]!.assignee).toBe('Riley');
-        expect(result.generation_metadata?.audit_change_count).toBe(1);
+      if (shouldReview) {
+        const result = await generation;
+        expect(result.all_action_items).toHaveLength(1);
+        expect(result.generation_metadata.source_action_review_version).toBe(1);
         expect(
           getChatGPTUsage().summary().tasks['notesWriter (account-model)']
             ?.requests,
@@ -159,7 +151,12 @@ describe('ChatGPT intelligence routing', () => {
           getChatGPTUsage().summary().tasks['notesAudit (account-model)']
             ?.requests,
         ).toBe(1);
+      } else {
+        await expect(generation).rejects.toThrow(
+          'notes_semantic_review_incomplete',
+        );
       }
+      expect(fetcher).toHaveBeenCalledTimes(shouldReview ? 2 : 1);
     },
   );
 
@@ -265,7 +262,7 @@ describe('ChatGPT intelligence routing', () => {
     expect(result.all_action_items).toHaveLength(1);
   });
 
-  it('sends a full meeting beyond the local context budget in one cloud writer request', async () => {
+  it('sends the complete cloud writer source then refuses an oversized single factual-review window', async () => {
     const source = createNotesSource(
       JSON.stringify({
         segments: [
@@ -305,11 +302,14 @@ describe('ChatGPT intelligence routing', () => {
     const provider = new UnifiedLLMProvider('chatgpt', {
       chatgpt_model: 'account-model',
     });
-    await provider.generateStructuredAnalysis('', '', 'auto', {
-      source,
-      compactWriterContract: true,
-      hierarchyAuditStrategy: 'deterministic_only',
-    });
+    expect(source.segments[0]!.text.length).toBeGreaterThan(48_000);
+    await expect(
+      provider.generateStructuredAnalysis('', '', 'auto', {
+        source,
+        compactWriterContract: true,
+        hierarchyAuditStrategy: 'deterministic_only',
+      }),
+    ).rejects.toThrow('notes_semantic_review_incomplete');
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 

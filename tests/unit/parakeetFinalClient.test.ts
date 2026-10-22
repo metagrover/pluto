@@ -21,7 +21,10 @@ class FakeChild extends EventEmitter implements NativeChildProcess {
     }),
     end: vi.fn(),
   };
-  readonly kill = vi.fn(() => true);
+  readonly kill = vi.fn(() => {
+    queueMicrotask(() => this.emit('exit', 0));
+    return true;
+  });
 
   respond(response: Record<string, unknown>): void {
     this.stdout.write(`${JSON.stringify(response)}\n`);
@@ -80,6 +83,39 @@ const speakerEvidenceSuccess = (id: string) => ({
 });
 
 describe('ParakeetFinalClient', () => {
+  it('keeps readiness warm until explicit unloading and prepares each replacement worker again', async () => {
+    const children: FakeChild[] = [];
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => {
+        const child = new FakeChild();
+        child.kill.mockImplementation(() => {
+          queueMicrotask(() => child.emit('exit', 0));
+          return true;
+        });
+        children.push(child);
+        return child;
+      },
+      runExclusive: async (run) => run(),
+    });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    for (let index = 0; index < 2; index++) {
+      const preparing = client.prepare();
+      await vi.waitFor(() =>
+        expect(children[index]?.writes[0]).toMatchObject({ method: 'prepare' }),
+      );
+      children[index]!.respond(
+        prepared(String(children[index]!.writes[0]!.id)),
+      );
+      await expect(preparing).resolves.toMatchObject({ ready: true });
+      expect(children[index]!.kill).not.toHaveBeenCalled();
+      await host.unloadIdleModels();
+      expect(children[index]!.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(client.getPreparedCapability()).toMatchObject({ ready: true });
+    }
+    host.shutdown();
+  });
+
   it('prepares a verified cached model through the real IPC validator', async () => {
     const child = new FakeChild();
     const client = new ParakeetFinalClient({ paths, spawn: () => child });

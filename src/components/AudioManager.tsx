@@ -577,7 +577,6 @@ export const AudioManager = ({
           format,
         },
       );
-      if (format !== 'wav') return null;
       const complete = (await window.ipcRenderer.invoke(
         'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
         {
@@ -587,7 +586,7 @@ export const AudioManager = ({
           source,
           sequence,
           rawChecksumSha256,
-          repairData: data,
+          ...(format === 'wav' ? { repairData: data } : {}),
         },
       )) as { manifest: JournalManifestState; receipt: JournalAudioReceipt };
       captureJournalStateRef.current = complete.manifest;

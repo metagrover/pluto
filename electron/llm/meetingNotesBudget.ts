@@ -3,6 +3,15 @@
 export const notesContextTokens = (provider: unknown): number =>
   provider === 'chatgpt' ? 131_072 : 16_384;
 
+/** Keep local writing bounded without automatic model review; preserve cloud contracts. */
+export const notesWriterPolicy = (provider: unknown) =>
+  !provider || provider === 'ollama'
+    ? {
+        compactWriterContract: true,
+        hierarchyAuditStrategy: 'deterministic_only' as const,
+      }
+    : { compactWriterContract: true };
+
 import {
   MeetingNotesError,
   type NotesSource,

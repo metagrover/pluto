@@ -22,7 +22,7 @@ import { readPersonProfile } from '../../src/utils/personProfile';
 afterAll(() => fs.rmSync(fixture.directory, { recursive: true, force: true }));
 
 describe('comprehensive person profile publication', () => {
-  it('consolidates chunks, publishes exact final citations, and retains the previous dossier on invalid output', async () => {
+  it('retains full reviewed citations when consolidation shortens them and retains the dossier on invalid output', async () => {
     const person = db.upsertEntity({
       id: 'profile-person',
       type: 'person',
@@ -85,10 +85,10 @@ describe('comprehensive person profile publication', () => {
     expect(profile).toHaveLength(1);
     expect(profile[0].citations).toHaveLength(3);
     expect(profile[0].citations[0].quote).toBe(
-      'Avery Chen requested a written recommendation',
+      'Avery Chen requested a written recommendation for review 3.',
     );
     expect(saved?.rendered_content).toContain(profile[0].summary);
-    expect(JSON.parse(saved!.config!).synthesis_version).toBe(15);
+    expect(JSON.parse(saved!.config!).synthesis_version).toBe(16);
     const versions = db.getKnowledgeDocVersions(doc.id).length;
 
     fixture.synthesize.mockResolvedValue('{}');

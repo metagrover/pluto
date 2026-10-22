@@ -76,7 +76,7 @@ describe('identity publication boundary', () => {
       ),
     ).rejects.toThrow('identity_revision_stale');
   });
-  it('retires a reviewed obligation instead of reusing it in normal extraction', async () => {
+  it('preserves a rejected obligation and requires review of a rephrased extraction', async () => {
     db.saveMeeting({
       id: 'pipeline-identity',
       title: 'Release',
@@ -98,7 +98,7 @@ describe('identity publication boundary', () => {
       sourceRevision: 'v1',
       evidence: [],
     });
-    db.upsertEntity({
+    const reviewed = db.upsertEntity({
       id: 'reviewed-identity',
       type: 'action_item',
       name: 'Share the launch checklist',
@@ -134,23 +134,21 @@ describe('identity publication boundary', () => {
       "Me: I'll publish the launch checklist.",
       'pipeline-identity',
     );
-    expect(db.isRetiredCommitment('reviewed-identity')).toBe(true);
-    expect(
-      JSON.parse(db.getEntity('reviewed-identity')?.metadata ?? '{}'),
-    ).toMatchObject({
-      commitment_state: 'rejected',
-      owner_source: 'user',
-      meeting_regeneration_retired_at: expect.any(String),
-    });
-    const active = db
+    expect(db.isRetiredCommitment(reviewed.id)).toBe(false);
+    expect(db.getEntity(reviewed.id)).toEqual(reviewed);
+    const actions = db
       .getEntitiesByType('action_item')
       .filter(
         (entity) =>
           JSON.parse(entity.metadata ?? '{}').source_meeting_id ===
           'pipeline-identity',
       );
-    expect(active).toHaveLength(1);
-    expect(active[0]?.id).not.toBe('reviewed-identity');
+    expect(actions).toHaveLength(2);
+    const replacement = actions.find((entity) => entity.id !== reviewed.id);
+    expect(JSON.parse(replacement?.metadata ?? '{}')).toMatchObject({
+      commitment_state: 'possible',
+      source_regeneration_review_required: true,
+    });
     expect(synthesizeKnowledgeDocument).not.toHaveBeenCalled();
   });
   it('builds meeting-local context without guessing the owner of imported or fallback channels', () => {

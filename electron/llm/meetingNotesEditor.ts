@@ -87,7 +87,7 @@ export const buildNotesEditorPrompt = ({
       ? [
           'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons and final state changes in the overview or topic discussion, even when a related action or decision is also structured separately.',
           'For every action or decision, copy the source-supported owner into owner and the source-supported deadline into due; use null only when absent.',
-          'Stay close to source wording in actions and decisions so deterministic evidence checks can verify them. For an explicit "the decision is" statement, the speaker who states the settled choice is the decision owner. A withdrawal or replacement explanation is discussion, not a separate decision, unless the source explicitly settles it as a choice.',
+          'Stay close to source wording in actions and decisions so deterministic evidence checks can verify them. Set a decision owner only when the source identifies who made or owns the choice; a person reporting it is not automatically its owner. Use null when that attribution is unknown. A withdrawal or replacement explanation is discussion, not a separate decision, unless the source explicitly settles it as a choice.',
         ]
       : []),
     notesProseGuidance,

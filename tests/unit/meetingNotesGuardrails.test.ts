@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   createNotesGuardrailChecker,
   findNotesGuardrailIssues,
+  hasOmittedSubjectCondition,
+  hasUnsupportedNotesCondition,
 } from '../../electron/llm/meetingNotesGuardrails';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type {
@@ -51,6 +53,71 @@ function fixture(...turns: string[]) {
 }
 
 describe('source-grounded notes guardrails', () => {
+  it.each([
+    ['send the outline', 'I have sent the outline.'],
+    ['provide the examples', 'I already provided the examples.'],
+    ['coordinate the review', 'I have coordinated the review.'],
+    ['rerun the report query', 'I have already rerun the report query.'],
+  ])(
+    'does not retain a completed promise to %s as a future task',
+    (task, completion) => {
+      const f = fixture(`I will ${task}.`, completion);
+      expect(findNotesGuardrailIssues(f.source, f.draft(f.item(task)))).toEqual(
+        [
+          expect.objectContaining({
+            code: 'conflicting_action',
+            sources: [f.spans[0], f.spans[1]],
+          }),
+        ],
+      );
+      expect(
+        findNotesGuardrailIssues(
+          f.source,
+          f.draft(f.item(completion, 'point', [f.spans[1]!])),
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it.each([
+    'I have to send the outline.',
+    'I have not sent the outline.',
+    'Have I sent the outline?',
+    'I have sent a different report.',
+    'The issue is resolved.',
+    'I have sent the outline but I will send it again.',
+  ])('does not infer task completion from %s', (text) => {
+    const f = fixture('I will send the outline.', text);
+    expect(
+      findNotesGuardrailIssues(f.source, f.draft(f.item('Send the outline.'))),
+    ).toEqual([]);
+  });
+
+  it('does not transfer another speaker completion or ignore an explicit renewal', () => {
+    const f = fixture(
+      'I will send the outline.',
+      'I have sent the outline.',
+      'I will send the outline.',
+    );
+    const renewed = f.item('Send the outline.', 'action', [f.spans[2]!]);
+    expect(findNotesGuardrailIssues(f.source, f.draft(renewed))).toEqual([]);
+    const other = fixture(
+      'I will send the outline.',
+      'I have sent the outline.',
+    );
+    const otherSource = createNotesSource(
+      JSON.stringify([
+        { speaker: 'Rae', text: 'I will send the outline.' },
+        { speaker: 'Lee', text: 'I have sent the outline.' },
+      ]),
+    );
+    expect(
+      findNotesGuardrailIssues(
+        otherSource,
+        other.draft(other.item('Send the outline.')),
+      ),
+    ).toEqual([]);
+  });
   it('reuses source preparation while checking edited drafts and individual actions independently', () => {
     const f = fixture(
       'I will send the outline after legal approves.',
@@ -921,5 +988,664 @@ describe('source-grounded notes guardrails', () => {
         f.draft(f.item('Send the invoice and review the outline.')),
       ),
     ).toEqual([{ code: 'missing_action', sources: f.spans }]);
+  });
+});
+
+describe('exact-source prerequisite support', () => {
+  it.each([
+    ['3.5', '3.5', false],
+    ['3.5', '4.5', true],
+    ['3.5', 'not 3.5', true],
+  ])(
+    'preserves decimal prerequisite values: %s / %s',
+    (rate, sourceRate, unsupported) => {
+      expect(
+        hasUnsupportedNotesCondition(
+          `Send the budget only if the rate is ${rate} percent.`,
+          `I will send the budget only if the rate is ${sourceRate} percent. This is not an unconditional send.`,
+        ),
+      ).toBe(unsupported);
+    },
+  );
+
+  it.each([
+    'conditional on finance approval',
+    'contingent on finance approval',
+    'contingent upon finance approval',
+    'if finance approves',
+  ])(
+    'keeps prerequisite polarity local despite independent explanatory negation: %s',
+    (condition) => {
+      const evidence =
+        'If finance approves, I will send the budget by Thursday. My promise still depends on finance approval; it is not an unconditional send.';
+      expect(
+        hasUnsupportedNotesCondition(
+          `Send the budget by Thursday, ${condition}.`,
+          evidence,
+        ),
+      ).toBe(false);
+    },
+  );
+  it.each([
+    [
+      'Send the guide after security approves.',
+      'I will send the guide after security does not approve. That is not an unconditional promise.',
+      true,
+    ],
+    [
+      'Send the guide after security does not approve.',
+      'I will send the guide after security approves. That is not an unconditional promise.',
+      true,
+    ],
+    [
+      'Send the guide after legal approves.',
+      'I will send the guide after security approves. Other work is not ready.',
+      true,
+    ],
+    [
+      'Send the guide until security approves.',
+      'I will send the guide after security approves. Other work is not ready.',
+      true,
+    ],
+  ])(
+    'keeps actual prerequisite scope and polarity protected: %s / %s',
+    (claim, evidence, unsupported) => {
+      expect(hasUnsupportedNotesCondition(claim, evidence)).toBe(unsupported);
+    },
+  );
+
+  it.each([
+    [
+      'Send the guide after security approval.',
+      'I will send the guide by Friday.',
+      true,
+    ],
+    [
+      'Send the guide after security approval.',
+      'I will send the guide after security approves.',
+      false,
+    ],
+    [
+      'Send the guide after legal approval.',
+      'I will send the guide after security approves.',
+      true,
+    ],
+    [
+      'Publish the report if legal approves.',
+      'I will publish the report unless legal approves.',
+      true,
+    ],
+    [
+      'Publish the report if legal does not approve.',
+      'I will publish the report unless legal approves.',
+      false,
+    ],
+    [
+      'Send the guide until security approves.',
+      'I will send the guide after security approves.',
+      true,
+    ],
+    [
+      'Send the guide after security approves.',
+      'I will send the guide until security approves.',
+      true,
+    ],
+    [
+      'Send the guide when security approves.',
+      'I will send the guide once security approves.',
+      false,
+    ],
+    [
+      'Send the guide after security approves.',
+      'I will send the guide if security approves.',
+      false,
+    ],
+    ['Send the guide.', 'I will send the guide by Friday.', false],
+  ])(
+    'checks %s against only its supplied source',
+    (text, evidence, unsupported) => {
+      expect(hasUnsupportedNotesCondition(text, evidence)).toBe(unsupported);
+    },
+  );
+});
+
+describe('known-owner commitment matching', () => {
+  const ownerFixture = (speaker: string | null, owner: string | null) => {
+    const source = createNotesSource(
+      JSON.stringify([
+        { speaker, text: 'I will send the release file.' },
+        { speaker, text: 'I sent the release file.' },
+      ]),
+    );
+    const sources = source.segments.map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+    const draft: NotesDraft = {
+      title: null,
+      overview: null,
+      meetingType: 'general',
+      sections: [
+        {
+          id: 'section',
+          title: { id: 'heading', text: 'Release', sources },
+          items: [
+            {
+              id: 'task',
+              kind: 'action',
+              text: 'Send the release file.',
+              owner,
+              due: null,
+              sources,
+            },
+          ],
+        },
+      ],
+    };
+    return findNotesGuardrailIssues(source, draft, undefined, [
+      'missing_condition',
+      'conflicting_action',
+    ]);
+  };
+  it('does not associate another known owner with the completed promise', () => {
+    expect(ownerFixture('Morgan', 'Casey')).toEqual([]);
+  });
+  it.each([
+    ['Casey', 'Casey'],
+    ['Casey', ' casey '],
+    ['Me', 'Me'],
+  ])(
+    'retains completion protection for the same exact normalized owner: %s / %s',
+    (speaker, owner) => {
+      expect(ownerFixture(speaker, owner).map((issue) => issue.code)).toEqual([
+        'conflicting_action',
+      ]);
+    },
+  );
+  it.each([
+    ['Casey', null],
+    ['Casey', 'Unknown'],
+    ['Them', 'Casey'],
+    ['Unknown', 'Casey'],
+    [null, 'Casey'],
+  ])('preserves unknown-label behavior: %s / %s', (speaker, owner) => {
+    const issues = ownerFixture(speaker, owner);
+    expect(issues.map((issue) => issue.code)).toEqual(
+      speaker === null ? [] : ['conflicting_action'],
+    );
+  });
+});
+
+describe('conditional prerequisite scopes', () => {
+  it.each([
+    [
+      'Once finance approval, which can cover accessibility.',
+      'Once finance approval, which can cover privacy.',
+      true,
+    ],
+    [
+      'Publish the guide after finance approval, which can cover accessibility.',
+      'I will publish the guide after finance approval, which can cover privacy.',
+      true,
+    ],
+    [
+      'Once finance, which can cover accessibility, approves, Rowan will publish the guide.',
+      'Once finance, which can cover privacy, approves, I will publish the guide.',
+      true,
+    ],
+    [
+      'When the second loaf rose, Jun felt satisfied.',
+      'When the second loaf rose, I felt satisfied.',
+      false,
+    ],
+    [
+      'When the second loaf rose, Jun felt satisfied.',
+      'When the first loaf rose, I felt satisfied.',
+      true,
+    ],
+    [
+      'Once finance, which can review budgets, approves, Rowan will publish the guide.',
+      'Once finance, which can review budgets, approves, I will publish the guide.',
+      false,
+    ],
+    [
+      'Once finance, which can review budgets, approves, Rowan will publish the guide.',
+      'Once finance, which can audit budgets, approves, I will publish the guide.',
+      true,
+    ],
+    [
+      'Once review passes, and only if finance approves, Rowan will publish the guide.',
+      'Once review passes, and only if finance approves, I will publish the guide.',
+      false,
+    ],
+    [
+      'Once review passes, and only if legal approves, Rowan will publish the guide.',
+      'Once review passes, and only if finance approves, I will publish the guide.',
+      true,
+    ],
+    [
+      'Once the accessibility review passes, Rowan will publish the guide by Wednesday.',
+      'Once the accessibility review passes, I will publish the guide by Wednesday.',
+      false,
+    ],
+    [
+      'The introduction stays static. Once the accessibility review passes, Rowan will publish the guide by Wednesday.',
+      'The introduction stays static. Once the accessibility review passes, I will publish the guide by Wednesday.',
+      false,
+    ],
+    [
+      'Once the accessibility review passes, publish the guide.',
+      'Once the accessibility review passes, I will publish the guide.',
+      false,
+    ],
+    [
+      'Once the review passes, Rowan will publish the guide. Send the email only if legal approves.',
+      'Once the review passes, I will publish the guide. I will send the email only if finance approves.',
+      true,
+    ],
+    [
+      'Publish the guide after review approval. Send the email only if legal approves.',
+      'I will publish the guide after review approval. I will send the email only if legal approves.',
+      false,
+    ],
+    [
+      'Once finance, legal and security approve, Rowan will publish the guide.',
+      'Once finance, legal and security approve, I will publish the guide.',
+      false,
+    ],
+    [
+      'Once finance, legal and security approve, Rowan will publish the guide.',
+      'Once finance, legal and research approve, I will publish the guide.',
+      true,
+    ],
+    [
+      'Once review passes, including accessibility, Rowan will publish the guide.',
+      'Once review passes, including privacy, I will publish the guide.',
+      true,
+    ],
+    [
+      'Once review passes, Rowan will not publish the guide.',
+      'Once review passes, I will publish the guide.',
+      false,
+    ],
+    [
+      'Once review does not pass, Rowan will publish the guide.',
+      'Once review passes, I will publish the guide.',
+      true,
+    ],
+    [
+      'Publish the guide after review approval and only if legal approves.',
+      'I will publish the guide after review approval and only if finance approves.',
+      true,
+    ],
+    [
+      'Publish the guide after review approval and only if legal approves.',
+      'I will publish the guide after review approval and only if legal approves.',
+      false,
+    ],
+  ])(
+    'validates only prerequisite clauses: %s',
+    (claim, evidence, unsupported) => {
+      expect(hasUnsupportedNotesCondition(claim, evidence)).toBe(unsupported);
+    },
+  );
+});
+
+describe('source-qualified omitted responsibility conditions', () => {
+  const subject = { text: 'Bind the booklets.', owner: 'Arden' };
+  it.each([
+    [
+      'Binding the booklets must wait until Robin approves the cover.',
+      'Bind the booklets.',
+      'Arden',
+      true,
+    ],
+    [
+      'Binding the booklets must wait until Robin approves the cover.',
+      'Bind the booklets, but wait until Robin approves the cover.',
+      'Arden',
+      false,
+    ],
+    [
+      'Binding the booklets must wait until Robin approves the cover.',
+      'Bind the booklets, but wait until Casey approves the paper.',
+      'Arden',
+      true,
+    ],
+    [
+      'Sorting the booklets must wait until Robin approves the cover.',
+      'Bind the booklets.',
+      'Arden',
+      false,
+    ],
+    [
+      'I will bind the booklets only if Robin approves the cover.',
+      'Bind the booklets.',
+      'Bo',
+      false,
+    ],
+    [
+      'Arden will bind the booklets only if Robin approves the cover.',
+      'Bind the booklets.',
+      'Bo',
+      true,
+    ],
+    [
+      'Binding the booklets does not need to wait until Robin approves the cover.',
+      'Bind the booklets.',
+      'Arden',
+      false,
+    ],
+    [
+      'Binding the booklets and packing the boxes must wait until Robin approves the cover.',
+      'Bind the booklets.',
+      'Arden',
+      false,
+    ],
+    [
+      '“Binding the booklets must wait until Robin approves the cover.”',
+      'Bind the booklets.',
+      'Arden',
+      false,
+    ],
+  ])(
+    'checks only a positive exact subject-qualified condition: %s',
+    (speech, text, speaker, omitted) => {
+      expect(
+        hasOmittedSubjectCondition(subject, text, [{ speaker, text: speech }]),
+      ).toBe(omitted);
+    },
+  );
+  it.each([
+    'Binding the booklets no longer needs approval.',
+    'Binding the booklets has its approval requirement removed.',
+    'I removed the approval requirement for binding the booklets.',
+    'Binding the booklets must wait until Casey approves the paper.',
+  ])(
+    'abstains when a later qualified statement changes or may waive the condition: %s',
+    (later) => {
+      expect(
+        hasOmittedSubjectCondition(subject, 'Bind the booklets.', [
+          {
+            speaker: 'Arden',
+            text: 'Binding the booklets must wait until Robin approves the cover.',
+          },
+          { speaker: 'Arden', text: later },
+        ]),
+      ).toBe(false);
+    },
+  );
+  it('does not use another actor’s condition change to waive the original owner’s prerequisite', () => {
+    expect(
+      hasOmittedSubjectCondition(subject, 'Bind the booklets.', [
+        {
+          speaker: 'Arden',
+          text: 'Binding the booklets must wait until Robin approves the cover.',
+        },
+        {
+          speaker: 'Bo',
+          text: 'I will bind the booklets without waiting for approval.',
+        },
+      ]),
+    ).toBe(true);
+  });
+  it('abstains without a known responsibility owner', () => {
+    expect(
+      hasOmittedSubjectCondition(
+        { ...subject, owner: null },
+        'Bind the booklets.',
+        [
+          {
+            speaker: 'Arden',
+            text: 'Binding the booklets must wait until Robin approves the cover.',
+          },
+        ],
+      ),
+    ).toBe(false);
+  });
+});
+
+it('does not treat a later mention of another subject as a waiver of this responsibility’s condition', () => {
+  expect(
+    hasOmittedSubjectCondition(
+      { text: 'Bind the booklets.', owner: 'Arden' },
+      'Bind the booklets.',
+      [
+        {
+          speaker: 'Arden',
+          text: 'Binding the booklets must wait until Robin approves the cover.',
+        },
+        {
+          speaker: 'Arden',
+          text: 'I removed the approval requirement for boxing the booklets.',
+        },
+      ],
+    ),
+  ).toBe(true);
+});
+
+describe('explicit prerequisite gating versus temporal until', () => {
+  const subject = { text: 'Bind the booklets.', owner: 'Arden' };
+  const passages = [
+    {
+      speaker: 'Arden',
+      text: 'Binding the booklets must wait until Robin approves the cover.',
+    },
+  ];
+  it.each([
+    'Bind the booklets, requiring Robin’s approval of the cover.',
+    'Bind the booklets contingent upon Robin approving the cover.',
+    'Bind the booklets only after Robin approves the cover.',
+  ])('retains a positive waiting prerequisite with %s', (text) => {
+    expect(hasOmittedSubjectCondition(subject, text, passages)).toBe(false);
+    expect(hasUnsupportedNotesCondition(text, passages[0]!.text)).toBe(false);
+  });
+  it.each([
+    'Bind the booklets.',
+    'Bind the booklets before Robin approves the cover.',
+    'Bind the booklets requiring Robin not to approve the cover.',
+    'Bind the booklets not requiring Robin’s approval of the cover.',
+  ])('does not accept an omitted or inverted prerequisite: %s', (text) => {
+    expect(hasOmittedSubjectCondition(subject, text, passages)).toBe(true);
+  });
+  it('keeps an ordinary temporal until distinct from after', () => {
+    expect(
+      hasUnsupportedNotesCondition('Read until Friday.', 'Read after Friday.'),
+    ).toBe(true);
+    expect(
+      hasUnsupportedNotesCondition('Read after Friday.', 'Read until Friday.'),
+    ).toBe(true);
+  });
+});
+
+describe('completion prerequisite lexical family', () => {
+  it.each([
+    [
+      'Publish after completion of the safety check.',
+      'Publish after completing the safety check.',
+    ],
+    [
+      'Publish after completing the safety check.',
+      'Publish after completion of the safety check.',
+    ],
+    [
+      'Publish after Robin’s completion of the safety check.',
+      'Publish after Robin’s completing the safety check.',
+    ],
+  ])('accepts the same operation in noun/verb form: %s', (claim, source) => {
+    expect(hasUnsupportedNotesCondition(claim, source)).toBe(false);
+  });
+  it.each([
+    [
+      'Publish after completion of the venue check.',
+      'Publish after completing the safety check.',
+    ],
+    [
+      'Publish after Tess’s completion of the safety check.',
+      'Publish after Robin’s completing the safety check.',
+    ],
+    [
+      'Publish after completion of the safety check and cover approval.',
+      'Publish after completing the safety check.',
+    ],
+    [
+      'Publish after completion of the safety check.',
+      'Publish after not completing the safety check.',
+    ],
+    [
+      'Publish after completion of three safety checks.',
+      'Publish after completing two safety checks.',
+    ],
+    [
+      'Publish after completion of the safety check.',
+      'Publish until completing the safety check.',
+    ],
+    [
+      'Publish after completion of the safety check and Robin approving the cover.',
+      'Publish after completing the safety check and Tess approving the cover.',
+    ],
+  ])(
+    'retains scope, actor, quantity and polarity protections: %s',
+    (claim, source) => {
+      expect(hasUnsupportedNotesCondition(claim, source)).toBe(true);
+    },
+  );
+});
+
+describe('prerequisites with a separate whole-list state assertion', () => {
+  it.each([
+    ['neither of which are complete', 'Neither condition is complete.'],
+    ['both of which are complete', 'Both conditions are complete.'],
+    ['either of which is pending', 'Either condition is pending.'],
+  ])('keeps %s outside the prerequisite itself', (relative, state) => {
+    expect(
+      hasUnsupportedNotesCondition(
+        `The opening is conditional on inspection approval and completing safety checks, ${relative}.`,
+        `The opening is conditional on inspection approval and completing safety checks. ${state}`,
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    [
+      'The opening is conditional on inspection approval and completing venue checks, neither of which are complete.',
+      'The opening is conditional on inspection approval and completing safety checks. Neither condition is complete.',
+    ],
+    [
+      'The opening is conditional on inspection approval and completing safety checks, neither of which are complete.',
+      'The opening is conditional on inspection approval. Neither condition is complete.',
+    ],
+    [
+      'Publish unless inspection approval arrives, neither of which is complete.',
+      'Publish until inspection approval arrives. Neither condition is complete.',
+    ],
+    [
+      'Publish after inspection approval arrives, neither of which is complete.',
+      'Publish after inspection approval does not arrive. Neither condition is complete.',
+    ],
+    [
+      'Publish after the permit, which includes insurance, is approved, neither of which is complete.',
+      'Publish after the permit, which includes venue cover, is approved. Neither condition is complete.',
+    ],
+    [
+      'Publish after inspection approval and safety checks, both of which require insurance.',
+      'Publish after inspection approval and safety checks.',
+    ],
+  ])('does not discard prerequisite scope: %s', (claim, source) => {
+    expect(hasUnsupportedNotesCondition(claim, source)).toBe(true);
+  });
+
+  it.each([
+    [
+      'I will publish the guide after inspection approval and completing safety checks.',
+      'Publish the guide after inspection approval, neither of which is complete.',
+    ],
+    [
+      'I will publish the guide after the permit, which includes insurance, is approved.',
+      'Publish the guide after the permit is approved, neither of which is complete.',
+    ],
+  ])(
+    'still catches a dropped prerequisite or noun qualification',
+    (source, text) => {
+      expect(
+        hasOmittedSubjectCondition(
+          { text: 'Publish the guide', owner: 'Rae' },
+          text,
+          [{ speaker: 'Rae', text: source }],
+        ),
+      ).toBe(true);
+    },
+  );
+});
+
+describe('citation-proven introduced owners keep the shared task protections', () => {
+  const check = (later: string, text: string, owner = 'Ellis') => {
+    const source = createNotesSource(
+      JSON.stringify([
+        { speaker: 'Remote Speaker 1', text: 'Hey, it’s Ellis.' },
+        {
+          speaker: 'Remote Speaker 1',
+          text: 'I will send the invitation after approval.',
+        },
+        ...(later ? [{ speaker: 'Remote Speaker 1', text: later }] : []),
+      ]),
+    );
+    const sources = source.segments.slice(0, 2).map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+    const draft: NotesDraft = {
+      meetingType: 'general',
+      overview: null,
+      sections: [
+        {
+          id: 's0',
+          title: { id: 's0:title', text: 'Invitation', sources },
+          items: [
+            {
+              id: 's0:item:0',
+              kind: 'action',
+              text,
+              owner,
+              due: null,
+              sources,
+            },
+          ],
+        },
+      ],
+    };
+    return findNotesGuardrailIssues(source, draft);
+  };
+  it('does not let the introduced owner hide a missing prerequisite', () => {
+    expect(check('', 'Send the invitation.')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'missing_condition' }),
+      ]),
+    );
+    expect(check('', 'Send the invitation after approval.')).toEqual([]);
+  });
+  it('does not let introduced ownership reopen completed or cancelled work', () => {
+    expect(
+      check(
+        'I have sent the invitation.',
+        'Send the invitation after approval.',
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'conflicting_action' }),
+      ]),
+    );
+    expect(
+      check(
+        'I am withdrawing my promise to send the invitation.',
+        'Send the invitation after approval.',
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'conflicting_action' }),
+      ]),
+    );
   });
 });

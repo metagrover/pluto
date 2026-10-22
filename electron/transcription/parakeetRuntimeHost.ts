@@ -1,3 +1,4 @@
+import { AsyncResource } from 'node:async_hooks';
 import { spawn as nodeSpawn } from 'node:child_process';
 
 import {
@@ -29,6 +30,14 @@ type LeaseRecord = {
   released: boolean;
   preempting: boolean;
   preemptionHandler: (() => Promise<void>) | null;
+  controller: AbortController;
+  admitted: boolean;
+  finished: Promise<void>;
+  finish: () => void;
+  runExclusive?: (
+    run: () => Promise<void>,
+    signal: AbortSignal,
+  ) => Promise<void>;
   resolve: (lease: ParakeetRuntimeLease) => void;
   reject: (error: Error) => void;
   lease: ParakeetRuntimeLease;
@@ -57,6 +66,10 @@ export class ParakeetRuntimeHost {
       diagnostic?: (code: string) => void;
       persistInterruptedFinalization?: () => Promise<void>;
       liveConfigurationId?: 'pinned-default' | 'low-latency-2s';
+      runExclusive?: (
+        run: () => Promise<void>,
+        signal: AbortSignal,
+      ) => Promise<void>;
     },
   ) {
     const liveConfigurationArgs = options.liveConfigurationId
@@ -83,7 +96,10 @@ export class ParakeetRuntimeHost {
       cancelPending: (id) => this.process.cancelPending(id),
       ignoreResponse: (id) => this.process.ignoreResponse(id),
     };
-    this.transport.onFailure((code) => this.invalidateActiveLease(code));
+    this.transport.onFailure((code) => {
+      if (code !== 'parakeet_process_unloaded')
+        this.invalidateActiveLease(code);
+    });
   }
 
   acquire(
@@ -112,7 +128,13 @@ export class ParakeetRuntimeHost {
       );
       const abort = () => {
         const index = this.queue.indexOf(record);
-        if (index < 0) return;
+        if (index < 0) {
+          if (this.active === record && !record.admitted) {
+            record.reject(new Error('parakeet_cancelled'));
+            void this.release(record);
+          }
+          return;
+        }
         this.queue.splice(index, 1);
         record.released = true;
         record.reject(new Error('parakeet_cancelled'));
@@ -124,7 +146,13 @@ export class ParakeetRuntimeHost {
   }
 
   tryAcquire(kind: ParakeetRuntimeWorkload): ParakeetRuntimeLease | null {
-    if (this.closed || this.active || this.queue.length > 0) return null;
+    if (
+      this.options.runExclusive ||
+      this.closed ||
+      this.active ||
+      this.queue.length > 0
+    )
+      return null;
     this.clearIdleTimer();
     const record = this.makeRecord(
       kind,
@@ -132,6 +160,7 @@ export class ParakeetRuntimeHost {
       () => undefined,
     );
     this.process.start();
+    record.admitted = true;
     this.active = record;
     return record.lease;
   }
@@ -188,13 +217,27 @@ export class ParakeetRuntimeHost {
     };
   }
 
+  async unloadIdleModels(): Promise<void> {
+    if (this.active?.admitted && !this.active.released)
+      throw new Error('parakeet_runtime_busy');
+    this.clearIdleTimer();
+    await this.process.terminateAndWait();
+  }
+
   shutdown(): void {
     if (this.closed) return;
     this.closed = true;
     this.clearIdleTimer();
     const error = new Error('parakeet_runtime_closed');
     for (const record of this.queue.splice(0)) record.reject(error);
+    const active = this.active;
     this.active = null;
+    if (active) {
+      active.released = true;
+      active.controller.abort(new Error('parakeet_runtime_closed'));
+      active.finish();
+      if (!active.admitted) active.reject(error);
+    }
     this.process.terminate();
   }
 
@@ -220,9 +263,13 @@ export class ParakeetRuntimeHost {
   }
 
   private async release(record: LeaseRecord): Promise<void> {
-    if (record.released) return;
+    if (record.released) return record.finished;
     if (record.preempting) return;
     record.released = true;
+    if (record.admitted && record.runExclusive)
+      await this.process.waitForStoppedChildren();
+    record.controller.abort(new Error('parakeet_cancelled'));
+    record.finish();
     if (this.active === record) this.active = null;
     else {
       const index = this.queue.indexOf(record);
@@ -237,6 +284,10 @@ export class ParakeetRuntimeHost {
     reject: (error: Error) => void,
   ): LeaseRecord {
     const record = {} as LeaseRecord;
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
     const lease: ParakeetRuntimeLease = {
       kind,
       release: async () => this.release(record),
@@ -252,6 +303,13 @@ export class ParakeetRuntimeHost {
       released: false,
       preempting: false,
       preemptionHandler: null,
+      controller: new AbortController(),
+      admitted: false,
+      finished,
+      finish,
+      runExclusive: this.options.runExclusive
+        ? AsyncResource.bind(this.options.runExclusive)
+        : undefined,
       resolve,
       reject,
       lease,
@@ -265,9 +323,12 @@ export class ParakeetRuntimeHost {
   ): Promise<void> {
     if (this.active !== record || record.released) return;
     record.released = true;
-    this.active = null;
+    record.controller.abort(new Error(code));
     this.options.diagnostic?.(code);
     this.process.terminate();
+    await this.process.terminateAndWait();
+    record.finish();
+    this.active = null;
     this.drain();
   }
 
@@ -278,18 +339,42 @@ export class ParakeetRuntimeHost {
       this.scheduleIdleUnload();
       return;
     }
-    this.process.start();
     this.active = next;
-    next.resolve(next.lease);
+    const start = () => {
+      this.process.start();
+      next.admitted = true;
+      next.resolve(next.lease);
+    };
+    if (!next.runExclusive) {
+      start();
+      return;
+    }
+    void next
+      .runExclusive(async () => {
+        if (next.released || this.closed) return;
+        try {
+          start();
+          await next.finished;
+        } finally {
+          await this.process.waitForStoppedChildren();
+        }
+      }, next.controller.signal)
+      .catch((error) => {
+        if (next.released) return;
+        next.reject(
+          error instanceof Error
+            ? error
+            : new Error('parakeet_admission_failed'),
+        );
+        void this.release(next);
+      });
   }
 
   private invalidateActiveLease(code: string): void {
     const active = this.active;
     if (!active || active.released) return;
-    active.released = true;
-    this.active = null;
     this.options.diagnostic?.(code);
-    this.drain();
+    void this.release(active);
   }
 
   private scheduleIdleUnload(): void {

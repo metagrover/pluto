@@ -65,7 +65,7 @@ it('keeps a deferred refresh queued and displays the completed profile when poll
     knowledgeDoc: {
       ...detail.knowledgeDoc,
       status: 'up_to_date',
-      config: JSON.stringify({ synthesis_version: 15 }),
+      config: JSON.stringify({ synthesis_version: 16 }),
       updated_at: '2026-09-21T12:00:00.000Z',
       structured_json: JSON.stringify({
         person_profile: [

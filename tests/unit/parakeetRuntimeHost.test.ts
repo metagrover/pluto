@@ -2,6 +2,10 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 
+import {
+  runWithLocalInferenceCoordinator,
+  runWithNativeInferenceCoordinator,
+} from '../../electron/llm/inferenceCoordinator';
 import type { NativeChildProcess } from '../../electron/transcription/nativeJsonLineProcess';
 import { makeRuntimeHost } from '../../electron/transcription/parakeetRuntimeHost';
 
@@ -9,7 +13,10 @@ class FakeChild extends EventEmitter implements NativeChildProcess {
   readonly stdin = { write: vi.fn(() => true), end: vi.fn() };
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
-  readonly kill = vi.fn(() => true);
+  readonly kill = vi.fn(() => {
+    queueMicrotask(() => this.emit('exit', 0));
+    return true;
+  });
 }
 
 const paths = {
@@ -19,6 +26,195 @@ const paths = {
 };
 
 describe('ParakeetRuntimeHost', () => {
+  it('keeps model admission blocked until the native worker has actually exited', async () => {
+    const child = new FakeChild();
+    child.kill.mockImplementation(() => true);
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => child,
+      runExclusive: (run, signal) =>
+        runWithNativeInferenceCoordinator(run, signal),
+    });
+    const lease = await host.acquire('final');
+    const next = vi.fn(async () => 'notes');
+    const notes = runWithLocalInferenceCoordinator({
+      key: Symbol('after-native'),
+      task: 'notesWriter',
+      run: async () => {
+        await host.unloadIdleModels();
+        return next();
+      },
+    });
+    const released = lease.release();
+    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGTERM'));
+    expect(next).not.toHaveBeenCalled();
+    child.emit('exit', 0);
+    await released;
+    await expect(notes).resolves.toBe('notes');
+    host.shutdown();
+  });
+
+  it('refuses to unload a worker while native inference is active', async () => {
+    const child = new FakeChild();
+    const host = makeRuntimeHost({ paths, spawn: () => child });
+    const lease = await host.acquire('final');
+    await expect(host.unloadIdleModels()).rejects.toThrow(
+      'parakeet_runtime_busy',
+    );
+    expect(child.kill).not.toHaveBeenCalled();
+    await lease.release();
+    host.shutdown();
+  });
+
+  it('preserves a pending live lease when an older idle worker exits during text handoff', async () => {
+    const first = new FakeChild();
+    first.kill.mockImplementation(() => true);
+    const second = new FakeChild();
+    const spawn = vi.fn().mockReturnValueOnce(first).mockReturnValue(second);
+    const host = makeRuntimeHost({
+      paths,
+      spawn,
+      runExclusive: (run, signal) =>
+        runWithNativeInferenceCoordinator(run, signal),
+    });
+    const initial = await host.acquire('final');
+    await initial.release();
+    const generate = vi.fn();
+    const text = runWithLocalInferenceCoordinator({
+      key: Symbol('handoff-race'),
+      task: 'notesWriter',
+      run: async (signal) => {
+        await host.unloadIdleModels();
+        signal.throwIfAborted();
+        generate();
+      },
+    });
+    const cancelled = expect(text).rejects.toThrow('foreground_preempted');
+    await vi.waitFor(() => expect(first.kill).toHaveBeenCalledWith('SIGTERM'));
+    const live = host.acquire('live');
+    first.emit('exit', 0);
+    await cancelled;
+    const lease = await live;
+    expect(generate).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledTimes(2);
+    await lease.release();
+    host.shutdown();
+  });
+
+  it('reuses voice admission without nesting the same serialized gate', async () => {
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => new FakeChild(),
+      runExclusive: (run, signal) =>
+        runWithNativeInferenceCoordinator(run, signal),
+    });
+    const voice = runWithLocalInferenceCoordinator({
+      key: Symbol('voice'),
+      task: 'speaker',
+      workClass: 'background',
+      run: async (signal) => {
+        const lease = await host.acquire('final', signal);
+        await lease.release();
+        return 'voice';
+      },
+    });
+    await expect(voice).resolves.toBe('voice');
+    host.shutdown();
+  });
+
+  it('settles generation before native admission and holds the gate for the complete lease', async () => {
+    let settleGeneration!: () => void;
+    let generationSignal!: AbortSignal;
+    const generation = runWithLocalInferenceCoordinator({
+      key: Symbol('chat'),
+      task: 'askPluto',
+      run: (signal) =>
+        new Promise<void>((resolve) => {
+          generationSignal = signal;
+          settleGeneration = resolve;
+        }),
+    });
+    await vi.waitFor(() => expect(settleGeneration).toBeDefined());
+    const spawn = vi.fn(() => new FakeChild());
+    const host = makeRuntimeHost({
+      paths,
+      spawn,
+      runExclusive: (run, signal) =>
+        runWithNativeInferenceCoordinator(run, signal),
+    });
+    expect(host.tryAcquire('final')).toBeNull();
+    const native = host.acquire('final');
+    expect(generationSignal.aborted).toBe(true);
+    expect(spawn).not.toHaveBeenCalled();
+    settleGeneration();
+    await generation;
+    const lease = await native;
+    const nextRun = vi.fn(async () => 'notes');
+    const notes = runWithLocalInferenceCoordinator({
+      key: Symbol('notes'),
+      task: 'notesWriter',
+      run: nextRun,
+    });
+    expect(nextRun).not.toHaveBeenCalled();
+    await lease.release();
+    await expect(notes).resolves.toBe('notes');
+    host.shutdown();
+  });
+
+  it.each(['cancel', 'shutdown'] as const)(
+    'does not start a native process after pending admission is stopped: %s',
+    async (reason) => {
+      let admit!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        admit = resolve;
+      });
+      const spawn = vi.fn(() => new FakeChild());
+      const host = makeRuntimeHost({
+        paths,
+        spawn,
+        runExclusive: async (run) => {
+          await waiting;
+          await run();
+        },
+      });
+      const controller = new AbortController();
+      const native = host.acquire('final', controller.signal);
+      const rejected = expect(native).rejects.toThrow(
+        reason === 'cancel' ? 'parakeet_cancelled' : 'parakeet_runtime_closed',
+      );
+      if (reason === 'cancel') controller.abort();
+      else host.shutdown();
+      await rejected;
+      admit();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(host.diagnostics().activeLeaseCount).toBe(0);
+      host.shutdown();
+    },
+  );
+
+  it('releases shared admission when the native worker fails', async () => {
+    const child = new FakeChild();
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => child,
+      runExclusive: (run, signal) =>
+        runWithNativeInferenceCoordinator(run, signal),
+    });
+    await host.acquire('final');
+    const run = vi.fn(async () => 'answer');
+    const answer = runWithLocalInferenceCoordinator({
+      key: Symbol('chat'),
+      task: 'askPluto',
+      run,
+    });
+    expect(run).not.toHaveBeenCalled();
+    child.emit('exit', 1);
+    await expect(answer).resolves.toBe('answer');
+    host.shutdown();
+  });
+
   it('removes cancelled live acquisitions so a stopped recovery cannot steal a later lease', async () => {
     const host = makeRuntimeHost({ paths, spawn: () => new FakeChild() });
     const active = await host.acquire('live');

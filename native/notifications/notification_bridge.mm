@@ -1,4 +1,6 @@
 #include <node_api.h>
+#include <sys/sysctl.h>
+#include <time.h>
 #import <Foundation/Foundation.h>
 #import <UserNotifications/UserNotifications.h>
 #include <memory>
@@ -176,6 +178,31 @@ static void Cleanup(void* raw) {
   if (center.delegate == bridge->delegate) center.delegate = nil;
   delete bridge;
 }
+// Read the same kernel level used by memory_pressure, on the guard's own thread.
+static napi_value MemoryPressureSample(napi_env env, napi_callback_info) {
+  struct timespec measuredAt;
+  int32_t level = 0;
+  size_t size = sizeof(level);
+  // Timestamp before the kernel call so delayed reads still fail the JS age check.
+  if (clock_gettime(CLOCK_REALTIME, &measuredAt) != 0 ||
+      sysctlbyname("kern.memorystatus_level", &level, &size, nullptr, 0) != 0 ||
+      size != sizeof(level) || level < 0 || level > 100) {
+    napi_throw_error(env, nullptr, "Kernel memory level unavailable.");
+    return nullptr;
+  }
+  const int64_t wallTimeMs = static_cast<int64_t>(measuredAt.tv_sec) * 1000 + measuredAt.tv_nsec / 1000000;
+  napi_value sample, timestamp, percent;
+  if (napi_create_object(env, &sample) != napi_ok ||
+      napi_create_int64(env, wallTimeMs, &timestamp) != napi_ok ||
+      napi_create_int32(env, level, &percent) != napi_ok ||
+      napi_set_named_property(env, sample, "wallTimeMs", timestamp) != napi_ok ||
+      napi_set_named_property(env, sample, "memoryPressureFreePercent", percent) != napi_ok) {
+    napi_throw_error(env, nullptr, "Kernel memory sample unavailable.");
+    return nullptr;
+  }
+  return sample;
+}
+
 static napi_value Init(napi_env env, napi_value exports) {
   auto* bridge = new Bridge;
   bridge->state = std::make_shared<ClickState>();
@@ -184,13 +211,14 @@ static napi_value Init(napi_env env, napi_value exports) {
   [UNUserNotificationCenter currentNotificationCenter].delegate = bridge->delegate;
   napi_add_env_cleanup_hook(env, Cleanup, bridge);
   napi_property_descriptor methods[] = {
+    {"memoryPressureSample", nullptr, MemoryPressureSample, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"status", nullptr, Permission, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"request", nullptr, Permission, nullptr, nullptr, nullptr, napi_default, (void*)1},
     {"submit", nullptr, Submit, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"cancel", nullptr, Cancel, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"onClick", nullptr, OnClick, nullptr, nullptr, nullptr, napi_default, bridge},
   };
-  napi_define_properties(env, exports, 5, methods);
+  napi_define_properties(env, exports, 6, methods);
   return exports;
 }
 NAPI_MODULE(NODE_GYP_MODULE_NAME, Init)

@@ -41,6 +41,7 @@
     "prepare": "lefthook install",
     "audit:high": "node scripts/audit-high.mjs",
     "test": "vitest",
+    "test:e2e:meeting": "RUN_REAL_MEETING_E2E=1 vitest run --config vitest.manual.config.ts tests/manual/realMeeting.e2e.test.ts",
     "test:manual": "vitest run --config vitest.manual.config.ts",
     "benchmark:recording-quality": "node --experimental-strip-types scripts/run_recording_quality_benchmark.ts",
     "benchmark:encrypted-storage": "node --expose-gc --experimental-strip-types scripts/benchmark_encrypted_storage.ts",

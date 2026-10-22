@@ -341,17 +341,89 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
             encoderPrecision: .int8,
             encoderComputeUnits: .cpuAndNeuralEngine
         )
-        let config = ASRConfig(
-            tdtConfig: TdtConfig(blankId: AsrModelVersion.v3.blankId),
-            encoderHiddenSize: AsrModelVersion.v3.encoderHiddenSize,
-            parallelChunkConcurrency: 1,
-            streamingEnabled: true
-        )
-        let loadedManager = AsrManager(config: config)
+        let loadedManager = AsrManager(config: Self.makeAsrConfiguration())
         try await loadedManager.loadModels(models)
         manager = loadedManager
         ctcModels = try await CtcModels.load(from: ctcDirectory, variant: .ctc110m)
         ctcModelDirectory = ctcDirectory
+    }
+
+    static func makeAsrConfiguration() -> ASRConfig {
+        ASRConfig(
+            tdtConfig: TdtConfig(blankId: AsrModelVersion.v3.blankId),
+            encoderHiddenSize: AsrModelVersion.v3.encoderHiddenSize,
+            parallelChunkConcurrency: 1,
+            streamingEnabled: true,
+            // v3's mel prefix can suppress a chunk's opening speech. Use the
+            // existing no-prefix, silence-aligned path (FluidAudio issue #594).
+            melChunkContext: false
+        )
+    }
+
+    // Preserve every real sample, but satisfy the ASR engine's existing minimum
+    // input shape. Long files and encrypted sources keep their streaming path.
+    static func prepareMinimumAudioInput(_ input: AudioInput) throws -> (
+        input: AudioInput, originalDuration: Double?
+    ) {
+        let minimum = ASRConstants.minimumRequiredSamples(forSampleRate: ASRConstants.sampleRate)
+        let samples: [Float]
+        switch input {
+        case .fileURL(let url):
+            let file = try AVAudioFile(forReading: url)
+            guard file.processingFormat.sampleRate > 0, file.length > 0 else {
+                throw RuntimeFailure.transcriptionFailed
+            }
+            let duration = Double(file.length) / file.processingFormat.sampleRate
+            if duration >= ASRConstants.minimumAudioDurationSeconds { return (input, nil) }
+            samples = try AudioConverter().resampleAudioFile(url)
+        case .pcmSamples(let inputSamples, let sampleRate):
+            samples = sampleRate == Double(ASRConstants.sampleRate)
+                ? inputSamples
+                : try AudioConverter().resample(inputSamples, from: sampleRate)
+        case .encryptedReader(let reader):
+            guard reader.sampleRate == Double(ASRConstants.sampleRate), reader.sampleCount > 0 else {
+                throw RuntimeFailure.transcriptionFailed
+            }
+            if reader.sampleCount >= minimum { return (input, nil) }
+            var copied = [Float](repeating: 0, count: reader.sampleCount)
+            try copied.withUnsafeMutableBufferPointer { buffer in
+                try reader.copySamples(into: buffer.baseAddress!, offset: 0, count: buffer.count)
+            }
+            samples = copied
+        }
+        guard !samples.isEmpty else { throw RuntimeFailure.transcriptionFailed }
+        if samples.count >= minimum {
+            return (.pcmSamples(samples, sampleRate: Double(ASRConstants.sampleRate)), nil)
+        }
+        let originalDuration = Double(samples.count) / Double(ASRConstants.sampleRate)
+        let padded = samples + [Float](repeating: 0, count: minimum - samples.count)
+        return (.pcmSamples(padded, sampleRate: Double(ASRConstants.sampleRate)), originalDuration)
+    }
+
+    static func boundPaddedOutput(
+        text: String, words: [TranscriptionWord], originalDuration: Double
+    ) throws -> (text: String, words: [TranscriptionWord]) {
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !words.isEmpty else {
+            throw RuntimeFailure.transcriptionFailed
+        }
+        guard originalDuration.isFinite, originalDuration > 0 else {
+            throw RuntimeFailure.transcriptionFailed
+        }
+        let validated = try normalizeWordTimings(
+            words, durationSeconds: max(originalDuration, ASRConstants.minimumAudioDurationSeconds)
+        )
+        let bounded = try normalizeWordTimings(
+            validated.filter {
+                $0.startSeconds < originalDuration && $0.endSeconds > $0.startSeconds
+            }.map {
+                TranscriptionWord(
+                    text: $0.text, startSeconds: $0.startSeconds,
+                    endSeconds: min($0.endSeconds, originalDuration), confidence: $0.confidence
+                )
+            },
+            durationSeconds: originalDuration
+        )
+        return (bounded.map(\.text).joined(separator: " "), bounded)
     }
 
     public func transcribe(
@@ -375,6 +447,8 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
         decoderIdentifier _: UUID
     ) async throws -> TranscriptionOutput {
         guard let manager else { throw RuntimeFailure.transcriptionFailed }
+        let prepared = try Self.prepareMinimumAudioInput(audioInput)
+        let audioInput = prepared.input
         let languageHint = language.flatMap(Language.init(rawValue:))
         var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
         let resultAndDuration: (ASRResult, Double, [Float]?, (any AudioSampleSource)?)
@@ -458,10 +532,20 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
             words: recognizedWords,
             replacements: replacements
         )
-        let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let durationSeconds = max(Double(result.duration), resultAndDuration.1)
+        var text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let durationSeconds = prepared.originalDuration ?? max(Double(result.duration), resultAndDuration.1)
+        let supportedWords: [TranscriptionWord]
+        if let originalDuration = prepared.originalDuration {
+            let bounded = try Self.boundPaddedOutput(
+                text: text, words: reconciledWords, originalDuration: originalDuration
+            )
+            text = bounded.text
+            supportedWords = bounded.words
+        } else {
+            supportedWords = reconciledWords
+        }
         let words = try normalizeWordTimings(
-            reconciledWords,
+            supportedWords,
             durationSeconds: durationSeconds
         )
         return TranscriptionOutput(

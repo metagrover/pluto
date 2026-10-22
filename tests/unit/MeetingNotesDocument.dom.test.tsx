@@ -696,7 +696,11 @@ describe('MeetingNotesDocument', () => {
     );
     expect(writes).toHaveLength(1);
     expect(JSON.parse(writes[0][1].edited)).toEqual([
-      { id: expect.any(String), text: 'Send the reviewed plan.' },
+      {
+        id: expect.any(String),
+        text: 'Send the reviewed plan.',
+        kind: 'decision',
+      },
     ]);
   });
 

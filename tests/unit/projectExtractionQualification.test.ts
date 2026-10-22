@@ -8,6 +8,7 @@ const mock = vi.hoisted(() => ({
   withCommitmentTransaction: vi.fn((operation: () => unknown) => operation()),
 }));
 vi.mock('../../electron/db', () => ({
+  hasReviewedActionSource: vi.fn(() => false),
   getEntitiesByType: (type: string) =>
     mock.existing.filter((e) => e.type === type),
   upsertEntity: mock.upsertEntity,

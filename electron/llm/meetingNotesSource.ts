@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  type CitedSpeakerAlias,
   MeetingNotesError,
   type NotesSource,
   type SourceSegment,
@@ -84,6 +85,11 @@ export const createNotesSource = (
   return {
     revision: createHash('sha256').update(canonical, 'utf8').digest('hex'),
     segments: Object.freeze(segments),
+    protectedSpeakerLabels: Object.freeze(
+      Object.values(speakerDisplayNames)
+        .map((name) => name.trim())
+        .filter(Boolean),
+    ),
   };
 };
 
@@ -151,6 +157,45 @@ export const completeCitedSourceWindow = (
     }));
 };
 
+export const hasBareNotesReferent = (text: string): boolean =>
+  /\b(?:either|neither|both|those|that)\s+(?:(?:of\s+)?the\s+)?(?:tasks?|conditions?)\b/i.test(
+    text,
+  );
+
+// Context selection is deliberately broader than unresolved-output detection.
+// Demonstratives can refer to any subject; extra context never resolves them.
+const needsPriorSourceContext = (text: string): boolean =>
+  hasBareNotesReferent(text) ||
+  /\b(?:this|that|these|those|such)\b/i.test(text);
+
+/** Exact backward-reference context, bounded to three prior turns. */
+export const sourceBoundReviewWindow = (
+  source: NotesSource,
+  spans: SourceSpan[],
+): SourceSpan[] => {
+  const referents = spans.filter((span) =>
+    needsPriorSourceContext(resolveSourceSpan(source, span)),
+  );
+  if (!referents.length) return completeCitedSourceWindow(source, spans);
+  // Anchor to the latest reference so earlier contextual references cannot
+  // extend the window again when a reviewed result is replayed.
+  const first = Math.max(...referents.map((span) => span.segment));
+  const previous = source.segments
+    .filter(
+      (segment) => segment.index < first && segment.text.trim().length > 0,
+    )
+    .map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+  const priorPassages = groupCitedSourcePassages(source, previous).slice(-3);
+  return completeCitedSourceWindow(source, [
+    ...priorPassages.flatMap(({ spans }) => spans),
+    ...spans,
+  ]);
+};
+
 export const groupCitedSourcePassages = (
   source: NotesSource,
   spans: SourceSpan[],
@@ -213,3 +258,112 @@ export const quoteCitedSourcePassages = (
   groupCitedSourcePassages(source, spans)
     .map(({ speaker, text }) => `${speaker ?? 'Speaker'}: “${text}”`)
     .join('\n');
+
+const identityKey = (value: string): string =>
+  value.normalize('NFKC').toLocaleLowerCase('en-US').trim();
+
+/** Deliberately literal: unsupported introductions retain the recorded label.
+ * Never joins fragments, resolves reported speech, or creates a person/voice binding. */
+// shortcut: Capitalized name/role ambiguity still needs semantic review; this never enrolls an identity.
+const explicitIntroduction = (text: string): string | null => {
+  const match =
+    /^(?:(?:hi|hey|hello)[,!]?\s+)?(?:I am|I['’]m|it['’]s|my name is)\s+([\p{Lu}][\p{L}\p{M}'’.-]*(?:[ -][\p{Lu}][\p{L}\p{M}'’.-]*){0,2})[.!]?$/iu.exec(
+      text.trim(),
+    );
+  if (!match) return null;
+  const name = match[1]!.replace(/[.!]$/, '');
+  if (
+    /^(?:group|team|the team|everyone|unknown|me|them|speaker|we|i|you)$/iu.test(
+      name,
+    )
+  )
+    return null;
+  // The case-insensitive phrase match must not turn ordinary predicates into names.
+  if (!name.split(/[ -]/u).every((part) => /^\p{Lu}/u.test(part))) return null;
+  return name;
+};
+
+/** Exact own-citation alias evidence, with conflicts checked across the WHOLE source. */
+export const buildCitedSpeakerAliasProof = (
+  source: NotesSource,
+  sources: readonly SourceSpan[],
+): readonly CitedSpeakerAlias[] => {
+  const introductions = source.segments.flatMap((segment) => {
+    const name = explicitIntroduction(segment.text);
+    return segment.speaker && name ? [{ segment, name }] : [];
+  });
+  const protectedLabels = new Set([
+    'me',
+    ...(source.protectedSpeakerLabels ?? []).map(identityKey),
+  ]);
+  const fullyCited = (segment: SourceSegment) =>
+    sources.some(
+      (span) =>
+        span.segment === segment.index &&
+        span.start === 0 &&
+        span.end === segment.text.length,
+    );
+  const proof: CitedSpeakerAlias[] = [];
+  for (const { segment, name } of introductions) {
+    const speaker = segment.speaker!;
+    if (
+      protectedLabels.has(identityKey(speaker)) ||
+      /^(?:them|unknown|speaker|group|team|we|everyone)$/iu.test(speaker) ||
+      !fullyCited(segment)
+    )
+      continue;
+    // Named/confirmed speaker labels already have authority; never silently rename them.
+    if (
+      !/^(?:remote\s*speaker\s*\d+|speaker[ _-]*\d+|unconfirmed\s*speaker(?:[ _-]*\d+)?|unknown[ _-]*speaker[ _-]*\d+)$/iu.test(
+        speaker,
+      )
+    )
+      continue;
+    if (
+      introductions.some(
+        (other) =>
+          (other.segment.speaker === speaker &&
+            identityKey(other.name) !== identityKey(name)) ||
+          (other.segment.speaker !== speaker &&
+            identityKey(other.name) === identityKey(name)),
+      )
+    )
+      continue;
+    if (
+      !source.segments.some(
+        (task) =>
+          task.speaker === speaker &&
+          task.index !== segment.index &&
+          fullyCited(task) &&
+          /^\s*I(?: will\b|['’]ll\b| can\b| am going to\b|['’]m going to\b| commit to\b| promise(?:d)? to\b|(?: am|['’]m)\s+(?:(?:currently|still)\s+)?[\p{L}]+ing\b)/iu.test(
+            task.text,
+          ),
+      )
+    )
+      continue;
+    if (proof.some((entry) => entry.speaker === speaker)) continue;
+    proof.push(
+      Object.freeze({
+        speaker,
+        name,
+        introductionSources: Object.freeze(
+          introductions
+            .filter(
+              (entry) =>
+                entry.segment.speaker === speaker &&
+                identityKey(entry.name) === identityKey(name) &&
+                fullyCited(entry.segment),
+            )
+            .map(({ segment: intro }) =>
+              Object.freeze({
+                segment: intro.index,
+                start: 0,
+                end: intro.text.length,
+              }),
+            ),
+        ),
+      }),
+    );
+  }
+  return Object.freeze(proof);
+};

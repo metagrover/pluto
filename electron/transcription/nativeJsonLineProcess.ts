@@ -2,6 +2,8 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 
 export type NativeChildProcess = Pick<ChildProcess, 'on' | 'once' | 'kill'> & {
+  pid?: number;
+} & {
   stdin: Pick<Writable, 'write' | 'end'>;
   stdout: Pick<Readable, 'on'>;
   stderr: Pick<Readable, 'on'>;
@@ -149,6 +151,7 @@ const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
 export class NativeJsonLineProcess {
   private child: NativeChildProcess | null = null;
+  private readonly liveChildren = new Map<NativeChildProcess, Promise<void>>();
   private stdoutBuffer = '';
   private readonly pending = new Map<string, PendingRequest>();
   private readonly ignoredResponseIDs = new Set<string>();
@@ -175,6 +178,19 @@ export class NativeJsonLineProcess {
       { stdio: ['pipe', 'pipe', 'pipe'] },
     );
     this.child = child;
+    this.liveChildren.set(
+      child,
+      new Promise<void>((resolve) => {
+        const exited = () => {
+          this.liveChildren.delete(child);
+          resolve();
+        };
+        child.once('exit', exited);
+        child.once('error', () => {
+          if (!child.pid) exited();
+        });
+      }),
+    );
     child.stdout.on('data', (chunk: Buffer | string) => {
       if (this.child === child) this.consumeStdout(chunk.toString());
     });
@@ -244,6 +260,26 @@ export class NativeJsonLineProcess {
   terminate(): void {
     const child = this.child;
     if (child) this.failChild(child, 'parakeet_process_terminated');
+  }
+
+  async terminateAndWait(): Promise<void> {
+    if (this.child) this.failChild(this.child, 'parakeet_process_unloaded');
+    await this.waitForStoppedChildren();
+  }
+
+  async waitForStoppedChildren(): Promise<void> {
+    await Promise.all(
+      [...this.liveChildren]
+        .filter(([child]) => child !== this.child)
+        .map(async ([child, exited]) => {
+          const timer = setTimeout(() => child.kill('SIGKILL'), 2_000);
+          try {
+            await exited;
+          } finally {
+            clearTimeout(timer);
+          }
+        }),
+    );
   }
 
   private stopChild(child: NativeChildProcess): void {

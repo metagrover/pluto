@@ -61,11 +61,13 @@ it('keeps completed adopted legacy actions and rejected self aliases closed in r
         text: 'Prepare the old checklist',
         status: 'completed',
         sourceMeetingId: 'scoped',
+        ownershipVerified: false,
       },
       {
         text: 'Send an obsolete report',
         status: 'rejected',
         sourceMeetingId: 'scoped',
+        ownershipVerified: false,
       },
     ]),
   );
@@ -101,7 +103,12 @@ it('does not attribute rejected owner-like prose or other owners to self', () =>
     (action) => action.text,
   );
   expect(texts).toContain('Send the self checklist');
-  expect(texts).not.toContain('I will send the unknown checklist');
+  expect(getCanonicalPersonCommitments(self.id)!.excluded).toContainEqual(
+    expect.objectContaining({
+      text: 'I will send the unknown checklist',
+      ownershipVerified: false,
+    }),
+  );
   expect(texts).not.toContain('I will send the other checklist');
 });
 
@@ -209,12 +216,72 @@ it('retains rejected and old completed tasks as exclusions for notes recall', ()
         text: 'Send obsolete report.',
         status: 'rejected',
         sourceMeetingId: 'scoped',
+        ownershipVerified: false,
       },
       {
         text: 'Archive checklist.',
         status: 'completed',
         sourceMeetingId: 'scoped',
+        ownershipVerified: true,
       },
     ]),
   );
+});
+
+it('separates personal closed history from suppression-only and other-owned records', () => {
+  const self = upsertEntity({
+    id: 'status-self',
+    type: 'person',
+    name: 'Riley',
+    dedupe_by_name: false,
+  });
+  identityStore.setSelfPersonId(self.id);
+  const other = upsertEntity({
+    id: 'status-other',
+    type: 'person',
+    name: 'Jordan',
+    dedupe_by_name: false,
+  });
+  for (const action of [
+    {
+      id: 'status-reviewed',
+      name: 'Schedule a review with Maya',
+      metadata: {
+        commitment_state: 'confirmed',
+        reviewed_at: '2026-10-01T12:00:00Z',
+      },
+    },
+    {
+      id: 'status-unresolved',
+      name: 'Prepare an uncertain report',
+      metadata: {},
+    },
+    {
+      id: 'status-other-owned',
+      name: 'Send Jordan report',
+      assigned_to: other.id,
+      metadata: { owner_source: 'user', commitment_state: 'confirmed' },
+    },
+  ])
+    upsertEntity({
+      ...action,
+      type: 'action_item',
+      status: 'completed',
+      dedupe_by_name: false,
+      metadata: { ...action.metadata, source_meeting_id: 'scoped' },
+    });
+  const closed = getCanonicalPersonCommitments(self.id)?.excluded || [];
+  expect(closed).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        text: 'Schedule a review with Maya',
+        ownershipVerified: true,
+      }),
+      expect.objectContaining({
+        text: 'Prepare an uncertain report',
+        ownershipVerified: false,
+      }),
+    ]),
+  );
+  expect(closed.some((item) => item.text === 'Send Jordan report')).toBe(false);
 });

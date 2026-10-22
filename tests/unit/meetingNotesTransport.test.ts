@@ -115,7 +115,7 @@ it.each([true, false])(
         think: thinking,
         format: 'json',
         stream: true,
-        options: { num_ctx: 16384, num_predict: 2048 },
+        options: { num_ctx: 3072, num_predict: 2048 },
       });
       expect(JSON.parse(init.body)).not.toHaveProperty('prompt');
       return {
@@ -241,7 +241,7 @@ it('keeps the complete source in Ollama notes requests and bounds prompt batchin
     expect(body).toMatchObject({
       truncate: false,
       shift: false,
-      options: { num_batch: 128, num_ctx: 16384, num_predict: 2048 },
+      options: { num_batch: 128, num_ctx: 3072, num_predict: 2048 },
       messages: [{ role: 'user', content: request.prompt }],
     });
     return new Response(

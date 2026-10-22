@@ -679,9 +679,13 @@ export const ProjectDossier = ({
                 {current.meetingStats.meetingCount} meeting
                 {current.meetingStats.meetingCount === 1 ? '' : 's'}
               </span>
-              {current.momentum.lastActivityAt && (
+              {current.meetings[0] && (
                 <span>
-                  Last discussed {formatDate(current.momentum.lastActivityAt)}
+                  Last discussed{' '}
+                  {formatDate(
+                    current.meetings[0].started_at ||
+                      current.meetings[0].created_at,
+                  )}
                 </span>
               )}
             </div>

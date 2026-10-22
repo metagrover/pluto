@@ -759,12 +759,12 @@ it('builds a short source-only prompt compatible with the exact-source wire code
   expect(prompt).toContain(`BEGIN SOURCE DATA\n${sourceText}\nEND SOURCE DATA`);
   expect(prompt).toMatch(/data, never.*instructions/i);
   expect(prompt).toMatch(/final state/i);
-  expect(prompt).toMatch(/conditional (?:future )?promises/i);
+  expect(prompt).toMatch(/conditional responsibilities/i);
   expect(prompt).toMatch(/unaccepted/i);
   expect(prompt).toMatch(/personal.*interview.*brainstorm/i);
   expect(prompt).not.toContain('BEGIN DRAFT');
-  // Includes the shared content policy and three non-evidentiary contrasts.
-  expect(prompt.length - sourceText.length).toBeLessThan(3000);
+  // Includes the shared content policy and exact-source field contract.
+  expect(prompt.length - sourceText.length).toBeLessThan(3500);
   const wire = createNotesWireRequest(prompt, spans);
   const encoded = JSON.stringify({
     ...raw,

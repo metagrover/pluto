@@ -9,9 +9,9 @@ it.each(['length', 'missing-done'])(
     vi.spyOn(provider as any, 'resolveOllamaModel').mockResolvedValue(
       'gemma4:12b',
     );
-    vi.spyOn(provider as any, 'reconcileOllamaResidency').mockResolvedValue(
-      undefined,
-    );
+    vi.spyOn(provider as any, 'reconcileOllamaResidency').mockResolvedValue({
+      resident: false,
+    });
     vi.spyOn(provider as any, 'ollamaStream').mockImplementation(
       async (_path: any, _options: any, onChunk: any) => {
         onChunk(
@@ -40,9 +40,9 @@ it('accepts a terminal stop packet split across transport chunks', async () => {
   vi.spyOn(provider as any, 'resolveOllamaModel').mockResolvedValue(
     'gemma4:12b',
   );
-  vi.spyOn(provider as any, 'reconcileOllamaResidency').mockResolvedValue(
-    undefined,
-  );
+  vi.spyOn(provider as any, 'reconcileOllamaResidency').mockResolvedValue({
+    resident: false,
+  });
   vi.spyOn(provider as any, 'ollamaStream').mockImplementation(
     async (_path: any, _options: any, onChunk: any) => {
       onChunk(`${JSON.stringify({ response: 'Morgan owns the report.' })}\n`);

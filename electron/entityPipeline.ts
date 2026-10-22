@@ -356,6 +356,7 @@ function persistExtractedEntities(
     actionIds?: Map<number, string>;
     actionMatches?: Map<string, string>;
     existingActions?: db.Entity[];
+    regenerationRequiresReview?: boolean;
   } = {},
 ): ProcessedEntities {
   const ensureCurrent = () => {
@@ -511,9 +512,21 @@ function persistExtractedEntities(
   }
 
   // 3. Process Action Items
-  const meetingStartedAt = extracted.action_items.length
-    ? (db.getMeeting(meetingId) as db.PersistedMeeting | undefined)?.started_at
-    : null;
+  const actionMeeting = extracted.action_items.length
+    ? (db.getMeeting(meetingId) as db.PersistedMeeting | undefined)
+    : undefined;
+  const meetingStartedAt = actionMeeting?.started_at;
+  const actionAnalysis = parseActionMetadata(
+    actionMeeting?.analysis_json ?? null,
+  );
+  const actionGeneration = actionAnalysis.generation_metadata as
+    | Record<string, unknown>
+    | undefined;
+  const reviewedActions =
+    actionGeneration?.source_action_review_version === 1 &&
+    Array.isArray(actionAnalysis.all_action_items)
+      ? actionAnalysis.all_action_items
+      : [];
   for (const [actionIndex, actionItem] of extracted.action_items.entries()) {
     ensureCurrent();
     if (!actionItem?.description || typeof actionItem.description !== 'string')
@@ -551,9 +564,20 @@ function persistExtractedEntities(
           source_index: actionIndex,
           assignee_name: actionItem.assignee,
           commitment_state: 'possible',
+          ...(options.regenerationRequiresReview
+            ? { source_regeneration_review_required: true }
+            : {}),
           origin: 'extraction',
           source_meeting_id: meetingId,
           source_evidence: actionItem.evidence,
+          ...(reviewedActions.some(
+            (item) =>
+              item?.text === actionItem.description &&
+              item?.evidence === actionItem.evidence &&
+              item?.assignee === actionItem.assignee,
+          )
+            ? { source_action_review_version: 1 }
+            : {}),
           source_due_date: actionItem.due_date,
         } satisfies ActionCommitmentMetadata,
       });
@@ -962,13 +986,68 @@ export async function processExtractedEntities(
 
   return db.withCommitmentTransaction(() => {
     ensureCurrent();
-    db.retireMeetingDerivedCommitments(meetingId);
+    const normalizeIdentity = (value: unknown) =>
+      typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
+    const sourceIdentity = (
+      description: unknown,
+      owner: unknown,
+      due: unknown,
+    ) =>
+      JSON.stringify([
+        normalizeIdentity(description),
+        normalizeIdentity(owner),
+        normalizeIdentity(due),
+      ]);
+    const sourceKeys = extracted.action_items.map((item) =>
+      sourceIdentity(item.description, item.assignee, item.due_date),
+    );
+    const reviewed = db.getEntitiesByType('action_item').flatMap((entity) => {
+      const metadata = parseActionMetadata(entity.metadata);
+      if (
+        metadata.origin !== 'extraction' ||
+        metadata.source_meeting_id !== meetingId ||
+        !(
+          entity.status === 'completed' ||
+          metadata.commitment_state === 'confirmed' ||
+          metadata.commitment_state === 'rejected' ||
+          metadata.owner_source === 'user'
+        )
+      )
+        return [];
+      return [
+        {
+          entity,
+          key: sourceIdentity(
+            metadata.original_description ??
+              metadata.full_description ??
+              entity.name,
+            metadata.assignee_name,
+            metadata.source_due_date,
+          ),
+        },
+      ];
+    });
+    for (const [index, key] of sourceKeys.entries()) {
+      const matches = reviewed.filter((candidate) => candidate.key === key);
+      // Reuse only one user record for one identical source operation.
+      if (
+        matches.length === 1 &&
+        sourceKeys.filter((value) => value === key).length === 1
+      )
+        actionIds.set(index, matches[0]!.entity.id);
+    }
+    const protectedSource = db.hasReviewedActionSource(meetingId);
+    const retired = db.retireMeetingDerivedCommitments(meetingId);
     const result = persistExtractedEntities(
       extracted,
       meetingId,
       context,
       transcriptForGrounding,
-      { ...options, actionIds },
+      {
+        ...options,
+        actionIds,
+        regenerationRequiresReview: protectedSource || retired > 0,
+      },
     );
     syncMeetingActionEntitiesFromUserEdits(db.db, meetingId);
     return result;

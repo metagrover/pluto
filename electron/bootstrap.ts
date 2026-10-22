@@ -23,6 +23,7 @@ import {
 } from './database/errors';
 import { initializeDatabaseStorageSetup } from './database/storageSetup';
 import { probeSignedMacBuild } from './encryptionRollout';
+import { setLocalModelMemoryProbeReader } from './llm/localModelMemoryProbe';
 import { createLogger, initializeElectronLogging } from './logger';
 
 // Guard against broken-pipe errors (EPIPE / EIO) on stdout/stderr early in process lifetime
@@ -103,7 +104,12 @@ if (!canOpenDatabase) {
   );
   app.quit();
 } else {
-  initializeCommitmentNotificationBridge();
+  const nativeBridge = initializeCommitmentNotificationBridge();
+  setLocalModelMemoryProbeReader(
+    typeof nativeBridge?.memoryPressureSample === 'function'
+      ? nativeBridge.memoryPressureSample.bind(nativeBridge)
+      : undefined,
+  );
   app.on('second-instance', () => focusPrimaryWindow?.());
 
   void app.whenReady().then(() => {

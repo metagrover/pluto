@@ -11,6 +11,7 @@ import {
   resolveAskPlutoConversation,
   resolveConversationQuery,
 } from '../../electron/intelligence/askPlutoConversation';
+import { resolveAskPlutoReasoningMode } from '../../electron/intelligence/askPlutoReasoning';
 import type { AskPlutoConversationTurn } from '../../src/types/askPlutoQuery';
 
 const priorTurns: AskPlutoConversationTurn[] = [
@@ -42,6 +43,42 @@ const priorTurns: AskPlutoConversationTurn[] = [
 ];
 
 describe('project evidence follow-up routing', () => {
+  it.each(['Is the focus session done?', 'When did the focus session finish?'])(
+    'keeps factual focus-session questions on fast retrieval: %s',
+    (query) => {
+      const turns: AskPlutoConversationTurn[] = [
+        { role: 'user', content: 'What changed on the beacon project?' },
+        {
+          role: 'assistant',
+          content: 'The pilot is awaiting approval.',
+          outcome: 'answered',
+          conversationAnchor: 'What changed on the beacon project?',
+        },
+      ];
+      for (const history of [[], turns]) {
+        const resolved = resolveAskPlutoConversation(query, history);
+        expect(resolved.task).toBe('lookup');
+        expect(
+          resolveAskPlutoReasoningMode({
+            query: resolved.answerQuery,
+            intent: 'factual',
+            task: resolved.task,
+            relation: resolved.relation,
+          }),
+        ).toBe('fast');
+      }
+    },
+  );
+
+  it.each([
+    'What should I focus on?',
+    'What should we focus on next?',
+    'Focus on the immediate priorities.',
+    'What to focus on next?',
+  ])('preserves focus-prioritization analysis: %s', (query) =>
+    expect(resolveAskPlutoConversation(query, []).task).toBe('analysis'),
+  );
+
   it('retries the original lookup with fresh retrieval through repeated retries', () => {
     const original = "What's assigned to Gamma?";
     for (const previousQuestion of [original, 'try again?']) {

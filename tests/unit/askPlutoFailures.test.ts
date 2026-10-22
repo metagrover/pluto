@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import { classifyAskPlutoFailure } from '../../electron/intelligence/askPlutoFailures';
+import { LocalModelMemoryError } from '../../electron/llm/localModelMemory';
 
 describe('classifyAskPlutoFailure', () => {
+  it('explains memory refusal without exposing internal model details', () => {
+    expect(
+      classifyAskPlutoFailure(
+        new LocalModelMemoryError('private internal detail'),
+      ),
+    ).toEqual({
+      reason: 'memory_pressure',
+      answer: expect.stringContaining('protect system memory'),
+    });
+  });
   it('distinguishes local timeouts from an unavailable provider', () => {
     expect(
       classifyAskPlutoFailure(new DOMException('Timed out', 'TimeoutError')),

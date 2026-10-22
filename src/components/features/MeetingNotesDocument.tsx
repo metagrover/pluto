@@ -1197,7 +1197,17 @@ export const MeetingNotesDocument = ({
     );
     unsavedContinuationIdsRef.current.add(id);
     setPendingNativeContinuationId(id);
-    setNativeContinuationState(parentPath, [...latest, { id, text: '' }]);
+    setNativeContinuationState(parentPath, [
+      ...latest,
+      {
+        id,
+        text: '',
+        kind: block.blockType ?? 'note',
+        ...(block.blockType === 'action'
+          ? { assignee: block.assignee ?? null }
+          : {}),
+      },
+    ]);
     setCreatingContinuationPath(null);
   };
 

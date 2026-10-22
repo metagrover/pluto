@@ -354,6 +354,10 @@ it.each(['missing_condition', 'conflicting_action'] as const)(
         ? 'I will send the outline after legal approves. I will review the budget.'
         : 'I will send the outline. I will review the budget. I will not send the outline.';
     const f = fixture(text);
+    f.draft.sections[0]!.items[0]!.text =
+      code === 'missing_condition'
+        ? 'Milo will send the outline after legal approves.'
+        : 'Milo withdrew the outline commitment and will review the budget.';
     const action = f.draft.sections[0]!.items[1]!;
     action.text = 'Send the outline';
     f.draft.sections[0]!.items.push({
@@ -410,6 +414,8 @@ it('removes an unverifiable decision without losing reviewed discussion', async 
 
 it('records individual action exclusions even when another action satisfies the whole-draft guard', async () => {
   const f = fixture('I will send the outline after legal approves.');
+  f.draft.sections[0]!.items[0]!.text =
+    'Milo will send the outline after legal approves.';
   const action = f.draft.sections[0]!.items[1]!;
   action.text = 'Send the outline after approval';
   f.draft.sections[0]!.items.push({
@@ -452,6 +458,10 @@ it.each(['missing_condition', 'conflicting_action'] as const)(
         : []),
     ]);
     const sources = [{ segment: 33, start: 0, end: text.length }];
+    f.draft.sections[0]!.items[0]!.text =
+      code === 'missing_condition'
+        ? 'Milo will send the outline after legal approves.'
+        : 'Milo promised to send the outline.';
     const section = f.draft.sections[0]!;
     for (const block of [section.title, ...section.items])
       block.sources = sources;

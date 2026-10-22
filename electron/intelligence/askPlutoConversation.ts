@@ -337,7 +337,7 @@ const resolveResearchTask = (query: string): AskPlutoResearchTask => {
     return 'comparison';
   }
   if (
-    /\b(?:analy[sz]e|assess|evaluate|reflect|performance|feedback|strengths?|weaknesses?|patterns?|concern(?:ed|s)?|priorit(?:y|ies|ize|ized)|biggest (?:risk|challenge)|most important|could (?:i|we) have|should (?:i|we)|improve|do better|coach(?:ing)?|focus(?: on)?|what(?:'s| is) on my plate|where should (?:i|we) start|what to focus on|next steps? for (?:me|us)|what (?:would|should|could) (?:you|i|we) (?:do|tackle|check) (?:first|next)|what do you think (?:will|would) satisfy)\b/i.test(
+    /\b(?:analy[sz]e|assess|evaluate|reflect|performance|feedback|strengths?|weaknesses?|patterns?|concern(?:ed|s)?|priorit(?:y|ies|ize|ized)|biggest (?:risk|challenge)|most important|could (?:i|we) have|should (?:i|we)|improve|do better|coach(?:ing)?|focus on|what(?:'s| is) on my plate|where should (?:i|we) start|what to focus on|next steps? for (?:me|us)|what (?:would|should|could) (?:you|i|we) (?:do|tackle|check) (?:first|next)|what do you think (?:will|would) satisfy)\b/i.test(
       query,
     )
   ) {

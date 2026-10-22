@@ -1,5 +1,6 @@
 import { containsPersonReference } from '../src/utils/evidenceText';
 import { parsePersonProfile } from '../src/utils/personProfile';
+import type { PersonProfileClaim } from '../src/utils/personProfile';
 import type { KnowledgeChunkSourceMeeting } from './knowledgeChunking';
 import {
   type KnowledgeV2Document,
@@ -10,6 +11,24 @@ import {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+export const personProfilePreservesEvidence = (
+  previous: PersonProfileClaim[],
+  consolidated: PersonProfileClaim[],
+): boolean =>
+  previous.every((claim) =>
+    claim.citations.every((citation) =>
+      consolidated.some(
+        (replacement) =>
+          replacement.section === claim.section &&
+          replacement.citations.some(
+            (source) =>
+              source.meeting_id === citation.meeting_id &&
+              source.quote === citation.quote,
+          ),
+      ),
+    ),
+  );
 
 export const getPersonKnowledgeChunkPrompt = (
   name: string,
@@ -32,6 +51,7 @@ Rules:
 - Keep at most four topics and two citations per topic. Prefer repeated work, then recent concrete contributions. Profile claims may cite up to four sources.
 - A topic may have one source; Pluto will distinguish one-off work from recurring work later.
 - Make titles specific. The read should explain what the person did, not offer a generic label.
+- Preserve acronyms without expansion unless the evidence defines them. Unclear or garbled wording is an unknown, never a concrete deadline or urgent priority. Omit claims that depend on guessing what a phrase meant.
 - Dates are historical observations, not proof that an old status is still current. Use past tense for older work. Say "last discussed" for unresolved historical status; absence of completion is not proof something remains undone.
 - Output JSON only, without markdown or extra fields.
 
