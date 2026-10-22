@@ -34,4 +34,17 @@ final class FluidAudioTokenOrderingTests: XCTestCase {
         XCTAssertEqual(tokens.map(\.token), [30])
         XCTAssertEqual(tokens.map(\.timestamp), [7])
     }
+
+    func testFinalTokenTimingsKeepDecoderOrderWhenFramesMoveBackward() async {
+        let manager = AsrManager()
+        await manager.setVocabularyForTesting([10: "a", 11: "b", 12: "c"])
+        let timings = await manager.createTokenTimings(
+            from: [10, 11, 12], timestamps: [100, 104, 103],
+            confidences: [0.91, 0.92, 0.93], tokenDurations: [1, 2, 3]
+        )
+        XCTAssertEqual(timings.map(\.tokenId), [10, 11, 12])
+        XCTAssertEqual(timings.map(\.confidence), [0.91, 0.92, 0.93])
+        XCTAssertEqual(timings.map(\.startTime), [7.92, 8.24, 8.24])
+    }
+
 }
