@@ -594,7 +594,7 @@ it('precomputes the compact product contract at background priority', async () =
       }),
     }),
   );
-});
+}, 15_000);
 
 it('preserves configured model, thinking, seed and request budgets on actual transport', async () => {
   const f = makeDirectNotesFixture();

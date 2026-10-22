@@ -194,6 +194,43 @@ describe('ParakeetRuntimeHost', () => {
     },
   );
 
+  it('rejects final work preempted by recording while waiting for admission', async () => {
+    let admit!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      admit = resolve;
+    });
+    const persist = vi.fn(async () => {});
+    const spawn = vi.fn(() => new FakeChild());
+    const host = makeRuntimeHost({
+      paths,
+      spawn,
+      persistInterruptedFinalization: persist,
+      runExclusive: async (run) => {
+        await waiting;
+        await run();
+      },
+    });
+    const rejected = vi.fn();
+    const final = host.acquire('final').catch(rejected);
+    try {
+      const live = host.startRecordingLive();
+      await vi.waitFor(() => expect(persist).toHaveBeenCalledOnce());
+      admit();
+      const lease = await live;
+      await vi.waitFor(() =>
+        expect(rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ message: 'parakeet_cancelled' }),
+        ),
+      );
+      await final;
+      expect(spawn).toHaveBeenCalledOnce();
+      await lease.release();
+    } finally {
+      admit();
+      host.shutdown();
+    }
+  });
+
   it('releases shared admission when the native worker fails', async () => {
     const child = new FakeChild();
     const host = makeRuntimeHost({

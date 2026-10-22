@@ -266,6 +266,7 @@ export class ParakeetRuntimeHost {
     if (record.released) return record.finished;
     if (record.preempting) return;
     record.released = true;
+    if (!record.admitted) record.reject(new Error('parakeet_cancelled'));
     if (record.admitted && record.runExclusive)
       await this.process.waitForStoppedChildren();
     record.controller.abort(new Error('parakeet_cancelled'));

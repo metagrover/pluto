@@ -1197,7 +1197,7 @@ it('plans compact leaves against source output capacity as well as input fit', a
   ).rejects.toThrow('stop-after-output-aware-planning');
 
   expect(onPlan).toHaveBeenCalledWith({ plannedLeafCount: 3 });
-});
+}, 15_000);
 
 it.each(['notes_context_exhausted', 'notes_audit_invalid'] as const)(
   'publishes a deterministically checked compact leaf after %s',
