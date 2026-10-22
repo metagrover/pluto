@@ -448,6 +448,8 @@ describe('Query Engine', () => {
     });
     it.each([
       'What did Maya say?',
+      'Did I discuss pricing with Maya?',
+      'Have I mentioned the retention risk before?',
       'Draft a message asking if the onboarding review is done',
       'Is the onboarding review a good idea?',
       'What are my tasks?',

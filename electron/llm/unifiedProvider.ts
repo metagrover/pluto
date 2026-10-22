@@ -458,14 +458,17 @@ export const runWithLocalTranscription = (
 ): Promise<void> =>
   runWithNativeInferenceCoordinator(async (admittedSignal) => {
     const model = electronActiveOllamaModel;
-    if (model) {
+    for (const pendingModel of new Set([
+      ...pendingOllamaUnloads,
+      ...(model ? [model] : []),
+    ])) {
       await requestConfirmedOllamaUnload(
         'http://127.0.0.1:11434',
-        model,
+        pendingModel,
         admittedSignal,
       );
-      if (electronActiveOllamaModel === model) electronActiveOllamaModel = null;
     }
+    if (electronActiveOllamaModel === model) electronActiveOllamaModel = null;
     admittedSignal.throwIfAborted();
     await run();
   }, signal);

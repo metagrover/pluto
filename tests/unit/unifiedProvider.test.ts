@@ -2811,6 +2811,59 @@ it('unloads externally resident Gemma before POST then reuses bounded placement 
   }
 });
 
+it('blocks native admission when first-use reconciliation leaves an unconfirmed external resident', async () => {
+  const electron = Object.getOwnPropertyDescriptor(
+    process.versions,
+    'electron',
+  );
+  Object.defineProperty(process.versions, 'electron', {
+    value: 'test',
+    configurable: true,
+  });
+  let resident = true;
+  let allowUnload = false;
+  const nativeRun = vi.fn(async () => {});
+  const http = vi
+    .spyOn(ollamaTransport, 'ollamaHttpFetch')
+    .mockImplementation(async (url, init) => {
+      if (url.endsWith('/api/ps'))
+        return jsonResponse({
+          models: resident ? [{ name: 'gemma4:12b' }] : [],
+        });
+      expect(parseRequestBody(init).keep_alive).toBe(0);
+      if (allowUnload) resident = false;
+      return jsonResponse({ done: true }, allowUnload);
+    });
+  try {
+    await expect(
+      new UnifiedLLMProvider('ollama', {
+        ollama_fast_model: 'phi4-mini:3.8b',
+      }).generateText({
+        prompt: 'A fictional question.',
+        task: 'askPlutoLive',
+      }),
+    ).rejects.toThrow('ollama_residency_cleanup_failed');
+    await expect(
+      runWithLocalTranscription(nativeRun, new AbortController().signal),
+    ).rejects.toThrow('ollama_residency_cleanup_failed');
+    expect(nativeRun).not.toHaveBeenCalled();
+    expect(resident).toBe(true);
+    allowUnload = true;
+    await runWithLocalTranscription(nativeRun, new AbortController().signal);
+    expect(resident).toBe(false);
+    expect(nativeRun).toHaveBeenCalledOnce();
+  } finally {
+    allowUnload = true;
+    await runWithLocalTranscription(
+      async () => {},
+      new AbortController().signal,
+    );
+    http.mockRestore();
+    if (electron) Object.defineProperty(process.versions, 'electron', electron);
+    else Reflect.deleteProperty(process.versions, 'electron');
+  }
+});
+
 it('blocks native admission after a watchdog abort until failed Ollama cleanup is retried and confirmed empty', async () => {
   const electron = Object.getOwnPropertyDescriptor(
     process.versions,

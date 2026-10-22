@@ -1034,6 +1034,13 @@ export const buildCommitmentStatusRecall = (
   outcome: 'answered' | 'no_evidence' | 'partial';
 } | null => {
   const value = query.trim().replace(/’/g, "'");
+  if (
+    /^(?:have|did) i\b/i.test(value) &&
+    !/^(?:have|did) i (?:already )?(?:done|finish(?:ed)?|complete(?:d)?|send|sent)\b/i.test(
+      value,
+    )
+  )
+    return null;
   const question = value.match(
     /^(?:do i (?:still )?(?:need|have) to|what do i (?:still )?owe|what(?:'s| is) the status of|am i (?:done|finished)(?: with)?|have i(?: already)?|did i(?: already)?|is|are)\s+(.+?)[?.!]*$/i,
   );
