@@ -59,7 +59,8 @@ class Renderer {
         const target = targets.find(
           (t: any) =>
             t.type === 'page' &&
-            /^http:\/\/(localhost|127\.0\.0\.1):\d+\//.test(t.url) &&
+            (/^http:\/\/(localhost|127\.0\.0\.1):\d+\//.test(t.url) ||
+              t.url.startsWith('file://')) &&
             !t.url.includes('active-call-alert'),
         );
         if (target) {
@@ -131,6 +132,14 @@ suite('private real meeting E2E', () => {
       const fixture = parseRealMeetingCase(
         JSON.parse(fs.readFileSync(casePath, 'utf8')),
       );
+      const packagedApp = process.env.REAL_MEETING_E2E_APP
+        ? fs.realpathSync(process.env.REAL_MEETING_E2E_APP)
+        : undefined;
+      const executable = packagedApp
+        ? path.join(packagedApp, 'Contents/MacOS/Pluto')
+        : 'pnpm';
+      if (packagedApp && !fs.statSync(executable).isFile())
+        throw new Error('packaged_app_executable_unavailable');
       fs.mkdirSync(privateRoot, { recursive: true, mode: 0o700 });
       const runDir = fs.mkdtempSync(path.join(privateRoot, 'run-'));
       fs.chmodSync(runDir, 0o700);
@@ -153,6 +162,7 @@ suite('private real meeting E2E', () => {
         startedAt: new Date().toISOString(),
         scope:
           'Saved validated transcript through Electron IPC; excludes capture/transcription and visual UI.',
+        runtime: packagedApp ? 'packaged' : 'source',
         stages: [],
         checks: [],
         expectations: fixture.checks,
@@ -203,17 +213,27 @@ suite('private real meeting E2E', () => {
       });
       await new Promise<void>((resolve) => server.close(() => resolve()));
       const log = fs.openSync(path.join(runDir, 'runtime.log'), 'wx', 0o600);
-      const child = spawn('pnpm', ['run', 'dev'], {
-        cwd: process.cwd(),
-        detached: true,
-        stdio: ['ignore', log, log],
-        env: {
-          ...process.env,
-          VITEST: '',
-          PLUTO_USER_DATA_DIR: profile,
-          PLUTO_REMOTE_DEBUGGING_PORT: String(port),
+      const child = spawn(
+        executable,
+        packagedApp
+          ? [
+              `--user-data-dir=${profile}`,
+              `--remote-debugging-port=${port}`,
+              '--remote-debugging-address=127.0.0.1',
+            ]
+          : ['run', 'dev'],
+        {
+          cwd: process.cwd(),
+          detached: true,
+          stdio: ['ignore', log, log],
+          env: {
+            ...process.env,
+            VITEST: '',
+            PLUTO_USER_DATA_DIR: profile,
+            PLUTO_REMOTE_DEBUGGING_PORT: String(port),
+          },
         },
-      });
+      );
       fs.closeSync(log);
       const childExited = once(child, 'exit');
       void childExited.catch(() => {});

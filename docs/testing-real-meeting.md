@@ -12,6 +12,14 @@ create their own case. `REAL_MEETING_E2E_CASE` can select another case inside th
 directory. `REAL_MEETING_E2E_PORT` changes the default debug port, 9367. Run one
 case at a time, without another heavy inference workload.
 
+To exercise a locally built package, set `REAL_MEETING_E2E_APP` to the absolute
+path of `Pluto.app` and run the same command. The test launches that executable
+with its own disposable profile and a loopback debugging port instead of starting
+the development server. It uses the same source case and expectations. Verify the
+package first with `pnpm run package:verify-runtime -- /absolute/path/Pluto.app`.
+This checks the packaged intelligence pipeline; recording and visual acceptance
+still require separate checks.
+
 Each run retains its profile, owner-only runtime log, and `report.json` under
 `.private/real-meeting-e2e/run-*`. The report includes the case/source hashes,
 configured models, stage results, expected-check IDs, and actual output. Missing

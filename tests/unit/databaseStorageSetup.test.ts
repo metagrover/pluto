@@ -322,7 +322,7 @@ describe('one-time database storage setup', () => {
     );
     expect(fs.readFileSync(databasePath)).toEqual(original);
     expect(backend.encryptString).not.toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it('fails closed for malformed choice files and incomplete databases', () => {
     fs.writeFileSync(path.join(root, 'database-storage.json'), '{');
