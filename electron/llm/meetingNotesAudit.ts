@@ -575,6 +575,24 @@ const sourceText = (source: NotesSource, spans: SourceSpan[]): string => {
     .join(' ');
 };
 
+const blockGroundingFailures = (
+  text: string,
+  evidence: string,
+): NotesReviewFailure['reason'][] => {
+  const failures: NotesReviewFailure['reason'][] = [];
+  const pronouns = (value: string): string[] =>
+    value
+      .toLowerCase()
+      .match(/\b(?:he|she|his|her|hers|him|himself|herself)\b/g) ?? [];
+  if (hasUnsupportedQuantityScope(text, evidence))
+    failures.push('quantity_scope');
+  if (hasUnsupportedNotesCondition(text, evidence))
+    failures.push('unsupported_condition');
+  if (pronouns(text).some((word) => !pronouns(evidence).includes(word)))
+    failures.push('unsupported_pronoun');
+  return failures;
+};
+
 const extractSuspectProse = (
   source: NotesSource,
   draft: NotesDraft,
@@ -1312,9 +1330,16 @@ export const acceptEditedNotes = ({
   const issues: string[] = [];
   for (const block of blocksForDraft(next)) {
     validateSources(source, block.sources);
-    const evidence = sourceText(source, block.sources);
+    const evidence = groupCitedSourcePassages(source, block.sources)
+      .map(({ text }) => text)
+      .join(' ');
     if (hasUncitedSourceLabel(block, evidence)) {
       throw new MeetingNotesError(`notes_editor_source_label:${block.id}`);
+    }
+    if (acceptancePolicy === 'strict') {
+      const [reason] = blockGroundingFailures(block.text, evidence);
+      if (reason)
+        throw new MeetingNotesError(`notes_editor_${reason}:${block.id}`);
     }
   }
   for (const section of next.sections) {
@@ -1604,10 +1629,6 @@ export const acceptSourceLedNotes = (
     ` ${normalizeTranscriptEvidence(text)} `.includes(
       ` ${normalizeTranscriptEvidence(value)} `,
     );
-  const pronouns = (text: string): string[] =>
-    text
-      .toLowerCase()
-      .match(/\b(?:he|she|his|her|hers|him|himself|herself)\b/g) ?? [];
   const check = (block: SupportedText, item?: NotesItem) => {
     validateSources(source, block.sources);
     const passages = groupCitedSourcePassages(source, block.sources);
@@ -1619,12 +1640,8 @@ export const acceptSourceLedNotes = (
       report('unfinished_prose', block.id);
     if (block.text === quoteCitedSourcePassages(source, block.sources))
       report('raw_source_quote', block.id);
-    if (hasUnsupportedQuantityScope(block.text, evidence))
-      report('quantity_scope', block.id);
-    if (hasUnsupportedNotesCondition(block.text, evidence))
-      report('unsupported_condition', block.id);
-    if (pronouns(block.text).some((word) => !pronouns(evidence).includes(word)))
-      report('unsupported_pronoun', block.id);
+    for (const reason of blockGroundingFailures(block.text, evidence))
+      report(reason, block.id);
     if (hasUncitedSourceLabel(block, evidence))
       report('source_label', block.id);
     if (!item) return;

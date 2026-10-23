@@ -4138,7 +4138,7 @@ it('repairs a combined cancellation decision once in the strict local whole-sour
     'notesAudit',
   ]);
   expect(generate.mock.calls[2]![0].prompt).toContain(
-    'notes_editor_invalid_commitment',
+    'The failed item is sections[0].items[0]',
   );
   expect(generate.mock.calls[2]![0].prompt).toContain(JSON.stringify(invalid));
   expect(result.all_decisions).toHaveLength(1);

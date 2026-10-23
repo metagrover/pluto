@@ -40,7 +40,7 @@ const fixture = (text = 'I will send the outline.') => {
           {
             kind: 'action',
             text: 'Send the outline',
-            owner: 'Milo',
+            owner: 'Milo' as string | null,
             due: null,
             sources: ['R0'],
           },
@@ -223,4 +223,104 @@ it('lets the existing writer repair correct a source-invalid responsibility with
     'source_action_review_version',
   );
   expect(source).toEqual(original);
+});
+
+it('identifies a misclassified discussion item in the bounded writer repair', async () => {
+  const { provider, source, response, generate } = fixture(
+    'This is a discussion of outlines, not an assignment.',
+  );
+  response.overview!.text = 'The conversation concerns outlines.';
+  const item = response.sections[0]!.items[0]!;
+  item.kind = 'decision';
+  item.text = 'This is a discussion of outlines, not an assignment.';
+  item.owner = null;
+  const corrected = structuredClone(response);
+  corrected.sections[0]!.items[0]!.kind = 'point';
+  generate
+    .mockResolvedValueOnce(JSON.stringify(response))
+    .mockResolvedValueOnce(JSON.stringify(corrected));
+  const original = structuredClone(source);
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+  });
+  expect(generate).toHaveBeenCalledTimes(2);
+  const repairPrompt = generate.mock.calls[1]![0].prompt;
+  expect(repairPrompt).toContain('sections[0].items[0]');
+  expect(repairPrompt.indexOf('The failed item is')).toBeGreaterThan(
+    repairPrompt.indexOf('END REJECTED RESPONSE DATA'),
+  );
+  expect(repairPrompt).not.toContain('Parser error:');
+  expect(result.all_action_items).toEqual([]);
+  expect(result.all_decisions).toEqual([]);
+  expect(result.topics[0]!.summary).toBe(item.text);
+  expect(source).toEqual(original);
+});
+
+it.each(['overview', 'point'])(
+  'refuses an unsupported gendered pronoun in ordinary local %s prose',
+  async (field) => {
+    const { provider, source, response, generate } = fixture(
+      'I enjoyed carving a small wooden bird.',
+    );
+    response.overview!.text = 'Milo enjoyed carving a wooden bird.';
+    const item = response.sections[0]!.items[0]!;
+    item.kind = 'point';
+    item.owner = null;
+    item.text = response.overview!.text;
+    if (field === 'overview')
+      response.overview!.text = 'Milo enjoyed her woodcarving.';
+    else item.text = 'Milo enjoyed her woodcarving.';
+    generate.mockResolvedValue(JSON.stringify(response));
+    const original = structuredClone(source);
+    await expect(
+      provider.generateStructuredAnalysis('', '', 'auto', { source }),
+    ).rejects.toThrow('notes_writer_invalid');
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(source).toEqual(original);
+  },
+);
+
+it('retains an explicitly source-supported pronoun without another model call', async () => {
+  const { provider, source, response, generate } = fixture(
+    'I use she and her. I enjoyed carving a wooden bird.',
+  );
+  response.overview!.text = 'Milo enjoyed her woodcarving.';
+  const item = response.sections[0]!.items[0]!;
+  item.kind = 'point';
+  item.owner = null;
+  item.text = response.overview!.text;
+  generate.mockResolvedValue(JSON.stringify(response));
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+  });
+  expect(result.overview).toBe(response.overview!.text);
+  expect(generate).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  {
+    sourceText: 'I carved three wooden birds.',
+    text: 'Milo carved three other wooden birds.',
+    reason: 'quantity_scope',
+  },
+  {
+    sourceText: 'I might send the outline only if finance approves.',
+    text: 'Milo might send the outline only if legal approves.',
+    reason: 'unsupported_condition',
+  },
+])('checks $reason in discussion prose before publication', async (entry) => {
+  const { provider, source, response, generate } = fixture(entry.sourceText);
+  response.overview!.text = 'Milo discussed a personal activity.';
+  const item = response.sections[0]!.items[0]!;
+  item.kind = 'point';
+  item.owner = null;
+  item.text = entry.text;
+  generate.mockResolvedValue(JSON.stringify(response));
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', { source }),
+  ).rejects.toThrow('notes_writer_invalid');
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(generate.mock.calls[1]![0].prompt).toContain(
+    `notes_editor_${entry.reason}:s0:item:0`,
+  );
 });
