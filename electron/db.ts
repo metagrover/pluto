@@ -3956,13 +3956,21 @@ export const deleteMeeting = (id: string | number) => {
     throw new Error('Meeting recovery must complete before deletion');
   }
 
-  // 1. Delete audio file if it exists
-  if (meeting.audio_path && fs.existsSync(meeting.audio_path)) {
+  // Keep the record retryable until every saved audio source is removed.
+  const audioPaths = new Set([
+    meeting.audio_path,
+    meeting.system_audio_path,
+    meeting.mixed_audio_path,
+  ]);
+  for (const audioPath of audioPaths) {
+    if (!audioPath) continue;
     try {
-      fs.unlinkSync(meeting.audio_path);
-      dbLog.debug(`Deleted audio file: ${meeting.audio_path}`);
+      fs.unlinkSync(audioPath);
+      dbLog.debug(`Deleted audio file: ${audioPath}`);
     } catch (e) {
-      dbLog.warn(`Failed to delete audio file: ${meeting.audio_path}`, e);
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      dbLog.warn(`Failed to delete audio file: ${audioPath}`, e);
+      throw e;
     }
   }
 

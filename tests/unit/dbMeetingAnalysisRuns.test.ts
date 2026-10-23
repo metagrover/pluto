@@ -982,6 +982,79 @@ describe('meeting analysis run publication', () => {
     expect(getMeeting(meetingId)).toBeUndefined();
   });
 
+  it('deletes every saved audio source, including duplicate channel paths', () => {
+    const meetingId = 'delete-all-audio';
+    const paths = ['mic', 'system', 'mixed'].map(
+      (source) => `${testDatabase.directory}/${meetingId}-${source}.wav`,
+    );
+    for (const audioPath of paths) fs.writeFileSync(audioPath, 'test audio');
+    saveMeeting({
+      id: meetingId,
+      title: 'Fictional recording',
+      audio_path: paths[0],
+      system_audio_path: paths[1],
+      mixed_audio_path: paths[2],
+    });
+
+    deleteMeeting(meetingId);
+
+    expect(getMeeting(meetingId)).toBeUndefined();
+    expect(paths.map((audioPath) => fs.existsSync(audioPath))).toEqual([
+      false,
+      false,
+      false,
+    ]);
+
+    saveMeeting({
+      id: 'delete-already-removed-audio',
+      title: 'Fictional recording',
+      system_audio_path: paths[1],
+    });
+    deleteMeeting('delete-already-removed-audio');
+    expect(getMeeting('delete-already-removed-audio')).toBeUndefined();
+
+    const sharedPath = `${testDatabase.directory}/shared-source.wav`;
+    fs.writeFileSync(sharedPath, 'test audio');
+    saveMeeting({
+      id: 'delete-shared-audio',
+      title: 'Fictional recording',
+      audio_path: sharedPath,
+      system_audio_path: sharedPath,
+      mixed_audio_path: sharedPath,
+    });
+    deleteMeeting('delete-shared-audio');
+    expect(fs.existsSync(sharedPath)).toBe(false);
+  });
+
+  it('retains a meeting for retry if an audio file cannot be deleted', () => {
+    const meetingId = 'delete-audio-retry';
+    const audioPath = `${testDatabase.directory}/${meetingId}.wav`;
+    fs.writeFileSync(audioPath, 'test audio');
+    saveMeeting({
+      id: meetingId,
+      title: 'Fictional recording',
+      system_audio_path: audioPath,
+    });
+    const originalUnlink = fs.unlinkSync;
+    const denied = Object.assign(new Error('Test file is locked'), {
+      code: 'EACCES',
+    });
+    const unlink = vi.spyOn(fs, 'unlinkSync').mockImplementation((target) => {
+      if (target === audioPath) throw denied;
+      return originalUnlink(target);
+    });
+    try {
+      expect(() => deleteMeeting(meetingId)).toThrow(denied);
+      expect(getMeeting(meetingId)).toBeDefined();
+      expect(fs.existsSync(audioPath)).toBe(true);
+    } finally {
+      unlink.mockRestore();
+    }
+    deleteMeeting(meetingId);
+    expect(getMeeting(meetingId)).toBeUndefined();
+    expect(fs.existsSync(audioPath)).toBe(false);
+  });
+
   it('keeps a recovery-required meeting until recovery completes', () => {
     const meetingId = 'delete-recovery-required-meeting';
     saveMeeting({
