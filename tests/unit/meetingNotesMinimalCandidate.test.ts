@@ -274,7 +274,10 @@ it.each(['overview', 'point'])(
     const original = structuredClone(source);
     await expect(
       provider.generateStructuredAnalysis('', '', 'auto', { source }),
-    ).rejects.toThrow('notes_writer_invalid');
+    ).rejects.toMatchObject({
+      code: 'notes_writer_invalid',
+      validationCategory: 'guardrail',
+    });
     expect(generate).toHaveBeenCalledTimes(2);
     expect(source).toEqual(original);
   },

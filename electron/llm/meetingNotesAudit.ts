@@ -1344,8 +1344,17 @@ export const acceptEditedNotes = ({
   }
   if (groundingFailures.length) {
     const first = groundingFailures[0]!;
+    const commitment = next.sections.some((section) =>
+      section.items.some(
+        (item) =>
+          item.id === first.target &&
+          (item.kind === 'action' || item.kind === 'decision'),
+      ),
+    );
     const error = new MeetingNotesError(
-      `notes_editor_${first.reason}:${first.target}`,
+      commitment
+        ? `notes_editor_invalid_commitment:${first.target}:correct_wording_kind_owner_or_due_from_source`
+        : `notes_editor_${first.reason}:${first.target}`,
     );
     sourceLedValidationFailures.set(error, Object.freeze(groundingFailures));
     throw error;

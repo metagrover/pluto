@@ -247,6 +247,9 @@ const validationCategoryFor = (error: unknown): NotesValidationCategory => {
     error.code.startsWith('notes_guardrail:') ||
     error.code.startsWith('notes_audit_invalid_commitment:') ||
     error.code.startsWith('notes_editor_source_label:') ||
+    error.code.startsWith('notes_editor_quantity_scope:') ||
+    error.code.startsWith('notes_editor_unsupported_condition:') ||
+    error.code.startsWith('notes_editor_unsupported_pronoun:') ||
     error.code.startsWith('notes_editor_invalid_commitment:')
   ) {
     return 'guardrail';
@@ -350,36 +353,37 @@ export const formatNotesRepairFeedback = (error: unknown): string | null => {
   const message = error instanceof Error ? error.message : 'invalid_json';
   const groundingPattern =
     /^notes_editor_(quantity_scope|unsupported_condition|unsupported_pronoun):(title|overview|s\d{1,4}:(?:title|item:\d{1,4}))$/;
-  if (groundingPattern.test(message)) {
+  const commitment =
+    /^notes_editor_invalid_commitment:s(\d{1,4}):item:(\d{1,4}):correct_wording_kind_owner_or_due_from_source$/.exec(
+      message,
+    );
+  if (groundingPattern.test(message) || commitment) {
     const messages = new Set([
       message,
       ...(getSourceLedValidationFailures(error) ?? []).map(
         ({ reason, target }) => `notes_editor_${reason}:${target}`,
       ),
     ]);
-    return [...messages]
-      .flatMap((diagnostic) => {
-        const grounding = groundingPattern.exec(diagnostic);
-        if (!grounding) return [];
-        const reason = grounding[1] as
-          | 'quantity_scope'
-          | 'unsupported_condition'
-          | 'unsupported_pronoun';
-        const target = grounding[2]!;
-        const path = target
-          .replace(/^s(\d+):title$/, 'sections[$1].title')
-          .replace(/^s(\d+):item:(\d+)$/, 'sections[$1].items[$2]');
-        return `${diagnostic}: ${REVIEW_RETRY_INSTRUCTIONS[reason]} Correct ${path}; retain unaffected supported content and complete source references.`;
-      })
-      .join('\n');
-  }
-  const commitment =
-    /^notes_editor_invalid_commitment:s(\d{1,4}):item:(\d{1,4}):correct_wording_kind_owner_or_due_from_source$/.exec(
-      message,
-    );
-  if (commitment) {
-    // Compact writers receive array positions, not the parser's canonical ids.
-    return `The failed item is sections[${commitment[1]}].items[${commitment[2]}] (zero-based array indices). Its action/decision classification, wording, owner, due date or cited evidence is unproved. Re-read the original source for that item. A description or task-scope clarification is a point, not a settled choice. A permitted activity is not a promise to perform it; preserve the exact permission/negation wording when recording a settled policy. Do not change valid actions into points merely to avoid validation. Retain all supported operations, conditions, reasons and history with complete supporting references. Return the complete corrected JSON.`;
+    const feedback = [...messages].flatMap((diagnostic) => {
+      const grounding = groundingPattern.exec(diagnostic);
+      if (!grounding) return [];
+      const reason = grounding[1] as
+        | 'quantity_scope'
+        | 'unsupported_condition'
+        | 'unsupported_pronoun';
+      const target = grounding[2]!;
+      const path = target
+        .replace(/^s(\d+):title$/, 'sections[$1].title')
+        .replace(/^s(\d+):item:(\d+)$/, 'sections[$1].items[$2]');
+      return `${diagnostic}: ${REVIEW_RETRY_INSTRUCTIONS[reason]} Correct ${path}; retain unaffected supported content and complete source references.`;
+    });
+    if (commitment) {
+      // Compact writers receive array positions, not the parser's canonical ids.
+      feedback.unshift(
+        `The failed item is sections[${commitment[1]}].items[${commitment[2]}] (zero-based array indices). Its action/decision classification, wording, owner, due date or cited evidence is unproved. Re-read the original source for that item. A description or task-scope clarification is a point, not a settled choice. A permitted activity is not a promise to perform it; preserve the exact permission/negation wording when recording a settled policy. Do not change valid actions into points merely to avoid validation. Retain all supported operations, conditions, reasons and history with complete supporting references. Return the complete corrected JSON.`,
+      );
+    }
+    return feedback.join('\n');
   }
   const polarity =
     /^notes_audit_invalid_commitment:([A-Za-z0-9][A-Za-z0-9:_-]{0,119}):correct_wording_or_kind_from_source:source_check_polarity_scope__separate_history_and_current_choice$/.exec(
@@ -581,7 +585,7 @@ const writeDraft = async (
         input.contextTokens,
         task,
         prompt,
-        'writer-audit-v5:source-labels:guardrails-v3:schema-v1',
+        'writer-audit-v6:source-labels:guardrails-v3:schema-v1',
         input.compactSourceSpeakers ?? false,
         input.sourceParagraphs ?? false,
       ]),
