@@ -1801,7 +1801,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           jsonMode && task === 'askPlutoDeep' ? 1024 : undefined,
         );
     const num_predict = budget.num_predict;
-    const requiredContext =
+    const requestedContext =
       (notesBudget || boundedGemmaArtifact) && !notesContinuation
         ? Math.min(
             notesBudget ? budget.num_ctx : getOllamaContextCap(task),
@@ -1810,6 +1810,13 @@ export class UnifiedLLMProvider implements LLMProvider {
             ) * 1024,
           )
         : budget.num_ctx;
+    // Ollama clamps vision-capable Gemma to 2048; account for that actual allocation.
+    const requiredContext = Math.max(
+      boundedGemmaArtifact ? 2048 : 0,
+      requestedContext,
+    );
+    if (notesBudget && requiredContext > budget.num_ctx)
+      throw new MeetingNotesError('notes_input_overflow');
     const num_ctx =
       resident &&
       residency.contextTokens !== undefined &&

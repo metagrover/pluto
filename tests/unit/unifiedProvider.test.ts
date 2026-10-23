@@ -2561,7 +2561,8 @@ it.each([
   {
     task: 'title' as const,
     residentContext: null,
-    expectedContext: 1024,
+    repeat: true,
+    expectedContext: 2048,
     output: 64,
     unload: false,
   },
@@ -2589,20 +2590,21 @@ it.each([
   {
     task: 'title' as const,
     residentContext: 512,
-    expectedContext: 1024,
+    expectedContext: 2048,
     output: 64,
     unload: true,
   },
   {
     task: 'title' as const,
     residentContext: 20000,
-    expectedContext: 1024,
+    expectedContext: 2048,
     output: 64,
     unload: true,
   },
 ])(
   'keeps Gemma secondary allocation bounded and starts its watcher only after admission ($task, $residentContext)',
-  async ({ task, residentContext, expectedContext, output, unload }) => {
+  async (row) => {
+    const { task, residentContext, expectedContext, output, unload } = row;
     const descriptor = Object.getOwnPropertyDescriptor(
       process.versions,
       'electron',
@@ -2657,6 +2659,10 @@ it.each([
         }
         expect(start).toHaveBeenCalledOnce();
         options = body.options;
+        context = Math.max(
+          2048,
+          Number((options as { num_ctx: number }).num_ctx),
+        );
         return jsonResponse({ response: 'Done.' });
       });
     const stream = vi
@@ -2664,6 +2670,10 @@ it.each([
       .mockImplementation(async (_url, init, onChunk) => {
         expect(start).toHaveBeenCalledOnce();
         options = parseRequestBody(init).options;
+        context = Math.max(
+          2048,
+          Number((options as { num_ctx: number }).num_ctx),
+        );
         onChunk(
           `${JSON.stringify({
             response: 'Done.',
@@ -2705,6 +2715,31 @@ it.each([
           contextTokens: expectedContext,
         }),
       );
+      if ('repeat' in row && row.repeat) {
+        start.mockClear();
+        capacity.mockClear();
+        await expect(
+          provider.generateText({ prompt: 'Another short meeting.', task }),
+        ).resolves.toBe('Done.');
+        expect(unloaded).toBe(false);
+        expect(options).toMatchObject({ num_ctx: 2048, num_predict: output });
+        expect(capacity).toHaveBeenCalledWith(
+          expect.objectContaining({ resident: true, contextTokens: 2048 }),
+        );
+        start.mockClear();
+        capacity.mockClear();
+        await expect(
+          provider.generateText({
+            prompt: 'Small.',
+            task: 'notesWriter',
+            notesModel: 'gemma4:12b',
+            notesBudget: { contextTokens: 1024, outputTokens: 64 },
+          }),
+        ).rejects.toThrow('notes_input_overflow');
+        expect(start).not.toHaveBeenCalled();
+        expect(capacity).not.toHaveBeenCalled();
+        expect(unloaded).toBe(true);
+      }
     } finally {
       watcher.mockRestore();
       capacity.mockRestore();
