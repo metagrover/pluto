@@ -137,6 +137,169 @@ const installFetchMock = (
 };
 
 describe('UnifiedLLMProvider', () => {
+  it('repartitions the full source after an initial cold memory refusal without reducing output', async () => {
+    const source = createNotesSource(
+      JSON.stringify({
+        segments: Array.from({ length: 16 }, (_, index) => ({
+          speaker: 'Observer',
+          text: `Specimen group ${index} has a recorded mass of ${index + 20} grams. The observation was recorded under controlled lighting at the laboratory bench. `.repeat(
+            3,
+          ),
+        })),
+      }),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+      ollama_fast_model: 'phi4-mini:3.8b',
+    });
+    const requests: Array<{ context: number; output: number }> = [];
+    const generate = vi
+      .spyOn(provider, 'generateText')
+      .mockRejectedValueOnce(
+        new modelMemory.LocalModelMemoryError('Cold capacity', 6144),
+      )
+      .mockImplementation(async (request) => {
+        requests.push({
+          context: request.notesBudget!.contextTokens,
+          output: request.notesBudget!.outputTokens,
+        });
+        const packet = request.prompt
+          .split('BEGIN SOURCE DATA')[1]!
+          .split('END SOURCE DATA')[0]!;
+        const rows = packet
+          .trim()
+          .split('\n')
+          .map((row) => JSON.parse(row) as string[]);
+        return JSON.stringify({
+          title: { text: 'Laboratory observations', sources: [rows[0]![0]] },
+          overview: {
+            text: 'The observer reviewed recorded specimen measurements.',
+            sources: [rows[0]![0]],
+          },
+          sections: [
+            {
+              title: 'Recorded measurements',
+              items: rows.map((row) => ({
+                kind: 'point',
+                text: 'The observer recorded the measurements described for this specimen group.',
+                owner: null,
+                due: null,
+                sources: [row[0]],
+              })),
+            },
+          ],
+        });
+      });
+    try {
+      const analysis = await provider.generateStructuredAnalysis(
+        '',
+        '',
+        'auto',
+        { source },
+      );
+      expect(requests.length).toBeGreaterThan(1);
+      expect(
+        requests.every(
+          (request) => request.context === 6144 && request.output === 2048,
+        ),
+      ).toBe(true);
+      const spans = Object.values(
+        analysis.generation_metadata!.source_provenance!.blocks,
+      ).flatMap((block) => block.sources);
+      for (const segment of source.segments) {
+        const covered = spans
+          .filter((span) => span.segment === segment.index)
+          .sort((a, b) => a.start - b.start);
+        let end = 0;
+        for (const span of covered) {
+          expect(span.start).toBeLessThanOrEqual(end);
+          end = Math.max(end, span.end);
+        }
+        expect(end).toBe(segment.text.length);
+      }
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it.each([undefined, 16384, 32768])(
+    'does not retry a refusal without a smaller context (%s)',
+    async (maxContextTokens) => {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'gemma4:12b',
+      });
+      const refusal = new modelMemory.LocalModelMemoryError(
+        'Capacity',
+        maxContextTokens,
+      );
+      const generate = vi
+        .spyOn(provider, 'generateText')
+        .mockRejectedValue(refusal);
+      try {
+        await expect(
+          provider.generateStructuredAnalysis(
+            'Observer: The specimen is blue.',
+            '',
+            'auto',
+          ),
+        ).rejects.toBe(refusal);
+        expect(generate).toHaveBeenCalledTimes(1);
+      } finally {
+        generate.mockRestore();
+      }
+    },
+  );
+
+  it('does not restart notes after a model response has already consumed the call budget', async () => {
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    });
+    const refusal = new modelMemory.LocalModelMemoryError('Capacity', 6144);
+    const generate = vi
+      .spyOn(provider, 'generateText')
+      .mockResolvedValueOnce('not JSON')
+      .mockRejectedValue(refusal);
+    try {
+      await expect(
+        provider.generateStructuredAnalysis(
+          'Observer: The specimen is blue.',
+          '',
+          'auto',
+        ),
+      ).rejects.toBe(refusal);
+      expect(generate).toHaveBeenCalledTimes(2);
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it('honors cancellation before memory repartitioning', async () => {
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    });
+    const controller = new AbortController();
+    const cancelled = new Error('Stopped by user');
+    const generate = vi
+      .spyOn(provider, 'generateText')
+      .mockImplementation(async () => {
+        controller.abort(cancelled);
+        throw new modelMemory.LocalModelMemoryError('Capacity', 6144);
+      });
+    try {
+      await expect(
+        provider.generateStructuredAnalysis(
+          'Observer: The specimen is blue.',
+          '',
+          'auto',
+          { signal: controller.signal },
+        ),
+      ).rejects.toBe(cancelled);
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
   it('routes an indexed source through exactly one writer and one audit with the configured model', async () => {
     const sourceText = 'I will send the outline.';
     const source = createNotesSource(

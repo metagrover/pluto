@@ -33,6 +33,13 @@ const hasMemoryCapacity = (available: number, total: number): boolean =>
 
 export class LocalModelMemoryError extends Error {
   name = 'LocalModelMemoryError';
+
+  constructor(
+    message: string,
+    readonly maxContextTokens?: number,
+  ) {
+    super(message);
+  }
 }
 
 export const readLocalModelMemory = async (): Promise<{
@@ -77,6 +84,21 @@ export const assertLocalModelMemoryCapacity = ({
     ? REACTION_HEADROOM_BYTES
     : coldLoad + contextTokens * 64 * 1024;
   if (!hasMemoryCapacity(available - additional, total)) {
+    let maxContextTokens: number | undefined;
+    if (!resident && Number.isSafeInteger(contextTokens)) {
+      for (
+        let context = Math.floor((contextTokens - 1) / 1024) * 1024;
+        context >= 4096;
+        context -= 1024
+      ) {
+        if (
+          hasMemoryCapacity(available - coldLoad - context * 64 * 1024, total)
+        ) {
+          maxContextTokens = context;
+          break;
+        }
+      }
+    }
     console.warn('[Local memory admission]', {
       availableBytes: available,
       totalBytes: total,
@@ -86,6 +108,7 @@ export const assertLocalModelMemoryCapacity = ({
     });
     throw new LocalModelMemoryError(
       'Not enough memory to safely load the selected local model. Close other apps or choose a smaller local model in Settings.',
+      maxContextTokens,
     );
   }
 };

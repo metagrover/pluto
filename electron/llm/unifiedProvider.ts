@@ -754,7 +754,8 @@ export class UnifiedLLMProvider implements LLMProvider {
       options.reuseWriterContext !== false
         ? {}
         : undefined;
-    const analysis = await generateMeetingNotes({
+    let completedStages = 0;
+    const input: Parameters<typeof generateMeetingNotes>[0] = {
       source,
       context: {
         userNotes: userNotes ?? '',
@@ -868,6 +869,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           notesModel: model,
           workClass: options.workClass,
         });
+        completedStages += 1;
         return wire.decode(raw);
       },
       provider: this.providerType,
@@ -875,8 +877,25 @@ export class UnifiedLLMProvider implements LLMProvider {
       contextTokens:
         options.contextTokens ?? notesContextTokens(this.providerType),
       ...(options.signal ? { signal: options.signal } : {}),
-    });
-    return analysis;
+    };
+    try {
+      return await generateMeetingNotes(input);
+    } catch (error) {
+      if (
+        this.providerType !== 'ollama' ||
+        completedStages > 0 ||
+        !(error instanceof LocalModelMemoryError) ||
+        !error.maxContextTokens ||
+        error.maxContextTokens >= input.contextTokens
+      )
+        throw error;
+      options.signal?.throwIfAborted();
+      // Repartition the complete source; every smaller request still needs fresh admission.
+      return generateMeetingNotes({
+        ...input,
+        contextTokens: error.maxContextTokens,
+      });
+    }
   }
 
   async precomputeStructuredAnalysisLeaf(

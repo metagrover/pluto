@@ -71,6 +71,57 @@ it('admits the established Gemma artifact with cold runtime headroom and reserve
   ).toThrow('Not enough memory');
 });
 
+it('reports a smaller cold context only when the unchanged admission rule admits it', () => {
+  const total = 16 * GIB;
+  const modelBytes = 7_556_508_396;
+  const memory = {
+    total,
+    modelBytes,
+    modelDigest:
+      '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c',
+    resident: false,
+    contextTokens: 16384,
+    available: modelBytes + 2 * GIB + 8192 * 64 * 1024 + total * 0.08 + 1,
+  };
+  let refusal: unknown;
+  try {
+    assertLocalModelMemoryCapacity(memory);
+  } catch (error) {
+    refusal = error;
+  }
+  expect(refusal).toBeInstanceOf(Error);
+  expect(refusal).toHaveProperty('maxContextTokens', 8192);
+  expect(() =>
+    assertLocalModelMemoryCapacity({ ...memory, contextTokens: 8192 }),
+  ).not.toThrow();
+  expect(() =>
+    assertLocalModelMemoryCapacity({ ...memory, contextTokens: 8193 }),
+  ).toThrow('Not enough memory');
+});
+
+it.each([
+  { resident: false, available: 10 * GIB },
+  { resident: true, available: 3 * GIB },
+])(
+  'does not suggest shrinking when context is not the limiting allocation ($resident)',
+  (state) => {
+    try {
+      assertLocalModelMemoryCapacity({
+        ...state,
+        total: 16 * GIB,
+        modelBytes: 7_556_508_396,
+        modelDigest:
+          '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c',
+        contextTokens: 16384,
+      });
+      expect.fail('Expected the unchanged memory guard to refuse');
+    } catch (error) {
+      expect(error).toHaveProperty('name', 'LocalModelMemoryError');
+      expect(error).toHaveProperty('maxContextTokens', undefined);
+    }
+  },
+);
+
 it('does not charge allocated context again but retains the watchdog headroom for warm reuse', () => {
   const memory = {
     available: 5 * GIB,
