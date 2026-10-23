@@ -2123,3 +2123,60 @@ it('keeps a proven introduced action owner instead of replacing it with the voic
   );
   expect(result?.owner).toBe('Ellis');
 });
+
+describe('source-reviewed reported responsibility ownership', () => {
+  const check = (claim: string, evidence: string) =>
+    groundSourceReviewedItem(
+      { kind: 'action', text: claim, owner: 'Mara', due: null },
+      {
+        evidence,
+        quotedEvidence: evidence,
+        sourceLine: `Finn: ${evidence}`,
+        sourceLines: [`Finn: ${evidence}`],
+        lineIndex: 0,
+      },
+    );
+  it.each([
+    [
+      'Mara is preparing the handover.',
+      "I'll be reading the handover. Mara is preparing the handover, not me.",
+    ],
+    [
+      'Mara is still reviewing the appendix.',
+      "I'll send a cover letter. Mara is still reviewing the appendix.",
+    ],
+    [
+      'Send the handover.',
+      "I'll be reading the handover. Mara will send the handover.",
+    ],
+  ])(
+    'uses the explicitly reported task owner despite unrelated reporter work: %s',
+    (claim, evidence) => {
+      expect(check(claim, evidence)?.owner).toBe('Mara');
+    },
+  );
+
+  it('still requires the reported task prerequisite in the claim', () => {
+    const evidence =
+      "I'll read the handover. Mara will send the handover after approval.";
+    expect(check('Send the handover.', evidence)).toBeNull();
+    expect(check('Send the handover after approval.', evidence)?.owner).toBe(
+      'Mara',
+    );
+  });
+  it.each([
+    "I'll prepare the handover. Mara is reading the handover.",
+    "I'll read the handover. Mara is not preparing the handover.",
+    "I'll read the handover. Mara might be preparing the handover.",
+    "I'll read the handover. Is Mara preparing the handover?",
+    "I'll read the handover. Mara is preparing the handover?",
+    "I'll read the handover. Mara was preparing the handover yesterday.",
+  ])(
+    'does not borrow ownership from a different, uncertain, negated or historical task: %s',
+    (evidence) => {
+      expect(
+        check('Mara is preparing the handover.', evidence)?.owner,
+      ).not.toBe('Mara');
+    },
+  );
+});

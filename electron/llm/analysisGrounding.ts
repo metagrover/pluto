@@ -414,7 +414,33 @@ const NAMED_ACTION_COMMITMENT =
 const resolveActionAssignee = (
   claimedAssignee: string | undefined,
   resolved: ResolvedTranscriptEvidence,
+  actionText: string,
 ): { assignee?: string; rejectedClaimedAssignee: boolean } => {
+  if (claimedAssignee && !GENERIC_ACTION_ASSIGNEE.test(claimedAssignee)) {
+    const name = normalizeTranscriptEvidence(claimedAssignee);
+    const task = normalizeTranscriptEvidence(
+      canonicalizeActionText(actionText, claimedAssignee),
+    ).replace(new RegExp(`^${name} (?:is|are) (?:(?:currently|still) )?`), '');
+    const verb = /^\p{L}+/u.exec(task)?.[0];
+    if (verb) {
+      const forms = [`(?:will|shall) ${verb}`];
+      if (verb.endsWith('ing'))
+        forms.push(`(?:is|are) (?:(?:currently|still) )?${verb}`);
+      const namedTask = new RegExp(`^${name} (?:${forms.join('|')})\\b`, 'u');
+      // A reporter's unrelated first-person work cannot override a named task subject.
+      if (
+        resolved.sourceLines.some((line) =>
+          (transcriptLineContent(line).match(/[^.?!;]+[.?!;]?/g) ?? []).some(
+            (clause) =>
+              !clause.includes('?') &&
+              !isUnsettledProposal(clause) &&
+              namedTask.test(normalizeTranscriptEvidence(clause)),
+          ),
+        )
+      )
+        return { assignee: claimedAssignee, rejectedClaimedAssignee: false };
+    }
+  }
   const firstPersonSpeakers = new Set(
     resolved.sourceLines
       .filter((line) =>
@@ -884,13 +910,17 @@ const sourceReviewedTaskAcceptance = (
     : matchingClauses.some(({ clause, index }) => {
         const speaker = transcriptLineSpeaker(resolved.sourceLines[index]!);
         const sourceLine = `${speaker ?? 'Speaker'}: ${clause}`;
-        const ownership = resolveActionAssignee(owner, {
-          ...resolved,
-          evidence: clause,
-          quotedEvidence: clause,
-          sourceLines: [sourceLine],
-          sourceLine,
-        });
+        const ownership = resolveActionAssignee(
+          owner,
+          {
+            ...resolved,
+            evidence: clause,
+            quotedEvidence: clause,
+            sourceLines: [sourceLine],
+            sourceLine,
+          },
+          text,
+        );
         return (
           ownership.assignee !== undefined &&
           normalizeTranscriptEvidence(ownership.assignee) ===
@@ -1231,13 +1261,17 @@ export const groundSourceReviewedItem = (
             )
               return false;
             const line = `${speaker ?? 'Speaker'}: ${clause}`;
-            const ownership = resolveActionAssignee(item.owner ?? undefined, {
-              ...resolved,
-              evidence: clause,
-              quotedEvidence: clause,
-              sourceLine: line,
-              sourceLines: [line],
-            });
+            const ownership = resolveActionAssignee(
+              item.owner ?? undefined,
+              {
+                ...resolved,
+                evidence: clause,
+                quotedEvidence: clause,
+                sourceLine: line,
+                sourceLines: [line],
+              },
+              item.text,
+            );
             return (
               normalizeTranscriptEvidence(
                 ownership.assignee ?? speaker ?? '',
@@ -1284,7 +1318,7 @@ export const groundSourceReviewedItem = (
     return null;
   const ownership =
     item.kind === 'action'
-      ? resolveActionAssignee(item.owner ?? undefined, resolved)
+      ? resolveActionAssignee(item.owner ?? undefined, resolved, item.text)
       : null;
   const owner =
     item.kind === 'action'
@@ -1448,7 +1482,11 @@ export const groundAnalysisDocument = (
         evidence: resolved.evidence,
         topic: topic.title,
       };
-      const ownership = resolveActionAssignee(item.assignee, resolved);
+      const ownership = resolveActionAssignee(
+        item.assignee,
+        resolved,
+        canonicalItem.text,
+      );
       if (ownership.assignee) {
         grounded.assignee = ownership.assignee;
       }
