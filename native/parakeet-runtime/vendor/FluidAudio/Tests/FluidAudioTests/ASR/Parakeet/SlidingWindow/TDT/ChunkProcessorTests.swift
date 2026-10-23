@@ -215,7 +215,7 @@ final class ChunkProcessorTests: XCTestCase {
             processorForLayout
             .chunkLayoutForTesting(melChunkContext: false, modelVersion: .v3)
             .strideSamples
-        let silentBoundary = stride + (3 * frameSamples)
+        let silentBoundary = stride - (3 * frameSamples)
         for index in (silentBoundary - frameSamples)..<(silentBoundary + frameSamples) {
             audio[index] = 0
         }
@@ -265,8 +265,8 @@ final class ChunkProcessorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(starts.count, 3)
         XCTAssertLessThanOrEqual(
             starts[2],
-            starts[1] + layout.chunkSamples - (6 * frameSamples),
-            "Aligned starts should preserve at least 480ms of overlap so the LCS merger has real context"
+            starts[1] + layout.strideSamples,
+            "Aligned starts should preserve the configured acoustic overlap for the token merger"
         )
     }
 
@@ -278,7 +278,7 @@ final class ChunkProcessorTests: XCTestCase {
             processorForLayout
             .chunkLayoutForTesting(melChunkContext: false, modelVersion: .v3)
             .strideSamples
-        let silentBoundary = stride + (3 * frameSamples)
+        let silentBoundary = stride - (3 * frameSamples)
 
         for index in (silentBoundary - frameSamples)..<(silentBoundary + frameSamples) {
             audio[index] = 0
@@ -330,7 +330,7 @@ final class ChunkProcessorTests: XCTestCase {
             processorForLayout
             .chunkLayoutForTesting(melChunkContext: false, modelVersion: .v3)
             .strideSamples
-        let silentBoundary = stride + (3 * frameSamples)
+        let silentBoundary = stride - (3 * frameSamples)
 
         for index in (silentBoundary - frameSamples)..<(silentBoundary + 4 * frameSamples) {
             audio[index] = 0

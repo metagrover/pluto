@@ -137,7 +137,8 @@ struct ChunkProcessor {
         let silenceSearchRadiusFrames = max(1, Int((4.0 * Double(ASRConstants.sampleRate)) / Double(frameSamples)))
         let valleySearchRadiusFrames = max(1, Int((0.5 * Double(ASRConstants.sampleRate)) / Double(frameSamples)))
         let halfEnergyWindowSamples = frameSamples
-        let minimumOverlapSamples = frameSamples * 6
+        // Silence alignment must retain the same acoustic context as the regular grid.
+        let minimumOverlapSamples = overlapSamples(forChunkSamples: chunkSamples)
 
         var starts = [ChunkStartDecision(start: 0, useWarmupPrefix: false)]
         var previousStart = 0
