@@ -318,7 +318,7 @@ public struct FluidAudioModelInstaller: ModelInstalling {
 
 public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
     private var manager: AsrManager?
-    private var ctcModels: CtcModels?
+    private var vocabularyModelLoader = SingleFlightModelLoader<CtcModels>()
     private var ctcModelDirectory: URL?
 
     public init() {}
@@ -344,7 +344,7 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
         let loadedManager = AsrManager(config: Self.makeAsrConfiguration())
         try await loadedManager.loadModels(models)
         manager = loadedManager
-        ctcModels = try await CtcModels.load(from: ctcDirectory, variant: .ctc110m)
+        vocabularyModelLoader = SingleFlightModelLoader<CtcModels>()
         ctcModelDirectory = ctcDirectory
     }
 
@@ -564,7 +564,6 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
         vocabulary: [String]
     ) async throws -> (ASRResult, [VocabularyReplacement]) {
         guard
-            let ctcModels,
             let ctcModelDirectory,
             let tokenTimings = result.tokenTimings,
             !tokenTimings.isEmpty
@@ -577,6 +576,10 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
             return CustomVocabularyTerm(text: term, ctcTokenIds: tokenizer.encode(term))
         }
         guard !terms.isEmpty else { return (result, []) }
+
+        let ctcModels = try await vocabularyModelLoader.load(at: ctcModelDirectory) {
+            try await CtcModels.load(from: ctcModelDirectory, variant: .ctc110m)
+        }
 
         let context = CustomVocabularyContext(terms: terms)
         let spotter = CtcKeywordSpotter(models: ctcModels, blankId: ctcModels.vocabulary.count)
