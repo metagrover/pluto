@@ -1397,7 +1397,8 @@ it('refuses conflicting compact actions rather than filtering them from writer-o
         model: 'gemma4:12b',
         contextTokens: 8_192,
       }),
-    ).rejects.toThrow(/notes_guardrail/);
+    ).rejects.toThrow(/notes_writer_invalid/);
+    // This bounded 8K path still refuses before another model request.
     expect(generate).toHaveBeenCalledTimes(1);
   } finally {
     plan.mockRestore();
@@ -2277,9 +2278,7 @@ it.each(['owner', 'due'] as const)(
         model: 'qwen3.5:9b',
         contextTokens: 16_384,
       }),
-    ).rejects.toThrow(
-      field === 'owner' ? /notes_guardrail/ : /notes_editor_invalid_commitment/,
-    );
+    ).rejects.toThrow(/notes_writer_invalid/);
     expect(generate).toHaveBeenCalledTimes(1);
   },
 );

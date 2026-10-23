@@ -191,7 +191,7 @@ private struct FluidAudioProductionBundleDownloader: FluidAudioModelBundleDownlo
             to: asrDirectory,
             version: .v3,
             encoderPrecision: .int8,
-            encoderComputeUnits: .cpuAndNeuralEngine,
+            encoderComputeUnits: .cpuOnly,
             progressHandler: asrProgress
         )
 
@@ -339,7 +339,8 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
             configuration: configuration,
             version: .v3,
             encoderPrecision: .int8,
-            encoderComputeUnits: .cpuAndNeuralEngine
+            // Avoid per-worker ANE compilation for the stateless final encoder.
+            encoderComputeUnits: .cpuOnly
         )
         let loadedManager = AsrManager(config: Self.makeAsrConfiguration())
         try await loadedManager.loadModels(models)
@@ -984,7 +985,8 @@ public actor FluidAudioEouDriver: ParakeetEouDriving {
     private func makeBackend(at activeModelURL: URL) async throws -> StreamingEouAsrManager {
         AppLogger.setProcessLogging(.disabled)
         let configuration = MLModelConfiguration()
-        configuration.computeUnits = .cpuAndNeuralEngine
+        // CPU avoids cold ANE compilation while keeping streaming ahead of audio.
+        configuration.computeUnits = .cpuOnly
         let backend = StreamingEouAsrManager(
             configuration: configuration,
             chunkSize: .ms320,

@@ -101,7 +101,7 @@ it('writes ordinary local notes once without a model reviewer or semantic-review
   ).toBe(false);
 });
 
-it('retains only the existing bounded writer JSON-format repair', async () => {
+it('retains the existing bounded writer JSON-format repair', async () => {
   const { provider, source, response, generate } = fixture();
   generate
     .mockResolvedValueOnce('{bad json')
@@ -119,14 +119,14 @@ it('retains only the existing bounded writer JSON-format repair', async () => {
   );
 });
 
-it('refuses a lost approval condition without another model call or transcript replacement', async () => {
+it('refuses a lost approval condition after one repair without transcript replacement', async () => {
   const { provider, source, generate } = fixture(
     'I will send the outline only after legal approval.',
   );
   await expect(
     provider.generateStructuredAnalysis('', '', 'auto', { source }),
-  ).rejects.toThrow('notes_guardrail');
-  expect(generate).toHaveBeenCalledTimes(1);
+  ).rejects.toThrow('notes_writer_invalid');
+  expect(generate).toHaveBeenCalledTimes(2);
 });
 
 it('refuses an unaccepted offer instead of converting it into raw-source discussion', async () => {
@@ -136,7 +136,7 @@ it('refuses an unaccepted offer instead of converting it into raw-source discuss
   await expect(
     provider.generateStructuredAnalysis('', '', 'auto', { source }),
   ).rejects.toThrow();
-  expect(generate).toHaveBeenCalledTimes(1);
+  expect(generate).toHaveBeenCalledTimes(2);
 });
 
 it('refuses a missing model overview instead of publishing an unreadable document or fallback', async () => {
@@ -148,7 +148,7 @@ it('refuses a missing model overview instead of publishing an unreadable documen
   expect(generate).toHaveBeenCalledTimes(1);
 });
 
-it('rejects raw first-person transcript prose without a repair cascade', async () => {
+it('rejects raw first-person transcript prose after the bounded repair', async () => {
   const { provider, source, response, generate } = fixture();
   response.sections[0]!.items[0]!.text = 'I will send the outline.';
   response.sections[0]!.items[0]!.kind = 'point';
@@ -156,7 +156,7 @@ it('rejects raw first-person transcript prose without a repair cascade', async (
   await expect(
     provider.generateStructuredAnalysis('', '', 'auto', { source }),
   ).rejects.toThrow();
-  expect(generate).toHaveBeenCalledTimes(1);
+  expect(generate).toHaveBeenCalledTimes(2);
 });
 
 it('refuses an oversized compact plan before generation rather than entering audit/merge', async () => {
@@ -193,6 +193,34 @@ it.each(['overview', 'title'])(
     await expect(
       provider.generateStructuredAnalysis('', '', 'auto', { source }),
     ).rejects.toThrow('notes_writer_invalid');
-    expect(generate).toHaveBeenCalledTimes(1);
+    expect(generate).toHaveBeenCalledTimes(2);
   },
 );
+
+it('lets the existing writer repair correct a source-invalid responsibility without granting review trust', async () => {
+  const { provider, source, response, generate } = fixture();
+  const invalid = structuredClone(response);
+  invalid.sections[0]!.items[0]!.owner = 'Another person';
+  generate
+    .mockResolvedValueOnce(JSON.stringify(invalid))
+    .mockResolvedValueOnce(JSON.stringify(response));
+  const original = structuredClone(source);
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+  });
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+    'notesWriter',
+    'notesWriter',
+  ]);
+  expect(generate.mock.calls[1]![0].prompt).toContain(
+    'BEGIN REJECTED RESPONSE DATA',
+  );
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining({ text: 'Send the outline', assignee: 'Milo' }),
+  ]);
+  expect(result.generation_metadata).not.toHaveProperty(
+    'source_action_review_version',
+  );
+  expect(source).toEqual(original);
+});

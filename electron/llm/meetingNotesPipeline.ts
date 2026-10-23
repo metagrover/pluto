@@ -546,7 +546,7 @@ const writeDraft = async (
         input.contextTokens,
         task,
         prompt,
-        'writer-audit-v1:source-labels:guardrails-v3:schema-v1',
+        'writer-audit-v2:source-labels:guardrails-v3:schema-v1',
         input.compactSourceSpeakers ?? false,
         input.sourceParagraphs ?? false,
       ]),
@@ -574,6 +574,9 @@ const writeDraft = async (
             )
           : parseNotesDraft(raw);
       assertAllowedSources(parsed, allowedSpans);
+      if (isLocalWriterOnly(input)) {
+        deterministicallyAcceptedDraft(input, parsed, allowedSpans);
+      }
       return parsed;
     },
     allowedSpans,

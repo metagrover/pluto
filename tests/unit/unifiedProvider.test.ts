@@ -378,8 +378,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
   });
 
-  it('versions notes and source review cache identity as notes-v88', () => {
-    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v88');
+  it('versions notes and source review cache identity as notes-v89', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v89');
   });
 
   beforeEach(() => {
