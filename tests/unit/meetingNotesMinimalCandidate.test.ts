@@ -324,3 +324,37 @@ it.each([
     `notes_editor_${entry.reason}:s0:item:0`,
   );
 });
+
+it('reports every hard prose failure within the same single repair', async () => {
+  const { provider, source, response, generate } = fixture(
+    'I might send three worksheets only if finance approves.',
+  );
+  response.overview!.text =
+    'Milo might send her three worksheets only if legal approves.';
+  const item = response.sections[0]!.items[0]!;
+  item.kind = 'point';
+  item.owner = null;
+  item.text = 'Milo might send three other worksheets.';
+  const corrected = structuredClone(response);
+  corrected.overview!.text =
+    'Milo might send three worksheets only if finance approves.';
+  corrected.sections[0]!.items[0]!.text = corrected.overview!.text;
+  generate
+    .mockResolvedValueOnce(JSON.stringify(response))
+    .mockResolvedValueOnce(JSON.stringify(corrected));
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+  });
+  expect(generate).toHaveBeenCalledTimes(2);
+  const repair = generate.mock.calls[1]![0].prompt;
+  for (const diagnostic of [
+    'notes_editor_unsupported_condition:overview',
+    'notes_editor_unsupported_pronoun:overview',
+    'notes_editor_quantity_scope:s0:item:0',
+  ])
+    expect(repair).toContain(diagnostic);
+  expect(result.overview).toBe(corrected.overview!.text);
+  expect(result.generation_metadata).not.toHaveProperty(
+    'source_action_review_version',
+  );
+});

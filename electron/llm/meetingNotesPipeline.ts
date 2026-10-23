@@ -6,6 +6,7 @@ import {
   type AuditedNotes,
   acceptEditedNotes,
   applyNotesAudit,
+  getSourceLedValidationFailures,
   parseCompactNotesDraft,
   parseNotesAudit,
   parseNotesDraft,
@@ -347,20 +348,30 @@ const withOneTransientLeafRetry = async <T>(
  * Other errors retain the original diagnostic path, not terminal instructions. */
 export const formatNotesRepairFeedback = (error: unknown): string | null => {
   const message = error instanceof Error ? error.message : 'invalid_json';
-  const grounding =
-    /^notes_editor_(quantity_scope|unsupported_condition|unsupported_pronoun):(title|overview|s\d{1,4}:(?:title|item:\d{1,4}))$/.exec(
+  const groundingPattern =
+    /^notes_editor_(quantity_scope|unsupported_condition|unsupported_pronoun):(title|overview|s\d{1,4}:(?:title|item:\d{1,4}))$/;
+  if (groundingPattern.test(message)) {
+    const messages = new Set([
       message,
-    );
-  if (grounding) {
-    const reason = grounding[1] as
-      | 'quantity_scope'
-      | 'unsupported_condition'
-      | 'unsupported_pronoun';
-    const target = grounding[2]!;
-    const path = target
-      .replace(/^s(\d+):title$/, 'sections[$1].title')
-      .replace(/^s(\d+):item:(\d+)$/, 'sections[$1].items[$2]');
-    return `${message}: ${REVIEW_RETRY_INSTRUCTIONS[reason]} Correct ${path}; retain unaffected supported content and complete source references.`;
+      ...(getSourceLedValidationFailures(error) ?? []).map(
+        ({ reason, target }) => `notes_editor_${reason}:${target}`,
+      ),
+    ]);
+    return [...messages]
+      .flatMap((diagnostic) => {
+        const grounding = groundingPattern.exec(diagnostic);
+        if (!grounding) return [];
+        const reason = grounding[1] as
+          | 'quantity_scope'
+          | 'unsupported_condition'
+          | 'unsupported_pronoun';
+        const target = grounding[2]!;
+        const path = target
+          .replace(/^s(\d+):title$/, 'sections[$1].title')
+          .replace(/^s(\d+):item:(\d+)$/, 'sections[$1].items[$2]');
+        return `${diagnostic}: ${REVIEW_RETRY_INSTRUCTIONS[reason]} Correct ${path}; retain unaffected supported content and complete source references.`;
+      })
+      .join('\n');
   }
   const commitment =
     /^notes_editor_invalid_commitment:s(\d{1,4}):item:(\d{1,4}):correct_wording_kind_owner_or_due_from_source$/.exec(
@@ -570,7 +581,7 @@ const writeDraft = async (
         input.contextTokens,
         task,
         prompt,
-        'writer-audit-v4:source-labels:guardrails-v3:schema-v1',
+        'writer-audit-v5:source-labels:guardrails-v3:schema-v1',
         input.compactSourceSpeakers ?? false,
         input.sourceParagraphs ?? false,
       ]),

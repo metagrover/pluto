@@ -111,7 +111,24 @@ function prerequisiteClauses(text: string): string[] {
       );
       const operators = [
         ...sentence.matchAll(new RegExp(CONDITION.source, 'gi')),
-      ];
+      ].filter((operator) => {
+        const prefix = sentence.slice(0, operator.index).trim();
+        // Embedded uncertainty questions use "if" as "whether", not a prerequisite.
+        if (
+          operator[0].toLowerCase() === 'if' &&
+          /\b(?:(?:am|is|are|was|were)\s+(?:(?:still|currently)\s+)?(?:unsure|uncertain|unclear|not\s+(?:sure|certain|clear))|(?:do|does|did)\s+not\s+know|(?:don['’]t|doesn['’]t|didn['’]t)\s+know|wonders?|wondered)\s*$/i.test(
+            prefix,
+          )
+        )
+          return false;
+        return !(
+          operator[0].toLowerCase() === 'when' &&
+          !prefix &&
+          /^\s*(?:will|would|can|could|should|is|are|was|were|do|does|did)\b/i.test(
+            sentence.slice(operator.index! + operator[0].length),
+          )
+        );
+      });
       return operators.map((operator, index) => {
         const start = operator.index!;
         const end = operators[index + 1]?.index ?? sentence.length;
@@ -194,7 +211,10 @@ export function hasUnsupportedNotesCondition(
   text: string,
   evidence: string,
 ): boolean {
-  return CONDITION.test(text) && !conditionIsSupported(text, evidence);
+  return (
+    prerequisiteClauses(text).length > 0 &&
+    !conditionIsSupported(text, evidence)
+  );
 }
 
 /** A named source prerequisite cannot disappear from that same responsibility. */

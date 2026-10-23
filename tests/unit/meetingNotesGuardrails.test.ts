@@ -12,6 +12,44 @@ import type {
   SourceSpan,
 } from '../../electron/llm/meetingNotesTypes';
 
+it.each([
+  'Ari is unsure if the route is accessible.',
+  'Ari does not know if the route is accessible.',
+  'Ari wonders if the route is accessible.',
+  'When will the route open?',
+])('does not treat an information question as a prerequisite: %s', (text) => {
+  expect(
+    hasUnsupportedNotesCondition(
+      text,
+      'The accessibility and opening date are unknown.',
+    ),
+  ).toBe(false);
+});
+
+it.each([
+  'Ari is unsure if the route will open after the inspection.',
+  'When will the route open after the inspection?',
+  'Ari will open the route only if the inspection passes.',
+  'Ari will be unsure if the inspection fails.',
+  'Ari is unsure only if the inspection fails.',
+])('still checks genuine prerequisites inside question prose: %s', (text) => {
+  expect(
+    hasUnsupportedNotesCondition(
+      text,
+      'The accessibility and opening date are unknown.',
+    ),
+  ).toBe(true);
+});
+
+it('does not borrow an uncertainty question as an accepted prerequisite', () => {
+  expect(
+    hasUnsupportedNotesCondition(
+      'Ari will open the route only if the inspection passes.',
+      'Ari is unsure if the inspection passes.',
+    ),
+  ).toBe(true);
+});
+
 function fixture(...turns: string[]) {
   const source = createNotesSource(
     JSON.stringify(

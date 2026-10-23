@@ -1328,6 +1328,7 @@ export const acceptEditedNotes = ({
     reviewOriginals.set(id, structuredClone(item));
   }
   const issues: string[] = [];
+  const groundingFailures: NotesReviewFailure[] = [];
   for (const block of blocksForDraft(next)) {
     validateSources(source, block.sources);
     const evidence = groupCitedSourcePassages(source, block.sources)
@@ -1337,10 +1338,17 @@ export const acceptEditedNotes = ({
       throw new MeetingNotesError(`notes_editor_source_label:${block.id}`);
     }
     if (acceptancePolicy === 'strict') {
-      const [reason] = blockGroundingFailures(block.text, evidence);
-      if (reason)
-        throw new MeetingNotesError(`notes_editor_${reason}:${block.id}`);
+      for (const reason of blockGroundingFailures(block.text, evidence))
+        groundingFailures.push(Object.freeze({ reason, target: block.id }));
     }
+  }
+  if (groundingFailures.length) {
+    const first = groundingFailures[0]!;
+    const error = new MeetingNotesError(
+      `notes_editor_${first.reason}:${first.target}`,
+    );
+    sourceLedValidationFailures.set(error, Object.freeze(groundingFailures));
+    throw error;
   }
   for (const section of next.sections) {
     section.items = section.items.flatMap((item) => {
