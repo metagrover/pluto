@@ -219,6 +219,7 @@ describe('ParakeetFinalClient', () => {
     expect(child.writes[0]).toMatchObject({
       method: 'prepare',
       modelRoot: paths.modelRoot,
+      warmLiveModels: false,
     });
     child.respond(prepared(String(child.writes[0].id)));
 
@@ -248,11 +249,34 @@ describe('ParakeetFinalClient', () => {
     expect(child.writes[0]).toMatchObject({
       method: 'prepare',
       modelRoot: paths.modelRoot,
+      warmLiveModels: true,
     });
     child.respond(prepared(String(child.writes[0].id)));
 
     await expect(ready).resolves.toMatchObject({ ready: true });
     expect(host.diagnostics().state).toBe('live');
+    await lease.release();
+    host.shutdown();
+  });
+
+  it('warms live models after final-only preparation and reuses the warm result', async () => {
+    const child = new FakeChild();
+    const host = makeRuntimeHost({ paths, spawn: () => child });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    const finalReady = client.prepare();
+    child.respond(prepared(String(child.writes[0].id)));
+    await finalReady;
+    const lease = await host.startRecordingLive();
+    const liveReady = client.prepareForLive(lease);
+    expect(child.writes).toHaveLength(2);
+    expect(child.writes[1]).toMatchObject({
+      method: 'prepare',
+      warmLiveModels: true,
+    });
+    child.respond(prepared(String(child.writes[1].id)));
+    await liveReady;
+    await client.prepareForLive(lease);
+    expect(child.writes).toHaveLength(2);
     await lease.release();
     host.shutdown();
   });

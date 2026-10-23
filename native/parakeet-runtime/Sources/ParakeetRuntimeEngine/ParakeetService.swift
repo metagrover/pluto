@@ -207,7 +207,10 @@ public actor ParakeetService {
                     progressSink?(requestId, progress)
                 }
             )
-            try await eouDriver.warmModels(at: preparedModelURL)
+            // Final-only work still verifies the full bundle without loading live inference.
+            if request.warmLiveModels != false {
+                try await eouDriver.warmModels(at: preparedModelURL)
+            }
             try Task.checkCancellation()
             activeModelURL = preparedModelURL
             return .prepared(

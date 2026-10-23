@@ -417,6 +417,28 @@ final class ParakeetServiceTests: XCTestCase {
         XCTAssertEqual(paths.first?.lastPathComponent, ModelManifest.fixture.version)
     }
 
+    func testFinalOnlyPreparationVerifiesModelsWithoutWarmingLiveInference() async throws {
+        let driver = ServiceEouDriver(failWarmup: true)
+        let service = ParakeetService(
+            modelRoot: try makeDirectory("final-only-models"),
+            audioRoot: try makeDirectory("final-only-audio"),
+            manifest: .fixture,
+            installer: ServiceModelInstaller(),
+            inferenceDriver: ServiceInferenceDriver(),
+            eouDriver: driver
+        )
+        let response = await service.handle(RuntimeRequest(
+            id: "final-prepare", method: .prepare, warmLiveModels: false
+        ))
+        XCTAssertTrue(response.ok)
+        let paths = await driver.warmedPaths
+        XCTAssertTrue(paths.isEmpty)
+        let liveResponse = await service.handle(RuntimeRequest(
+            id: "live-prepare", method: .prepare, warmLiveModels: true
+        ))
+        XCTAssertEqual(liveResponse.error?.code, .modelPreparationFailed)
+    }
+
     func testWarmupFailureDoesNotPublishReadyOrActivateTheModel() async throws {
         let service = ParakeetService(
             modelRoot: try makeDirectory("failed-warm-models"),

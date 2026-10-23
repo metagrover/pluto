@@ -39,6 +39,22 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(request.vocabulary, ["Pluto", "FluidAudio"])
     }
 
+    func testFinalOnlyPreparationFlagRoundTripsAndIsPrepareOnly() throws {
+        let request = RuntimeRequest(id: "final", method: .prepare, warmLiveModels: false)
+        let decoded = try JSONDecoder().decode(RuntimeRequest.self, from: JSONEncoder().encode(request))
+        XCTAssertEqual(decoded.warmLiveModels, false)
+        for payload in [
+            #"{"schemaVersion":1,"id":"bad","method":"prepare","warmLiveModels":"false"}"#,
+            #"{"schemaVersion":1,"id":"bad","method":"transcribe","warmLiveModels":false}"#,
+            #"{"schemaVersion":1,"id":"bad","method":"eou_open","warmLiveModels":false}"#,
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(RuntimeRequest.self, from: Data(payload.utf8)))
+        }
+        XCTAssertThrowsError(try JSONEncoder().encode(RuntimeRequest(
+            id: "bad", method: .transcribe, warmLiveModels: false
+        )))
+    }
+
     func testDecodesAndRoundTripsScopedMeetingCapability() throws {
         let data = Data(#"{"schemaVersion":1,"id":"request-encrypted","method":"transcribe","audioPath":"/approved/audio.enc","language":"en","capability":{"version":1,"meetingId":"meeting-1","keyId":"key-1","meetingKeyBase64":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","generation":"generation-1","allowedOperations":["transcribe"],"expiresAtMs":4102444800000}}"#.utf8)
 
