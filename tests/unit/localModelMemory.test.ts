@@ -529,6 +529,41 @@ it('aborts the native watchdog when the last fresh sample becomes unavailable', 
   Object.defineProperty(process, 'platform', platform);
 });
 
+it('refreshes residency before its proof expires despite reserve timer jitter', async () => {
+  vi.useFakeTimers();
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  vi.spyOn(os, 'totalmem').mockReturnValue(16 * GIB);
+  const read = vi.fn(() => 50);
+  vi.spyOn(memoryProbe, 'createLocalModelMemoryProbe').mockReturnValue({
+    read,
+    start: async () => {},
+    dispose: async () => {},
+  });
+  const guard = watchLocalModelMemory();
+  const check = vi.fn(async () => true);
+  guard.setResidentCheck(
+    '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c',
+    check,
+  );
+  try {
+    await guard.start();
+    await vi.advanceTimersByTimeAsync(99);
+    read.mockReturnValue(20);
+    vi.setSystemTime(Date.now() + 3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(guard.signal.aborted).toBe(false);
+    expect(read).toHaveBeenCalledTimes(2);
+    // A stalled proof still expires under the original 100 ms limit.
+    check.mockImplementation(() => new Promise(() => {}));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(guard.signal.aborted).toBe(true);
+  } finally {
+    await guard.dispose();
+    Object.defineProperty(process, 'platform', platform);
+  }
+});
+
 it('checks the native reserve every100ms while one residency request remains pending', async () => {
   vi.useFakeTimers();
   const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
@@ -602,7 +637,7 @@ it('never reuses a previous workload residency result or overlaps its lookup', a
     await vi.advanceTimersByTimeAsync(100);
     expect(guard.signal.aborted).toBe(true);
     expect(oldCheck).toHaveBeenCalledOnce();
-    expect(currentCheck).toHaveBeenCalledOnce();
+    expect(currentCheck).toHaveBeenCalledTimes(2);
   } finally {
     await guard.dispose();
     Object.defineProperty(process, 'platform', platform);

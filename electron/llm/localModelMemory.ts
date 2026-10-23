@@ -144,6 +144,7 @@ export const watchLocalModelMemory = () => {
     return pending;
   };
   let timer: ReturnType<typeof setInterval> | undefined;
+  let residencyTimer: ReturnType<typeof setInterval> | undefined;
   let probe: ReturnType<typeof createLocalModelMemoryProbe> | undefined;
   const monitorFailed = () => {
     if (!disposed)
@@ -211,8 +212,11 @@ export const watchLocalModelMemory = () => {
         timer = setInterval(() => {
           // Residency discovery must never delay the independent reserve check.
           void checkMemory();
-          void refreshResidency();
         }, MEMORY_CHECK_INTERVAL_MS);
+        // Refresh inside the freshness window so timer jitter cannot age a healthy proof out.
+        residencyTimer = setInterval(() => {
+          void refreshResidency();
+        }, MEMORY_CHECK_INTERVAL_MS / 2);
         void refreshResidency();
       }
     },
@@ -230,6 +234,7 @@ export const watchLocalModelMemory = () => {
       residentEpoch += 1;
       resident = false;
       clearInterval(timer);
+      clearInterval(residencyTimer);
       await probe?.dispose();
     },
   };
