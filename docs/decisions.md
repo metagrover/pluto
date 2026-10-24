@@ -4,6 +4,13 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-24 - Preserve unaffected notes during scoped validation repair
+
+- **Status:** Candidate; original-source and packaged acceptance remain required in [PR #884](https://github.com/metagrover/pluto/pull/884).
+- **Decision:** In the existing single compact-writer repair, application-owned validation diagnostics identify the blocks to replace. When both documents retain the same section/item layout and each failed item has one exact citation-identity match in both documents, replace that item and retain every other original block and its citations. Item order is not identity. Validate the complete merged document through the same source, schema and publication checks. Structural, ambiguous or unlocalized repairs retain the existing full-document path; no model call or repair allowance is added. Notes/cache identity advances to notes-v96.
+- **Polarity:** For an exact copied decision predicate with an explicit settlement cue, compare every matching source clause, including later contradictions. An unrelated negative decision cannot negate a separate affirmative choice; an earlier affirmative choice cannot hide a later contradiction. Other acceptance, ownership, quantity, condition and evidence checks remain in force.
+- **Evidence:** The original validator both rejected a supported choice because a neighboring choice was negative and admitted a choice contradicted later in the same evidence. A captured repair also removed a valid alternative while fixing a different block. Focused regressions cover these boundaries, unchanged source records and refusal of an invalid targeted repair. These checks do not establish complete model fidelity.
+
 ## 2026-10-22 - Bound durable live-transcription input delay to two seconds
 
 - **Status:** Packaged short-recording check passed; sustained recording qualification remains open.

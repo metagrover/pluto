@@ -178,6 +178,112 @@ it.each([false, true])(
   },
 );
 
+it.each([
+  [false, false, false],
+  [true, false, false],
+  [true, true, false],
+  [true, true, true],
+])(
+  'retains unaffected compact blocks and validates every targeted repair (corrected=%s, reordered=%s, ambiguous=%s)',
+  async (corrected, reordered, ambiguous) => {
+    const turns = [
+      {
+        speaker: 'Rina',
+        text: 'We have decided to keep the printed instructions. The narration offer was rejected.',
+      },
+      {
+        speaker: 'Ada',
+        text: 'The trail looked steep to me. I am unsure whether the route is accessible.',
+      },
+    ];
+    const source = makeSyntheticNotesSource(
+      ambiguous
+        ? [
+            {
+              speaker: 'Rina',
+              text: `${turns[0]!.text} Ada found the trail steep and is unsure whether the route is accessible.`,
+            },
+          ]
+        : turns,
+    );
+    const spans = source.segments.map((segment) => [
+      { segment: segment.index, start: 0, end: segment.text.length },
+    ]);
+    const refs = [spans[0]!, spans[ambiguous ? 0 : 1]!];
+    const original = {
+      title: null,
+      overview: { text: 'She discussed the route.', sources: refs[1] },
+      sections: [
+        {
+          title: 'Orientation',
+          items: [
+            {
+              kind: 'decision',
+              text: 'Keep the printed instructions.',
+              owner: null,
+              due: null,
+              sources: refs[0],
+            },
+            {
+              kind: 'point',
+              text: 'He found the trail steep.',
+              owner: null,
+              due: null,
+              sources: refs[1],
+            },
+          ],
+        },
+      ],
+    };
+    const repaired = structuredClone(original);
+    repaired.overview.text = 'Ada discussed the route.';
+    repaired.sections[0]!.title = 'Rewritten heading';
+    repaired.sections[0]!.items[0]!.text = 'The narration offer was rejected.';
+    repaired.sections[0]!.items[1]!.text = corrected
+      ? 'Ada found the trail steep.'
+      : original.sections[0]!.items[1]!.text;
+    if (reordered) repaired.sections[0]!.items.reverse();
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce(JSON.stringify(original))
+      .mockResolvedValueOnce(JSON.stringify(repaired));
+    const snapshot = structuredClone(source);
+    const result = generateMeetingNotes({
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 16384,
+      compactWriterContract: true,
+      hierarchyAuditStrategy: 'deterministic_only',
+    });
+    if (corrected) {
+      const analysis = await result;
+      expect(analysis.overview).toBe('Ada discussed the route.');
+      expect(analysis.topics[0]!.title).toBe(
+        ambiguous ? 'Rewritten heading' : 'Orientation',
+      );
+      expect(analysis.all_decisions.map((item) => item.text)).toEqual([
+        ambiguous
+          ? 'The narration offer was rejected.'
+          : 'Keep the printed instructions.',
+      ]);
+      expect(JSON.stringify(analysis.topics)).toContain(
+        'Ada found the trail steep.',
+      );
+      expect(
+        Object.values(analysis.generation_metadata!.source_provenance!.blocks),
+      ).toContainEqual(expect.objectContaining({ sources: refs[0] }));
+    } else
+      await expect(result).rejects.toMatchObject({
+        code: 'notes_writer_invalid',
+      });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(source).toEqual(snapshot);
+  },
+);
+
 it.each([false, true])(
   'replays the frozen mixed-citation failure with a deterministic corrected repair: %s',
   async (corrected) => {

@@ -12,6 +12,85 @@ import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
 
 it.each([
   {
+    text: 'The team decided to keep the existing lanyards because replacements waste plastic.',
+    evidence:
+      'We decided not to replace the badges because replacements waste plastic. We will keep the existing lanyards.',
+    accepted: true,
+  },
+  {
+    text: 'Keep the printed instructions.',
+    evidence:
+      'We decided not to record narration. We will keep the printed instructions.',
+    accepted: true,
+  },
+  {
+    text: 'Print labels.',
+    evidence: 'We decided not to print maps. We will print labels.',
+    accepted: true,
+  },
+  {
+    text: 'Print maps.',
+    evidence: 'We decided not to print maps. We will print labels.',
+    accepted: false,
+  },
+  {
+    text: 'Keep the existing lanyards.',
+    evidence:
+      'We will keep the existing lanyards. We decided not to keep the existing lanyards.',
+    accepted: false,
+  },
+  {
+    text: 'Do not keep the existing lanyards.',
+    evidence:
+      'We decided not to replace the badges. We will keep the existing lanyards.',
+    accepted: false,
+  },
+  {
+    text: 'Keep the existing lanyards.',
+    evidence:
+      'We decided not to replace the badges. We will keep the existing lanyards only if the safety review passes.',
+    accepted: false,
+  },
+  {
+    text: 'Keep 20 existing lanyards.',
+    evidence:
+      'We decided not to replace the badges. We will keep 12 existing lanyards.',
+    accepted: false,
+  },
+  {
+    text: 'The team decided to keep the existing lanyards because replacements waste plastic.',
+    evidence:
+      'We decided not to replace the badges because replacements waste plastic. We will keep the existing lanyards, maybe.',
+    accepted: false,
+  },
+  {
+    text: 'The team decided to keep the existing lanyards because replacements waste plastic.',
+    evidence:
+      'We decided not to replace the badges because replacements waste plastic. We will keep the existing lanyards, but the decision is not final.',
+    accepted: false,
+  },
+])(
+  'keeps decision polarity scoped to the copied choice: $evidence',
+  ({ text, evidence, accepted }) => {
+    const resolved = {
+      evidence,
+      quotedEvidence: evidence,
+      sourceLine: `Rina: ${evidence}`,
+      sourceLines: [`Rina: ${evidence}`],
+      lineIndex: 0,
+    };
+    const snapshot = structuredClone(resolved);
+    const result = groundSourceReviewedItem(
+      { text, kind: 'decision', owner: null, due: null },
+      resolved,
+    );
+    expect(result !== null).toBe(accepted);
+    expect(resolved).toEqual(snapshot);
+  },
+);
+
+it.each([
+  {
     evidence: 'I will review the checklist by Wednesday, October twenty first.',
     due: 'October twenty first',
     expected: 'October twenty first',

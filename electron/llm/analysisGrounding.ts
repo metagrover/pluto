@@ -862,6 +862,44 @@ const decisionCopyPredicate = (value: string) =>
     value.replace(/^\s*(?:the decision is|decision)\s+/i, ''),
   );
 
+const hasUnsettledDecisionStatus = (text: string): boolean =>
+  /\btentative(?:ly)?\b/i.test(text) ||
+  // Pending publication can be a condition; a pending decision is not settled.
+  /\b(?:the decision|but it)\s+is\s+(?:pending\b|not\s+(?:yet\s+)?final(?:ized|ised)?\b)/i.test(
+    text,
+  );
+
+const copiedDecisionClauses = (
+  text: string,
+  resolved: ResolvedTranscriptEvidence,
+): string[] => {
+  if (
+    isUnsettledProposal(resolved.evidence) ||
+    hasUnsettledDecisionStatus(resolved.evidence)
+  )
+    return [];
+  const claims = text
+    .split(/(?<!\d)\.|\.(?!\d)|[?!;]/u)
+    .filter((part) => part.trim());
+  if (claims.length !== 1) return [];
+  const predicate = normalizeTranscriptEvidence(
+    claims[0]!
+      .replace(/^.*?\b(?:decided|agreed)(?:\s+that)?(?:\s+to)?\s+/i, '')
+      .replace(/^\s*(?:the decision is|decision)(?:\s+to)?\s+/i, '')
+      .split(/\s+because\s+/i)[0]!,
+  ).replace(/^(?:do not|not(?: to)?) /, '');
+  if (predicate.split(' ').length < 2) return [];
+  const clauses = resolved.sourceLines.flatMap((line) =>
+    transcriptLineContent(line)
+      .split(/(?<!\d)\.|\.(?!\d)|[?!;]/u)
+      .filter((clause) =>
+        ` ${normalizeTranscriptEvidence(clause)} `.includes(` ${predicate} `),
+      ),
+  );
+  // Keep every exact predicate occurrence: a later contradiction cannot hide behind an earlier choice.
+  return clauses.some(hasExplicitResolutionCue) ? clauses : [];
+};
+
 const SOURCE_UNCERTAIN_MODAL = /\b(?:may|might|could|should|maybe|perhaps)\b/i;
 
 /** Share exact task/acceptance matching with the existing offer guard.
@@ -1136,12 +1174,6 @@ const sourceReviewedAcceptanceContext = (
   const evidence = disposition?.evidence ?? rejectedChoice ?? resolved.evidence;
   // An explicit settled choice copied in full can use "may" as permission.
   // This exception never borrows a neighboring cue or relaxes other modalities.
-  const hasUnsettledDecisionStatus = (text: string): boolean =>
-    /\btentative(?:ly)?\b/i.test(text) ||
-    // Pending publication can be a condition; a pending decision is not settled.
-    /\b(?:the decision|but it)\s+is\s+(?:pending\b|not\s+(?:yet\s+)?final(?:ized|ised)?\b)/i.test(
-      text,
-    );
   const isExplicitSettledDecision = (text: string): boolean =>
     /^\s*the decision is\b/i.test(text) &&
     !isUnsettledProposal(text.replace(/\bmay\b/gi, '')) &&
@@ -1287,6 +1319,10 @@ export const groundSourceReviewedItem = (
   // Exact same-owner task clauses prevent sibling work from donating polarity
   // or prerequisites. Unprovable paraphrases retain the conservative full check.
   const taskEvidence = taskClauses.length ? taskClauses.join(' ') : evidence;
+  const polarityClauses =
+    item.kind === 'decision'
+      ? copiedDecisionClauses(item.text, resolved)
+      : taskClauses;
   const subject = { text: task, owner: item.owner };
   const separatePrerequisite =
     taskClauses.length > 0 && hasOmittedSubjectCondition(subject, '', passages);
@@ -1296,7 +1332,7 @@ export const groundSourceReviewedItem = (
       : resolved.quotedEvidence;
   if (
     !hasSourceReviewedAcceptance(item, resolved) ||
-    !(taskClauses.length ? taskClauses : [evidence]).every((clause) =>
+    !(polarityClauses.length ? polarityClauses : [evidence]).every((clause) =>
       hasMatchingScopedPolarity(
         normalizeDecline
           ? item.text.replace(/\bdeclining\b/gi, 'declined')

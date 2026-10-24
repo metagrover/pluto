@@ -398,6 +398,81 @@ export const formatNotesRepairFeedback = (error: unknown): string | null => {
   return null;
 };
 
+const retainUnchangedNotesBlocks = (
+  input: GenerateMeetingNotesInput,
+  raw: string,
+  repairedRaw: string,
+  error: unknown,
+): string => {
+  const failures = getSourceLedValidationFailures(error);
+  if (
+    !failures?.length ||
+    failures.some(
+      ({ target }) =>
+        !target || !/^(?:title|overview|s\d+:item:\d+)$/.test(target),
+    )
+  )
+    return repairedRaw;
+  try {
+    const maxSpans = input.sourceParagraphs
+      ? 36
+      : notesSourceSpanLimit(input.provider);
+    const before = parseCompactNotesDraft(raw, maxSpans, input.provider);
+    const after = parseCompactNotesDraft(repairedRaw, maxSpans, input.provider);
+    // shortcut: Structural or ambiguous repairs retain the full-document path until the writer has explicit repair ids.
+    if (
+      before.sections.length !== after.sections.length ||
+      before.sections.some(
+        (section, index) =>
+          section.items.length !== after.sections[index]!.items.length,
+      )
+    )
+      return repairedRaw;
+    type Compact = {
+      title: unknown;
+      overview: unknown;
+      sections: Array<{ title: unknown; items: unknown[] }>;
+    };
+    const next = JSON.parse(raw) as Compact;
+    const repaired = JSON.parse(repairedRaw) as Compact;
+    const sourceKey = (item: NotesItem) =>
+      item.sources
+        .map((span) => `${span.segment}:${span.start}:${span.end}`)
+        .sort()
+        .join('|');
+    const originals = before.sections.flatMap((section) => section.items);
+    const replacements = after.sections.flatMap((section, sectionIndex) =>
+      section.items.map((item, itemIndex) => ({
+        item,
+        value: repaired.sections[sectionIndex]!.items[itemIndex],
+      })),
+    );
+    for (const { target } of failures) {
+      if (target === 'title' || target === 'overview')
+        next[target] = repaired[target];
+      else {
+        const path = /^s(\d+):item:(\d+)$/.exec(target!)!;
+        const section = Number(path[1]);
+        const index = Number(path[2]);
+        const key = sourceKey(before.sections[section]!.items[index]!);
+        const matching = replacements.filter(
+          ({ item }) => sourceKey(item) === key,
+        );
+        // Array positions are not identity: a repair can reorder items without changing their counts.
+        if (
+          originals.filter((item) => sourceKey(item) === key).length !== 1 ||
+          matching.length !== 1
+        )
+          return repairedRaw;
+        next.sections[section]!.items[index] = matching[0]!.value;
+      }
+    }
+    return JSON.stringify(next);
+  } catch {
+    return repairedRaw;
+  }
+};
+
 const withOneRepair = async <T>(
   input: GenerateMeetingNotesInput,
   task: NotesTask,
@@ -471,7 +546,12 @@ const withOneRepair = async <T>(
     const repairedRaw = await run(repairPrompt);
     assertNotCancelled(input);
     try {
-      return parse(repairedRaw, true);
+      return parse(
+        task === 'notesWriter' && input.compactWriterContract
+          ? retainUnchangedNotesBlocks(input, raw, repairedRaw, error)
+          : repairedRaw,
+        true,
+      );
     } catch (repairError) {
       throw new MeetingNotesError(
         failureCode,
@@ -585,7 +665,7 @@ const writeDraft = async (
         input.contextTokens,
         task,
         prompt,
-        'writer-audit-v8:source-labels:guardrails-v3:schema-v1',
+        'writer-audit-v9:source-labels:guardrails-v3:schema-v1',
         input.compactSourceSpeakers ?? false,
         input.sourceParagraphs ?? false,
       ]),
