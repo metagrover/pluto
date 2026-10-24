@@ -383,6 +383,116 @@ describe('Citation Engine', () => {
       },
     ] as RetrievalResult[];
 
+    it.each(['None', 'Remote Speaker 2', 'Friday', 'Forty maps'])(
+      'retains a single plain short answer without treating it as an orphan heading: %s',
+      (answer) => {
+        const stream = createSynthesizedAnswerStream(sources, () => undefined);
+        stream.push(answer);
+        expect(stream.streamedAnswer).toBe('');
+        const presentation = stream.finalize(answer);
+        expect(presentation.answer).toBe(answer);
+        expect(presentation.trustStatus).toBe('inferred');
+      },
+    );
+
+    it.each(['## Owner', '**Owner**', 'Owner:', 'Owner\n\n## Timing'])(
+      'still removes explicit or multi-paragraph orphan headings: %s',
+      (answer) => {
+        expect(buildSynthesizedAnswerPresentation(answer, sources).answer).toBe(
+          '',
+        );
+      },
+    );
+
+    it.each([
+      [
+        'The archive may hold forty maps.',
+        'The archive can definitely hold forty maps.',
+      ],
+      [
+        'The observatory dome might open on Friday.',
+        'The observatory dome will certainly open on Friday.',
+      ],
+      [
+        'The sensor reading could reach 18 volts.',
+        'The sensor reading is guaranteed to reach 18 volts.',
+      ],
+    ])(
+      'does not publish certainty over an otherwise matching possibility: %s',
+      (source, answer) => {
+        const context = [{ ...sources[0], evidence_text: source }];
+        const deltas: string[] = [];
+        const stream = createSynthesizedAnswerStream(context, (delta) =>
+          deltas.push(delta),
+        );
+        stream.push(answer.slice(0, -1));
+        stream.push('.');
+        const presentation = stream.finalize(answer);
+        expect(presentation.outcome).toBe('no_evidence');
+        expect(presentation.unsupportedClaims).toEqual([answer]);
+        expect(deltas.join('')).toBe('');
+      },
+    );
+
+    it.each([
+      ['The archive may hold forty maps.', 'The archive may hold forty maps.'],
+      [
+        'The archive may hold forty maps.',
+        'The archive is not guaranteed to hold forty maps.',
+      ],
+      [
+        'The archive may hold forty maps.',
+        'The archive could definitely hold forty maps.',
+      ],
+      [
+        'The archive may hold forty maps. The archive will hold forty maps.',
+        'The archive will definitely hold forty maps.',
+      ],
+      [
+        'The archive may hold forty maps. The gallery will hold forty maps.',
+        'The gallery will definitely hold forty maps.',
+      ],
+      [
+        'The annual event opens in May.',
+        'The annual event definitely opens in May.',
+      ],
+      [
+        'The annual event opens in may.',
+        'The annual event definitely opens in may.',
+      ],
+      [
+        'May will book the large room.',
+        'May will definitely book the large room.',
+      ],
+      ['May will book the large room.', 'Definitely book the large room.'],
+    ])(
+      'preserves qualified or independently supported wording: %s / %s',
+      (source, answer) => {
+        const presentation = buildSynthesizedAnswerPresentation(answer, [
+          { ...sources[0], evidence_text: source },
+        ]);
+        expect(presentation.outcome).toBe('answered');
+        expect(presentation.answer).toBe(answer);
+        expect(presentation.trustStatus).toBe('inferred');
+      },
+    );
+
+    it('keeps a separate supported fact when a certainty claim is removed', () => {
+      const presentation = buildSynthesizedAnswerPresentation(
+        'The archive can definitely hold forty maps. The gallery opens on Monday.',
+        [
+          {
+            ...sources[0],
+            evidence_text:
+              'The archive may hold forty maps. The gallery opens on Monday.',
+          },
+        ],
+      );
+      expect(presentation.answer).toBe('The gallery opens on Monday.');
+      expect(presentation.outcome).toBe('partial');
+      expect(presentation.unsupportedClaimCount).toBe(1);
+    });
+
     it('waits for a complete sentence before streaming synthesized prose', () => {
       const deltas: string[] = [];
       const stream = createSynthesizedAnswerStream(sources, (delta) =>

@@ -4,6 +4,13 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-24 - Preserve uncertainty and short answers at saved-answer publication
+
+- **Refines:** “Quote only validated evidence in Ask Pluto source disclosures” (2026-10-17). Synthesized answers still disclose context and remain inferred; these checks do not establish semantic verification.
+- **Decision:** Before displaying a complete synthesized sentence, reject explicit certainty when the otherwise equal fact tokens occur only in source clauses marked as possibilities. An independently matching unqualified source statement prevents this narrow contradiction check from firing. Keep the existing single provider retry, publication buffering, provenance and trust labels. Paraphrase entailment and broader state/ownership fidelity remain separate acceptance gates.
+- **Formatting:** A single plain answer without heading markup is content, even without terminal punctuation. Preserve it at finalization; continue buffering incomplete stream prefixes and pruning explicit or multi-paragraph orphan headings. The separately audited answer path keeps its existing heading rules.
+- **Evidence:** A fresh Phi answer turned a recorded possibility into a definite capacity. The shared presentation check withheld it, and the existing retry retained the possibility and unmeasured status. The same run exposed short owner/absence answers being erased by heading cleanup. Regression cases cover independent domains, matching unqualified evidence, unrelated subjects, qualified/negated wording and streaming behavior. Gemma/Phi models, inference settings and every memory check remain unchanged. Remaining semantic and loading failures continue to block release in [PR #884](https://github.com/metagrover/pluto/pull/884).
+
 ## 2026-10-24 - Preserve unaffected notes during scoped validation repair
 
 - **Status:** Candidate; original-source and packaged acceptance remain required in [PR #884](https://github.com/metagrover/pluto/pull/884).

@@ -1636,6 +1636,38 @@ const trimDanglingTrailingSentence = (answer: string): string => {
     : answer;
 };
 
+const contradictsRecordedUncertainty = (
+  claim: string,
+  evidence: string[],
+): boolean => {
+  const strong = /\b(?:definitely|certainly|guaranteed)\b/i;
+  // Capitalized names and calendar terms are not modal words.
+  const possible = /\b(?:may|might|could|possibly|perhaps|maybe)\b/;
+  if (
+    !strong.test(claim) ||
+    possible.test(claim) ||
+    /\b(?:not|never)\b/i.test(claim) ||
+    claim.trim().endsWith('?')
+  )
+    return false;
+  const factTokens = (text: string) =>
+    contentTokens(
+      text
+        .replace(/\b(?:definitely|certainly|guaranteed)\b/gi, '')
+        .replace(/\b(?:can|may|might|could|possibly|perhaps|maybe)\b/g, ''),
+    );
+  const tokens = factTokens(claim);
+  if (tokens.length < 3) return false;
+  // shortcut: Compare otherwise equal fact tokens; widen only with scoped paraphrase controls.
+  const matching = evidence
+    .flatMap((passage) => passage.split(/(?<=[.!?;])\s+|\n+/u))
+    .filter((passage) => factTokens(passage).join(' ') === tokens.join(' '));
+  return (
+    matching.length > 0 &&
+    matching.every((passage) => possible.test(passage) && !strong.test(passage))
+  );
+};
+
 /**
  * Treats synthesized notes, project profiles, and people profiles as the trust
  * boundary. Input sources establish provenance, not claim verification.
@@ -1681,8 +1713,12 @@ export const buildSynthesizedAnswerPresentation = (
       ])
       .filter(Boolean),
   );
-  const cleanAnswer = pruneOrphanHeadings(
-    trimDanglingTrailingSentence(strippedAnswer),
+  const completeAnswer = trimDanglingTrailingSentence(strippedAnswer);
+  const cleanAnswer = (
+    completeAnswer.includes('\n') ||
+    /^(?:#{1,6}\s|\*\*|__)|:\s*$/.test(completeAnswer)
+      ? pruneOrphanHeadings(completeAnswer)
+      : completeAnswer
   )
     .split('\n')
     .map((paragraph) =>
@@ -1750,18 +1786,24 @@ export const buildSynthesizedAnswerPresentation = (
             }) ||
             (/\btoday\b/i.test(sentence) &&
               !sourceDays.has(new Date().toISOString().slice(0, 10)));
+          const unsupportedCertainty = contradictsRecordedUncertainty(
+            sentence,
+            evidence,
+          );
           if (
             unsupportedPerson ||
             unsupportedDuration ||
             unsupportedDate ||
-            unsupportedImplementation
+            unsupportedImplementation ||
+            unsupportedCertainty
           )
             unsupportedClaims.push(sentence);
           return (
             !unsupportedPerson &&
             !unsupportedDuration &&
             !unsupportedDate &&
-            !unsupportedImplementation
+            !unsupportedImplementation &&
+            !unsupportedCertainty
           );
         })
         .join(' '),
