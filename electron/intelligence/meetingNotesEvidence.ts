@@ -43,6 +43,7 @@ export interface MeetingNotesEvidenceDocument {
   meetingId: string;
   title: string;
   notesText: string;
+  notePassages: Array<{ text: string; kind: string }>;
   decisionsText: string;
   actionItemsText: string;
   actions?: Array<{
@@ -231,6 +232,33 @@ export const buildMeetingNotesEvidenceDocument = (
         ),
       )
     : uniqueText([clean(meeting.enhanced_notes), clean(meeting.user_notes)]);
+  const notePassages = notesDocument
+    ? orderedNoteSections
+        .flatMap((section) =>
+          section.blocks.flatMap((block) =>
+            block.blockType === 'review'
+              ? []
+              : [
+                  {
+                    text: uniqueText([
+                      block.text,
+                      ...(block.nativeContinuations || []).map(
+                        (continuation) => continuation.text,
+                      ),
+                    ]),
+                    kind: section.kind,
+                  },
+                ],
+          ),
+        )
+        .filter((passage) => passage.text)
+    : [clean(meeting.enhanced_notes), clean(meeting.user_notes)].flatMap(
+        (text) =>
+          text
+            .split(/\n\s*\n/)
+            .filter(Boolean)
+            .map((text) => ({ text, kind: 'legacy' })),
+      );
   const decisionsText = uniqueText(
     settledBlocks
       ? settledBlocks
@@ -386,6 +414,7 @@ export const buildMeetingNotesEvidenceDocument = (
     meetingId: String(meeting.id),
     title: clean(meeting.title) || 'Untitled meeting',
     notesText,
+    notePassages,
     decisionsText,
     actionItemsText,
     ...(notesDocument

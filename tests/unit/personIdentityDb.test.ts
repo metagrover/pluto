@@ -19,7 +19,7 @@ const saveMeeting = (id: string, day: number) =>
   db.saveMeeting({
     id,
     title: `Meeting ${id}`,
-    started_at: `2026-08-${String(day).padStart(2, '0')}T12:00:00.000Z`,
+    started_at: new Date(Date.now() - (31 - day) * 86_400_000).toISOString(),
   });
 
 describe('canonical person identity', () => {

@@ -1,4 +1,5 @@
 vi.mock('../../electron/db', () => ({
+  hasReviewedActionSource: vi.fn(() => false),
   getEntitiesByType: vi.fn(),
   getEntity: vi.fn(),
   getMeeting: vi.fn(),

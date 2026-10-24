@@ -1,8 +1,13 @@
+import { canonicalizeActionText } from '../../src/utils/actionCommitment';
 import {
   groundRecentWin,
   groundSourceReviewedItem,
+  hasMatchingScopedPolarity,
+  hasSourceReviewedAcceptance,
+  hasUnsupportedQuantityScope,
   isUnacceptedConditionalWillingness,
   normalizeTranscriptEvidence,
+  sourceReviewedOngoingOwner,
 } from './analysisGrounding';
 import type {
   AnalysisDocumentV3,
@@ -11,12 +16,23 @@ import type {
 } from './analysisTypes';
 import { createEditorTerminologyArtifact } from './meetingNotesEditorTerminology';
 import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
-import { classifySuspectNotesProse } from './meetingNotesProseQuality';
 import {
+  findNotesGuardrailIssues,
+  hasOmittedSubjectCondition,
+  hasUnsupportedNotesCondition,
+} from './meetingNotesGuardrails';
+import {
+  classifySuspectNotesProse,
+  hasDirectFirstPersonNotesText,
+  hasUnfinishedNotesText,
+} from './meetingNotesProseQuality';
+import {
+  buildCitedSpeakerAliasProof,
   completeCitedSourceWindow,
   groupCitedSourcePassages,
   quoteCitedSourcePassages,
   resolveSourceSpan,
+  sourceBoundReviewWindow,
 } from './meetingNotesSource';
 import {
   type AuditVerdict,
@@ -25,6 +41,7 @@ import {
   type NotesAudit,
   type NotesDraft,
   type NotesItem,
+  type NotesReviewFailure,
   type NotesSection,
   type NotesSource,
   type SourceSpan,
@@ -51,6 +68,7 @@ export type AuditedNotes = {
 
 type Block = SupportedText | NotesItem;
 const reviewedResults = new WeakSet<object>();
+const sourceLedResults = new WeakSet<object>();
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -271,7 +289,7 @@ export const parseCompactNotesDraft = (
   const compactKeys =
     isRecord(parsed) &&
     Object.keys(parsed).every((key) =>
-      ['title', 'meetingType', 'sections'].includes(key),
+      ['title', 'overview', 'meetingType', 'sections'].includes(key),
     );
   if (
     !isRecord(parsed) ||
@@ -371,11 +389,23 @@ export const parseCompactNotesDraft = (
   if (parsed.title !== null && !title) {
     throw new MeetingNotesError('notes_writer_invalid');
   }
+  const overview =
+    parsed.overview === undefined || parsed.overview === null
+      ? null
+      : isRecord(parsed.overview) &&
+          exactKeys(parsed.overview, ['text', 'sources']) &&
+          Array.isArray(parsed.overview.sources) &&
+          parsed.overview.sources.length <= sourceSpanLimit
+        ? parseSupportedText(parsed.overview, 'overview')
+        : null;
+  if (parsed.overview !== undefined && parsed.overview !== null && !overview) {
+    throw new MeetingNotesError('notes_writer_invalid');
+  }
   return parseNotesDraft(
     JSON.stringify({
       meetingType: 'general',
       title,
-      overview: null,
+      overview,
       sections,
     }),
   );
@@ -545,6 +575,24 @@ const sourceText = (source: NotesSource, spans: SourceSpan[]): string => {
     .join(' ');
 };
 
+const blockGroundingFailures = (
+  text: string,
+  evidence: string,
+): NotesReviewFailure['reason'][] => {
+  const failures: NotesReviewFailure['reason'][] = [];
+  const pronouns = (value: string): string[] =>
+    value
+      .toLowerCase()
+      .match(/\b(?:he|she|his|her|hers|him|himself|herself)\b/g) ?? [];
+  if (hasUnsupportedQuantityScope(text, evidence))
+    failures.push('quantity_scope');
+  if (hasUnsupportedNotesCondition(text, evidence))
+    failures.push('unsupported_condition');
+  if (pronouns(text).some((word) => !pronouns(evidence).includes(word)))
+    failures.push('unsupported_pronoun');
+  return failures;
+};
+
 const extractSuspectProse = (
   source: NotesSource,
   draft: NotesDraft,
@@ -631,7 +679,7 @@ const overviewForDraft = (draft: NotesDraft): SupportedText | null => {
   };
 };
 
-const sourceMetadata = (draft: NotesDraft) => {
+const sourceMetadata = (draft: NotesDraft, allowDerivedOverview = true) => {
   const blocks: Record<
     string,
     {
@@ -660,7 +708,9 @@ const sourceMetadata = (draft: NotesDraft) => {
     }
   };
 
-  const overview = overviewForDraft(draft);
+  const overview = allowDerivedOverview
+    ? overviewForDraft(draft)
+    : draft.overview;
   if (draft.title) add('title', draft.title);
   if (overview) add('overview', overview);
   if (draft.recentWin) {
@@ -1104,6 +1154,14 @@ export const applyNotesAudit = ({
     }
   }
 
+  // Audit changes and verdict citations establish this generation's candidates.
+  // Preserve them before grounding or prose review can alter/remove the items.
+  const reviewOriginals = new Map(
+    next.sections.flatMap((section) =>
+      section.items.map((item) => [item.id, structuredClone(item)] as const),
+    ),
+  );
+
   for (const section of next.sections) {
     section.items = section.items.flatMap((item) => {
       if (item.kind !== 'action' && item.kind !== 'decision') return [item];
@@ -1119,6 +1177,7 @@ export const applyNotesAudit = ({
           sourceLines,
           sourceLine: sourceLines.join(' '),
           lineIndex: item.sources[0]!.segment,
+          speakerAliases: buildCitedSpeakerAliasProof(source, item.sources),
         },
       );
       // A supported verdict and a failed source check require repair, not a
@@ -1126,20 +1185,37 @@ export const applyNotesAudit = ({
       if (!checked) {
         if (qualityPolicy === 'advisory') {
           issues.push(`notes_audit_invalid_commitment:${item.id}`);
+          if (item.kind === 'action') {
+            issues.push(
+              ...findNotesGuardrailIssues(
+                source,
+                { ...next, sections: [{ ...section, items: [item] }] },
+                undefined,
+                ['missing_condition', 'conflicting_action'],
+              ).map((issue) => `notes_guardrail:${issue.code}:${item.id}`),
+            );
+          }
           return [];
         }
+        const polarityFeedback =
+          item.kind === 'decision' &&
+          !hasMatchingScopedPolarity(item.text, evidence)
+            ? ':source_check_polarity_scope__separate_history_and_current_choice'
+            : '';
         throw new MeetingNotesError(
-          `notes_audit_invalid_commitment:${item.id}:correct_wording_or_kind_from_source`,
+          `notes_audit_invalid_commitment:${item.id}:correct_wording_or_kind_from_source${polarityFeedback}`,
         );
       }
       return [{ ...item, ...checked }];
     });
   }
 
+  holdCollapsedPointsForReview(next, issues, reviewOriginals);
   const proseReviewItems = extractSuspectProse(source, next, issues);
 
   const result: AuditedNotes = {
     source,
+    reviewOriginals,
     draft: next,
     verdicts,
     acceptedTerminology: structuredClone(audit.terminology),
@@ -1174,7 +1250,13 @@ const explicitDecisionOwner = (
       );
       if (!segment?.speaker) return [];
       const text = resolveSourceSpan(source, span);
-      return /\b(?:the decision is|(?:we|i) (?:decided|agreed|approved|selected|chose)|proceed with)\b/i.test(
+      if (
+        /\b(?:the decision|it)\s+is\s+(?:still\s+)?(?:pending|tentative|not\s+(?:yet\s+)?(?:final(?:ized|ised)?|settled|made|approved))\b/i.test(
+          text,
+        )
+      )
+        return [];
+      return /(?:^|[.!?]\s*)i (?:decided|agreed|approved|selected|chose)\b/i.test(
         text,
       )
         ? [segment.speaker]
@@ -1184,6 +1266,38 @@ const explicitDecisionOwner = (
   return speakers.size === 1 ? [...speakers][0]! : null;
 };
 
+const holdCollapsedPointsForReview = (
+  draft: NotesDraft,
+  issues: string[],
+  originals: ReadonlyMap<string, NotesItem>,
+): void => {
+  for (const section of draft.sections) {
+    const seen = new Map<string, NotesItem>();
+    section.items = section.items.filter((item) => {
+      if (item.kind !== 'point') return true;
+      const original = originals.get(item.id) ?? item;
+      // Equal fallback speech does not establish equal responsibility identity.
+      const key = JSON.stringify([
+        item.text,
+        item.owner,
+        item.due,
+        item.sources,
+        original.kind,
+        original.text,
+        original.owner,
+        original.due,
+      ]);
+      const first = seen.get(key);
+      if (!first) {
+        seen.set(key, item);
+        return true;
+      }
+      issues.push(`deterministic_collapsed_points:${first.id}`);
+      return false;
+    });
+  }
+};
+
 export const acceptEditedNotes = ({
   source,
   draft,
@@ -1191,9 +1305,11 @@ export const acceptEditedNotes = ({
   proposals = [],
   acceptancePolicy = 'strict',
   compactNormalization = false,
+  reviewOriginals: inheritedOriginals,
 }: {
   source: NotesSource;
   draft: NotesDraft;
+  reviewOriginals?: ReadonlyMap<string, NotesItem>;
   terminology?: AuditTerminologyContext;
   proposals?: NotesAudit['terminology'];
   acceptancePolicy?: 'strict' | 'conservative';
@@ -1205,18 +1321,49 @@ export const acceptEditedNotes = ({
       section.items.map((item) => [item.id, structuredClone(item)] as const),
     ),
   );
+  for (const [id, item] of inheritedOriginals ?? []) {
+    if (!reviewOriginals.has(id)) continue;
+    if (item.id !== id) throw new MeetingNotesError('invalid_notes_audit');
+    validateSources(source, item.sources);
+    reviewOriginals.set(id, structuredClone(item));
+  }
   const issues: string[] = [];
+  const groundingFailures: NotesReviewFailure[] = [];
   for (const block of blocksForDraft(next)) {
     validateSources(source, block.sources);
-    const evidence = sourceText(source, block.sources);
-    if (
-      (block.text.match(/\b[RP]\d+\b/g) ?? []).some(
-        (label) => !evidence.includes(label),
-      )
-    ) {
+    const evidence = groupCitedSourcePassages(source, block.sources)
+      .map(({ text }) => text)
+      .join(' ');
+    if (hasUncitedSourceLabel(block, evidence)) {
       throw new MeetingNotesError(`notes_editor_source_label:${block.id}`);
     }
+    if (acceptancePolicy === 'strict') {
+      for (const reason of blockGroundingFailures(block.text, evidence))
+        groundingFailures.push(Object.freeze({ reason, target: block.id }));
+    }
   }
+  let validationError: MeetingNotesError | undefined;
+  if (groundingFailures.length) {
+    const first = groundingFailures[0]!;
+    const commitment = next.sections.some((section) =>
+      section.items.some(
+        (item) =>
+          item.id === first.target &&
+          (item.kind === 'action' || item.kind === 'decision'),
+      ),
+    );
+    validationError = new MeetingNotesError(
+      commitment
+        ? `notes_editor_invalid_commitment:${first.target}:correct_wording_kind_owner_or_due_from_source`
+        : `notes_editor_${first.reason}:${first.target}`,
+    );
+  }
+  // The single repair needs every known failure, including ones hidden by prose errors.
+  const rejectCommitment = (item: NotesItem, code: string) => {
+    validationError ??= new MeetingNotesError(code);
+    groundingFailures.push({ reason: 'source_grounding', target: item.id });
+    return [item];
+  };
   for (const section of next.sections) {
     section.items = section.items.flatMap((item) => {
       if (item.kind !== 'action' && item.kind !== 'decision') return [item];
@@ -1224,7 +1371,7 @@ export const acceptEditedNotes = ({
       const sourceLines = groupCitedSourcePassages(source, item.sources).map(
         ({ speaker, text }) => `${speaker ?? 'Speaker'}: ${text}`,
       );
-      const discussionText = sourceLines.join('\n');
+      const discussionText = quoteCitedSourcePassages(source, item.sources);
       const declaredDecisionOwner =
         compactNormalization && item.kind === 'decision'
           ? explicitDecisionOwner(source, item)
@@ -1244,13 +1391,14 @@ export const acceptEditedNotes = ({
             {
               ...item,
               kind: 'point' as const,
-              text: evidence.trim(),
+              text: discussionText,
               owner: null,
               due: null,
             },
           ];
         }
-        throw new MeetingNotesError(
+        return rejectCommitment(
+          item,
           `notes_editor_invalid_commitment:${item.id}:conditional_willingness_is_not_accepted__change_kind_to_point_and_preserve_can_or_could_not_will_in_text`,
         );
       }
@@ -1260,6 +1408,7 @@ export const acceptEditedNotes = ({
         sourceLines,
         sourceLine: sourceLines.join(' '),
         lineIndex: item.sources[0]!.segment,
+        speakerAliases: buildCitedSpeakerAliasProof(source, item.sources),
       };
       const checked = groundSourceReviewedItem(
         { ...reviewedItem, kind: item.kind },
@@ -1271,15 +1420,15 @@ export const acceptEditedNotes = ({
         if (
           item.kind === 'decision' &&
           compactNormalization &&
-          !declaredDecisionOwner &&
+          // Collective decisions remain decisions without an individual owner.
+          !/\b(?:the decision is|(?:we|i) (?:decided|agreed|approved|selected|chose)|proceed with)\b/i.test(
+            evidence,
+          ) &&
           statusExplanation.test(item.text) &&
           statusExplanation.test(evidence)
         ) {
           issues.push(`deterministic_reclassified_decision:${item.id}`);
           return [{ ...item, kind: 'point' as const, owner: null, due: null }];
-        }
-        if (item.kind === 'decision' && declaredDecisionOwner) {
-          return [{ ...item, owner: declaredDecisionOwner, due: null }];
         }
         if (acceptancePolicy === 'conservative') {
           issues.push(`deterministic_unsupported_commitment:${item.id}`);
@@ -1296,7 +1445,8 @@ export const acceptEditedNotes = ({
             },
           ];
         }
-        throw new MeetingNotesError(
+        return rejectCommitment(
+          item,
           `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
         );
       }
@@ -1322,15 +1472,40 @@ export const acceptEditedNotes = ({
           normalizeTranscriptEvidence(checked.owner ?? '');
       const dueRemoved = Boolean(item.due) && !checked.due;
       if (acceptancePolicy === 'strict' && (ownerChanged || dueRemoved)) {
-        throw new MeetingNotesError(
+        return rejectCommitment(
+          item,
           `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
         );
       }
       if (ownerChanged) issues.push(`deterministic_corrected_owner:${item.id}`);
       if (dueRemoved) issues.push(`deterministic_removed_due:${item.id}`);
+      if (
+        item.kind === 'action' &&
+        ownerChanged &&
+        canonicalizeActionText(item.text, item.owner!) !== checked.text
+      ) {
+        issues.push(`deterministic_reclassified_owner_conflict:${item.id}`);
+        return [
+          {
+            ...item,
+            kind: 'point' as const,
+            text: discussionText,
+            owner: null,
+            due: null,
+          },
+        ];
+      }
       return [{ ...item, ...checked }];
     });
   }
+  if (validationError) {
+    sourceLedValidationFailures.set(
+      validationError,
+      Object.freeze(groundingFailures),
+    );
+    throw validationError;
+  }
+  holdCollapsedPointsForReview(next, issues, reviewOriginals);
   const proseReviewItems = extractSuspectProse(source, next, issues);
   const result: AuditedNotes = {
     source,
@@ -1355,36 +1530,676 @@ export const acceptEditedNotes = ({
   return result;
 };
 
+/** Shared existing single-responsibility coverage check; no new classification rules. */
+export const hasOngoingSourceResponsibility = (
+  notes: Pick<AuditedNotes, 'source' | 'draft'>,
+  item: NotesItem,
+  requireUnrepresented = false,
+): boolean => {
+  const aliases = buildCitedSpeakerAliasProof(notes.source, item.sources);
+  const taskSources = item.sources.filter(
+    (span) =>
+      !aliases.some((alias) =>
+        alias.introductionSources.some(
+          (intro) =>
+            intro.segment === span.segment &&
+            intro.start === span.start &&
+            intro.end === span.end,
+        ),
+      ),
+  );
+  const passages = groupCitedSourcePassages(notes.source, taskSources);
+  // This coverage gate handles an unambiguous current responsibility only.
+  // Other clauses may cancel or finish it; their final state belongs to review.
+  const clauses = passages
+    .flatMap(({ text }) => text.match(/[^.?!;]+[.?!;]?/g) ?? [])
+    .filter(
+      (clause) =>
+        normalizeTranscriptEvidence(clause) !== 'that work is ongoing',
+    );
+  if (requireUnrepresented && clauses.length !== 1) return false;
+  return passages.some(({ speaker, text }) =>
+    (text.match(/[^.?!;]+[.?!;]?/g) ?? []).some((clause) => {
+      const predicate = clause.replace(
+        /^\s*i(?: am|['’]m)\s+(?:(?:currently|still)\s+)?/iu,
+        '',
+      );
+      const owner = sourceReviewedOngoingOwner(predicate, speaker, {
+        evidence: text,
+        quotedEvidence: text,
+        sourceLine: `${speaker ?? 'Speaker'}: ${text}`,
+        sourceLines: [`${speaker ?? 'Speaker'}: ${text}`],
+        lineIndex: item.sources[0]!.segment,
+      });
+      if (!owner) return false;
+      if (!requireUnrepresented) return true;
+      // A separate action can already cover this exact responsibility; scope
+      // clarification beside it must not be forced into a duplicate action.
+      return !notes.draft.sections.some((section) =>
+        section.items.some((other) => {
+          if (other.id === item.id || other.kind !== 'action') return false;
+          const aliases = buildCitedSpeakerAliasProof(
+            notes.source,
+            other.sources,
+          );
+          const alias = aliases.find(
+            (entry) => entry.name === other.owner && entry.speaker === owner,
+          );
+          if (other.owner !== owner && !alias) return false;
+          // Identity evidence may accompany this exact task, never unrelated work.
+          const taskSources = other.sources.filter(
+            (span) =>
+              !alias?.introductionSources.some(
+                (intro) =>
+                  intro.segment === span.segment &&
+                  intro.start === span.start &&
+                  intro.end === span.end,
+              ),
+          );
+          const passages = groupCitedSourcePassages(notes.source, taskSources);
+          return (
+            passages.length === 1 &&
+            passages[0]!.speaker === speaker &&
+            normalizeTranscriptEvidence(passages[0]!.text) ===
+              normalizeTranscriptEvidence(clause) &&
+            taskSources.every((span) =>
+              item.sources.some(
+                (cited) =>
+                  cited.segment === span.segment &&
+                  cited.start <= span.start &&
+                  cited.end >= span.end,
+              ),
+            )
+          );
+        }),
+      );
+    }),
+  );
+};
+
+/** Final source-led boundary: no advisory normalization or raw-source recovery. */
+const sourceLedValidationFailures = new WeakMap<
+  MeetingNotesError,
+  readonly NotesReviewFailure[]
+>();
+export const getSourceLedValidationFailures = (error: unknown) =>
+  error instanceof MeetingNotesError
+    ? sourceLedValidationFailures.get(error)
+    : undefined;
+const hasUncitedSourceLabel = (block: SupportedText, evidence: string) =>
+  (block.text.match(/\b[RP]\d+\b/g) ?? []).some(
+    (label) => !evidence.includes(label),
+  );
+
+export const acceptSourceLedNotes = (
+  source: NotesSource,
+  draft: NotesDraft,
+  options: {
+    proposals?: NotesAudit['terminology'];
+    terminology?: AuditTerminologyContext;
+  } = {},
+): AuditedNotes => {
+  const failures = new Map<string, NotesReviewFailure>();
+  const report = (
+    reason: NotesReviewFailure['reason'],
+    target: string | null,
+  ) =>
+    failures.set(
+      `${reason}:${target ?? ''}`,
+      Object.freeze({ reason, target }),
+    );
+  const refuse = (): never => {
+    const error = new MeetingNotesError('notes_semantic_review_incomplete');
+    sourceLedValidationFailures.set(
+      error,
+      Object.freeze([...failures.values()]),
+    );
+    throw error;
+  };
+  if (!draft.overview?.text.trim()) report('invalid_schema', null);
+  const contains = (text: string, value: string) =>
+    ` ${normalizeTranscriptEvidence(text)} `.includes(
+      ` ${normalizeTranscriptEvidence(value)} `,
+    );
+  const check = (block: SupportedText, item?: NotesItem) => {
+    validateSources(source, block.sources);
+    const passages = groupCitedSourcePassages(source, block.sources);
+    const evidence = passages.map(({ text }) => text).join(' ');
+    if (
+      hasUnfinishedNotesText(block.text) ||
+      hasDirectFirstPersonNotesText(block.text)
+    )
+      report('unfinished_prose', block.id);
+    if (block.text === quoteCitedSourcePassages(source, block.sources))
+      report('raw_source_quote', block.id);
+    for (const reason of blockGroundingFailures(block.text, evidence))
+      report(reason, block.id);
+    if (hasUncitedSourceLabel(block, evidence))
+      report('source_label', block.id);
+    if (!item) return;
+    if (
+      (item.kind === 'point' || item.kind === 'question') &&
+      (item.owner !== null || item.due !== null)
+    )
+      report('overview_role', item.id);
+    if (
+      item.owner !== null &&
+      (['them', 'unknown', 'speaker'].includes(item.owner.toLowerCase()) ||
+        !passages.some(
+          ({ speaker, text }) =>
+            speaker === item.owner ||
+            (item.owner!.toLowerCase() !== 'me' && contains(text, item.owner!)),
+        ))
+    )
+      report('unsupported_owner', item.id);
+    if (
+      item.due !== null &&
+      !passages.some(({ text }) =>
+        sourceBoundDueForms(item.due!).some((form) =>
+          contains(
+            text.replace(/\b(\d{1,2})(?:st|nd|rd|th)\b/gi, '$1'),
+            form.replace(/\b(\d{1,2})(?:st|nd|rd|th)\b/gi, '$1'),
+          ),
+        ),
+      )
+    )
+      report('unsupported_due', item.id);
+  };
+  for (const block of blocksForDraft(draft)) check(block);
+  for (const section of draft.sections)
+    for (const item of section.items) {
+      check(item, item);
+      if (
+        item.kind !== 'action' &&
+        hasOngoingSourceResponsibility({ source, draft }, item, true)
+      )
+        report('ongoing_responsibility', item.id);
+    }
+  if (draft.recentWin) {
+    const win = draft.recentWin;
+    if (
+      !win.ownership ||
+      (['shared', 'unknown'].includes(win.ownership) && win.owner != null) ||
+      (win.ownership === 'personal' && !win.owner)
+    )
+      report('win_ownership', win.win.id);
+    if (
+      win.owner &&
+      !groupCitedSourcePassages(source, win.win.sources).some(
+        ({ speaker, text }) =>
+          speaker === win.owner || contains(text, win.owner!),
+      )
+    )
+      report('unsupported_owner', win.win.id);
+    const evidence = sourceText(source, win.win.sources);
+    if (
+      !groundRecentWin(
+        {
+          win: win.win.text,
+          why_it_counts: win.impact.text,
+          evidence,
+          ownership: win.ownership,
+          owner: win.owner ?? undefined,
+        },
+        transcriptForSource(source),
+        {},
+      )
+    )
+      report('source_grounding', win.win.id);
+  }
+  if (
+    findNotesGuardrailIssues(source, draft, undefined, [
+      'missing_condition',
+      'conflicting_action',
+    ]).length
+  )
+    report('source_guardrail', null);
+  if (failures.size) refuse();
+  let accepted: AuditedNotes;
+  try {
+    accepted = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'strict',
+      proposals: options.proposals,
+      terminology: options.terminology,
+    });
+  } catch (error) {
+    if (!(error instanceof MeetingNotesError)) throw error;
+    const target =
+      blocksForDraft(draft).find(
+        (block) =>
+          error.code === `notes_editor_source_label:${block.id}` ||
+          error.code.startsWith(`notes_editor_invalid_commitment:${block.id}:`),
+      )?.id ?? null;
+    report(
+      error.code.startsWith('notes_editor_source_label:')
+        ? 'source_label'
+        : 'source_grounding',
+      target,
+    );
+    sourceLedValidationFailures.set(
+      error,
+      Object.freeze([
+        ...(sourceLedValidationFailures.get(error) ?? []),
+        ...failures.values(),
+      ]),
+    );
+    throw error;
+  }
+  if (accepted.issues?.length) {
+    report('source_grounding', null);
+    refuse();
+  }
+  // No source-led brand is granted until the final optional presentation check.
+  if (draft.recentWin && !projectAuditedNotes(accepted).recent_win) {
+    report('source_grounding', draft.recentWin.win.id);
+    refuse();
+  }
+  sourceLedResults.add(accepted);
+  return accepted;
+};
+
+export const sourceBoundDueForms = (value: string) => {
+  if (value.length !== 10 || value[4] !== '-' || value[7] !== '-')
+    return [value];
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (
+    !Number.isFinite(date.valueOf()) ||
+    date.toISOString().slice(0, 10) !== value
+  )
+    return [value];
+  return [
+    value,
+    ...['en-US', 'en-GB'].map((locale) =>
+      new Intl.DateTimeFormat(locale, {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        timeZone: 'UTC',
+      }).format(date),
+    ),
+  ];
+};
+
+export const sourceBoundDueMatches = (
+  due: string,
+  original: string,
+  sourceEvidence?: string,
+): boolean => {
+  const normalized = (value: string) =>
+    normalizeTranscriptEvidence(
+      value.replace(/\b(\d{1,2})(?:st|nd|rd|th)\b/gi, '$1'),
+    );
+  const forms = sourceBoundDueForms(due).map(normalized);
+  const evidence =
+    sourceEvidence === undefined ? null : ` ${normalized(sourceEvidence)} `;
+  if (forms.includes(normalized(original)))
+    return (
+      evidence === null || forms.some((form) => evidence.includes(` ${form} `))
+    );
+  if (evidence === null) return false;
+  // A model-invented year cannot prevent correction to the exact source deadline.
+  return sourceBoundDueForms(original).some((form) => {
+    const draft = normalized(form);
+    const date = draft.replace(/ \d{4}$/, '');
+    if (date === draft || !evidence.includes(` ${date} `)) return false;
+    const sourceYear = new RegExp(` ${date} (\\d{4})(?: |$)`).exec(
+      evidence,
+    )?.[1];
+    const expected = sourceYear ? `${date} ${sourceYear}` : date;
+    return forms.includes(expected) && evidence.includes(` ${expected} `);
+  });
+};
+
 export type SourceBoundNotesReplacement = NotesItem & {
   discussion?: string | null;
+  mergedIds?: string[];
+  ownership?: 'personal' | 'shared' | 'other' | 'unknown';
+};
+export type SourceBoundNotesOmission = { id: string; omit: true };
+
+/** Admission only: semantic review cannot bypass the existing source checks. */
+export const hasSourceReviewedAdmission = (
+  source: NotesSource,
+  item: NotesItem,
+): boolean => {
+  if (item.kind !== 'action' && item.kind !== 'decision') return true;
+  const evidence = sourceText(source, item.sources);
+  const sourceLines = groupCitedSourcePassages(source, item.sources).map(
+    ({ speaker, text }) => `${speaker ?? 'Speaker'}: ${text}`,
+  );
+  return hasSourceReviewedAcceptance(
+    { ...item, kind: item.kind },
+    {
+      evidence,
+      quotedEvidence: evidence,
+      sourceLines,
+      sourceLine: sourceLines.join(' '),
+      lineIndex: item.sources[0]!.segment,
+    },
+  );
+};
+
+/** Exact bounded dialogue/lifecycle context, never a classification. */
+export const sourceBoundItemReviewWindow = (
+  audited: Pick<AuditedNotes, 'source' | 'draft' | 'reviewOriginals'>,
+  item: NotesItem,
+): SourceSpan[] => {
+  // A point may be promoted by the model. Probe the existing action guard only
+  // to discover its cited promise's later resolution; never change the item.
+  const issues = findNotesGuardrailIssues(
+    audited.source,
+    {
+      ...audited.draft,
+      sections: [
+        { ...audited.draft.sections[0]!, items: [{ ...item, kind: 'action' }] },
+      ],
+    },
+    undefined,
+    ['missing_condition', 'conflicting_action'],
+  );
+  const window = sourceBoundReviewWindow(audited.source, [
+    ...item.sources,
+    ...issues.flatMap((issue) => issue.sources),
+  ]);
+  // Only the immutable original question anchors forward context. Expanded
+  // review citations (or newly inserted items) must not crawl later dialogue.
+  const original = audited.reviewOriginals?.get(item.id);
+  if (!original?.sources.length) return window;
+  const questions = original.sources.filter((span) =>
+    resolveSourceSpan(audited.source, span).includes('?'),
+  );
+  if (original.kind !== 'question' && !questions.length) return window;
+  const anchor = Math.max(
+    ...(questions.length ? questions : original.sources).map(
+      (span) => span.segment,
+    ),
+  );
+  const following = audited.source.segments
+    .filter(
+      (segment) => segment.index > anchor && segment.text.trim().length > 0,
+    )
+    .map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+  const turns = groupCitedSourcePassages(audited.source, following).slice(0, 3);
+  return completeCitedSourceWindow(audited.source, [
+    ...window,
+    ...turns.flatMap((turn) => turn.spans),
+  ]);
 };
 
 export const applySourceBoundSemanticReview = (
   audited: AuditedNotes,
-  replacements: SourceBoundNotesReplacement[],
+  resolutions: Array<SourceBoundNotesReplacement | SourceBoundNotesOmission>,
 ): AuditedNotes => {
   if (!reviewedResults.has(audited))
     throw new MeetingNotesError('notes_unreviewed_projection');
   const next = { ...audited, draft: structuredClone(audited.draft) };
-  const byId = new Map(replacements.map((item) => [item.id, item]));
-  if (byId.size !== replacements.length)
+  if (new Set(resolutions.map((item) => item.id)).size !== resolutions.length)
     throw new MeetingNotesError('invalid_notes_audit');
+  const omissions = resolutions.filter(
+    (item): item is SourceBoundNotesOmission => 'omit' in item,
+  );
+  const replacements = resolutions.filter(
+    (item): item is SourceBoundNotesReplacement => !('omit' in item),
+  );
+  const recentWin = next.draft.recentWin;
+  const optionalIds = recentWin ? [recentWin.win.id, recentWin.impact.id] : [];
+  if (
+    omissions.some(
+      (item) =>
+        item.omit !== true ||
+        Object.keys(item).length !== 2 ||
+        !optionalIds.includes(item.id),
+    )
+  )
+    throw new MeetingNotesError('invalid_notes_audit');
+  if (
+    replacements.some(
+      (item) => item.ownership !== undefined && item.id !== recentWin?.win.id,
+    )
+  )
+    throw new MeetingNotesError('invalid_notes_audit');
+  const optionalResults = resolutions.filter((item) =>
+    optionalIds.includes(item.id),
+  );
+  if (optionalResults.length && optionalResults.length !== 2)
+    throw new MeetingNotesError('invalid_notes_audit');
+  for (const replacement of replacements.filter((item) =>
+    optionalIds.includes(item.id),
+  )) {
+    const original =
+      replacement.id === recentWin!.win.id ? recentWin!.win : recentWin!.impact;
+    if (
+      replacement.kind !== 'point' ||
+      replacement.due !== null ||
+      replacement.discussion ||
+      replacement.mergedIds?.length ||
+      !replacement.text.trim() ||
+      hasUnfinishedNotesText(replacement.text) ||
+      hasDirectFirstPersonNotesText(replacement.text) ||
+      replacement.text ===
+        quoteCitedSourcePassages(audited.source, replacement.sources)
+    )
+      throw new MeetingNotesError('invalid_notes_audit');
+    const permitted = new Set(
+      original.sources.map((span) => JSON.stringify(span)),
+    );
+    if (
+      replacement.sources.length !== original.sources.length ||
+      new Set(replacement.sources.map((span) => JSON.stringify(span))).size !==
+        permitted.size ||
+      replacement.sources.some((span) => !permitted.has(JSON.stringify(span)))
+    )
+      throw new MeetingNotesError('notes_source_out_of_scope');
+    if (replacement.id === recentWin!.impact.id) {
+      if (replacement.owner !== null || replacement.ownership !== undefined)
+        throw new MeetingNotesError('invalid_notes_audit');
+    } else {
+      const ownership = replacement.ownership;
+      if (
+        !ownership ||
+        !['personal', 'shared', 'other', 'unknown'].includes(ownership) ||
+        (['shared', 'unknown'].includes(ownership) &&
+          replacement.owner !== null) ||
+        (ownership === 'personal' && !replacement.owner)
+      )
+        throw new MeetingNotesError('invalid_notes_audit');
+      if (replacement.owner) {
+        const owner = normalizeTranscriptEvidence(replacement.owner);
+        const passages = groupCitedSourcePassages(
+          audited.source,
+          original.sources,
+        );
+        if (
+          ['me', 'them', 'unknown', 'speaker'].includes(owner) &&
+          owner !== 'me'
+        )
+          throw new MeetingNotesError('invalid_notes_audit');
+        if (
+          !passages.some(
+            ({ speaker, text }) =>
+              speaker === replacement.owner ||
+              ` ${normalizeTranscriptEvidence(text)} `.includes(` ${owner} `),
+          )
+        )
+          throw new MeetingNotesError('invalid_notes_audit');
+      }
+    }
+  }
+  if (optionalResults.length) {
+    if (omissions.length) next.draft.recentWin = undefined;
+    else {
+      const win = replacements.find((item) => item.id === recentWin!.win.id)!;
+      const impact = replacements.find(
+        (item) => item.id === recentWin!.impact.id,
+      )!;
+      next.draft.recentWin = {
+        win: {
+          id: win.id,
+          text: win.text,
+          sources: structuredClone(win.sources),
+        },
+        impact: {
+          id: impact.id,
+          text: impact.text,
+          sources: structuredClone(impact.sources),
+        },
+        ownership: win.ownership,
+        owner: win.owner,
+      };
+    }
+  }
+  const byId = new Map(
+    replacements
+      .filter((item) => !optionalIds.includes(item.id))
+      .map((item) => [item.id, item]),
+  );
+
+  const originalItems = new Map(
+    audited.draft.sections.flatMap((section) =>
+      section.items.map((item) => [item.id, item] as const),
+    ),
+  );
+  const removed = new Set<string>();
+  for (const replacement of replacements) {
+    if (replacement.mergedIds?.length) {
+      const members = [replacement.id, ...replacement.mergedIds].map(
+        (id) => audited.reviewOriginals?.get(id) ?? originalItems.get(id),
+      );
+      if (
+        !replacement.owner ||
+        members.some(
+          (item) =>
+            !item ||
+            !item.owner ||
+            normalizeTranscriptEvidence(item.owner) !==
+              normalizeTranscriptEvidence(replacement.owner!) ||
+            (item.due &&
+              !sourceBoundDueMatches(
+                replacement.due ?? '',
+                item.due,
+                sourceText(audited.source, item.sources),
+              )),
+        )
+      )
+        throw new MeetingNotesError('invalid_notes_audit');
+    }
+    if (
+      replacement.mergedIds?.length &&
+      (
+        audited.reviewOriginals?.get(replacement.id) ??
+        originalItems.get(replacement.id)
+      )?.kind !== 'action'
+    )
+      throw new MeetingNotesError('invalid_notes_audit');
+    for (const id of replacement.mergedIds ?? []) {
+      const member = originalItems.get(id);
+      if (
+        !member ||
+        id === replacement.id ||
+        removed.has(id) ||
+        byId.has(id) ||
+        replacement.kind !== 'action' ||
+        (audited.reviewOriginals?.get(id) ?? member).kind !== 'action'
+      )
+        throw new MeetingNotesError('invalid_notes_audit');
+      removed.add(id);
+    }
+  }
   const existingIds = new Set(
     blocksForDraft(next.draft).map((block) => block.id),
   );
+  const overview = next.draft.overview;
+  const overviewReplacement = overview ? byId.get(overview.id) : undefined;
+  if (overview && overviewReplacement) {
+    if (
+      overviewReplacement.kind !== 'point' ||
+      overviewReplacement.owner !== null ||
+      overviewReplacement.due !== null ||
+      overviewReplacement.discussion ||
+      overviewReplacement.mergedIds?.length ||
+      !overviewReplacement.text.trim() ||
+      hasUnfinishedNotesText(overviewReplacement.text) ||
+      hasDirectFirstPersonNotesText(overviewReplacement.text) ||
+      overviewReplacement.text ===
+        quoteCitedSourcePassages(audited.source, overviewReplacement.sources)
+    )
+      throw new MeetingNotesError('invalid_notes_audit');
+    const permitted = new Set(
+      overview.sources.map((span) => JSON.stringify(span)),
+    );
+    if (
+      overviewReplacement.sources.length !== overview.sources.length ||
+      new Set(overviewReplacement.sources.map((span) => JSON.stringify(span)))
+        .size !== permitted.size ||
+      overviewReplacement.sources.some(
+        (span) => !permitted.has(JSON.stringify(span)),
+      )
+    )
+      throw new MeetingNotesError('notes_source_out_of_scope');
+    next.draft.overview = {
+      id: overview.id,
+      text: overviewReplacement.text,
+      sources: structuredClone(overviewReplacement.sources),
+    };
+    byId.delete(overview.id);
+  }
   for (const section of next.draft.sections) {
     section.items = section.items.flatMap((item) => {
+      if (removed.has(item.id)) return [];
       const replacement = byId.get(item.id);
       if (!replacement) return [item];
-      if (
-        JSON.stringify(replacement.sources) !== JSON.stringify(item.sources) &&
-        JSON.stringify(replacement.sources) !==
-          JSON.stringify(
-            completeCitedSourceWindow(audited.source, item.sources),
+      const mergedSources = replacement.mergedIds?.length
+        ? [
+            ...new Map(
+              [item.id, ...replacement.mergedIds]
+                .flatMap((id) =>
+                  sourceBoundItemReviewWindow(audited, originalItems.get(id)!),
+                )
+                .map((span) => [JSON.stringify(span), span]),
+            ).values(),
+          ].sort(
+            (left, right) =>
+              left.segment - right.segment ||
+              left.start - right.start ||
+              left.end - right.end,
           )
+        : undefined;
+      if (
+        mergedSources &&
+        JSON.stringify(replacement.sources) !== JSON.stringify(mergedSources)
       )
         throw new MeetingNotesError('notes_source_out_of_scope');
-      const { discussion, ...fields } = replacement;
+      if (
+        !(
+          mergedSources &&
+          JSON.stringify(replacement.sources) === JSON.stringify(mergedSources)
+        ) &&
+        JSON.stringify(replacement.sources) !== JSON.stringify(item.sources) &&
+        JSON.stringify(replacement.sources) !==
+          JSON.stringify(sourceBoundItemReviewWindow(audited, item))
+      )
+        throw new MeetingNotesError('notes_source_out_of_scope');
+      if (
+        replacement.kind === 'action' &&
+        hasOmittedSubjectCondition(
+          {
+            ...(audited.reviewOriginals?.get(item.id) ?? item),
+            owner: replacement.owner,
+          },
+          replacement.text,
+          groupCitedSourcePassages(audited.source, replacement.sources),
+        )
+      )
+        throw new MeetingNotesError('invalid_notes_audit');
+      if (!hasSourceReviewedAdmission(audited.source, replacement))
+        throw new MeetingNotesError('invalid_notes_audit');
+      const { discussion, mergedIds: _mergedIds, ...fields } = replacement;
       const contextId = `${item.id}:semantic-context`;
       if (discussion && existingIds.has(contextId))
         throw new MeetingNotesError('invalid_notes_audit');
@@ -1407,12 +2222,11 @@ export const applySourceBoundSemanticReview = (
     });
   }
   if (byId.size) throw new MeetingNotesError('invalid_notes_audit');
-  const ids = new Set(replacements.map((item) => item.id));
+  const ids = new Set([...removed, ...resolutions.map((item) => item.id)]);
   next.issues = audited.issues?.filter(
     (issue) =>
-      !replacements.some(
-        (item) =>
-          issue.startsWith('deterministic_') && issue.endsWith(`:${item.id}`),
+      ![...ids].some(
+        (id) => issue.startsWith('deterministic_') && issue.endsWith(`:${id}`),
       ),
   );
   next.proseReviewItems = audited.proseReviewItems?.filter(
@@ -1420,6 +2234,8 @@ export const applySourceBoundSemanticReview = (
   );
   next.semanticChangeCount =
     (audited.semanticChangeCount ?? 0) +
+    removed.size +
+    omissions.length +
     replacements.length +
     replacements.filter((item) => item.discussion).length;
   reviewedResults.add(next);
@@ -1428,6 +2244,7 @@ export const applySourceBoundSemanticReview = (
 
 export const projectAuditedNotes = (
   audited: AuditedNotes,
+  options: { deriveOverview?: boolean } = {},
 ): AnalysisDocumentV3 => {
   if (!reviewedResults.has(audited))
     throw new MeetingNotesError('notes_unreviewed_projection');
@@ -1450,14 +2267,26 @@ export const projectAuditedNotes = (
         ]);
         const duplicate = seen.get(key);
         if (duplicate !== undefined) {
-          if (item.kind === 'point') {
-            // Collapsed prose can omit a source clause; retain the exact evidence once.
-            items[duplicate] = {
-              ...items[duplicate]!,
-              text: quoteCitedSourcePassages(audited.source, item.sources),
-            };
-          }
           continue;
+        }
+        if (item.kind === 'action' && item.owner !== null) {
+          const contained = items.findIndex(
+            (prior) =>
+              prior.kind === 'action' &&
+              prior.owner === item.owner &&
+              prior.due === item.due &&
+              JSON.stringify(prior.sources) === JSON.stringify(item.sources) &&
+              // Keep only lossless whole-clause containment; a shared prefix
+              // alone cannot establish equal predicates or responsibility.
+              (prior.text.startsWith(`${item.text.replace(/\.$/, '')}; `) ||
+                item.text.startsWith(`${prior.text.replace(/\.$/, '')}; `)),
+          );
+          if (contained !== -1) {
+            if (item.text.length > items[contained]!.text.length)
+              items[contained] = item;
+            seen.set(key, contained);
+            continue;
+          }
         }
         seen.set(key, items.length);
         items.push(item);
@@ -1502,7 +2331,13 @@ export const projectAuditedNotes = (
           .map((item) => item.text),
       };
     });
-  const overview = overviewForDraft(draft)?.text ?? 'Conversation captured.';
+  const allowDerivedOverview =
+    options.deriveOverview !== false && !sourceLedResults.has(audited);
+  const overview =
+    (allowDerivedOverview
+      ? overviewForDraft(draft)?.text
+      : draft.overview?.text) ??
+    (allowDerivedOverview ? 'Conversation captured.' : '');
   const title = draft.title?.text.trim() || undefined;
   const analysis: AnalysisDocumentV3 = {
     analysis_schema_version: 3,
@@ -1552,12 +2387,15 @@ export const projectAuditedNotes = (
       source_provenance: {
         schema_version: 1,
         source_revision: audited.source.revision,
-        blocks: sourceMetadata({
-          ...draft,
-          sections: draft.sections.filter(
-            (section) => section.items.length > 0,
-          ),
-        }),
+        blocks: sourceMetadata(
+          {
+            ...draft,
+            sections: draft.sections.filter(
+              (section) => section.items.length > 0,
+            ),
+          },
+          allowDerivedOverview,
+        ),
       },
       ...(audited.proseReviewItems?.length
         ? {

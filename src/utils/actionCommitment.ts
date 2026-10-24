@@ -200,6 +200,68 @@ export const isThirdPartyAction = (
   );
 };
 
+/** Ownership facts are independent of whether an obligation is currently open. */
+export const isExplicitOtherActionOwner = (
+  action: { assigned_to?: string | null; metadata?: string | null },
+  selfOptions: ThirdPartyAssigneeOptions,
+): boolean => {
+  const metadata = parseActionMetadata(action.metadata ?? null);
+  if (action.assigned_to && action.assigned_to !== selfOptions.selfPersonId)
+    return true;
+  if (
+    action.assigned_to &&
+    action.assigned_to === selfOptions.selfPersonId &&
+    (metadata.owner_source === 'user' ||
+      metadata.origin === 'user' ||
+      metadata.commitment_state === 'confirmed')
+  )
+    return false;
+  const assignee =
+    typeof metadata.assignee_name === 'string'
+      ? metadata.assignee_name.trim().toLowerCase()
+      : '';
+  const selfNames = new Set([
+    ...SELF_ACTION_ASSIGNEES,
+    ...(selfOptions.selfNames ?? []).map((name) => name.trim().toLowerCase()),
+  ]);
+  return Boolean(
+    assignee &&
+      !selfNames.has(assignee) &&
+      !COLLECTIVE_ACTION_ASSIGNEES.has(assignee),
+  );
+};
+
+export const isUnresolvedInheritedActionOwner = (
+  action: { assigned_to?: string | null; metadata: string | null },
+  selfOptions: ThirdPartyAssigneeOptions,
+): boolean => {
+  const metadata = parseActionMetadata(action.metadata);
+  if (metadata.owner_source !== 'notes_parent') return false;
+  const assignee =
+    typeof metadata.assignee_name === 'string'
+      ? metadata.assignee_name.trim().toLocaleLowerCase()
+      : '';
+  const selfNames = new Set([
+    ...SELF_ACTION_ASSIGNEES,
+    ...(selfOptions.selfNames ?? []).map((name) =>
+      name.trim().toLocaleLowerCase(),
+    ),
+  ]);
+  return (
+    !selfNames.has(assignee) &&
+    !(
+      action.assigned_to &&
+      selfOptions.selfPersonId &&
+      action.assigned_to === selfOptions.selfPersonId
+    ) &&
+    !(
+      getCommitmentState(action.metadata) === 'confirmed' &&
+      typeof metadata.reviewed_at === 'string' &&
+      metadata.reviewed_at.trim()
+    )
+  );
+};
+
 /** Ownership comes from structured evidence or explicit adoption, never prose. */
 export const hasPersonalActionOwner = (
   action: {
@@ -209,30 +271,33 @@ export const hasPersonalActionOwner = (
   selfOptions: ThirdPartyAssigneeOptions,
 ): boolean => {
   const metadata = parseActionMetadata(action.metadata);
-  if (action.assigned_to)
-    return Boolean(
-      selfOptions.selfPersonId &&
-        action.assigned_to === selfOptions.selfPersonId,
-    );
-
+  if (
+    isExplicitOtherActionOwner(action, selfOptions) ||
+    isUnresolvedInheritedActionOwner(action, selfOptions)
+  )
+    return false;
+  const adopted =
+    metadata.owner_source === 'user' ||
+    metadata.origin === 'user' ||
+    getCommitmentState(action.metadata) === 'confirmed';
+  if (adopted) return true;
+  if (metadata.source_regeneration_review_required) return false;
+  if (
+    metadata.origin === 'extraction' &&
+    metadata.source_action_review_version !== 1
+  )
+    return false;
   const assignee =
     typeof metadata.assignee_name === 'string'
       ? metadata.assignee_name.trim().toLowerCase()
       : '';
-  const selfAssignees = new Set([
+  const selfNames = new Set([
     ...SELF_ACTION_ASSIGNEES,
     ...(selfOptions.selfNames ?? []).map((name) => name.trim().toLowerCase()),
   ]);
-  if (assignee && !selfAssignees.has(assignee)) return false;
-
-  if (
-    metadata.origin === 'user' ||
-    getCommitmentState(action.metadata) === 'confirmed'
-  )
-    return true;
-
   return Boolean(
     assignee &&
+      selfNames.has(assignee) &&
       getActionSourceMeetingId(action.metadata) &&
       typeof metadata.source_evidence === 'string' &&
       metadata.source_evidence.trim(),

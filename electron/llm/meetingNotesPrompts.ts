@@ -53,24 +53,27 @@ const notesBlockSchema = [
   'Text = {text: nonempty string, sources: copied source descriptor[]}.',
   'Item = {text: nonempty string, sources: copied source descriptor[], kind: "point" | "action" | "decision" | "question", owner: string | null, due: string | null}.',
   'Use kind: "point" for discussion.',
-  'Section = {id: string, title: Text, items: Item[]}.',
+  'Section = {title: Text, items: Item[]}.',
 ].join('\n');
 
 export const notesDraftSchema = [
   'Field definitions (not output content):',
   notesBlockSchema,
-  'Document = {title: Text | null, meetingType: one_on_one | team_sync | brainstorm | presentation | general, overview: Text | null, sections: Section[], recentWin: {win: Text, impact: Text, ownership: personal | shared | other | unknown, owner: string | null} | null}. title is required and is a concise descriptive title for the overall meeting (max 5-7 words) citing the main topic source descriptor(s), or null only when no trustworthy overall title can be grounded. Do not use a single topic heading as the meeting title unless it represents the whole meeting. recentWin is optional; include only a completed positive event and its source-backed impact. When present, recentWin.win and recentWin.impact must be complete Text blocks, not null. Use personal when the evidence assigns the win to one identifiable person and copy that exact name or speaker label into owner; use shared for an explicitly collective win and owner null; use other when the evidence clearly assigns it outside the participating group; use unknown when ownership cannot be grounded. Do not infer ownership beyond the cited source.',
-  'Use null for an uncertain title/overview/recentWin and [] for empty sections/items. The application assigns canonical block ids after parsing.',
+  'Document = {title: Text | null, meetingType: one_on_one | team_sync | brainstorm | presentation | general, overview: Text | null, sections: Section[], recentWin: {win: Text, impact: Text, ownership: personal | shared | other | unknown, owner: string | null} | null}. Follow the supplied schema for required fields. Use a concise grounded title for the overall conversation, not merely its first section, or null when uncertain. The overview is a brief source-supported summary, or null.',
+  'recentWin is optional: include only a completed positive event with an explicitly supported impact. recentWin.win and recentWin.impact must be complete Text blocks, not null. Set ownership to personal with its exact source-backed owner, shared with owner null for a collective event, other for an event outside the participating group, or unknown when ungrounded. Do not invent an impact or owner to fill this field.',
+  'Use null for uncertain optional metadata and [] for empty sections/items. The application assigns canonical block ids after parsing; do not invent ids unless this stage explicitly requires them.',
 ].join('\n');
 
 const compactNotesDraftSchema = [
   'Field definitions (not output content):',
   'Title = {text: nonempty string, sources: 1 to at most 3 copied source descriptors}.',
+  'Overview = {text: nonempty string, sources: 1 to at most 3 copied source descriptors}. Write a concise 1-2 sentence overview in readable prose that connects the main topics and outcomes; cite the source descriptors supporting it. Use null when no trustworthy overview can be grounded.',
   'Item = {kind: "point" | "action" | "decision" | "question", text: nonempty string, owner: string | null, due: string | null, sources: 1 to at most 3 copied source descriptors}.',
-  'Use kind: "point" for discussion.',
+  'Use kind: "point" for discussion. Points and questions have null owner and due.',
+  'For actions and decisions, owner and due must be source-supported, or null when unknown. First-person responsibilities use the recorded canonical speaker as owner. Use an unconfirmed introduced name only when the item cites both the standalone same-speaker introduction and its responsibility; otherwise keep the recorded label. Never rename Me or a confirmed recorded speaker. Explicitly named reported third-party owners remain valid independently of the speaker roster.',
   'Section = {title: nonempty string, items: nonempty Item[]}.',
-  'Document = {title: Title | null, sections: Section[]}. title is the concise 5-7 word title for the overall meeting, not the first section heading; cite only the source descriptors needed to support the whole-meeting title, and use null when no trustworthy overall title can be grounded. The final editor classifies the meeting.',
-  'The title field is required even when its value is null.',
+  'Document = {title: Title | null, overview: Overview | null, sections: Section[]}. title is a concise grounded title for the overall conversation, not the first section heading; cite only the source descriptors needed to support the whole-meeting title, and use null when no trustworthy overall title can be grounded. Do not add fields outside this compact contract.',
+  'The title and overview fields are required even when their values are null.',
 ].join('\n');
 
 export const notesDispositionSchema =
@@ -83,11 +86,12 @@ export const notesTerminologySchema = [
 
 export const notesAuditCorrectionGuidance = [
   'BEGIN AUDIT CORRECTION GUIDANCE',
-  'Work source-first across every provided turn. Put every accepted operation, prerequisite, deadline, owner and recipient from those turns in the action itself; a summary mention is insufficient. Keep unknown details unknown.',
-  'Retain material completed-work who/when and explicit personal feelings and reasons as points, without inferring details or converting completed work into tasks.',
-  'Distinguish settled decisions from task-scope clarifications. Keep clarifications as points or in the affected action, not separate decisions unless a settled choice is explicit.',
-  'Correct all similar errors, not only the first parser target. Correct wording, kind and supporting sources together; include necessary antecedent task scope and acceptance. Use relevant exact descriptors, but inspect all permitted later turns for reversals; never narrow citations to hide contradictory evidence.',
-  'Return actual replacements/insertions with matching verdicts for the final text and kind. Approval verdicts alone cannot fix omissions or misclassification. Retain unaffected supported content.',
+  'Every turn: put every accepted operation, prerequisite, deadline, owner and recipient in the action itself; a summary mention is insufficient. Unknowns stay unknown.',
+  'Retain completed-work who/when and explicit personal feelings and reasons as points; infer nothing and never reopen work.',
+  'Separate historical cancellation/completion points from current replacement decisions/actions, each with own evidence; retain both and prerequisites. Never delete supported content to pass validation.',
+  'Distinguish settled decisions from task-scope clarifications; keep the latter as points or in the affected action.',
+  'Correct all similar errors, not only the first parser target: wording, kind and supporting sources together, including antecedent task scope and acceptance. Use relevant exact descriptors; inspect all permitted later turns for reversals; never narrow citations to hide contradictory evidence.',
+  'Return actual replacements/insertions with matching verdicts for final text/kind. Retain unaffected supported content; approval alone cannot fix errors.',
   'END AUDIT CORRECTION GUIDANCE',
 ].join('\n');
 
@@ -120,7 +124,7 @@ export const buildNotesWriterPrompt = ({
   [
     notesContentGuidance,
     notesProseGuidance,
-    'Every still-valid commitment belongs in a kind:action item. An overview mention is not a substitute for an action. Do not emit document rollups; code derives them from retained items.',
+    'Group useful sections by topic. Put each accepted responsibility in an action item rather than only the overview; code derives document rollups.',
     notesSourceGuidance,
     '',
     `Known terminology hints (entity hints are not trusted corrections): ${termsPacket(knownTerms)}`,
@@ -142,20 +146,9 @@ export const buildCompactNotesWriterPrompt = ({
   maxSourceSpans = 3,
 }: WriterPromptInput): string =>
   [
-    "Start the notes with accepted current responsibilities and future commitments: find each speaker's actual promise anywhere in the source, including brief colloquial promises between long discussions. A fragmented 'let me' promise can span adjacent fragments from the same identified speaker; retain all necessary fragments and its condition. Do not substitute an earlier tentative plan, proposed meeting time, or request from somebody else. State each promise close to its source wording as kind action with its actual speaker owner. Separate uncertain access approval, testing, a later production request and production availability; do not turn an estimate into a promise.",
-    'Track concrete work and scheduling commitments. Routine farewells or saying people will speak later, without a defined topic, task or arrangement, are not action items. A promised call about a specific task or an arranged meeting remains an action.',
-    'Retain every explicit settled choice as kind decision, with its reason and final state. Completed facts and status confirmations are points with actor and time. Conditional possible refusals remain discussion.',
-    "Keep each speaker's explicit experience, feeling and reason as an attributed point. Reports about other people's feelings do not cover the speaker's own reaction.",
-    'Preserve epistemic status: believed, expected, requested and confirmed are distinct. Preserve every prerequisite step and actor in order; an anticipated approval is not a confirmed approval.',
     notesContentGuidance,
     notesProseGuidance,
-    'Read the final turns again before returning: retain every accepted future commitment as an action, even when it is a short scheduling or notification promise after a long discussion. Cite the full task and acceptance, including antecedent requests and conditions, not an earlier tentative plan.',
-    'Keep every duration estimate tied to its stated starting point and endpoint. A total wait that includes approval, testing or provisioning must not become an additional wait after those steps. Preserve prerequisites and uncertainty in discussion points as well as actions; do not invent a relative date or a causal link.',
-    'Fictional writing example, not meeting facts: source "I think the sandbox approval went through. Once validation finishes, we can request live access. All of that should take another two or three working days." becomes "Sandbox approval was believed complete. Validation must finish before live access is requested. The total estimate, including those steps, was another two or three working days." Apply the same fidelity to the actual source; never copy facts from this example.',
-    'Keep scope clarifications and operating expectations as points unless the source explicitly settles a choice. A suggested helper, a request to book a session, or an agreed time without a booking confirmation must not become an accepted assignment or completed booking. Retain material proposed arrangements as discussion points, including their proposed time and unconfirmed booking status; uncertainty changes their classification, not whether they belong in the notes.',
-    'For actions and decisions, copy the supported owner and deadline into owner and due. Use null when absent. Keep every accepted operation, recipient, condition and deadline clear in the text itself.',
-    'Stay close to source wording in actions and decisions so deterministic evidence checks can verify them. For an explicit "the decision is" statement, use its speaker as owner. A withdrawal or replacement explanation is discussion, not a separate decision, unless the source explicitly settles it as a choice.',
-    `For each item, cite only the 1 to ${maxSourceSpans} source labels needed to support its exact claim.`,
+    'Group useful sections by topic. Put each accepted responsibility in an action item rather than only the overview.',
     notesSourceGuidance,
     '',
     `Known terminology hints (entity hints are not trusted corrections): ${termsPacket(knownTerms)}`,
@@ -170,7 +163,6 @@ export const buildCompactNotesWriterPrompt = ({
       'at most 3',
       `at most ${maxSourceSpans}`,
     ),
-    'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons, state changes and current commitments. Include unaccepted offers with their latest disposition, and every speaker’s own feelings and reasons; others’ reactions do not replace them. Compact repetition, not facts.',
   ].join('\n');
 
 export const buildNotesAuditPrompt = ({

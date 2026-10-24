@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createSerializedTaskGate } from '../serializedTaskGate';
 import {
   type LLMWorkClass,
@@ -54,6 +55,11 @@ export const getLocalInferenceAdmission = (
 });
 
 const runSerializedInference = createSerializedTaskGate<symbol, unknown>();
+const admissionScope = new AsyncLocalStorage<{
+  signal: AbortSignal;
+  active: boolean;
+  native: boolean;
+}>();
 
 export const runWithLocalInferenceCoordinator = <Result>({
   key,
@@ -79,9 +85,38 @@ export const runWithLocalInferenceCoordinator = <Result>({
     key,
     async (coordinatorSignal) => {
       onAdmitted?.({ task, queueMs: Date.now() - queuedAt });
-      return run(coordinatorSignal);
+      const admission = {
+        signal: coordinatorSignal,
+        active: true,
+        native: task === 'speaker',
+      };
+      try {
+        return await admissionScope.run(admission, () =>
+          run(coordinatorSignal),
+        );
+      } finally {
+        admission.active = false;
+      }
     },
     admission.priority,
     { signal, preemptible: admission.preemptible },
   ) as Promise<Result>;
+};
+
+/** Native audio work must settle local generation before loading its runtime. */
+export const runWithNativeInferenceCoordinator = <Result>(
+  run: (signal: AbortSignal) => Promise<Result>,
+  signal?: AbortSignal,
+): Promise<Result> => {
+  // Voice enrollment already owns this gate; its native lease must reuse admission.
+  const admission = admissionScope.getStore();
+  if (admission?.active && admission.native) {
+    return run(
+      AbortSignal.any([admission.signal, ...(signal ? [signal] : [])]),
+    );
+  }
+  return runSerializedInference(Symbol('transcription'), run, 40, {
+    signal,
+    preemptActive: true,
+  }) as Promise<Result>;
 };

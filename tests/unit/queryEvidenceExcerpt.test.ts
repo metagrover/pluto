@@ -85,3 +85,31 @@ it('retains authoritative task state before selecting relevant note excerpts', (
   expect(excerpt).toContain('Morgan — rejected: Send the obsolete report.');
   expect(excerpt.length).toBeLessThanOrEqual(500);
 });
+
+it('does not let repeated summary sentences crowd out a specific contact', () => {
+  const repeated = 'The group reviewed product scope and interaction design.';
+  const text = [
+    repeated,
+    repeated,
+    repeated,
+    'Design support',
+    'Consult Avery for design language and visual review.',
+    'Morgan handles infrastructure.',
+    ...Array.from({ length: 20 }, (_, i) => `Unrelated appendix ${i}.`),
+  ].join('\n');
+  const result = excerptQueryEvidence(text, 'design support', 300);
+  expect(result).toContain('Consult Avery');
+  expect(result.length).toBeLessThanOrEqual(300);
+});
+
+it('retains short acronyms when selecting a late passage', () => {
+  const text = [
+    'Background context.',
+    ...Array.from({ length: 30 }, (_, i) => `Unrelated note ${i}.`),
+    'FDEs should focus on product logic.',
+    'Infrastructure stays with the platform team.',
+  ].join('\n');
+  expect(excerptQueryEvidence(text, 'FDEs', 200)).toContain(
+    'FDEs should focus',
+  );
+});

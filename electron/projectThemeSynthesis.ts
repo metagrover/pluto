@@ -132,11 +132,22 @@ const selectedSources = (sources: ProjectThemeSource[]) => {
     320,
     Math.floor(MAX_SERIALIZED_SOURCE_CHARS / Math.max(1, selected.length)),
   );
-  return selected.map((source) => ({
-    ...source,
-    notes: source.notes.slice(0, perSource),
-    candidateProjects: source.candidateProjects.slice(0, 12),
-  }));
+  return selected.flatMap((source) => {
+    const end =
+      source.notes.length <= perSource
+        ? source.notes.length
+        : source.notes.lastIndexOf('\n', perSource);
+    const notes = source.notes.slice(0, Math.max(0, end)).trim();
+    return notes
+      ? [
+          {
+            ...source,
+            notes,
+            candidateProjects: source.candidateProjects.slice(0, 12),
+          },
+        ]
+      : [];
+  });
 };
 
 const evidenceHash = (sources: ProjectThemeSource[]) =>
@@ -206,7 +217,15 @@ const responseSchema: Record<string, unknown> = {
             type: 'object',
             additionalProperties: false,
             required: ['text', 'sourceMeetingId', 'evidenceQuote'],
-            properties: { text, sourceMeetingId: text, evidenceQuote: quote },
+            properties: {
+              text: {
+                ...text,
+                maxLength: 1200,
+                description: 'A concise summary in complete sentences.',
+              },
+              sourceMeetingId: text,
+              evidenceQuote: quote,
+            },
           },
           workstreams: {
             type: 'array',
@@ -402,7 +421,7 @@ export async function synthesizeProjectThemes(
         : [];
     });
   const sourceHash = createHash('sha256')
-    .update('project-identity-matching-v1')
+    .update('project-identity-matching-v2')
     .update(evidenceHash(fullSources))
     .update(JSON.stringify(corrections))
     .update(
@@ -458,7 +477,7 @@ A project theme is a stable outcome or focus that continues across at least two 
 Prefer the user's own terminology. Reconcile aliases and overlapping extracted candidates into one recognizable theme. Use candidateProjectIds only from the supplied candidateProjects. Do not create multiple themes for phases or tasks belonging to the same outcome.
 Reuse an existingProjectId from KNOWN PROJECTS whenever the evidence continues that project's outcome, even when new sources use different wording. Use an empty existingProjectId for a genuinely new initiative. Never group distinct outcomes solely because the same people or meetings mention them. Treat user-confirmed and completed projects as protected identities; do not rename, reactivate, or absorb them.
 For each theme, provide a concise name, durable outcome, current focus, exact supporting excerpts from at least two distinct note sources, recent changes, and open decisions, actions, questions, or risks. Every evidenceQuote must be an exact excerpt from that source's notes. If fewer than two conversations support a theme, omit it.
-Also provide a summary: a coherent current read explaining scope, what changed, and what remains unresolved, with a supporting sourceMeetingId and evidenceQuote. Provide workstreams as name/text/sourceMeetingId/evidenceQuote entries, describing the state of constituent work without invented owners, deadlines, completion, or percentages. Provide decisions as text/sourceMeetingId/evidenceQuote entries for actual settled decisions, not questions. All profile evidence must come from the theme's supporting meetings; include every cited meeting in evidence.
+Also provide a summary: a coherent current read in two or three complete sentences explaining scope, what changed, and what remains unresolved, with a supporting sourceMeetingId and evidenceQuote. Older dates are historical targets, not current deadlines; do not treat missing completion evidence as proof that old work remains pending. Provide workstreams as name/text/sourceMeetingId/evidenceQuote entries, describing the state of constituent work without invented owners, deadlines, completion, or percentages. Provide decisions as text/sourceMeetingId/evidenceQuote entries for actual settled decisions, not questions. All profile evidence must come from the theme's supporting meetings; include every cited meeting in evidence.
 For extracted candidates that clearly belong to this theme, provide memberships with projectId, relationship alias (another name for the SAME initiative) or workstream (a narrower task/topic/phase within it), sourceMeetingId, and an exact quote demonstrating that relationship. Mere co-occurrence is insufficient. Use only candidate IDs associated with that source. Include assigned IDs in candidateProjectIds. Omit uncertain assignments. Do not absorb user-confirmed projects. Do not put completed work into openThreads; qualify older unresolved items rather than assuming they remain open.
 KNOWN PROJECTS (untrusted context):
 ${JSON.stringify(knownProjects.map((project) => ({ id: project.id, name: project.name, status: project.status, pinned: isProjectStarred(project.metadata), outcome: (parseMetadata(project.metadata).projectThemeSynthesis as Record<string, unknown> | undefined)?.outcome || readProjectQualification(project.metadata)?.outcome, userConfirmed: readProjectQualification(project.metadata)?.source === 'user' })))}

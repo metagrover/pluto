@@ -41,6 +41,7 @@
     "prepare": "lefthook install",
     "audit:high": "node scripts/audit-high.mjs",
     "test": "vitest",
+    "test:e2e:meeting": "RUN_REAL_MEETING_E2E=1 vitest run --config vitest.manual.config.ts tests/manual/realMeeting.e2e.test.ts",
     "test:manual": "vitest run --config vitest.manual.config.ts",
     "benchmark:recording-quality": "node --experimental-strip-types scripts/run_recording_quality_benchmark.ts",
     "benchmark:encrypted-storage": "node --expose-gc --experimental-strip-types scripts/benchmark_encrypted_storage.ts",
@@ -88,9 +89,9 @@
     "react-markdown": "^10.1.0",
     "react-textarea-autosize": "^8.5.9",
     "remark-gfm": "^4.0.1",
-    "undici": "^6.29.0",
+    "undici": "^6.29.1",
     "unpdf": "^1.8.1",
-    "zod": "^3.25.76",
+    "zod": "^4.6.7",
     "zustand": "^5.0.11"
   },
   "optionalDependencies": {

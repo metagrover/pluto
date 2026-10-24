@@ -67,8 +67,13 @@ public struct ParakeetEouManagerRequest: Sendable {
 }
 
 public protocol ParakeetEouDriving: Sendable {
+    func warmModels(at activeModelURL: URL) async throws
     func makeManager(request: ParakeetEouManagerRequest) async throws
         -> any ParakeetEouManaging
+}
+
+public extension ParakeetEouDriving {
+    func warmModels(at _: URL) async throws {}
 }
 
 enum EouSessionFailure: Error, Equatable, Sendable {

@@ -4,6 +4,7 @@ import {
   canonicalizeActionText,
   parseActionMetadata,
 } from '../../src/utils/actionCommitment';
+import { isContinuationEditPath } from '../../src/utils/meetingNotesEditRebase';
 import { parseDueDate } from '../actionDueDate';
 
 const truncateAtWordBoundary = (text: string, maxLength = 100): string => {
@@ -40,6 +41,8 @@ interface PersistedEntityRow {
 }
 
 interface NativeContinuationItem {
+  kind?: 'action' | 'decision' | 'note' | 'paragraph' | 'review';
+  assignee?: string | null;
   id: string;
   text: string;
   completed?: boolean;
@@ -194,6 +197,7 @@ export const syncMeetingActionEntitiesFromUserEdits = (
     }
   }
 
+  let analysisData: Record<string, unknown> = {};
   let actionItems: Array<{
     text: string;
     assignee?: string | null;
@@ -206,10 +210,13 @@ export const syncMeetingActionEntitiesFromUserEdits = (
         string,
         unknown
       >;
+      analysisData = parsed;
       if (Array.isArray(parsed.all_action_items)) {
         actionItems = parsed.all_action_items as typeof actionItems;
       } else if (Array.isArray(parsed.action_items)) {
-        actionItems = parsed.action_items as typeof actionItems;
+        actionItems = parsed.action_items.map((item) =>
+          typeof item === 'string' ? { text: item } : item,
+        ) as typeof actionItems;
       }
     } catch {
       actionItems = [];
@@ -401,8 +408,6 @@ export const syncMeetingActionEntitiesFromUserEdits = (
     if (completionEdit && typeof completionEdit.edited === 'string') {
       effectiveStatus =
         completionEdit.edited === 'true' ? 'completed' : 'active';
-    } else if (meta.user_completed_edited) {
-      effectiveStatus = 'active';
     }
 
     const assignee =
@@ -531,9 +536,54 @@ export const syncMeetingActionEntitiesFromUserEdits = (
   let continuationsUpdated = 0;
   let continuationsRemoved = 0;
 
+  const legacyActionLists = new Set([
+    'continuation:all_action_items',
+    'continuation:action_items',
+    'continuation:v2:action',
+  ]);
+  const parentAction = (
+    path: string,
+  ): { assignee: string | null } | undefined => {
+    const parent = path.startsWith('native_continuations:')
+      ? path.slice('native_continuations:'.length)
+      : path.startsWith('continuation:')
+        ? path.slice('continuation:'.length)
+        : '';
+    const parts = parent.split(':');
+    const at = (list: unknown, key: string | undefined): unknown => {
+      const index = Number(key);
+      return key !== undefined &&
+        Number.isInteger(index) &&
+        index >= 0 &&
+        Array.isArray(list)
+        ? list[index]
+        : undefined;
+    };
+    let item: unknown;
+    if (parts.length === 2 && parts[0] === 'all_action_items')
+      item = at(analysisData.all_action_items, parts[1]);
+    else if (parts.length === 3 && parts[0] === 'v2' && parts[1] === 'action')
+      item = at(analysisData.action_items, parts[2]);
+    else if (
+      parts.length === 4 &&
+      parts[0] === 'topic' &&
+      parts[2] === 'action'
+    ) {
+      const topic = at(analysisData.topics, parts[1]);
+      if (topic && typeof topic === 'object')
+        item = at((topic as Record<string, unknown>).action_items, parts[3]);
+    }
+    if (typeof item === 'string') return { assignee: null };
+    if (!item || typeof item !== 'object') return undefined;
+    const owner = (item as Record<string, unknown>).assignee;
+    return {
+      assignee: typeof owner === 'string' && owner.trim() ? owner : null,
+    };
+  };
   const continuationPaths = Object.keys(editsMap).filter(
-    (key) => key.startsWith('continuation:') || key.includes(':continuation'),
+    isContinuationEditPath,
   );
+  const evaluatedContinuationPaths = new Set<string>();
 
   const activeContinuationEntityIds = new Set<string>();
 
@@ -544,14 +594,26 @@ export const syncMeetingActionEntitiesFromUserEdits = (
     let parsedItems: NativeContinuationItem[] = [];
     try {
       const parsed = JSON.parse(editEntry.edited);
-      if (Array.isArray(parsed)) {
-        parsedItems = parsed.filter(
-          (c): c is NativeContinuationItem =>
+      if (
+        !Array.isArray(parsed) ||
+        !parsed.every(
+          (c) =>
             Boolean(c) &&
             typeof c.id === 'string' &&
-            typeof c.text === 'string',
-        );
-      }
+            typeof c.text === 'string' &&
+            (c.kind === undefined ||
+              ['action', 'decision', 'note', 'paragraph', 'review'].includes(
+                c.kind,
+              )) &&
+            (c.assignee === undefined ||
+              c.assignee === null ||
+              typeof c.assignee === 'string') &&
+            (c.completed === undefined || typeof c.completed === 'boolean'),
+        )
+      )
+        continue;
+      evaluatedContinuationPaths.add(pathKey);
+      parsedItems = parsed;
     } catch {
       continue;
     }
@@ -559,21 +621,62 @@ export const syncMeetingActionEntitiesFromUserEdits = (
     for (const item of parsedItems) {
       if (!item.text.trim()) continue;
       const continuationEntityId = `action-continuation-${meetingId}-${item.id}`;
+      const existingContinuation = sqlite
+        .prepare('SELECT * FROM entities WHERE id = ?')
+        .get(continuationEntityId) as PersistedEntityRow | undefined;
+      const existingMetadata = parseActionMetadata(
+        existingContinuation?.metadata ?? null,
+      );
+      const parent = parentAction(pathKey);
+      const legacyList = legacyActionLists.has(pathKey);
+      const isAction = item.kind
+        ? item.kind === 'action'
+        : Boolean(parent || legacyList);
+      if (!isAction) {
+        if (
+          item.kind === undefined &&
+          (existingMetadata.reviewed_at ||
+            existingMetadata.owner_source === 'user')
+        )
+          activeContinuationEntityIds.add(continuationEntityId);
+        continue;
+      }
       activeContinuationEntityIds.add(continuationEntityId);
+      const owner =
+        existingMetadata.owner_source === 'user'
+          ? existingMetadata.assignee_name
+          : Object.hasOwn(item, 'assignee')
+            ? item.assignee
+            : parent?.assignee;
+      const ownerSource =
+        existingMetadata.owner_source === 'user' || legacyList
+          ? 'user'
+          : 'notes_parent';
 
       const canonical = canonicalizeActionText(item.text);
       const continuationName = truncateAtWordBoundary(
         canonical || item.text,
         100,
       );
-      const continuationStatus = item.completed ? 'completed' : 'active';
-
-      const existingContinuation = sqlite
-        .prepare('SELECT * FROM entities WHERE id = ?')
-        .get(continuationEntityId) as PersistedEntityRow | undefined;
+      const continuationStatus =
+        typeof item.completed === 'boolean'
+          ? item.completed
+            ? 'completed'
+            : 'active'
+          : (existingContinuation?.status ?? 'active');
 
       const metadata: ActionCommitmentMetadata = {
-        commitment_state: 'confirmed',
+        ...existingMetadata,
+        commitment_state:
+          existingMetadata.commitment_state === 'confirmed' ||
+          existingMetadata.commitment_state === 'rejected'
+            ? existingMetadata.commitment_state
+            : ownerSource === 'user' || owner
+              ? 'confirmed'
+              : 'possible',
+        owner_source: ownerSource,
+        assignee_name: typeof owner === 'string' ? owner : undefined,
+        continuation_kind: 'action',
         origin: 'user',
         source_meeting_id: meetingId,
         source_path: pathKey,
@@ -584,8 +687,11 @@ export const syncMeetingActionEntitiesFromUserEdits = (
 
       if (existingContinuation) {
         if (
+          JSON.stringify(existingMetadata) !== JSON.stringify(metadata) ||
           existingContinuation.name !== continuationName ||
           existingContinuation.status !== continuationStatus ||
+          parseActionMetadata(existingContinuation.metadata).source_path !==
+            pathKey ||
           parseActionMetadata(existingContinuation.metadata)
             .full_description !== item.text
         ) {
@@ -662,17 +768,22 @@ export const syncMeetingActionEntitiesFromUserEdits = (
   const existingUserContinuations = sqlite
     .prepare(
       `
-      SELECT id FROM entities
+      SELECT id, metadata FROM entities
       WHERE type = 'action_item'
         AND json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.source_meeting_id') = ?
         AND json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.origin') = 'user'
         AND json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.continuation_id') IS NOT NULL
     `,
     )
-    .all(meetingId) as Array<{ id: string }>;
+    .all(meetingId) as Array<{ id: string; metadata: string | null }>;
 
   for (const row of existingUserContinuations) {
-    if (!activeContinuationEntityIds.has(row.id)) {
+    const sourcePath = parseActionMetadata(row.metadata).source_path;
+    if (
+      !activeContinuationEntityIds.has(row.id) &&
+      typeof sourcePath === 'string' &&
+      evaluatedContinuationPaths.has(sourcePath)
+    ) {
       sqlite.prepare('DELETE FROM entities WHERE id = ?').run(row.id);
       try {
         sqlite

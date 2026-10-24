@@ -5,7 +5,10 @@ import { buildMeetingNotesSpeakerReferences } from '../src/utils/meetingNotesSpe
 import { meetingTitleNeedsGeneration } from '../src/utils/meetingTitle';
 import { buildAnalysisTranscriptFromJson } from '../src/utils/transcript';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
-import { notesContextTokens } from './llm/meetingNotesBudget';
+import {
+  notesContextTokens,
+  notesWriterPolicy,
+} from './llm/meetingNotesBudget';
 import {
   type MeetingNotesRunMetric,
   createMeetingNotesRunMetrics,
@@ -181,7 +184,7 @@ type NotesProvider = {
       templateSnapshot?: ResolvedMeetingNotesTemplate;
       contextTokens?: number;
       compactWriterContract?: boolean;
-      hierarchyAuditStrategy?: 'deterministic_only';
+      hierarchyAuditStrategy?: 'every_node' | 'deterministic_only';
       optionalReviewDeadlineAtMs?: number;
       optionalReviewMinStartMs?: number;
       stageCache?: NotesStageCache;
@@ -288,10 +291,22 @@ export const shouldUseMeetingNotesOptionalReviewBudget = (
 const hashFingerprint = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 
+/** Only the hash enters run/cache metadata; names remain in existing projection. */
+const speakerIdentityRevision = (
+  names: Readonly<Record<string, string>>,
+): string | null => {
+  const entries = Object.entries(names)
+    .map(([speaker, name]) => [speaker, name.trim()] as const)
+    .filter(([, name]) => name)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return entries.length ? hashFingerprint(entries) : null;
+};
+
 export const createMeetingNotesStageCacheKey = (input: {
   userNotesHash: string;
   terms: string[];
   trustedUserTerms?: string[];
+  speakerIdentityRevision?: string;
   template: Pick<ResolvedMeetingNotesTemplate, 'id' | 'revision'>;
   provider: string;
   model: string | null;
@@ -379,6 +394,8 @@ const stringSetting = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null;
 
 const errorCode = (error: unknown): string => {
+  if (error instanceof Error && error.name === 'LocalModelMemoryError')
+    return 'notes_memory_capacity';
   const initializationCodes = [
     'chatgpt_sign_in_required',
     'chatgpt_model_required',
@@ -499,7 +516,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       return Promise.resolve();
     secondaryByMeeting.set(input.meetingId, { runId: input.runId, controller });
     const update = (
-      secondaryStatus: 'running' | 'complete' | 'failed',
+      secondaryStatus: 'pending' | 'running' | 'complete' | 'failed',
       stage: string,
       code?: string,
     ) => {
@@ -561,6 +578,10 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       })
       .then(() => update('complete', 'complete'))
       .catch((error) => {
+        if (errorCode(error) === 'knowledge_document_refresh_deferred') {
+          update('pending', 'knowledge');
+          return;
+        }
         console.error(
           `[MeetingNotesCoordinator] Secondary run failed for meeting ${input.meetingId}:`,
           error,
@@ -694,7 +715,8 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         entityHints: terms,
         templateSnapshot: template,
         contextTokens: notesContextTokens(settings.llm_provider),
-        compactWriterContract: true,
+        compactWriterContract: notesWriterPolicy(settings.llm_provider)
+          .compactWriterContract,
         stageCache,
         cacheKey,
         workClass: 'automatic_notes',
@@ -816,7 +838,14 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       .filter((name) => typeof name === 'string' && name.trim())
       .slice(0, 24);
     const projection = identityProjection();
+    const identityRevision =
+      settings.llm_provider === 'chatgpt'
+        ? null
+        : speakerIdentityRevision(projection.speakerDisplayNames);
     const generationIdentity = {
+      ...(identityRevision
+        ? { speakerIdentityRevision: identityRevision }
+        : {}),
       userNotesHash: revisions.userNotesHash,
       terms,
       ...(projection.trustedUserTerms.length > 0
@@ -862,6 +891,8 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         metadata.provider === (settings.llm_provider ?? 'ollama') &&
         metadata.model === configuredModel(settings) &&
         metadata.prompt_version === NOTES_PROMPT_VERSION &&
+        (metadata.generation_options?.speaker_identity_revision ?? null) ===
+          identityRevision &&
         metadata.notes_template?.id === template.id &&
         metadata.notes_template.revision === template.revision &&
         (metadata.generation_options?.structured_thinking ?? false) ===
@@ -1101,8 +1132,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                     entityHints: terms,
                     templateSnapshot: template,
                     contextTokens: notesContextTokens(settings.llm_provider),
-                    compactWriterContract: true,
-                    hierarchyAuditStrategy: 'deterministic_only',
+                    ...notesWriterPolicy(settings.llm_provider),
                     ...optionalReviewBudgetOptions,
                     stageCache,
                     cacheKey: stageCacheKey,
@@ -1166,9 +1196,19 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             }
           })();
           if (controller.signal.aborted) throw controller.signal.reason;
+          if (
+            settings.llm_provider !== 'chatgpt' &&
+            speakerIdentityRevision(
+              identityProjection().speakerDisplayNames,
+            ) !== identityRevision
+          )
+            throw new Error('meeting_notes_superseded');
           if (analysis.generation_metadata) {
             analysis.generation_metadata.generation_options = {
               ...analysis.generation_metadata.generation_options,
+              ...(identityRevision
+                ? { speaker_identity_revision: identityRevision }
+                : {}),
               ...(typeof settings.ollama_structured_thinking === 'boolean'
                 ? { structured_thinking: settings.ollama_structured_thinking }
                 : {}),

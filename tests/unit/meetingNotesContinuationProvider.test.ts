@@ -12,6 +12,26 @@ const powerBlocker = vi.hoisted(() => ({
   start: vi.fn(() => 7),
   stop: vi.fn(),
 }));
+vi.mock('../../electron/llm/localModelMemory', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('../../electron/llm/localModelMemory')
+    >();
+  return {
+    ...actual,
+    readLocalModelMemory: vi.fn(async () => ({
+      available: 30 * 1024 ** 3,
+      total: 32 * 1024 ** 3,
+    })),
+    watchLocalModelMemory: vi.fn(() => ({
+      signal: new AbortController().signal,
+      setResidentCheck() {},
+      start() {},
+      dispose() {},
+    })),
+  };
+});
+
 vi.mock('electron', () => ({ powerSaveBlocker: powerBlocker }));
 
 vi.mock('../../electron/llm/ollamaHttpTransport', () => ({
@@ -165,7 +185,7 @@ it('reuses each matching chunk after all bounded writers finish', async () => {
     expect(bodies[index + 3].messages[0]).toEqual(bodies[index].messages[0]);
 });
 
-it('enables reuse for a compact direct run and keeps separate runs independent', async () => {
+it('enables reuse for an explicit legacy final-only compact diagnostic and keeps runs independent', async () => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url, init) => {
@@ -216,6 +236,7 @@ it('enables reuse for a compact direct run and keeps separate runs independent',
     const result = await provider.generateStructuredAnalysis('', '', 'auto', {
       source,
       compactWriterContract: true,
+      hierarchyAuditStrategy: 'final_only',
       reuseWriterContext,
     });
     expect(result.all_action_items).toEqual([
@@ -232,6 +253,10 @@ const electronProvider = () => {
   });
   vi.mocked(transport.ollamaHttpFetch).mockImplementation(async (url, init) => {
     if (url.endsWith('/api/ps')) return Response.json({ models: [] });
+    if (url.endsWith('/api/tags'))
+      return Response.json({
+        models: [{ name: 'gemma4:12b', size: 7_000_000_000 }],
+      });
     bodies.push(JSON.parse(String(init?.body)));
     return Response.json({ response: 'Outline', done: true });
   });
@@ -282,6 +307,10 @@ it('does not unload a long-running request or the model just used by it', async 
   let complete!: (response: Response) => void;
   vi.mocked(transport.ollamaHttpFetch).mockImplementation(async (url, init) => {
     if (url.endsWith('/api/ps')) return Response.json({ models: [] });
+    if (url.endsWith('/api/tags'))
+      return Response.json({
+        models: [{ name: 'gemma4:12b', size: 7_000_000_000 }],
+      });
     bodies.push(JSON.parse(String(init?.body)));
     return new Promise<Response>((resolve) => {
       complete = resolve;

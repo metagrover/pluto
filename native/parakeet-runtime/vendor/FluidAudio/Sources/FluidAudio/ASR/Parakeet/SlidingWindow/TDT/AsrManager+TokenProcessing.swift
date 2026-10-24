@@ -39,16 +39,14 @@ extension AsrManager {
 
         var timings: [TokenTiming] = []
 
-        // Create combined data for sorting
-        let combinedData = zip(
+        var tokenData: [ChunkProcessor.TokenWindow] = zip(
             zip(zip(tokenIds, timestamps), confidences),
             tokenDurations.isEmpty ? Array(repeating: 0, count: tokenIds.count) : tokenDurations
         ).map {
-            (tokenId: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
+            (token: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
         }
 
-        // Sort by timestamp to ensure chronological order
-        let sortedData = combinedData.sorted { $0.timestamp < $1.timestamp }
+        ChunkProcessor.clampTokenTimestamps(&tokenData)
 
         let frameDuration = ASRConstants.secondsPerEncoderFrame
 
@@ -61,13 +59,13 @@ extension AsrManager {
             ProcessInfo.processInfo.environment["TDT_EMISSION_DELAY_FRAMES"]
             .flatMap { Int($0) } ?? 1
 
-        for i in 0..<sortedData.count {
-            let data = sortedData[i]
-            let tokenId = data.tokenId
+        for i in 0..<tokenData.count {
+            let data = tokenData[i]
+            let tokenId = data.token
             let frameIndex = max(0, data.timestamp - emissionDelayFrames)
             let nextFrameIndex =
-                i < sortedData.count - 1
-                ? max(0, sortedData[i + 1].timestamp - emissionDelayFrames)
+                i < tokenData.count - 1
+                ? max(0, tokenData[i + 1].timestamp - emissionDelayFrames)
                 : frameIndex
 
             let startTime = TimeInterval(frameIndex) * frameDuration
@@ -77,7 +75,7 @@ extension AsrManager {
             if !tokenDurations.isEmpty && data.duration > 0 {
                 let durationInSeconds = TimeInterval(data.duration) * frameDuration
                 endTime = startTime + max(durationInSeconds, frameDuration)
-            } else if i < sortedData.count - 1 {
+            } else if i < tokenData.count - 1 {
                 let nextStartTime = TimeInterval(nextFrameIndex) * frameDuration
                 endTime = max(nextStartTime, startTime + frameDuration)
             } else {

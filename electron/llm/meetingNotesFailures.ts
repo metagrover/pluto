@@ -1,6 +1,8 @@
 import { MeetingNotesError } from './meetingNotesTypes';
 
 export const classifyMeetingNotesFailure = (error: unknown): string => {
+  if (error instanceof Error && error.name === 'LocalModelMemoryError')
+    return 'notes_memory_capacity';
   if (error instanceof MeetingNotesError) return error.code;
   if (error instanceof SyntaxError) return 'notes_provider_response_invalid';
   if (error instanceof DOMException && error.name === 'TimeoutError') {

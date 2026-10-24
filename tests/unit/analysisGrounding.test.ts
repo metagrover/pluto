@@ -3,10 +3,130 @@ import { describe, expect, it } from 'vitest';
 import {
   groundAnalysisDocument,
   groundSourceReviewedItem,
+  hasSourceReviewedAcceptance,
+  hasUnsupportedQuantityScope,
   normalizeTranscriptEvidence,
   resolveTranscriptEvidence,
 } from '../../electron/llm/analysisGrounding';
 import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
+
+it.each([
+  {
+    text: 'The team decided to keep the existing lanyards because replacements waste plastic.',
+    evidence:
+      'We decided not to replace the badges because replacements waste plastic. We will keep the existing lanyards.',
+    accepted: true,
+  },
+  {
+    text: 'Keep the printed instructions.',
+    evidence:
+      'We decided not to record narration. We will keep the printed instructions.',
+    accepted: true,
+  },
+  {
+    text: 'Print labels.',
+    evidence: 'We decided not to print maps. We will print labels.',
+    accepted: true,
+  },
+  {
+    text: 'Print maps.',
+    evidence: 'We decided not to print maps. We will print labels.',
+    accepted: false,
+  },
+  {
+    text: 'Keep the existing lanyards.',
+    evidence:
+      'We will keep the existing lanyards. We decided not to keep the existing lanyards.',
+    accepted: false,
+  },
+  {
+    text: 'Do not keep the existing lanyards.',
+    evidence:
+      'We decided not to replace the badges. We will keep the existing lanyards.',
+    accepted: false,
+  },
+  {
+    text: 'Keep the existing lanyards.',
+    evidence:
+      'We decided not to replace the badges. We will keep the existing lanyards only if the safety review passes.',
+    accepted: false,
+  },
+  {
+    text: 'Keep 20 existing lanyards.',
+    evidence:
+      'We decided not to replace the badges. We will keep 12 existing lanyards.',
+    accepted: false,
+  },
+  {
+    text: 'The team decided to keep the existing lanyards because replacements waste plastic.',
+    evidence:
+      'We decided not to replace the badges because replacements waste plastic. We will keep the existing lanyards, maybe.',
+    accepted: false,
+  },
+  {
+    text: 'The team decided to keep the existing lanyards because replacements waste plastic.',
+    evidence:
+      'We decided not to replace the badges because replacements waste plastic. We will keep the existing lanyards, but the decision is not final.',
+    accepted: false,
+  },
+])(
+  'keeps decision polarity scoped to the copied choice: $evidence',
+  ({ text, evidence, accepted }) => {
+    const resolved = {
+      evidence,
+      quotedEvidence: evidence,
+      sourceLine: `Rina: ${evidence}`,
+      sourceLines: [`Rina: ${evidence}`],
+      lineIndex: 0,
+    };
+    const snapshot = structuredClone(resolved);
+    const result = groundSourceReviewedItem(
+      { text, kind: 'decision', owner: null, due: null },
+      resolved,
+    );
+    expect(result !== null).toBe(accepted);
+    expect(resolved).toEqual(snapshot);
+  },
+);
+
+it.each([
+  {
+    evidence: 'I will review the checklist by Wednesday, October twenty first.',
+    due: 'October twenty first',
+    expected: 'October twenty first',
+  },
+  {
+    evidence: 'I will review the checklist by Wednesday October 21.',
+    due: 'October 21',
+    expected: 'October 21',
+  },
+  {
+    evidence: 'I will review the checklist by Wednesday, October 22.',
+    due: 'October 21',
+    expected: null,
+  },
+  {
+    evidence:
+      'I will review the checklist by Wednesday, October 21. Not October 21; the deadline is now October 28.',
+    due: 'October 21',
+    expected: null,
+  },
+])(
+  'grounds the stated calendar date after a weekday without accepting another date: $evidence',
+  ({ evidence, due, expected }) => {
+    const result = groundSourceReviewedItem(
+      { text: 'Review the checklist', kind: 'action', owner: 'Milo', due },
+      {
+        evidence,
+        quotedEvidence: evidence,
+        sourceLine: `Milo: ${evidence}`,
+        sourceLines: [`Milo: ${evidence}`],
+        lineIndex: 0,
+      },
+    );
+    expect(result?.due).toBe(expected);
+  },
+);
 
 describe('source-reviewed explicit negative decisions', () => {
   const review = (
@@ -1472,4 +1592,693 @@ describe('filler-prefixed first-person owner phrases', () => {
       )?.owner,
     ).toBe('Nora');
   });
+});
+
+describe('equivalent source-reviewed forms and ongoing ownership', () => {
+  const review = (
+    text: string,
+    evidence: string,
+    kind: 'action' | 'decision' = 'action',
+    due: string | null = null,
+    owner: string | null = 'Rina',
+  ) => {
+    const resolved = {
+      evidence,
+      quotedEvidence: evidence,
+      sourceLine: `Rina: ${evidence}`,
+      sourceLines: [`Rina: ${evidence}`],
+      lineIndex: 0,
+    };
+    const original = structuredClone(resolved);
+    const result = groundSourceReviewedItem(
+      { text, kind, owner, due },
+      resolved,
+    );
+    expect(resolved).toEqual(original);
+    return result;
+  };
+  it.each(["isn't", 'isn’t'])(
+    'preserves a settled decision with equivalent %s negation',
+    (negative) => {
+      expect(
+        review(
+          'Run a pilot because testing is not complete.',
+          `We decided to run a pilot because testing ${negative} complete.`,
+          'decision',
+          null,
+          null,
+        ),
+      ).not.toBeNull();
+      expect(
+        review(
+          'Run a pilot because testing is complete.',
+          `We decided to run a pilot because testing ${negative} complete.`,
+          'decision',
+          null,
+          null,
+        ),
+      ).toBeNull();
+    },
+  );
+  it.each([
+    { source: 'October 21st', claim: 'October 21', due: 'October 21' },
+    { source: 'October 21', claim: 'October 21st', due: 'October 21st' },
+    { source: 'February 3rd', claim: 'February 3', due: 'February 3' },
+  ])(
+    'retains equivalent ordinal date $source / $claim without changing source',
+    ({ source, claim, due }) => {
+      expect(
+        review(
+          `Review the rules by Wednesday, ${claim}.`,
+          `I will review the rules by Wednesday, ${source}.`,
+          'action',
+          due,
+        ),
+      ).toMatchObject({ owner: 'Rina', due });
+    },
+  );
+  it('rejects a different calendar day and keeps a superseded ordinal deadline absent', () => {
+    expect(
+      review(
+        'Review the rules by October 22.',
+        'I will review the rules by October 21st.',
+        'action',
+        'October 22',
+      ),
+    ).toBeNull();
+    expect(
+      review(
+        'Review the rules',
+        'I will review the rules by October 21st. Not October 21st; the deadline is now October 28.',
+        'action',
+        'October 21',
+      )?.due,
+    ).toBeNull();
+  });
+  it.each([
+    {
+      text: 'Continue preparing the support handover.',
+      evidence: 'I am preparing the support handover.',
+    },
+    {
+      text: 'Continue reviewing the access rules.',
+      evidence: "I'm currently reviewing the access rules.",
+    },
+    {
+      text: 'Working on the rollout guide.',
+      evidence: 'I am still working on the rollout guide.',
+    },
+  ])(
+    'retains the recorded speaker of explicit current work: $evidence',
+    ({ text, evidence }) => {
+      expect(review(text, evidence)).toMatchObject({
+        owner: 'Rina',
+        due: null,
+      });
+      expect(review(text, evidence, 'action', null, 'Sam')?.owner).toBeNull();
+    },
+  );
+  it.each([
+    'I am not preparing the support handover.',
+    'Am I preparing the support handover?',
+    'I might be preparing the support handover.',
+    'I am considering preparing the support handover.',
+    'I am hoping to prepare the support handover.',
+    'I am preparing the support handover?',
+    'Sam is preparing the support handover.',
+    'I am planning to prepare the support handover.',
+  ])(
+    'does not assign uncertain, negated, requested or other-owned work: %s',
+    (evidence) => {
+      expect(
+        review('Continue preparing the support handover.', evidence)?.owner ??
+          null,
+      ).toBeNull();
+    },
+  );
+});
+
+describe('source-bound quantity membership and additions', () => {
+  it.each([
+    'other three',
+    'three other',
+    'additional three',
+    'three extra',
+    'another three',
+    'three more',
+    'different three',
+  ])('rejects unsupported count-bound scope: %s workspaces', (phrase) => {
+    expect(
+      hasUnsupportedQuantityScope(
+        `Run a pilot with ${phrase} workspaces.`,
+        'We decided to run a pilot with three workspaces first.',
+      ),
+    ).toBe(true);
+  });
+  it.each([
+    ['other three workspaces', 'three different workspaces'],
+    ['three additional workspaces', 'another 3 workspaces'],
+    ['3 extra profiles', 'three more profiles'],
+    ['another three days', 'three additional days'],
+    ['extra 2.5 hours', '2.5 more hours'],
+  ])(
+    'accepts a supported quantity-bound paraphrase: %s / %s',
+    (claim, evidence) => {
+      expect(hasUnsupportedQuantityScope(claim, evidence)).toBe(false);
+    },
+  );
+  it.each([
+    ['other three workspaces', 'three additional workspaces'],
+    ['three more workspaces', 'three different workspaces'],
+    ['three extra workspaces', 'three extra profiles'],
+    ['three additional workspaces', 'two additional workspaces'],
+    [
+      'other three workspaces',
+      'Other people said three workspaces were enough.',
+    ],
+  ])(
+    'does not borrow a different scope, unit, count or unrelated other: %s / %s',
+    (claim, evidence) => {
+      expect(hasUnsupportedQuantityScope(claim, evidence)).toBe(true);
+    },
+  );
+  it.each([
+    'Other people said three workspaces were enough.',
+    'The three workspaces belong to other teams.',
+    'Three workspaces were discussed with additional people.',
+    'Another person confirmed the three workspaces.',
+  ])(
+    'does not hold ordinary reported others or unrelated qualifiers: %s',
+    (claim) => {
+      expect(
+        hasUnsupportedQuantityScope(claim, 'We agreed on three workspaces.'),
+      ).toBe(false);
+    },
+  );
+  it('holds the actual pilot expansion through shared commitment grounding', () => {
+    const evidence =
+      "We decided to run a pilot with three workspaces first, because authentication testing isn't complete.";
+    const resolved = {
+      evidence,
+      quotedEvidence: evidence,
+      sourceLine: `Milo: ${evidence}`,
+      sourceLines: [`Milo: ${evidence}`],
+      lineIndex: 0,
+    };
+    expect(
+      groundSourceReviewedItem(
+        {
+          text: evidence.replace('three workspaces', 'other three workspaces'),
+          kind: 'decision',
+          owner: null,
+          due: null,
+        },
+        resolved,
+      ),
+    ).toBeNull();
+    expect(
+      groundSourceReviewedItem(
+        { text: evidence, kind: 'decision', owner: null, due: null },
+        resolved,
+      ),
+    ).not.toBeNull();
+  });
+});
+
+it.each([
+  { evidence: 'I will send the guide by Friday.', supported: false },
+  {
+    evidence: 'I will send the guide after security approves.',
+    supported: true,
+  },
+  { evidence: 'I will send the guide after legal approves.', supported: false },
+])(
+  'requires the reviewed action condition in its own evidence: $evidence',
+  ({ evidence, supported }) => {
+    const text = 'Send the guide after security approval.';
+    const result = groundSourceReviewedItem(
+      { text, kind: 'action', owner: 'Milo', due: null },
+      {
+        evidence,
+        quotedEvidence: evidence,
+        sourceLine: `Milo: ${evidence}`,
+        sourceLines: [`Milo: ${evidence}`],
+        lineIndex: 0,
+      },
+    );
+    expect(result !== null).toBe(supported);
+  },
+);
+
+it.each([true, false])(
+  'checks conditions against the complete own quoted evidence, not narrowed or adjacent context (quoted=%s)',
+  (quoted) => {
+    const narrowed = 'I will send the guide by Friday.';
+    const full =
+      'I will send the guide by Friday. I will send the guide after security approves.';
+    const result = groundSourceReviewedItem(
+      {
+        text: 'Send the guide after security approval.',
+        kind: 'action',
+        owner: 'Milo',
+        due: null,
+      },
+      {
+        evidence: quoted ? narrowed : full,
+        quotedEvidence: quoted ? full : narrowed,
+        sourceLine: `Milo: ${full}`,
+        sourceLines: [`Milo: ${full}`],
+        lineIndex: 0,
+      },
+    );
+    expect(result !== null).toBe(quoted);
+  },
+);
+
+describe('hard source-reviewed acceptance admission', () => {
+  const resolved = (evidence: string) => ({
+    evidence,
+    quotedEvidence: evidence,
+    sourceLines: [`Rowan: ${evidence}`],
+    sourceLine: `Rowan: ${evidence}`,
+    lineIndex: 0,
+  });
+  const action = {
+    kind: 'action' as const,
+    text: 'Send the samples within an hour.',
+    owner: 'Rowan',
+    due: null,
+  };
+  it.each([
+    ['We should be able to send the samples within an hour.', false],
+    ['I will send the samples within an hour.', true],
+  ])(
+    'retains the existing explicit-acceptance distinction: %s',
+    (evidence, expected) => {
+      expect(hasSourceReviewedAcceptance(action, resolved(evidence))).toBe(
+        expected,
+      );
+    },
+  );
+  it('keeps conservative polarity rejection separate from acceptance of a later promise', () => {
+    const evidence = resolved(
+      'I have not sent the samples yet, but I will send the samples within an hour.',
+    );
+    expect(hasSourceReviewedAcceptance(action, evidence)).toBe(true);
+    expect(groundSourceReviewedItem(action, evidence)).toBeNull();
+  });
+  it('continues rejecting a negated action in initial grounding', () => {
+    expect(
+      groundSourceReviewedItem(
+        action,
+        resolved('I will not send the samples within an hour.'),
+      ),
+    ).toBeNull();
+  });
+});
+
+it.each([
+  [
+    'unrelated promise',
+    'Rowan',
+    'We should be able to send samples within an hour. I will book the room.',
+    false,
+  ],
+  [
+    'same verb but different responsibility',
+    'Rowan',
+    'I will send the invoice within an hour.',
+    false,
+  ],
+  [
+    'same-task promise',
+    'Rowan',
+    'We should be able to send samples within an hour. I will send samples within an hour.',
+    true,
+  ],
+  [
+    'negated same-task promise',
+    'Rowan',
+    'We should be able to send samples within an hour. I will not send samples within an hour.',
+    false,
+  ],
+  [
+    'different speaker promise',
+    'Casey',
+    'I will send samples within an hour.',
+    false,
+  ],
+])(
+  'scopes modal acceptance to the responsibility and owner: %s',
+  (_label, speaker, text, expected) => {
+    const first = 'Rowan: We should be able to send samples within an hour.';
+    const second = `${speaker}: ${text}`;
+    expect(
+      hasSourceReviewedAcceptance(
+        {
+          kind: 'action',
+          text: 'Send samples within an hour.',
+          owner: 'Rowan',
+          due: null,
+        },
+        {
+          evidence: `We should be able to send samples within an hour. ${text}`,
+          quotedEvidence: `We should be able to send samples within an hour. ${text}`,
+          sourceLines: [first, second],
+          sourceLine: `${first} ${second}`,
+          lineIndex: 0,
+        },
+      ),
+    ).toBe(expected);
+  },
+);
+
+it('holds an unproven same-verb referent paraphrase rather than guessing acceptance', () => {
+  const evidence =
+    'Maybe I could book the planning call. I will book that call once funding is approved.';
+  expect(
+    hasSourceReviewedAcceptance(
+      {
+        kind: 'action',
+        text: 'Book the planning call once funding is approved.',
+        owner: 'Rowan',
+        due: null,
+      },
+      {
+        evidence,
+        quotedEvidence: evidence,
+        sourceLines: [`Rowan: ${evidence}`],
+        sourceLine: `Rowan: ${evidence}`,
+        lineIndex: 0,
+      },
+    ),
+  ).toBe(false);
+});
+
+describe('source-reviewed decision clause scope', () => {
+  const evidence =
+    'The decision is not to display original sketches. Only thumbnails may be displayed to conserve gallery space.';
+  const resolved = (text: string) => ({
+    evidence: text,
+    quotedEvidence: text,
+    sourceLine: `Ari: ${text}`,
+    sourceLines: [`Ari: ${text}`],
+    lineIndex: 0,
+  });
+  const item = (text: string) => ({
+    text,
+    kind: 'decision' as const,
+    owner: null,
+    due: null,
+  });
+  it('admits an exact settled prohibition without borrowing the neighboring permission modality', () => {
+    const claim = item('The decision is not to display original sketches.');
+    expect(hasSourceReviewedAcceptance(claim, resolved(evidence))).toBe(true);
+    expect(groundSourceReviewedItem(claim, resolved(evidence))).not.toBeNull();
+  });
+  it('retains the existing exact full permission-bearing choice', () => {
+    expect(
+      hasSourceReviewedAcceptance(item(evidence), resolved(evidence)),
+    ).toBe(true);
+  });
+  it('holds an unprovable permission-preserving paraphrase rather than guessing its equivalence', () => {
+    expect(
+      hasSourceReviewedAcceptance(
+        item(
+          'The decision is not to display original sketches. Only thumbnails may be displayed to save gallery space.',
+        ),
+        resolved(evidence),
+      ),
+    ).toBe(false);
+  });
+  it.each([
+    'The decision is not to display original sketches, but only thumbnails.',
+    'The decision is to display thumbnails.',
+    'Only thumbnails will be displayed to conserve gallery space.',
+  ])('does not harden permission into a publication plan: %s', (text) => {
+    expect(hasSourceReviewedAcceptance(item(text), resolved(evidence))).toBe(
+      false,
+    );
+  });
+  it('ignores an unrelated speculative neighbor for an exact settled clause only', () => {
+    expect(
+      hasSourceReviewedAcceptance(
+        item('The decision is not to display original sketches.'),
+        resolved(
+          'The decision is not to display original sketches. We might extend opening hours.',
+        ),
+      ),
+    ).toBe(true);
+  });
+  it.each([
+    'We might extend opening hours.',
+    'The decision is not to display original sketches. We might extend opening hours.',
+    'The decision is not to display original sketches. We will extend opening hours.',
+  ])(
+    'does not borrow a settled choice for a speculative neighboring claim: %s',
+    (text) => {
+      expect(
+        hasSourceReviewedAcceptance(
+          item(text),
+          resolved(
+            'The decision is not to display original sketches. We might extend opening hours.',
+          ),
+        ),
+      ).toBe(false);
+    },
+  );
+  it.each([
+    'But it is not yet final.',
+    'The decision is pending.',
+    'The decision is not yet final.',
+    'This is tentative.',
+  ])(
+    'does not bypass a later unsettled status with an earlier exact choice: %s',
+    (status) => {
+      const claim = 'The decision is not to display original sketches.';
+      expect(
+        hasSourceReviewedAcceptance(
+          item(claim),
+          resolved(`${claim} ${status} Only thumbnails may be displayed.`),
+        ),
+      ).toBe(false);
+    },
+  );
+  it('does not turn a decimal substring into an exact settled source clause', () => {
+    const source =
+      'The decision is to allocate 3.5 hours. Other uses may be proposed.';
+    expect(
+      hasSourceReviewedAcceptance(
+        item('The decision is to allocate 3.'),
+        resolved(source),
+      ),
+    ).toBe(false);
+    expect(
+      hasSourceReviewedAcceptance(
+        item('The decision is to allocate 3.5 hours.'),
+        resolved(source),
+      ),
+    ).toBe(true);
+  });
+  it('does not settle a pending exact decision clause', () => {
+    const pending =
+      'The decision is not yet final. Only thumbnails may be displayed.';
+    expect(
+      hasSourceReviewedAcceptance(
+        item('The decision is not yet final.'),
+        resolved(pending),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('source-reviewed sibling responsibility scope', () => {
+  const lines = [
+    'Arden: I will inspect the stage lights by Friday, and print the programme by Saturday. Printing the programme must wait until Robin approves the layout; the light inspection does not need that approval.',
+    'Robin: Agreed. Arden owns both tasks. I have not approved the layout yet.',
+    'Arden: I accept both tasks, with only the printing waiting on approval. Neither task is finished.',
+  ];
+  const resolve = (sourceLines = lines) => {
+    const evidence = sourceLines
+      .map((line) => line.slice(line.indexOf(':') + 1).trim())
+      .join(' ');
+    return {
+      evidence,
+      quotedEvidence: evidence,
+      sourceLines,
+      sourceLine: sourceLines.join(' '),
+      lineIndex: 0,
+    };
+  };
+  const action = (text: string, owner = 'Arden') => ({
+    text,
+    kind: 'action' as const,
+    owner,
+    due: null,
+  });
+  it('does not give an unconditional operation a sibling prerequisite', () => {
+    expect(
+      groundSourceReviewedItem(
+        action('Arden will inspect the stage lights.'),
+        resolve(),
+      ),
+    ).not.toBeNull();
+  });
+  it('does not negate a conditional operation with a sibling prerequisite exemption', () => {
+    expect(
+      groundSourceReviewedItem(
+        action(
+          'Arden will print the programme, which is contingent upon Robin’s approval of the layout.',
+        ),
+        resolve(),
+      ),
+    ).not.toBeNull();
+  });
+  it('still rejects the separately stated prerequisite being omitted from its actual responsibility', () => {
+    expect(
+      groundSourceReviewedItem(action('Print the programme.'), resolve()),
+    ).toBeNull();
+  });
+  it('does not borrow a sibling prerequisite to constrain the unconditional operation', () => {
+    expect(
+      groundSourceReviewedItem(
+        action('Inspect the stage lights after Robin approves the layout.'),
+        resolve(),
+      ),
+    ).toBeNull();
+  });
+  it('still rejects a same-responsibility negation rather than selecting only positive evidence', () => {
+    expect(
+      groundSourceReviewedItem(
+        action('Print the programme after Robin approves the layout.'),
+        resolve([...lines, 'Arden: I will not print the programme.']),
+      ),
+    ).toBeNull();
+  });
+  it('does not mistake the other operation’s negation for this task’s polarity', () => {
+    expect(
+      groundSourceReviewedItem(
+        action('Print the programme after Robin approves the layout.'),
+        resolve([...lines, 'Arden: Do not inspect the stage lights.']),
+      ),
+    ).not.toBeNull();
+  });
+  it('never assigns the first-person task to another actor', () => {
+    expect(
+      groundSourceReviewedItem(
+        action('Print the programme after Robin approves the layout.', 'Robin'),
+        resolve(),
+      )?.owner,
+    ).not.toBe('Robin');
+  });
+});
+
+// Within-meeting aliases require application-built, cited source proof.
+it('keeps a proven introduced action owner instead of replacing it with the voice label', () => {
+  const result = groundSourceReviewedItem(
+    {
+      text: 'Send the draft by Friday.',
+      kind: 'action',
+      owner: 'Ellis',
+      due: 'Friday',
+    },
+    {
+      evidence: 'Hey, it’s Ellis. I will send the draft by Friday.',
+      quotedEvidence: 'Hey, it’s Ellis. I will send the draft by Friday.',
+      sourceLine: 'UnconfirmedSpeaker: I will send the draft by Friday.',
+      sourceLines: [
+        'UnconfirmedSpeaker: Hey, it’s Ellis.',
+        'UnconfirmedSpeaker: I will send the draft by Friday.',
+      ],
+      lineIndex: 1,
+      speakerAliases: [
+        {
+          speaker: 'UnconfirmedSpeaker',
+          name: 'Ellis',
+          introductionSources: [{ segment: 0, start: 0, end: 16 }],
+        },
+      ],
+    },
+  );
+  expect(result?.owner).toBe('Ellis');
+});
+
+describe('source-reviewed reported responsibility ownership', () => {
+  const check = (claim: string, evidence: string) =>
+    groundSourceReviewedItem(
+      { kind: 'action', text: claim, owner: 'Mara', due: null },
+      {
+        evidence,
+        quotedEvidence: evidence,
+        sourceLine: `Finn: ${evidence}`,
+        sourceLines: [`Finn: ${evidence}`],
+        lineIndex: 0,
+      },
+    );
+  it.each([
+    [
+      'Mara is preparing the handover.',
+      "I'll be reading the handover. Mara is preparing the handover, not me.",
+    ],
+    [
+      'Mara is still reviewing the appendix.',
+      "I'll send a cover letter. Mara is still reviewing the appendix.",
+    ],
+    [
+      'Send the handover.',
+      "I'll be reading the handover. Mara will send the handover.",
+    ],
+  ])(
+    'uses the explicitly reported task owner despite unrelated reporter work: %s',
+    (claim, evidence) => {
+      expect(check(claim, evidence)?.owner).toBe('Mara');
+    },
+  );
+
+  it('still requires the reported task prerequisite in the claim', () => {
+    const evidence =
+      "I'll read the handover. Mara will send the handover after approval.";
+    expect(check('Send the handover.', evidence)).toBeNull();
+    expect(check('Send the handover after approval.', evidence)?.owner).toBe(
+      'Mara',
+    );
+  });
+  it.each([
+    [
+      'Send the handover.',
+      'Mara will send invitations. I will send the handover.',
+    ],
+    [
+      'Send invitations.',
+      'Mara will send the handover. I will send invitations.',
+    ],
+    [
+      'Mara is preparing the handover.',
+      'Mara is preparing invitations. I will prepare the handover.',
+    ],
+    [
+      'Send the handover and invitations.',
+      'Mara will send the handover. I will send invitations.',
+    ],
+  ])(
+    'requires the complete reported task before overriding the reporter: %s',
+    (claim, evidence) => {
+      expect(check(claim, evidence)?.owner).not.toBe('Mara');
+    },
+  );
+  it.each([
+    "I'll prepare the handover. Mara is reading the handover.",
+    "I'll read the handover. Mara is not preparing the handover.",
+    "I'll read the handover. Mara might be preparing the handover.",
+    "I'll read the handover. Is Mara preparing the handover?",
+    "I'll read the handover. Mara is preparing the handover?",
+    "I'll read the handover. Mara was preparing the handover yesterday.",
+  ])(
+    'does not borrow ownership from a different, uncertain, negated or historical task: %s',
+    (evidence) => {
+      expect(
+        check('Mara is preparing the handover.', evidence)?.owner,
+      ).not.toBe('Mara');
+    },
+  );
 });

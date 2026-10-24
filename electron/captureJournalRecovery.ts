@@ -1577,7 +1577,8 @@ export const recoverInterruptedCaptureJournals = async (
       }
       if (manifest.schemaVersion === 3 || manifest.schemaVersion === 4) {
         if (
-          manifest.lifecycleState === 'recording' &&
+          (manifest.lifecycleState === 'recording' ||
+            manifest.lifecycleState === 'stopping') &&
           (manifest.schemaVersion === 4 || deps.repairRawChunk)
         ) {
           for (const interval of manifest.intervals) {

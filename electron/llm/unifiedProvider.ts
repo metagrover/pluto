@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { GoogleGenAI } from '@google/genai';
 import { resolveConfiguredOllamaModel } from '../../src/utils/ollamaModels';
 import { ChatGPTError } from '../chatgpt/auth';
@@ -15,11 +16,28 @@ import type { AnalysisDocumentV3, TopicSection } from './analysisTypes';
 import {
   type LocalInferenceTask,
   runWithLocalInferenceCoordinator,
+  runWithNativeInferenceCoordinator,
 } from './inferenceCoordinator';
 import type { InferenceRequest } from './inferenceTypes';
 import type { LLMWorkClass } from './llmWorkClass';
-import { notesContextTokens, notesSourceSpanLimit } from './meetingNotesBudget';
-import { calculateNotesRequestBudget } from './meetingNotesBudget';
+import {
+  LocalModelMemoryError,
+  assertLocalModelMemoryCapacity,
+  getEstablishedGemmaLoadOptions,
+  isEstablishedGemmaArtifact,
+  readLocalModelMemory,
+  watchLocalModelMemory,
+} from './localModelMemory';
+
+import {
+  notesContextTokens,
+  notesSourceSpanLimit,
+  notesWriterPolicy,
+} from './meetingNotesBudget';
+import {
+  calculateNotesRequestBudget,
+  estimateNotesTokens,
+} from './meetingNotesBudget';
 import {
   type CompletedWriter,
   type ContinuationRequest,
@@ -397,6 +415,7 @@ let nextNotesStageSequence = 0;
 let electronActiveOllamaModel: string | null = null;
 let ollamaActivityEpoch = 0;
 let lastOllamaActivityAt = 0;
+const pendingOllamaUnloads = new Set<string>();
 
 /** Release only Pluto's idle resident model, never an active or newly used one. */
 export async function releaseIdleOllamaModel(
@@ -416,18 +435,43 @@ export async function releaseIdleOllamaModel(
         Date.now() - lastOllamaActivityAt < minimumIdleMs
       )
         return;
-      const request = process.versions.electron ? ollamaHttpFetch : fetch;
-      const response = await request('http://127.0.0.1:11434/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, keep_alive: 0, stream: false }),
-        signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
-      });
-      if (!response.ok) throw new Error('ollama_idle_unload_failed');
+      await requestConfirmedOllamaUnload(
+        'http://127.0.0.1:11434',
+        model,
+        AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
+      );
       if (electronActiveOllamaModel === model) electronActiveOllamaModel = null;
     },
   });
 }
+
+let localTranscriptionModelUnloader: (() => Promise<void>) | undefined;
+export const setLocalTranscriptionModelUnloader = (
+  unload?: () => Promise<void>,
+): void => {
+  localTranscriptionModelUnloader = unload;
+};
+
+export const runWithLocalTranscription = (
+  run: () => Promise<void>,
+  signal: AbortSignal,
+): Promise<void> =>
+  runWithNativeInferenceCoordinator(async (admittedSignal) => {
+    const model = electronActiveOllamaModel;
+    for (const pendingModel of new Set([
+      ...pendingOllamaUnloads,
+      ...(model ? [model] : []),
+    ])) {
+      await requestConfirmedOllamaUnload(
+        'http://127.0.0.1:11434',
+        pendingModel,
+        admittedSignal,
+      );
+    }
+    if (electronActiveOllamaModel === model) electronActiveOllamaModel = null;
+    admittedSignal.throwIfAborted();
+    await run();
+  }, signal);
 
 type LLMTask = LocalInferenceTask;
 
@@ -442,6 +486,57 @@ const normalizeOllamaModelName = (value: unknown): string | null => {
   return normalized.endsWith(':latest')
     ? normalized.slice(0, -':latest'.length)
     : normalized;
+};
+
+const readOllamaResidents = (payload: unknown): Map<string, string> => {
+  const models = (payload as { models?: unknown } | null)?.models;
+  if (!Array.isArray(models))
+    throw new Error('ollama_residency_discovery_failed');
+  const residents = new Map<string, string>();
+  for (const entry of models) {
+    const name = [entry?.name, entry?.model].find(
+      (value) => normalizeOllamaModelName(value) !== null,
+    );
+    const key = normalizeOllamaModelName(name);
+    if (!key || typeof name !== 'string')
+      throw new Error('ollama_residency_discovery_failed');
+    if (!residents.has(key)) residents.set(key, name.trim());
+  }
+  return residents;
+};
+
+const requestConfirmedOllamaUnload = async (
+  baseUrl: string,
+  model: string,
+  externalSignal?: AbortSignal,
+): Promise<void> => {
+  const key = normalizeOllamaModelName(model);
+  if (!key) throw new Error('ollama_residency_cleanup_failed');
+  const signal = AbortSignal.any([
+    AbortSignal.timeout(30_000),
+    ...(externalSignal ? [externalSignal] : []),
+  ]);
+  const request = process.versions.electron ? ollamaHttpFetch : fetch;
+  // A cancelled transport or successful unload response does not prove the runner stopped.
+  pendingOllamaUnloads.add(key);
+  const response = await request(`${baseUrl}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, keep_alive: 0, stream: false }),
+    signal,
+  });
+  if (!response.ok) throw new Error('ollama_residency_cleanup_failed');
+  for (;;) {
+    signal.throwIfAborted();
+    const status = await request(`${baseUrl}/api/ps`, { signal });
+    if (!status.ok) throw new Error('ollama_residency_discovery_failed');
+    const residents = readOllamaResidents(await status.json());
+    if (!residents.has(key)) {
+      pendingOllamaUnloads.delete(key);
+      return;
+    }
+    await delay(100, undefined, { signal });
+  }
 };
 
 export const getOllamaTimeoutMs = (task: string): number =>
@@ -543,6 +638,11 @@ export class UnifiedLLMProvider implements LLMProvider {
   private ollamaBaseUrl = 'http://127.0.0.1:11434';
   private geminiClient: GoogleGenAI | null = null;
   private activeOllamaModel: string | null = null;
+  private establishedGemmaAllocation: {
+    model: string;
+    contextTokens: number;
+  } | null = null;
+  private ollamaMemoryReclaimDeadline = 0;
 
   constructor(
     private providerType: ProviderType,
@@ -603,7 +703,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       sourceParagraphs?: boolean;
       ollamaNotesBatchSize?: 128 | 256 | 512;
       maxSourceCharactersPerLeaf?: 8000 | 12000 | 16000;
-      /** Model review policy; production currently disables model reviews. */
+      /** Audit placement; ordinary local notes use strict static validation. */
       hierarchyAuditStrategy?:
         | 'every_node'
         | 'final_only'
@@ -634,20 +734,28 @@ export class UnifiedLLMProvider implements LLMProvider {
     const hierarchyAuditStrategy =
       this.providerType === 'chatgpt'
         ? 'deterministic_only'
-        : options.hierarchyAuditStrategy;
+        : (options.hierarchyAuditStrategy ??
+          (this.providerType === 'ollama' ? 'deterministic_only' : undefined));
+    const compactWriterContract =
+      options.compactWriterContract ??
+      (this.providerType === 'ollama' && hierarchyAuditStrategy !== 'final_only'
+        ? notesWriterPolicy(this.providerType).compactWriterContract
+        : undefined);
     const model =
       this.providerType === 'ollama'
         ? await this.resolveOllamaModel('notesWriter')
         : this.getConfiguredAnalysisModel();
+    const semanticReviewTimeoutMs = 90_000;
     const source = options.source ?? createNotesSourceFromText(transcript);
     const notesContinuation =
       NOTES_EXPERIMENTS_ENABLED &&
       this.providerType === 'ollama' &&
-      options.compactWriterContract &&
+      compactWriterContract &&
       options.reuseWriterContext !== false
         ? {}
         : undefined;
-    const analysis = await generateMeetingNotes({
+    let completedStages = 0;
+    const input: Parameters<typeof generateMeetingNotes>[0] = {
       source,
       context: {
         userNotes: userNotes ?? '',
@@ -658,8 +766,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       stageCache: options.stageCache,
       cacheKey: options.cacheKey,
       hierarchyAuditStrategy,
-      ...(['ollama', 'chatgpt'].includes(this.providerType) &&
-      hierarchyAuditStrategy === 'deterministic_only'
+      ...(this.providerType === 'chatgpt'
         ? {
             reviewSourceBoundNotes: (
               notes: import('./meetingNotesAudit').AuditedNotes,
@@ -669,7 +776,8 @@ export class UnifiedLLMProvider implements LLMProvider {
                 async ({ prompt, responseSchema }) => {
                   if (
                     options.optionalReviewDeadlineAtMs !== undefined &&
-                    Date.now() + 90_000 >= options.optionalReviewDeadlineAtMs
+                    Date.now() + semanticReviewTimeoutMs >=
+                      options.optionalReviewDeadlineAtMs
                   )
                     throw new Error('semantic_review_publication_reserve');
                   options.onStage?.('notesAudit');
@@ -680,31 +788,27 @@ export class UnifiedLLMProvider implements LLMProvider {
                     jsonMode: true,
                     notesModel: model,
                     notesStageObserver: options.onStageEvent,
-                    notesBudget: {
-                      contextTokens:
-                        this.providerType === 'chatgpt' ? 32768 : 8192,
-                      outputTokens: 1536,
-                    },
+                    notesBudget: { contextTokens: 32768, outputTokens: 1536 },
                     workClass: options.workClass,
                     signal: options.signal
                       ? AbortSignal.any([
                           options.signal,
-                          AbortSignal.timeout(90_000),
+                          AbortSignal.timeout(semanticReviewTimeoutMs),
                         ])
-                      : AbortSignal.timeout(90_000),
+                      : AbortSignal.timeout(semanticReviewTimeoutMs),
                   });
                 },
                 options.signal,
-                this.providerType === 'chatgpt' ? 48_000 : 12_000,
+                48_000,
+                { contextTokens: 32768, outputTokens: 1536 },
               ),
           }
         : {}),
       reviewProtocol:
-        options.compactWriterContract &&
-        hierarchyAuditStrategy !== 'deterministic_only'
+        compactWriterContract && hierarchyAuditStrategy !== 'deterministic_only'
           ? 'editor'
           : undefined,
-      compactWriterContract: options.compactWriterContract,
+      compactWriterContract: compactWriterContract,
       maxSourceCharactersPerLeaf: options.maxSourceCharactersPerLeaf,
       correctionOnlyReview: options.correctionOnlyReview,
       compactSourceSpeakers: options.compactSourceSpeakers,
@@ -765,6 +869,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           notesModel: model,
           workClass: options.workClass,
         });
+        completedStages += 1;
         return wire.decode(raw);
       },
       provider: this.providerType,
@@ -772,8 +877,25 @@ export class UnifiedLLMProvider implements LLMProvider {
       contextTokens:
         options.contextTokens ?? notesContextTokens(this.providerType),
       ...(options.signal ? { signal: options.signal } : {}),
-    });
-    return analysis;
+    };
+    try {
+      return await generateMeetingNotes(input);
+    } catch (error) {
+      if (
+        this.providerType !== 'ollama' ||
+        completedStages > 0 ||
+        !(error instanceof LocalModelMemoryError) ||
+        !error.maxContextTokens ||
+        error.maxContextTokens >= input.contextTokens
+      )
+        throw error;
+      options.signal?.throwIfAborted();
+      // Repartition the complete source; every smaller request still needs fresh admission.
+      return generateMeetingNotes({
+        ...input,
+        contextTokens: error.maxContextTokens,
+      });
+    }
   }
 
   async precomputeStructuredAnalysisLeaf(
@@ -1252,7 +1374,9 @@ export class UnifiedLLMProvider implements LLMProvider {
       });
     }
     const isBackground =
-      options.task === 'knowledgeDoc' || options.task === 'dreaming';
+      options.workClass === 'background' ||
+      options.task === 'knowledgeDoc' ||
+      options.task === 'dreaming';
     if (!isBackground) {
       knowledgeSynthesisPause.acquire('llm_active');
     }
@@ -1307,16 +1431,47 @@ export class UnifiedLLMProvider implements LLMProvider {
             run: async (gateSignal) => {
               observeNotesStarted();
               options.onStart?.();
-              return this.generateWithOllama({
-                ...options,
-                onNotesMetrics: (metrics) => {
-                  terminalNotesMetrics = metrics;
-                  options.onNotesMetrics?.(metrics);
-                },
-                signal: options.signal
-                  ? AbortSignal.any([options.signal, gateSignal])
-                  : gateSignal,
-              });
+              const memory = process.versions.electron
+                ? watchLocalModelMemory()
+                : null;
+              const signal = AbortSignal.any([
+                gateSignal,
+                ...(options.signal ? [options.signal] : []),
+                ...(memory ? [memory.signal] : []),
+              ]);
+              let completed = false;
+              try {
+                const answer = await this.generateWithOllama(
+                  {
+                    ...options,
+                    onNotesMetrics: (metrics) => {
+                      terminalNotesMetrics = metrics;
+                      options.onNotesMetrics?.(metrics);
+                    },
+                    signal,
+                  },
+                  memory,
+                );
+                signal.throwIfAborted();
+                completed = true;
+                return answer;
+              } catch (error) {
+                signal.throwIfAborted();
+                throw error;
+              } finally {
+                let monitorDisposed = false;
+                try {
+                  await memory?.dispose();
+                  monitorDisposed = true;
+                } finally {
+                  if (
+                    (signal.aborted ||
+                      (memory && (!completed || !monitorDisposed))) &&
+                    this.activeOllamaModel
+                  )
+                    await this.unloadOllamaModel(this.activeOllamaModel);
+                }
+              }
             },
           });
           break;
@@ -1568,23 +1723,26 @@ export class UnifiedLLMProvider implements LLMProvider {
     return response.text ?? '';
   }
 
-  private async generateWithOllama({
-    prompt,
-    task,
-    jsonMode,
-    responseSchema,
-    signal,
-    onToken,
-    notesBudget,
-    notesResponseSchema,
-    notesModel,
-    modelOverride,
-    onNotesMetrics,
-    onNotesPartial,
-    onProgress,
-    notesContinuation,
-    notesBatchSize,
-  }: TextGenerationOptions): Promise<string> {
+  private async generateWithOllama(
+    {
+      prompt,
+      task,
+      jsonMode,
+      responseSchema,
+      signal,
+      onToken,
+      notesBudget,
+      notesResponseSchema,
+      notesModel,
+      modelOverride,
+      onNotesMetrics,
+      onNotesPartial,
+      onProgress,
+      notesContinuation,
+      notesBatchSize,
+    }: TextGenerationOptions,
+    memory?: ReturnType<typeof watchLocalModelMemory> | null,
+  ): Promise<string> {
     ollamaActivityEpoch += 1;
     lastOllamaActivityAt = Date.now();
     const model = modelOverride
@@ -1592,10 +1750,46 @@ export class UnifiedLLMProvider implements LLMProvider {
       : notesBudget && notesModel
         ? notesModel
         : await this.resolveOllamaModel(task);
-    await this.reconcileOllamaResidency(model, signal);
+    await localTranscriptionModelUnloader?.();
+    signal?.throwIfAborted();
+    const residency = await this.reconcileOllamaResidency(model, signal);
+    let resident = residency.resident;
     this.activeOllamaModel = model;
     if (process.versions.electron) electronActiveOllamaModel = model;
-    const { num_ctx, num_predict } = notesBudget
+    let entry: { size: number; digest?: string } | undefined;
+    if (process.versions.electron) {
+      const response = await this.ollamaFetch(
+        '/api/tags',
+        undefined,
+        OLLAMA_RESIDENCY_TIMEOUT_MS,
+        signal,
+      );
+      if (!response.ok)
+        throw new Error('Could not verify local model memory requirements.');
+      const payload = await response.json();
+      entry = payload.models?.find(
+        (item: { name?: string; model?: string }) =>
+          normalizeOllamaModelName(item.name ?? item.model) ===
+          normalizeOllamaModelName(model),
+      );
+      if (!entry || !Number.isFinite(entry.size) || entry.size <= 0)
+        throw new Error('Could not verify local model memory requirements.');
+    }
+    const boundedGemmaArtifact = isEstablishedGemmaArtifact(entry?.digest);
+    if (!resident) this.establishedGemmaAllocation = null;
+    if (
+      boundedGemmaArtifact &&
+      resident &&
+      (this.establishedGemmaAllocation?.model !== model ||
+        this.establishedGemmaAllocation.contextTokens !==
+          residency.contextTokens)
+    ) {
+      // /api/ps omits execution options; establish defaults through a verified cold load.
+      await this.requestOllamaUnload(model, signal);
+      resident = false;
+    }
+
+    const budget = notesBudget
       ? calculateNotesRequestBudget({
           prompt,
           contextTokens: notesBudget.contextTokens,
@@ -1606,6 +1800,124 @@ export class UnifiedLLMProvider implements LLMProvider {
           task,
           jsonMode && task === 'askPlutoDeep' ? 1024 : undefined,
         );
+    const num_predict = budget.num_predict;
+    const requestedContext =
+      (notesBudget || boundedGemmaArtifact) && !notesContinuation
+        ? Math.min(
+            notesBudget ? budget.num_ctx : getOllamaContextCap(task),
+            Math.ceil(
+              (estimateNotesTokens(prompt) + num_predict + 512) / 1024,
+            ) * 1024,
+          )
+        : budget.num_ctx;
+    // Ollama clamps vision-capable Gemma to 2048; account for that actual allocation.
+    const requiredContext = Math.max(
+      boundedGemmaArtifact ? 2048 : 0,
+      requestedContext,
+    );
+    if (notesBudget && requiredContext > budget.num_ctx)
+      throw new MeetingNotesError('notes_input_overflow');
+    const num_ctx =
+      resident &&
+      residency.contextTokens !== undefined &&
+      residency.contextTokens >= requiredContext &&
+      residency.contextTokens <=
+        (notesBudget || !boundedGemmaArtifact
+          ? budget.num_ctx
+          : getOllamaContextCap(task))
+        ? residency.contextTokens
+        : requiredContext;
+    if (entry)
+      console.info('[Local inference budget]', {
+        task,
+        promptCharacters: prompt.length,
+        estimatedInputTokens: estimateNotesTokens(prompt),
+        requiredContext,
+        residentContext: residency.contextTokens ?? null,
+        selectedContext: num_ctx,
+        outputTokens: num_predict,
+        resident,
+      });
+    // A context resize reloads the weights; do not account for it as a warm request.
+    if (
+      resident &&
+      residency.contextTokens !== undefined &&
+      residency.contextTokens !== num_ctx
+    ) {
+      await this.requestOllamaUnload(model, signal);
+      resident = false;
+    }
+    if (entry) {
+      const checkCapacity = async (isResident: boolean) => {
+        for (;;) {
+          signal?.throwIfAborted();
+          try {
+            assertLocalModelMemoryCapacity({
+              ...(await readLocalModelMemory()),
+              modelBytes: entry.size,
+              modelDigest: entry.digest,
+              resident: isResident,
+              contextTokens: num_ctx,
+            });
+            return;
+          } catch (error) {
+            const remaining = this.ollamaMemoryReclaimDeadline - Date.now();
+            if (
+              !(error instanceof LocalModelMemoryError) ||
+              isResident ||
+              remaining <= 0
+            )
+              throw error;
+            // Runner removal can precede macOS reclaiming its released pages.
+            await delay(Math.min(100, remaining), undefined, { signal });
+            const status = await this.ollamaFetch(
+              '/api/ps',
+              undefined,
+              100,
+              signal,
+            );
+            if (!status.ok || readOllamaResidents(await status.json()).size)
+              throw error;
+          }
+        }
+      };
+      try {
+        await checkCapacity(resident && residency.contextTokens === num_ctx);
+      } catch (error) {
+        if (!resident || !(error instanceof LocalModelMemoryError)) throw error;
+        await this.requestOllamaUnload(model, signal);
+        if ((await this.reconcileOllamaResidency(model, signal)).resident)
+          throw error;
+        // Reclaim warm runtime allocations, then require the unchanged cold-load reserve.
+        await checkCapacity(false);
+      }
+      signal?.throwIfAborted();
+      memory?.setResidentCheck(entry.digest, async () => {
+        const status = await this.ollamaFetch(
+          '/api/ps',
+          undefined,
+          100,
+          signal,
+        );
+        if (!status.ok) return false;
+        const payload = await status.json();
+        readOllamaResidents(payload);
+        return payload.models.some(
+          (loaded: {
+            name?: string;
+            model?: string;
+            digest?: string;
+            context_length?: number;
+          }) =>
+            normalizeOllamaModelName(loaded.name ?? loaded.model) ===
+              normalizeOllamaModelName(model) &&
+            loaded.digest === entry.digest &&
+            loaded.context_length === num_ctx,
+        );
+      });
+      await memory?.start(signal);
+    }
+    this.ollamaMemoryReclaimDeadline = 0;
     const progressAware =
       Boolean(notesBudget) || usesProgressAwareOllamaDeadline(task);
     const shouldStream = Boolean(onToken) || progressAware;
@@ -1617,7 +1929,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       options: {
         num_ctx,
         num_predict,
-        ...(notesBudget
+        ...(notesBudget || boundedGemmaArtifact
           ? {
               num_batch:
                 (NOTES_EXPERIMENTS_ENABLED ? notesBatchSize : undefined) ?? 128,
@@ -1625,8 +1937,15 @@ export class UnifiedLLMProvider implements LLMProvider {
           : {}),
         temperature: this.getTemperature(task),
         num_thread: 8, // Ensure multi-threading is utilized
+        ...getEstablishedGemmaLoadOptions(entry?.digest),
       },
       keep_alive: '2h', // Idle models can be released earlier under memory pressure.
+    };
+
+    const rememberGemmaAllocation = () => {
+      this.establishedGemmaAllocation = boundedGemmaArtifact
+        ? { model, contextTokens: num_ctx }
+        : null;
     };
 
     if (jsonMode) {
@@ -1882,6 +2201,7 @@ export class UnifiedLLMProvider implements LLMProvider {
               : {}),
           };
         }
+        rememberGemmaAllocation();
         return answer;
       } catch (error) {
         const fastModel = (this.settings.ollama_fast_model || '').trim();
@@ -1940,6 +2260,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     }
 
     lastOllamaActivityAt = Date.now();
+    rememberGemmaAllocation();
     return useChatEndpoint
       ? (data.message?.content ?? '')
       : (data.response ?? '');
@@ -1965,7 +2286,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private async reconcileOllamaResidency(
     targetModel: string,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<{ resident: boolean; contextTokens?: number }> {
     signal?.throwIfAborted();
     const deadlineController = new AbortController();
     const deadlineId = setTimeout(
@@ -1996,42 +2317,17 @@ export class UnifiedLLMProvider implements LLMProvider {
         throw new Error('ollama_residency_discovery_failed');
       }
 
-      let payload: unknown;
-      try {
-        payload = await response.json();
-      } catch (error) {
-        throw new Error('ollama_residency_discovery_failed', { cause: error });
+      const payload = await response.json();
+      const residents = readOllamaResidents(payload);
+      for (const key of pendingOllamaUnloads) {
+        if (!residents.has(key)) pendingOllamaUnloads.delete(key);
       }
-      const models =
-        payload && typeof payload === 'object' && 'models' in payload
-          ? (payload as { models?: unknown }).models
-          : undefined;
-      if (!Array.isArray(models)) {
-        throw new Error('ollama_residency_discovery_failed');
-      }
-
       const targetKey = normalizeOllamaModelName(targetModel);
       if (!targetKey) throw new Error('ollama_residency_discovery_failed');
-      const residents = new Map<string, string>();
-      for (const entry of models) {
-        if (!entry || typeof entry !== 'object') {
-          throw new Error('ollama_residency_discovery_failed');
-        }
-        const record = entry as { name?: unknown; model?: unknown };
-        const residentModel = [record.name, record.model].find(
-          (candidate) => normalizeOllamaModelName(candidate) !== null,
-        );
-        const residentKey = normalizeOllamaModelName(residentModel);
-        if (!residentKey || typeof residentModel !== 'string') {
-          throw new Error('ollama_residency_discovery_failed');
-        }
-        if (!residents.has(residentKey)) {
-          residents.set(residentKey, residentModel.trim());
-        }
-      }
 
       for (const [residentKey, residentModel] of residents) {
-        if (residentKey === targetKey) continue;
+        if (residentKey === targetKey && !pendingOllamaUnloads.has(residentKey))
+          continue;
         signal?.throwIfAborted();
         try {
           await this.requestOllamaUnload(residentModel, reconciliationSignal);
@@ -2040,6 +2336,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           signal?.throwIfAborted();
           throw new Error('ollama_residency_cleanup_failed', { cause: error });
         }
+        residents.delete(residentKey);
         if (normalizeOllamaModelName(this.activeOllamaModel) === residentKey) {
           this.activeOllamaModel = null;
         }
@@ -2049,6 +2346,16 @@ export class UnifiedLLMProvider implements LLMProvider {
           electronActiveOllamaModel = null;
         }
       }
+      const contextTokens = payload.models.find(
+        (entry: { name?: string; model?: string }) =>
+          normalizeOllamaModelName(entry.name ?? entry.model) === targetKey,
+      )?.context_length;
+      return {
+        resident: residents.has(targetKey),
+        ...(Number.isSafeInteger(contextTokens) && contextTokens > 0
+          ? { contextTokens }
+          : {}),
+      };
     } finally {
       clearTimeout(deadlineId);
     }
@@ -2058,22 +2365,10 @@ export class UnifiedLLMProvider implements LLMProvider {
     model: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    const response = await this.ollamaFetch(
-      '/api/generate',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          keep_alive: 0,
-          stream: false,
-        }),
-      },
-      30_000,
-      signal,
-    );
-    if (!response.ok)
-      throw new Error(`Ollama API error: ${response.statusText}`);
+    if (this.establishedGemmaAllocation?.model === model)
+      this.establishedGemmaAllocation = null;
+    await requestConfirmedOllamaUnload(this.ollamaBaseUrl, model, signal);
+    this.ollamaMemoryReclaimDeadline = Date.now() + 2_000;
   }
 
   private getGeminiClient(): GoogleGenAI {
@@ -2091,7 +2386,8 @@ export class UnifiedLLMProvider implements LLMProvider {
   private async resolveOllamaModel(task?: LLMTask): Promise<string> {
     return resolveConfiguredOllamaModel(
       this.settings,
-      task === 'askPlutoLive' ||
+      task === 'askPluto' ||
+        task === 'askPlutoLive' ||
         task === 'queryClassification' ||
         task === 'askPlutoScope',
     );
@@ -2349,6 +2645,15 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 }
 
+const getOllamaContextCap = (task: string): number =>
+  task === 'askPlutoLive'
+    ? 8192
+    : task === 'askPluto' || task === 'askPlutoDeep'
+      ? 12288
+      : task === 'knowledgeDoc' || task === 'analysisEditorial'
+        ? OLLAMA_EDITORIAL_CONTEXT_TOKENS
+        : 16384;
+
 export function calculateOllamaContextBudget(
   prompt: string,
   task: string,
@@ -2379,14 +2684,7 @@ export function calculateOllamaContextBudget(
                       : 2500);
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
-  const maxCap =
-    task === 'askPlutoLive'
-      ? 8192
-      : task === 'askPluto' || task === 'askPlutoDeep'
-        ? 12288
-        : task === 'knowledgeDoc' || task === 'analysisEditorial'
-          ? OLLAMA_EDITORIAL_CONTEXT_TOKENS
-          : 16384;
+  const maxCap = getOllamaContextCap(task);
   const minimumContext =
     task === 'askPlutoLive'
       ? 4096

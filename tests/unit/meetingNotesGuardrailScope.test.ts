@@ -12,7 +12,12 @@ import { makeNotesContext } from '../fixtures/meeting-notes-v10';
 
 const issuesFor = (
   turns: Array<{ speaker: string; text: string }>,
-  items: Array<{ text: string; segment?: number; due?: string | null }> = [],
+  items: Array<{
+    text: string;
+    segment?: number;
+    due?: string | null;
+    owner?: string;
+  }> = [],
 ) => {
   const source = createNotesSource(JSON.stringify({ segments: turns }));
   const draft: NotesDraft = {
@@ -32,7 +37,7 @@ const issuesFor = (
           id: `s0:item:${index}`,
           kind: 'action',
           text: item.text,
-          owner: 'Priya',
+          owner: item.owner ?? 'Priya',
           due: item.due ?? null,
           sources: [
             {
@@ -200,7 +205,7 @@ describe('guardrail task scope and explicit withdrawal', () => {
             text: 'I will email the report to Nora so Nora can compare the annual figures.',
           },
         ],
-        [{ text: 'Email the report to Nora.' }],
+        [{ text: 'Email the report to Nora.', owner: 'Ari' }],
       ),
     ).toEqual([]);
   });

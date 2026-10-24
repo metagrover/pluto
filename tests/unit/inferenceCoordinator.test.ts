@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   getLocalInferenceAdmission,
   runWithLocalInferenceCoordinator,
+  runWithNativeInferenceCoordinator,
 } from '../../electron/llm/inferenceCoordinator';
 
 describe('local inference coordinator', () => {
@@ -23,6 +24,35 @@ describe('local inference coordinator', () => {
       priority: 20,
       preemptible: true,
     });
+  });
+
+  it('does not let a generation callback inherit native admission', async () => {
+    let settle!: () => void;
+    const cleanup = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    let native: Promise<string> | undefined;
+    let generationSignal!: AbortSignal;
+    const nativeRun = vi.fn(async () => 'native');
+    const generation = runWithLocalInferenceCoordinator({
+      key: Symbol('generation'),
+      task: 'askPluto',
+      run: async (signal) => {
+        generationSignal = signal;
+        native = runWithNativeInferenceCoordinator(nativeRun);
+        await cleanup;
+        signal.throwIfAborted();
+      },
+    });
+    await vi.waitFor(() => expect(native).toBeDefined());
+    expect(generationSignal.aborted).toBe(true);
+    expect(nativeRun).not.toHaveBeenCalled();
+    const cancelled = expect(generation).rejects.toMatchObject({
+      message: 'foreground_preempted',
+    });
+    settle();
+    await cancelled;
+    await expect(native).resolves.toBe('native');
   });
 
   it('settles preemptible background work before foreground inference starts', async () => {

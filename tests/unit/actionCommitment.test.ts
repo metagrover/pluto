@@ -10,6 +10,47 @@ import {
   parseActionMetadata,
 } from '../../src/utils/actionCommitment';
 
+it('requires current semantic classification or user adoption even for a canonical self owner', () => {
+  const action = {
+    name: 'Me will prepare a checklist',
+    status: 'active',
+    assigned_to: 'self',
+    metadata: JSON.stringify({
+      origin: 'extraction',
+      commitment_state: 'possible',
+      source_meeting_id: 'meeting',
+      assignee_name: 'Me',
+      source_evidence: 'I will prepare a checklist.',
+    }),
+  };
+  expect(isPersonalAction(action, { selfPersonId: 'self' })).toBe(false);
+  expect(
+    isPersonalAction(
+      {
+        ...action,
+        metadata: JSON.stringify({
+          ...JSON.parse(action.metadata),
+          source_action_review_version: 1,
+        }),
+      },
+      { selfPersonId: 'self' },
+    ),
+  ).toBe(true);
+  expect(
+    isPersonalAction(
+      {
+        ...action,
+        metadata: JSON.stringify({
+          ...JSON.parse(action.metadata),
+          commitment_state: 'rejected',
+          origin: 'user',
+        }),
+      },
+      { selfPersonId: 'self' },
+    ),
+  ).toBe(false);
+});
+
 describe('action commitment metadata', () => {
   it('does not infer personal ownership from first-person prose alone', () => {
     const action = {
@@ -402,4 +443,33 @@ describe('action commitment metadata', () => {
     };
     expect(areActionsEquivalent(alexTask, taylorTask)).toBe(false);
   });
+});
+
+it('does not treat an automatically linked self identity as proof of the source owner', () => {
+  const metadata = {
+    origin: 'extraction',
+    commitment_state: 'possible',
+    source_action_review_version: 1,
+    source_meeting_id: 'meeting',
+    source_evidence: 'I will send the checklist.',
+    assignee_name: 'Another person',
+  };
+  const action = {
+    name: 'Send the checklist',
+    status: 'active',
+    assigned_to: 'self',
+    metadata: JSON.stringify(metadata),
+  };
+  expect(
+    isPersonalAction(action, { selfPersonId: 'self', selfNames: ['My Name'] }),
+  ).toBe(false);
+  expect(
+    isPersonalAction(
+      {
+        ...action,
+        metadata: JSON.stringify({ ...metadata, owner_source: 'user' }),
+      },
+      { selfPersonId: 'self', selfNames: ['My Name'] },
+    ),
+  ).toBe(true);
 });

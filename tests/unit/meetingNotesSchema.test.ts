@@ -48,6 +48,51 @@ const validate = (
 ) => validator.validate(buildNotesResponseSchema(contract, ['R0']), value);
 
 describe('local notes wire schemas', () => {
+  it('requires a cited compact overview or explicit null for new generation', () => {
+    const value = {
+      title: null,
+      overview: {
+        text: 'The team agreed to send the outline.',
+        sources: ['R0'],
+      },
+      sections: [{ title: 'Outline', items: [item] }],
+    };
+    expect(validate('compact_draft', value)).toBe(true);
+    expect(validate('compact_draft', { ...value, overview: null })).toBe(true);
+    const { overview: _overview, ...historical } = value;
+    expect(validate('compact_draft', historical)).toBe(false);
+    expect(
+      parseCompactNotesDraft(wire.decode(JSON.stringify(historical))).overview,
+    ).toBeNull();
+    expect(
+      parseCompactNotesDraft(wire.decode(JSON.stringify(value))).overview,
+    ).toEqual({
+      id: 'overview',
+      text: value.overview.text,
+      sources: fixture.draft.sections[0]!.title.sources,
+    });
+  });
+
+  it.each([
+    'Outline',
+    { text: '', sources: ['R0'] },
+    { text: 'x'.repeat(12_001), sources: ['R0'] },
+    { text: 'Outline', sources: [] },
+    { text: 'Outline', sources: ['R0', 'R0', 'R0', 'R0'] },
+    { text: 'Outline', sources: ['R9'] },
+    { text: 'Outline', sources: ['R0'], owner: 'Milo' },
+  ])('rejects malformed or unsupported compact overview %#', (overview) => {
+    const value = {
+      title: null,
+      overview,
+      sections: [{ title: 'Outline', items: [item] }],
+    };
+    expect(validate('compact_draft', value)).toBe(false);
+    expect(() =>
+      parseCompactNotesDraft(wire.decode(JSON.stringify(value))),
+    ).toThrow();
+  });
+
   it('requires the title in the whole-meeting notes response', () => {
     const schema = buildNotesResponseSchema('compact_draft', ['P0', 'P0.0']);
     const sections = [
@@ -65,7 +110,9 @@ describe('local notes wire schemas', () => {
       },
     ];
     const title = { text: 'Roadmap Review', sources: ['P0.0'] };
-    expect(validator.validate(schema, { title, sections })).toBe(true);
+    expect(
+      validator.validate(schema, { title, overview: null, sections }),
+    ).toBe(true);
     expect(validator.validate(schema, { title: null, sections })).toBe(false);
     expect(validator.validate(schema, { sections })).toBe(false);
     expect(
@@ -101,6 +148,7 @@ describe('local notes wire schemas', () => {
 
   it('expands a compact writer draft with title-specific evidence and empty metadata', () => {
     const value = {
+      overview: null,
       title: { text: 'Quarterly Planning', sources: ['R0'] },
       sections: [
         {
@@ -131,6 +179,7 @@ describe('local notes wire schemas', () => {
 
   it('ignores a leaked compact meeting type because the editor owns final classification', () => {
     const value = {
+      overview: null,
       title: { text: 'Interview Overview', sources: ['R0'] },
       meetingType: 'interview',
       sections: [
@@ -156,6 +205,7 @@ describe('local notes wire schemas', () => {
 
   it('rejects compact writer items with more than three sources', () => {
     const value = {
+      overview: null,
       title: { text: 'Outline Review', sources: ['R0'] },
       sections: [
         {
@@ -181,6 +231,7 @@ describe('local notes wire schemas', () => {
 
   it('accepts the explicit cloud citation budget while retaining exact source validation', () => {
     const value = {
+      overview: null,
       title: { text: 'Outline', sources: ['R0'] },
       sections: [
         {
@@ -233,7 +284,9 @@ describe('local notes wire schemas', () => {
         wire.decode(JSON.stringify({ title: 'Legacy topic title', sections })),
       ),
     ).toThrow('notes_writer_invalid');
-    expect(validate('compact_draft', { title: null, sections })).toBe(true);
+    expect(
+      validate('compact_draft', { title: null, overview: null, sections }),
+    ).toBe(true);
     expect(
       parseCompactNotesDraft(
         wire.decode(JSON.stringify({ title: null, sections })),

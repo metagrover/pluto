@@ -1357,3 +1357,28 @@ it('does not report success when the refreshed brief has outdated evidence', asy
   expect(host.textContent).toContain('No brief could be prepared');
   expect(api.triggerDreamingNow).not.toHaveBeenCalled();
 });
+
+it('dates the last discussion from the meeting rather than a later task update', async () => {
+  api.getProjectBrief.mockResolvedValue(
+    brief({
+      meetings: [
+        {
+          id: 'm1',
+          title: 'Source review',
+          started_at: '2026-08-20T12:00:00Z',
+          created_at: '2026-08-20T12:00:00Z',
+          participants: [],
+        },
+      ] as ProjectBrief['meetings'],
+      momentum: { ...brief().momentum, lastActivityAt: '2026-08-28T12:00:00Z' },
+    }),
+  );
+  await act(async () => {
+    root.render(<ProjectDossier projectId="p1" onClose={() => {}} />);
+  });
+  const discussion = [...host.querySelectorAll('span')].find((node) =>
+    node.textContent?.startsWith('Last discussed'),
+  );
+  expect(discussion?.textContent).toContain('Aug 20');
+  expect(discussion?.textContent).not.toContain('Aug 28');
+});

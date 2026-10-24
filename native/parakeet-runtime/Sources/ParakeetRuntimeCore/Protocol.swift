@@ -23,6 +23,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
     public let id: String
     public let method: RuntimeMethod
     public let modelRoot: String?
+    public let warmLiveModels: Bool?
     public let audioPath: String?
     public let mixedAudioPath: String?
     public let micAudioPath: String?
@@ -39,6 +40,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         id: String,
         method: RuntimeMethod,
         modelRoot: String? = nil,
+        warmLiveModels: Bool? = nil,
         audioPath: String? = nil,
         mixedAudioPath: String? = nil,
         micAudioPath: String? = nil,
@@ -54,6 +56,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         self.id = id
         self.method = method
         self.modelRoot = modelRoot
+        self.warmLiveModels = warmLiveModels
         self.audioPath = audioPath
         self.mixedAudioPath = mixedAudioPath
         self.micAudioPath = micAudioPath
@@ -71,6 +74,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         case id
         case method
         case modelRoot
+        case warmLiveModels
         case audioPath
         case mixedAudioPath
         case micAudioPath
@@ -103,6 +107,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
             throw protocolDecodingError(incompatible, "method-incompatible request field")
         }
         modelRoot = try container.decodeIfPresent(String.self, forKey: .modelRoot)
+        warmLiveModels = try container.decodeIfPresent(Bool.self, forKey: .warmLiveModels)
         audioPath = try container.decodeIfPresent(String.self, forKey: .audioPath)
         mixedAudioPath = try container.decodeIfPresent(String.self, forKey: .mixedAudioPath)
         micAudioPath = try container.decodeIfPresent(String.self, forKey: .micAudioPath)
@@ -326,6 +331,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         try container.encode(id, forKey: .id)
         try container.encode(method, forKey: .method)
         try container.encodeIfPresent(modelRoot, forKey: .modelRoot)
+        try container.encodeIfPresent(warmLiveModels, forKey: .warmLiveModels)
         try container.encodeIfPresent(audioPath, forKey: .audioPath)
         try container.encodeIfPresent(mixedAudioPath, forKey: .mixedAudioPath)
         try container.encodeIfPresent(micAudioPath, forKey: .micAudioPath)
@@ -361,6 +367,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
     private var encodedKnownKeys: Set<CodingKeys> {
         var keys: Set<CodingKeys> = [.schemaVersion, .id, .method]
         if modelRoot != nil { keys.insert(.modelRoot) }
+        if warmLiveModels != nil { keys.insert(.warmLiveModels) }
         if audioPath != nil { keys.insert(.audioPath) }
         if mixedAudioPath != nil { keys.insert(.mixedAudioPath) }
         if micAudioPath != nil { keys.insert(.micAudioPath) }
@@ -402,7 +409,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         let common: Set<CodingKeys> = [.schemaVersion, .id, .method]
         switch method {
         case .prepare:
-            return common.union([.modelRoot])
+            return common.union([.modelRoot, .warmLiveModels])
         case .transcribe:
             return common.union([.audioPath, .language, .vocabulary, .capability])
         case .speakerEvidence:

@@ -1,13 +1,20 @@
 import { expect, it } from 'vitest';
 import {
   acceptEditedNotes,
+  acceptSourceLedNotes,
   applyNotesAudit,
+  applySourceBoundSemanticReview,
+  hasOngoingSourceResponsibility,
+  parseCompactNotesDraft,
   parseNotesAudit,
   parseNotesDraft,
   projectAuditedNotes,
 } from '../../electron/llm/meetingNotesAudit';
 import { reviewSourceBoundNotes } from '../../electron/llm/meetingNotesSemanticReview';
-import { groupCitedSourcePassages } from '../../electron/llm/meetingNotesSource';
+import {
+  groupCitedSourcePassages,
+  quoteCitedSourcePassages,
+} from '../../electron/llm/meetingNotesSource';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type {
   NotesAudit,
@@ -16,6 +23,121 @@ import type {
 import { getAnalysisEditBlocks } from '../../src/utils/analysisDocument';
 import { rebaseMeetingNotesEdits } from '../../src/utils/meetingNotesEditRebase';
 import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
+
+it.each([
+  ['The decision is to keep the introduction static.', undefined],
+  ['We decided to keep the introduction static.', undefined],
+  ['I decided to keep the introduction static.', 'Tariq'],
+])(
+  'does not turn a decision reporter into its individual owner: %s',
+  (text, owner) => {
+    const source = createNotesSource(
+      JSON.stringify([{ speaker: 'Tariq', text }]),
+    );
+    const sources = [{ segment: 0, start: 0, end: text.length }];
+    const draft = parseNotesDraft(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: { text: 'Introduction', sources },
+            items: [
+              {
+                kind: 'decision',
+                text: 'Keep the introduction static.',
+                owner: null,
+                due: null,
+                sources,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const before = structuredClone({ source, draft });
+    const analysis = projectAuditedNotes(
+      acceptEditedNotes({ source, draft, compactNormalization: true }),
+    );
+    expect(analysis.all_decisions).toHaveLength(1);
+    expect(analysis.all_decisions[0]!.decided_by).toBe(owner);
+    expect({ source, draft }).toEqual(before);
+  },
+);
+
+it.each([
+  'valid',
+  'unknown member',
+  'self',
+  'repeated member',
+  'different owner',
+  'outside evidence',
+  'missing evidence',
+])('applies only a bounded complete semantic merge: %s', (mode) => {
+  const { source, draft } = makeDirectNotesFixture();
+  const first = draft.sections[0]!.items[0]!;
+  const duplicate = { ...structuredClone(first), id: 'duplicate' };
+  draft.sections[0]!.items.push(duplicate);
+  const notes = acceptEditedNotes({
+    source,
+    draft,
+    acceptancePolicy: 'conservative',
+  });
+  const replacement = { ...structuredClone(first), mergedIds: ['duplicate'] };
+  if (mode === 'unknown member') replacement.mergedIds = ['missing'];
+  if (mode === 'self') replacement.mergedIds = [first.id];
+  if (mode === 'repeated member') replacement.mergedIds.push('duplicate');
+  if (mode === 'different owner') replacement.owner = 'Iris';
+  if (mode === 'outside evidence') replacement.sources[0]!.segment = 4;
+  if (mode === 'missing evidence') replacement.sources = [];
+  const before = structuredClone(notes.draft);
+  if (mode !== 'valid') {
+    expect(() =>
+      applySourceBoundSemanticReview(notes, [replacement]),
+    ).toThrow();
+    expect(notes.draft).toEqual(before);
+    return;
+  }
+  const merged = applySourceBoundSemanticReview(notes, [replacement]);
+  expect(projectAuditedNotes(merged).all_action_items).toHaveLength(1);
+  expect(merged.draft.sections[0]!.items[0]).not.toHaveProperty('mergedIds');
+  expect(notes.draft).toEqual(before);
+});
+
+it('preserves a compact writer overview and its evidence through projection', () => {
+  const fixture = makeDirectNotesFixture();
+  const sources = fixture.draft.sections[0]!.items[0]!.sources;
+  const overview = 'The team reviewed the outline and agreed to send it.';
+  const draft = parseCompactNotesDraft(
+    JSON.stringify({
+      title: null,
+      overview: { text: overview, sources },
+      sections: [
+        {
+          title: 'Outline',
+          items: [
+            {
+              kind: 'action',
+              text: 'Send the outline',
+              owner: 'Milo',
+              due: null,
+              sources,
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const audit = structuredClone(fixture.audit);
+  audit.verdicts.push({ target: 'overview', status: 'supported', sources });
+  const projected = projectAuditedNotes(
+    applyNotesAudit({ ...fixture, draft, audit }),
+  );
+  expect(projected.overview).toBe(overview);
+  expect(
+    projected.generation_metadata?.source_provenance?.blocks.overview?.sources,
+  ).toEqual(sources);
+});
 
 it.each(['same', 'owner', 'due', 'source', 'section'])(
   'projects exact duplicate commitments once without merging a different %s',
@@ -100,7 +222,7 @@ it.each(['same', 'owner', 'due', 'source', 'section'])(
   },
 );
 
-it('retains the full cited passage once when reviewed points collapse to identical prose', () => {
+it('deduplicates identical model prose without substituting transcript text', () => {
   const text =
     'Do not deploy before staging tests pass, the meeting at 5 is only proposed.';
   const source = createNotesSource(JSON.stringify([{ speaker: 'Sora', text }]));
@@ -130,10 +252,9 @@ it('retains the full cited passage once when reviewed points collapse to identic
     acceptancePolicy: 'conservative',
   });
   const result = projectAuditedNotes(audited);
-  const quote = `Sora: “${text}”`;
-  expect(result.topics[0]!.summary).toBe(quote);
+  expect(result.topics[0]!.summary).toBe(item.text);
   expect(result.topics[0]!.key_points).toEqual([]);
-  expect(result.overview).toBe(quote);
+  expect(result.overview).toBe(item.text);
   expect(result.all_action_items).toEqual([]);
   expect(result.all_decisions).toEqual([]);
   expect(
@@ -141,10 +262,8 @@ it('retains the full cited passage once when reviewed points collapse to identic
       (block) => block.id === 'second',
     ),
   ).toBe(false);
-  expect(audited.draft.sections[0]!.items).toEqual([
-    item,
-    { ...item, id: 'second' },
-  ]);
+  expect(audited.draft.sections[0]!.items).toEqual([item]);
+  expect(audited.issues).toContain('deterministic_collapsed_points:first');
 });
 
 it.each(['point', 'question'])(
@@ -1261,7 +1380,7 @@ it('preserves rejected decision and action classifications as exact discussion, 
     const retained = accepted.draft.sections[0].items[0];
     expect(retained).toMatchObject({
       kind: 'point',
-      text: `Morgan: ${source.segments[0].text}`,
+      text: quoteCitedSourcePassages(source, [span]),
       owner: null,
       due: null,
       sources: [span],
@@ -1275,6 +1394,62 @@ it('preserves rejected decision and action classifications as exact discussion, 
     );
   }
 });
+
+it.each([
+  {
+    sourceText: 'If you want, I could send the outline.',
+    text: 'Send the outline',
+    owner: 'Morgan',
+  },
+  {
+    sourceText:
+      'The group accepted sending the outline, but no owner has been assigned.',
+    text: 'Send the outline',
+    owner: null,
+  },
+  {
+    sourceText: 'Please review the draft and give feedback.',
+    text: 'Review the draft',
+    owner: 'Me',
+  },
+])(
+  'marks conservative source fallback as an exact quote for publication repair %#',
+  ({ sourceText, text, owner }) => {
+    const source = createNotesSource(
+      JSON.stringify([{ speaker: 'Morgan', text: sourceText }]),
+    );
+    const sources = [{ segment: 0, start: 0, end: sourceText.length }];
+    const draft = parseNotesDraft(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: { text: 'Outline', sources },
+            items: [{ kind: 'action', text, owner, due: null, sources }],
+          },
+        ],
+      }),
+    );
+    const original = structuredClone(draft);
+    const accepted = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+    expect(accepted.draft.sections[0]!.items[0]).toMatchObject({
+      kind: 'point',
+      text: quoteCitedSourcePassages(source, sources),
+      owner: null,
+      due: null,
+    });
+    expect(accepted.reviewOriginals?.get('s0:item:0')).toEqual(
+      original.sections[0]!.items[0],
+    );
+    expect(draft).toEqual(original);
+    expect(source.segments[0]!.text).toBe(sourceText);
+  },
+);
 
 it('groups adjacent cited fragments without bridging omitted words, different speakers, or ambiguous recording labels', () => {
   const make = (speakers: string[]) =>
@@ -1491,3 +1666,431 @@ it('keeps only the promised action and preserves the tentative plan as source di
     'notes_editor_invalid_commitment',
   );
 });
+
+it.each([
+  'valid',
+  'outside window',
+  'partial pair',
+  'invented owner',
+  'unknown omit',
+  'extra omit key',
+  'ordinary ownership',
+])(
+  'validates optional factual review at the shared application boundary: %s',
+  (mode) => {
+    const source = createNotesSource(
+      JSON.stringify([
+        { speaker: 'Dana', text: 'Dana completed the pilot successfully.' },
+        { speaker: 'Dana', text: 'The pilot reduced incidents by three.' },
+      ]),
+    );
+    const span = (segment: number) => ({
+      segment,
+      start: 0,
+      end: source.segments[segment]!.text.length,
+    });
+    const draft: NotesDraft = {
+      meetingType: 'general',
+      overview: null,
+      sections: [],
+      recentWin: {
+        win: { id: 'win', text: 'The pilot succeeded.', sources: [span(0)] },
+        impact: {
+          id: 'impact',
+          text: 'The pilot reduced incidents.',
+          sources: [span(1)],
+        },
+      },
+    };
+    const notes = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+    const replacements: any[] = [
+      {
+        id: 'win',
+        kind: 'point',
+        text: 'Dana successfully completed the pilot.',
+        sources: [span(0)],
+        owner: 'Dana',
+        ownership: 'personal',
+        due: null,
+        discussion: null,
+      },
+      {
+        id: 'impact',
+        kind: 'point',
+        text: 'The pilot reduced incident counts by three.',
+        sources: [span(1)],
+        owner: null,
+        due: null,
+        discussion: null,
+      },
+    ];
+    if (mode === 'outside window') replacements[1].sources = [span(0)];
+    if (mode === 'partial pair') replacements.pop();
+    if (mode === 'invented owner') replacements[0].owner = 'Sora';
+    if (mode === 'unknown omit')
+      replacements[0] = { id: 'unknown', omit: true };
+    if (mode === 'extra omit key')
+      replacements[0] = { id: 'win', omit: true, text: 'extra' };
+    if (mode === 'ordinary ownership') replacements[1].ownership = 'shared';
+    if (mode === 'valid') {
+      const reviewed = applySourceBoundSemanticReview(notes, replacements);
+      expect(reviewed.draft.recentWin?.owner).toBe('Dana');
+      expect(reviewed.draft.recentWin?.impact.sources).toEqual([span(1)]);
+    } else
+      expect(() =>
+        applySourceBoundSemanticReview(notes, replacements),
+      ).toThrow();
+  },
+);
+it('atomically removes a reviewed optional win and ownership without inventing replacement prose', () => {
+  const { source, draft } = makeDirectNotesFixture();
+  const span = draft.sections[0]!.items[0]!.sources;
+  draft.recentWin = {
+    win: { id: 'win', text: 'A rollout completed.', sources: span },
+    impact: { id: 'impact', text: 'Errors fell.', sources: span },
+    ownership: 'personal',
+    owner: 'Milo',
+  };
+  const notes = acceptEditedNotes({
+    source,
+    draft,
+    acceptancePolicy: 'conservative',
+  });
+  const reviewed = applySourceBoundSemanticReview(notes, [
+    { id: 'win', omit: true },
+    { id: 'impact', omit: true },
+  ]);
+  expect(reviewed.draft.recentWin).toBeUndefined();
+  expect(reviewed.draft.sections).toEqual(notes.draft.sections);
+});
+
+it.each(['personal', 'other'] as const)(
+  'uses own cited named-actor evidence for a narrated %s win without classifying from the speaker roster',
+  (ownership) => {
+    const lines = [
+      {
+        speaker: 'Me',
+        text:
+          ownership === 'other'
+            ? 'Dana from the outside vendor completed the pilot successfully.'
+            : 'Dana completed the pilot successfully.',
+      },
+      { speaker: 'Me', text: 'The pilot reduced incidents by three.' },
+      ...(ownership === 'other'
+        ? [{ speaker: 'Dana', text: 'The vendor update is recorded.' }]
+        : []),
+    ];
+    const source = createNotesSource(JSON.stringify(lines));
+    const span = (segment: number) => ({
+      segment,
+      start: 0,
+      end: source.segments[segment]!.text.length,
+    });
+    const draft: NotesDraft = {
+      meetingType: 'general',
+      overview: null,
+      sections: [],
+      recentWin: {
+        win: { id: 'win', text: 'The pilot succeeded.', sources: [span(0)] },
+        impact: { id: 'impact', text: 'Incidents fell.', sources: [span(1)] },
+      },
+    };
+    const notes = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+    const result = applySourceBoundSemanticReview(notes, [
+      {
+        id: 'win',
+        kind: 'point',
+        text: 'Dana successfully completed the pilot.',
+        sources: [span(0)],
+        ownership,
+        owner: 'Dana',
+        due: null,
+        discussion: null,
+      },
+      {
+        id: 'impact',
+        kind: 'point',
+        text: 'The pilot reduced incident counts by three.',
+        sources: [span(1)],
+        owner: null,
+        due: null,
+        discussion: null,
+      },
+    ]);
+    expect(result.draft.recentWin).toMatchObject({ ownership, owner: 'Dana' });
+  },
+);
+
+it('refuses a source-led null global overview instead of inventing a follow-up count', () => {
+  const { source, draft } = makeDirectNotesFixture();
+  expect(() => acceptSourceLedNotes(source, draft)).toThrow(
+    'notes_semantic_review_incomplete',
+  );
+});
+
+it('retains a source-led provider overview with its own exact provenance', () => {
+  const { source, draft } = makeDirectNotesFixture();
+  draft.overview = {
+    id: 'overview',
+    text: 'Milo will send the outline.',
+    sources: draft.sections[0]!.items[0]!.sources,
+  };
+  const result = projectAuditedNotes(acceptSourceLedNotes(source, draft));
+  expect(result.overview).toBe('Milo will send the outline.');
+  expect(
+    result.generation_metadata?.source_provenance?.blocks.overview?.sources,
+  ).toEqual(draft.overview.sources);
+});
+
+it.each(['owner', 'due', 'quantity', 'pronoun', 'direct speech'])(
+  'does not brand a source-led result with unsupported %s',
+  (defect) => {
+    const { source, draft } = makeDirectNotesFixture();
+    draft.overview = {
+      id: 'overview',
+      text: 'Milo will send the outline.',
+      sources: draft.sections[0]!.items[0]!.sources,
+    };
+    const item = draft.sections[0]!.items[0]!;
+    if (defect === 'owner') item.owner = 'Rowan';
+    if (defect === 'due') item.due = '2023-10-21';
+    if (defect === 'quantity') item.text = 'Milo will send 30 outlines.';
+    if (defect === 'pronoun') item.text = 'He will send the outline.';
+    if (defect === 'direct speech') item.text = 'I will send the outline.';
+    expect(() => acceptSourceLedNotes(source, draft)).toThrow(
+      /notes_semantic_review_incomplete|notes_editor_invalid_commitment/,
+    );
+  },
+);
+
+it('keeps source-led strict commitment grounding rather than treating a model verdict as permission', () => {
+  const { draft } = makeDirectNotesFixture();
+  const source = createNotesSource(
+    JSON.stringify([
+      { speaker: 'Milo', text: 'Maybe I could send the outline.' },
+    ]),
+  );
+  draft.sections[0]!.title.sources = [
+    { segment: 0, start: 0, end: source.segments[0]!.text.length },
+  ];
+  draft.sections[0]!.items[0]!.sources = structuredClone(
+    draft.sections[0]!.title.sources,
+  );
+  draft.overview = {
+    id: 'overview',
+    text: 'Milo could send the outline.',
+    sources: draft.sections[0]!.items[0]!.sources,
+  };
+  expect(() => acceptSourceLedNotes(source, draft)).toThrow(
+    'notes_editor_invalid_commitment',
+  );
+});
+
+it.each(['personal', 'shared', 'other', 'unknown'] as const)(
+  'preserves a genuine source-led recent win with %s ownership',
+  (ownership) => {
+    const text =
+      ownership === 'shared'
+        ? 'The team completed the migration and removed the deployment blocker.'
+        : ownership === 'unknown'
+          ? 'The migration was completed and removed the deployment blocker.'
+          : ownership === 'other'
+            ? 'Dana, who is outside the group, completed the migration and removed the deployment blocker.'
+            : 'Dana completed the migration and removed the deployment blocker.';
+    const source = createNotesSource(JSON.stringify([{ speaker: 'Me', text }]));
+    const sources = [{ segment: 0, start: 0, end: text.length }];
+    const owner =
+      ownership === 'personal' || ownership === 'other' ? 'Dana' : null;
+    const winText =
+      ownership === 'shared'
+        ? 'The team completed the migration.'
+        : ownership === 'unknown'
+          ? 'The migration was completed.'
+          : 'Dana completed the migration.';
+    const draft: NotesDraft = {
+      meetingType: 'general',
+      title: null,
+      overview: { id: 'overview', text: winText, sources },
+      sections: [
+        {
+          id: 's0',
+          title: { id: 's0:title', text: 'Migration', sources },
+          items: [
+            {
+              id: 's0:item:0',
+              kind: 'point',
+              text: winText,
+              owner: null,
+              due: null,
+              sources,
+            },
+          ],
+        },
+      ],
+      recentWin: {
+        win: { id: 'recent-win', text: winText, sources },
+        impact: {
+          id: 'recent-win-impact',
+          text: 'The migration removed the deployment blocker.',
+          sources,
+        },
+        ownership,
+        owner,
+      },
+    };
+    const result = projectAuditedNotes(acceptSourceLedNotes(source, draft));
+    expect(result.recent_win).toMatchObject({ win: winText, ownership });
+  },
+);
+
+it('rejects a source-led recent-win owner supported only by another uncited passage', () => {
+  const source = createNotesSource(
+    JSON.stringify([
+      {
+        speaker: 'Me',
+        text: 'The migration was completed and removed the deployment blocker.',
+      },
+      { speaker: 'Me', text: 'Dana is away today.' },
+    ]),
+  );
+  const sources = [
+    { segment: 0, start: 0, end: source.segments[0]!.text.length },
+  ];
+  const draft: NotesDraft = {
+    meetingType: 'general',
+    title: null,
+    overview: { id: 'overview', text: 'The migration was completed.', sources },
+    sections: [
+      {
+        id: 's0',
+        title: { id: 's0:title', text: 'Migration', sources },
+        items: [
+          {
+            id: 's0:item:0',
+            kind: 'point',
+            text: 'The migration was completed.',
+            owner: null,
+            due: null,
+            sources,
+          },
+        ],
+      },
+    ],
+    recentWin: {
+      win: { id: 'recent-win', text: 'The migration was completed.', sources },
+      impact: {
+        id: 'recent-win-impact',
+        text: 'The migration removed the deployment blocker.',
+        sources,
+      },
+      ownership: 'personal',
+      owner: 'Dana',
+    },
+  };
+  expect(() => acceptSourceLedNotes(source, draft)).toThrow(
+    'notes_semantic_review_incomplete',
+  );
+});
+
+it.each([false, true])(
+  'preserves existing ongoing-action coverage when represented=%s',
+  (represented) => {
+    const text = 'I am preparing the training agenda.';
+    const source = createNotesSource(
+      JSON.stringify([{ speaker: 'Milo', text }]),
+    );
+    const sources = [{ segment: 0, start: 0, end: text.length }];
+    const point = {
+      id: 's0:item:0',
+      kind: 'point' as const,
+      text: 'Milo is preparing the training agenda.',
+      owner: null,
+      due: null,
+      sources,
+    };
+    const action = {
+      ...point,
+      id: 's0:item:1',
+      kind: 'action' as const,
+      text: 'Continue preparing the training agenda',
+      owner: 'Milo',
+    };
+    const draft: NotesDraft = {
+      meetingType: 'general',
+      title: null,
+      overview: { id: 'overview', text: point.text, sources },
+      sections: [
+        {
+          id: 's0',
+          title: { id: 's0:title', text: 'Agenda', sources },
+          items: [point, ...(represented ? [action] : [])],
+        },
+      ],
+    };
+    expect(hasOngoingSourceResponsibility({ source, draft }, point, true)).toBe(
+      !represented,
+    );
+    if (represented)
+      expect(
+        projectAuditedNotes(acceptSourceLedNotes(source, draft))
+          .all_action_items,
+      ).toHaveLength(1);
+    else
+      expect(() => acceptSourceLedNotes(source, draft)).toThrow(
+        'notes_semantic_review_incomplete',
+      );
+  },
+);
+
+it.each([
+  [
+    'I am preparing the training agenda. Actually cancel that task.',
+    'Milo cancelled the training agenda.',
+  ],
+  [
+    'I am preparing the training agenda. The training agenda is finished now.',
+    'Milo finished the training agenda.',
+  ],
+])(
+  'does not force closed ongoing history back into active work',
+  (speech, summary) => {
+    const source = createNotesSource(
+      JSON.stringify([{ speaker: 'Milo', text: speech }]),
+    );
+    const sources = [{ segment: 0, start: 0, end: speech.length }];
+    const point = {
+      id: 's0:item:0',
+      kind: 'point' as const,
+      text: summary,
+      owner: null,
+      due: null,
+      sources,
+    };
+    const draft: NotesDraft = {
+      meetingType: 'general',
+      title: null,
+      overview: { id: 'overview', text: summary, sources },
+      sections: [
+        {
+          id: 's0',
+          title: { id: 's0:title', text: 'Agenda', sources },
+          items: [point],
+        },
+      ],
+    };
+    expect(hasOngoingSourceResponsibility({ source, draft }, point, true)).toBe(
+      false,
+    );
+    expect(
+      projectAuditedNotes(acceptSourceLedNotes(source, draft)).all_action_items,
+    ).toEqual([]);
+  },
+);

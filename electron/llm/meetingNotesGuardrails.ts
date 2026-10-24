@@ -1,3 +1,5 @@
+import { canonicalizeActionText } from '../../src/utils/actionCommitment';
+import { buildCitedSpeakerAliasProof } from './meetingNotesSource';
 import type { NotesDraft, NotesSource, SourceSpan } from './meetingNotesTypes';
 
 export type NotesGuardrailIssue = {
@@ -12,15 +14,17 @@ export type NotesGuardrailIssue = {
 // Deliberately small: these checks are a repair signal, not an action extractor.
 // State, intention, reported speech, and ambiguous task identity must abstain.
 const TASK_VERBS =
-  'send|email|share|review|update|prepare|write|draft|create|check|book|schedule|publish|upload|finish|replace';
+  'send|email|share|review|update|prepare|write|draft|create|check|book|schedule|publish|upload|finish|replace|coordinate|provide|rerun';
 const TASK_BOUNDARY = new RegExp(
   `\\s+and\\s+(?=(?:(?:i['’]ll|i will)\\s+)?(?:${TASK_VERBS})\\b)`,
   'i',
 );
 const PROMISE =
   /^(?:yes[, ]+|okay[, ]+|sure[, ]+)?(?:i['’]ll|i will|i commit to)\s+(.+)$/i;
+const COMPLETED_PROMISE =
+  /^i(?:(?:['’]ve| have)\s+(?:already\s+)?|\s+already\s+|\s+)((?:sent|emailed|shared|reviewed|updated|prepared|written|drafted|created|checked|booked|scheduled|published|uploaded|finished|replaced|coordinated|provided|rerun)\s+.+)/i;
 export const CONDITION =
-  /\b(?:only if|if|unless|until|once|after|when|provided(?: that)?|pending|subject to|conditional on|contingent (?:on|upon))\b/i;
+  /\b(?:only if|if|unless|until|once|after|when|provided(?: that)?|pending|subject to|conditional on|contingent (?:on|upon)|(?:not\s+)?(?:requires?|requiring))\b/i;
 // Recognizable trailing due phrases are metadata, not task identity. Do not
 // strip arbitrary "by ..." text, which could name the task's recipient/author.
 const DUE_PHRASE =
@@ -31,6 +35,13 @@ const NON_CONTENT = new Set(
     ' ',
   ),
 );
+
+const knownOwnerLabel = (value: string | null): string | null => {
+  const label = value?.trim().toLocaleLowerCase();
+  return label && !['them', 'unknown', 'speaker'].includes(label)
+    ? label
+    : null;
+};
 
 type Sentence = {
   text: string;
@@ -57,17 +68,224 @@ function tokens(text: string): string[] {
           ? 'approve'
           : word === 'replacement'
             ? 'replace'
-            : word
+            : word === 'completion'
+              ? 'complete'
+              : word
       )
         .replace(/(?:ing|ed|s)$/, '')
         .replace(/e$/, ''),
-    );
+    )
+    .filter(Boolean);
 }
 
 function conditionTokens(text: string): string[] {
   return tokens(text.replace(/n['’]t\b/gi, '')).filter(
     (word) => !/^(?:not|never|no|do|did)$/.test(word),
   );
+}
+
+function normalizeWaitingPrerequisite(text: string): string {
+  return text.replace(
+    /\b(?:must\s+)?wait\s+until\b/gi,
+    (match, offset: number) => {
+      const prefix =
+        text
+          .slice(0, offset)
+          .split(/[.!?;\n]/u)
+          .at(-1) ?? '';
+      return NEGATION.test(prefix) ? match : 'conditional on';
+    },
+  );
+}
+
+function prerequisiteClauses(text: string): string[] {
+  return normalizeWaitingPrerequisite(text)
+    .split(/(?<!\d)\.|\.(?!\d)|[?!;]/u)
+    .flatMap((rawSentence) => {
+      // A whole-list status is a separate assertion for semantic review;
+      // noun qualifications and additional requirements stay in the prerequisite.
+      // shortcut: Extend other relative grammar only with scoped prerequisite controls.
+      const sentence = rawSentence.replace(
+        /,\s*(?:neither|both|either)\s+of\s+which\s+(?:is|are|was|were)\s+(?:(?:not|yet|still|currently)\s+)*(?:complete|completed|incomplete|done|pending|outstanding)\s*$/iu,
+        '',
+      );
+      const operators = [
+        ...sentence.matchAll(new RegExp(CONDITION.source, 'gi')),
+      ].filter((operator) => {
+        const prefix = sentence.slice(0, operator.index).trim();
+        // Embedded uncertainty questions use "if" as "whether", not a prerequisite.
+        if (
+          operator[0].toLowerCase() === 'if' &&
+          /\b(?:(?:am|is|are|was|were)\s+(?:(?:still|currently)\s+)?(?:unsure|uncertain|unclear|not\s+(?:sure|certain|clear))|(?:do|does|did)\s+not\s+know|(?:don['’]t|doesn['’]t|didn['’]t)\s+know|wonders?|wondered)\s*$/i.test(
+            prefix,
+          )
+        )
+          return false;
+        return !(
+          operator[0].toLowerCase() === 'when' &&
+          !prefix &&
+          /^\s*(?:will|would|can|could|should|is|are|was|were|do|does|did)\b/i.test(
+            sentence.slice(operator.index! + operator[0].length),
+          )
+        );
+      });
+      return operators.map((operator, index) => {
+        const start = operator.index!;
+        const end = operators[index + 1]?.index ?? sentence.length;
+        let clause = sentence.slice(start, end).trim();
+        // A prefix prerequisite ends before its consequent, not at the first
+        // comma in a list. Keep preceding comma-qualified evidence intact.
+        const consequents = [
+          ...clause.matchAll(
+            new RegExp(
+              `,\\s+(?:(?:[\\p{L}\\p{N}'’-]+\\s+)*(?:will|shall|can|could|may|might|must|should)\\b|(?:${TASK_VERBS})\\b)`,
+              'giu',
+            ),
+          ),
+        ];
+        const consequent = consequents
+          .filter((match) => !/^,\s+(?:which|who|that)\b/i.test(match[0]))
+          .at(-1);
+        if (consequent && !sentence.slice(0, start).trim())
+          clause = clause.slice(0, consequent.index).trim();
+        return clause;
+      });
+    });
+}
+
+function conditionIsSupported(expected: string, actual: string): boolean {
+  const expectedClauses = prerequisiteClauses(expected);
+  const actualClauses = prerequisiteClauses(actual);
+  return (
+    expectedClauses.length > 0 &&
+    expectedClauses.every((condition) =>
+      actualClauses.some((evidence) =>
+        prerequisiteIsSupported(condition, evidence),
+      ),
+    )
+  );
+}
+
+function prerequisiteIsSupported(expected: string, actual: string): boolean {
+  let expectedPrerequisite = expected;
+  let actualPrerequisite = actual;
+  // A self-report can become attributed prose without changing its prerequisite.
+  // Align only an otherwise exact consequent; this is not an actor-identity check.
+  for (const boundary of actual.matchAll(/,\s+(?:I|we)\s+([^,]+)$/gi)) {
+    const consequent = boundary[1]!.trim().toLowerCase();
+    const claimBoundary = [
+      ...expected.matchAll(/,\s+[^\s,]+\s+([^,]+)$/g),
+    ].find((candidate) => candidate[1]!.trim().toLowerCase() === consequent);
+    if (claimBoundary) {
+      expectedPrerequisite = expected.slice(0, claimBoundary.index);
+      actualPrerequisite = actual.slice(0, boundary.index);
+      break;
+    }
+  }
+  const expectedOperator = CONDITION.exec(expectedPrerequisite);
+  const actualOperator = CONDITION.exec(actualPrerequisite);
+  if (!expectedOperator || !actualOperator) return false;
+  if (
+    /^until$/i.test(expectedOperator[0]) !== /^until$/i.test(actualOperator[0])
+  )
+    return false;
+  const expectedBody = expectedPrerequisite.slice(
+    expectedOperator.index + expectedOperator[0].length,
+  );
+  const actualBody = actualPrerequisite.slice(
+    actualOperator.index + actualOperator[0].length,
+  );
+  const expectedNegative =
+    (/^unless$/i.test(expectedOperator[0]) ||
+      NEGATION.test(expectedOperator[0])) !== NEGATION.test(expectedBody);
+  const actualNegative =
+    (/^unless$/i.test(actualOperator[0]) ||
+      NEGATION.test(actualOperator[0])) !== NEGATION.test(actualBody);
+  if (expectedNegative !== actualNegative) return false;
+  const words = new Set(conditionTokens(actualBody));
+  return conditionTokens(expectedBody).every((word) => words.has(word));
+}
+
+/** A reviewed prerequisite must be supported by this item's exact cited evidence. */
+export function hasUnsupportedNotesCondition(
+  text: string,
+  evidence: string,
+): boolean {
+  return (
+    prerequisiteClauses(text).length > 0 &&
+    !conditionIsSupported(text, evidence)
+  );
+}
+
+/** A named source prerequisite cannot disappear from that same responsibility. */
+export function hasOmittedSubjectCondition(
+  subject: { text: string; owner: string | null },
+  text: string,
+  passages: readonly { speaker: string | null; text: string }[],
+): boolean {
+  const owner = knownOwnerLabel(subject.owner);
+  if (!owner) return false;
+  const subjectWords = conditionTokens(
+    splitCondition(
+      canonicalizeActionText(subject.text, subject.owner ?? undefined),
+    ).task,
+  );
+  if (subjectWords.length < 2) return false;
+  const scoped = passages.flatMap((passage) =>
+    passage.text.split(/(?<!\d)\.|\.(?!\d)|[!;\n]/u).flatMap((clause) => {
+      if (/[?"“”]/.test(clause)) return [];
+      const { task, condition } = splitCondition(
+        normalizeWaitingPrerequisite(clause.trim()),
+      );
+      const canonical = canonicalizeActionText(
+        task,
+        subject.owner ?? undefined,
+      );
+      const explicitOwner = canonical !== canonicalizeActionText(task);
+      if (knownOwnerLabel(passage.speaker) !== owner && !explicitOwner)
+        return [];
+      const words = conditionTokens(canonical);
+      const leading = subjectWords.every(
+        (word, index) => words[index] === word,
+      );
+      const clauseWords = conditionTokens(clause);
+      const mentioned = clauseWords.some((_, start) =>
+        subjectWords.every(
+          (word, index) => clauseWords[start + index] === word,
+        ),
+      );
+      if (!leading && !mentioned) return [];
+      return [
+        {
+          condition: leading ? condition : null,
+          positive:
+            leading &&
+            !NEGATION.test(task) &&
+            !/[,]|\b(?:and|or|but)\b/i.test(task),
+        },
+      ];
+    }),
+  );
+  const first = scoped.findIndex(
+    (clause) => clause.positive && clause.condition,
+  );
+  const condition = scoped[first]?.condition;
+  if (!condition) return false;
+  // A later qualified statement may change this prerequisite. Do not pick an
+  // earlier condition or infer a waiver from wording this small check cannot resolve.
+  if (
+    scoped
+      .slice(first + 1)
+      .some(
+        (clause) =>
+          !clause.positive ||
+          !clause.condition ||
+          !conditionIsSupported(condition, clause.condition) ||
+          !conditionIsSupported(clause.condition, condition),
+      )
+  )
+    return false;
+  return !conditionIsSupported(condition, text);
 }
 
 function taskParts(text: string): { verb: string; objects: string[] } | null {
@@ -309,6 +527,29 @@ function cancels(
   );
 }
 
+function completes(entry: Sentence, candidate: Candidate): boolean {
+  if (
+    !candidate.speaker ||
+    entry.speaker !== candidate.speaker ||
+    entry.text.endsWith('?') ||
+    /\b(?:but|and)\s+i(?:['’]ll| will| need to| must)\b/i.test(entry.text)
+  )
+    return false;
+  const match = COMPLETED_PROMISE.exec(entry.text);
+  if (
+    !match ||
+    CONDITION.test(match[1]!.replace(/^\S+\s+/, '')) ||
+    (/^rerun\b/i.test(match[1]!) &&
+      !/^i(?:['’]ve| have| already)\b/i.test(entry.text))
+  )
+    return false;
+  const task = match[1]!
+    .split(/[;,]|\s+(?:and|but)\s+/i)[0]!
+    .replace(/^sent\b/i, 'send')
+    .replace(/^written\b/i, 'write');
+  return matchesTask(candidate.task, task);
+}
+
 function requiresWithdrawalContext(
   entry: Sentence,
   candidate: Candidate,
@@ -354,7 +595,8 @@ export function createNotesGuardrailChecker(
         (entry) =>
           entry.order > previous.order &&
           entry.order < candidate.order &&
-          cancels(entry, previous, sourceCandidates),
+          (cancels(entry, previous, sourceCandidates) ||
+            completes(entry, previous)),
       )
         ? repeatedSources.get(previous)!
         : [];
@@ -379,8 +621,21 @@ export function createNotesGuardrailChecker(
     ];
     const issues = new Map<string, NotesGuardrailIssue>();
     for (const candidate of sourceCandidates) {
-      const matching = actions.flatMap((item) =>
-        repeatedSources
+      const candidateOwner = knownOwnerLabel(candidate.speaker);
+      const matching = actions.flatMap((item) => {
+        const itemOwner = knownOwnerLabel(item.owner);
+        if (
+          candidateOwner &&
+          itemOwner &&
+          candidateOwner !== itemOwner &&
+          !buildCitedSpeakerAliasProof(source, item.sources).some(
+            (alias) =>
+              knownOwnerLabel(alias.speaker) === candidateOwner &&
+              knownOwnerLabel(alias.name) === itemOwner,
+          )
+        )
+          return [];
+        return repeatedSources
           .get(candidate)!
           .some((span) => item.sources.some((ref) => overlaps(span, ref)))
           ? item.text
@@ -392,20 +647,24 @@ export function createNotesGuardrailChecker(
                   true,
                 ),
               )
-          : [],
-      );
+          : [];
+      });
       const cancellation = entries.find(
         (entry) =>
           entry.order > candidate.order &&
           cancels(entry, candidate, sourceCandidates),
       );
+      const completion = entries.find(
+        (entry) => entry.order > candidate.order && completes(entry, candidate),
+      );
+      const resolution = cancellation ?? completion;
       // A later explicit renewal is authoritative for the same speaking owner
       // and task. An unrelated promise cannot reactivate cancelled work.
       if (
-        cancellation &&
+        resolution &&
         sourceCandidates.some(
           (later) =>
-            later.order > cancellation.order &&
+            later.order > resolution.order &&
             later.speaker === candidate.speaker &&
             matchesTask(candidate.task, later.task) &&
             matchesTask(later.task, candidate.task),
@@ -413,9 +672,10 @@ export function createNotesGuardrailChecker(
       )
         continue;
       let code: NotesGuardrailIssue['code'] | null = null;
-      if (cancellation) {
+      if (resolution) {
         if (matching.length) code = 'conflicting_action';
         else if (
+          cancellation &&
           requiresWithdrawalContext(cancellation, candidate) &&
           !context.some(
             (block) =>
@@ -438,22 +698,9 @@ export function createNotesGuardrailChecker(
         code = 'missing_action';
       } else if (
         candidate.condition &&
-        !matching.some((clause) => {
-          const condition = CONDITION.exec(clause);
-          if (!condition) return false;
-          const expectedOperator = CONDITION.exec(candidate.condition!)![0];
-          const expectedBody = candidate.condition!.replace(CONDITION, '');
-          const actualBody = clause.slice(
-            condition.index + condition[0].length,
-          );
-          const expectedNegative =
-            /^unless$/i.test(expectedOperator) !== NEGATION.test(expectedBody);
-          const actualNegative =
-            /^unless$/i.test(condition[0]) !== NEGATION.test(actualBody);
-          if (expectedNegative !== actualNegative) return false;
-          const words = new Set(conditionTokens(actualBody));
-          return conditionTokens(expectedBody).every((word) => words.has(word));
-        })
+        !matching.some((clause) =>
+          conditionIsSupported(candidate.condition!, clause),
+        )
       ) {
         code = 'missing_condition';
       }
@@ -462,7 +709,7 @@ export function createNotesGuardrailChecker(
       if (code && (!diagnosticCodes || diagnosticCodes.includes(code))) {
         const sources = [
           ...candidate.sources,
-          ...(cancellation ? [cancellation.span] : []),
+          ...(resolution ? [resolution.span] : []),
         ].map((span) => ({ ...span }));
         const issue = { code, sources };
         issues.set(JSON.stringify(issue), issue);

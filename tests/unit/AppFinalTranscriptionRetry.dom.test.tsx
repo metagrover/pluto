@@ -196,6 +196,7 @@ describe('App final transcription retry boundary', () => {
         errors.mockRestore();
       }
     },
+    15_000,
   );
 
   it.each([

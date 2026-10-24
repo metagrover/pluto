@@ -95,6 +95,20 @@ extension VocabularyRescorer {
         let similarity: Float  // String similarity for sorting
     }
 
+    static func overlapsCanonicalWords(words: [String], vocabularyTerm: String, candidateIndices: [Int]) -> Bool {
+        let canonical = normalizeForSimilarity(vocabularyTerm).split(separator: " ").map(String.init)
+        guard !canonical.isEmpty, canonical.count <= words.count,
+              let first = candidateIndices.min(), let last = candidateIndices.max()
+        else { return false }
+        let lower = max(0, first - canonical.count + 1)
+        let upper = min(words.count - canonical.count, last)
+        guard lower <= upper else { return false }
+        return (lower...upper).contains { start in
+            let range = start..<(start + canonical.count)
+            return words[range].map(normalizeForSimilarity) == canonical && candidateIndices.contains(where: range.contains)
+        }
+    }
+
     // MARK: - Shared Finalization
 
     /// Finalize replacements: sort by span length, apply greedily, reconstruct transcript.
@@ -145,8 +159,14 @@ extension VocabularyRescorer {
             return a.similarity > b.similarity
         }
 
+        let originalWords = modifiedWords.map(\.word)
         // PASS 3: Greedily apply non-overlapping replacements
         for pending in sortedReplacements {
+            // Preserve already-correct occurrences, including candidates that clip their edges.
+            guard !Self.overlapsCanonicalWords(
+                words: originalWords, vocabularyTerm: pending.candidate.vocabTerm,
+                candidateIndices: pending.candidate.spanIndices
+            ) else { continue }
             // Check if any index in this span is already replaced
             guard pending.candidate.spanIndices.allSatisfy({ !replacedIndices.contains($0) }) else {
                 continue  // Skip - overlaps with already-accepted replacement

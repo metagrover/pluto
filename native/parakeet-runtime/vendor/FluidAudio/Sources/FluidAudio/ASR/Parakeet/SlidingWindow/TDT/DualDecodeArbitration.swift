@@ -324,11 +324,11 @@ extension ChunkProcessor {
                 )
             }
             if mergedTokens.count > 1 {
-                mergedTokens.sort { $0.timestamp < $1.timestamp }
+                Self.clampTokenTimestamps(&mergedTokens)
             }
             mergedTokens = collapseSeamWordDuplicates(mergedTokens, vocabulary: vocabulary)
         } else if mergedTokens.count > 1 {
-            mergedTokens.sort { $0.timestamp < $1.timestamp }
+            Self.clampTokenTimestamps(&mergedTokens)
         }
 
         let allTokens = mergedTokens.map { $0.token }

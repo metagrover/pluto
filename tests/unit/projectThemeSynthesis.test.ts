@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   PROJECT_THEME_SYNTHESIS_VERSION,
@@ -88,6 +89,35 @@ const makeDeps = () => {
 };
 
 describe('cross-conversation project theme synthesis', () => {
+  it('packages whole note blocks without turning a cut-off prerequisite into evidence', async () => {
+    const { deps } = makeDeps();
+    const complete = 'The archive index was reviewed. '.repeat(35).trim();
+    const task =
+      'Avery will deliver the final report after legal approves the access rules. '.repeat(
+        4,
+      );
+    const many = Array.from({ length: 24 }, (_, index) => ({
+      ...sources[index % sources.length],
+      id: `source-${index}`,
+      notes: index === 0 ? 'X'.repeat(2000) : `${complete}\n${task}`,
+    }));
+    const generate = vi.fn(async (prompt: string) => {
+      const packet = JSON.parse(
+        prompt.split('SOURCE NOTES (untrusted data):\n')[1],
+      );
+      expect(packet).toHaveLength(23);
+      expect(packet.every((source) => source.notes === complete)).toBe(true);
+      return JSON.stringify({ themes: [] });
+    });
+    await synthesizeProjectThemes({
+      ...deps,
+      listSources: () => many,
+      generate,
+    });
+    expect(generate).toHaveBeenCalledOnce();
+    expect(deps.saveTheme).not.toHaveBeenCalled();
+  });
+
   it('reuses a grounded existing label variant even when the model omits candidate IDs', async () => {
     const { deps } = makeDeps();
     const existing = {
@@ -229,6 +259,42 @@ describe('cross-conversation project theme synthesis', () => {
       status: 'complete',
       projectIds: [],
     });
+  });
+
+  it('reconsiders a completed v1 identity-matching cache once, then reuses the new result', async () => {
+    const fixture = makeDeps();
+    const oldEvidenceHash = createHash('sha256')
+      .update(
+        JSON.stringify(
+          sources.map((source) => ({
+            id: source.id,
+            title: source.title,
+            notes: source.notes,
+            startedAt: source.startedAt || null,
+            candidateProjects: source.candidateProjects,
+          })),
+        ),
+      )
+      .digest('hex');
+    const oldSourceHash = createHash('sha256')
+      .update('project-identity-matching-v1')
+      .update(oldEvidenceHash)
+      .update('[]') // no user corrections or pinned projects in this fixture
+      .update('[]')
+      .digest('hex');
+    fixture.deps.saveState({
+      version: PROJECT_THEME_SYNTHESIS_VERSION,
+      sourceHash: oldSourceHash,
+      status: 'complete',
+      projectIds: [],
+      attemptedAt: '2026-08-27T12:00:00Z',
+    });
+
+    await synthesizeProjectThemes(fixture.deps);
+    expect(fixture.deps.generate).toHaveBeenCalledOnce();
+    expect(fixture.state.sourceHash).not.toBe(oldSourceHash);
+    await synthesizeProjectThemes(fixture.deps);
+    expect(fixture.deps.generate).toHaveBeenCalledOnce();
   });
 
   it('does not rerun unchanged portfolio evidence', async () => {

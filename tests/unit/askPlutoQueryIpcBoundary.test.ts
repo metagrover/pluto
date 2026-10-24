@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
+import { resolveConfiguredProviderModel } from '../../electron/llm/providerCatalog';
 
 const main = readFileSync('electron/main.ts', 'utf8');
 const handlerStart = main.indexOf("'intelligence:query',");
@@ -296,6 +297,101 @@ describe('Ask Pluto query IPC boundary', () => {
     expect(actionBranch).toBeLessThan(
       queryHandler.indexOf("sendStatus('retrieving')"),
     );
+  });
+
+  it.each([
+    ['fast', 'phi4-mini:3.8b'],
+    ['deep', 'gemma4:12b'],
+  ])(
+    'reports the actual %s model in answer performance diagnostics',
+    (reasoningMode, expectedModel) => {
+      const modeStart = queryHandler.indexOf(
+        'reasoningMode = resolveAskPlutoReasoningMode(',
+      );
+      const assignmentStart = queryHandler.indexOf(
+        'configuredModel = resolveConfiguredProviderModel(',
+        modeStart,
+      );
+      const assignmentEnd = queryHandler.indexOf(';', assignmentStart);
+      const providerRequest = queryHandler.indexOf(
+        'answerRaw = await provider.answerAskPluto(',
+        assignmentEnd,
+      );
+      expect(assignmentStart).toBeGreaterThan(modeStart);
+      expect(assignmentEnd).toBeLessThan(providerRequest);
+      const modelDiagnostic = queryHandler.match(
+        /model: providerRequestedAt \? configuredModel : 'not_used'/,
+      )?.[0];
+      expect(modelDiagnostic).toBeDefined();
+      const diagnostics = new Function(
+        'settings',
+        'reasoningMode',
+        'providerRequestedAt',
+        'resolveConfiguredProviderModel',
+        `let configuredModel; ${queryHandler.slice(assignmentStart, assignmentEnd + 1)} return { ${modelDiagnostic} };`,
+      );
+      const settings = {
+        llm_provider: 'ollama',
+        ollama_model: 'gemma4:12b',
+        ollama_fast_model: 'phi4-mini:3.8b',
+      };
+      expect(
+        diagnostics(
+          settings,
+          reasoningMode,
+          100,
+          resolveConfiguredProviderModel,
+        ),
+      ).toEqual({ model: expectedModel });
+      expect(
+        diagnostics(
+          settings,
+          reasoningMode,
+          undefined,
+          resolveConfiguredProviderModel,
+        ),
+      ).toEqual({ model: 'not_used' });
+      expect(
+        diagnostics(
+          { llm_provider: 'chatgpt', chatgpt_model: 'gpt-5.6-terra' },
+          reasoningMode,
+          100,
+          resolveConfiguredProviderModel,
+        ),
+      ).toEqual({ model: 'gpt-5.6-terra' });
+      expect(queryHandler).toContain(
+        'performance: buildPerformanceDiagnostics()',
+      );
+      expect(queryHandler).toContain(
+        'const performance = buildPerformanceDiagnostics(finishedAt)',
+      );
+    },
+  );
+
+  it('continues to evidence retrieval when canonical status lookup declines a question', () => {
+    const start = queryHandler.indexOf('if (commitmentStatus) {');
+    const end = queryHandler.indexOf(
+      'conversationResolutionStartedAt =',
+      start,
+    );
+    expect(start).toBeGreaterThan(0);
+    const route = new Function(
+      'commitmentStatus',
+      'currentMeetingStatus',
+      `let turnMode, retrievalPolicy, contextCount; ${queryHandler.slice(start, end).replaceAll(' as const', '')} return { continueToEvidenceRetrieval: true };`,
+    );
+    expect(route(null, {})).toEqual({ continueToEvidenceRetrieval: true });
+    const canonical = {
+      answer: 'Marked completed: Focus session.',
+      citations: [{ meeting_id: 'planning' }],
+      outcome: 'answered',
+    };
+    expect(route(canonical, {})).toMatchObject({
+      status: 'answered',
+      answer: canonical.answer,
+      trustStatus: 'grounded',
+      retrievalSummary: { retrievalLevel: 'commitment' },
+    });
   });
 
   it('returns end-to-end performance diagnostics for real IPC benchmarks', () => {

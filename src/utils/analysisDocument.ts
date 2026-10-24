@@ -344,6 +344,7 @@ const rendererEditPaths = (doc: AnalysisDocumentV3): string[] => [
 ];
 
 const isSourceGrounded = (doc: AnalysisDocumentV3): boolean =>
+  doc.generation_metadata?.pipeline_version === 'writer-only-v1' ||
   doc.generation_metadata?.pipeline_version === 'writer-editor-v1' ||
   doc.generation_metadata?.pipeline_version === 'writer-editor-bounded-v1' ||
   doc.generation_metadata?.prompt_version === 'notes-v11' ||
@@ -357,18 +358,30 @@ const appendEditableBlock = (
     text,
     sourceKey,
     supportsCompletion = false,
+    completionIdentity,
     supportsNativeContinuation = true,
   }: {
     path: string;
     text: string;
     sourceKey: string | null;
     supportsCompletion?: boolean;
+    completionIdentity?: EditBlock['completionIdentity'];
     supportsNativeContinuation?: boolean;
   },
 ): void => {
   blocks.push({ path, text, sourceKey });
   if (supportsCompletion) {
-    blocks.push({ path: `completion:${path}`, text: 'false', sourceKey });
+    blocks.push({
+      path: `completion:${path}`,
+      text: 'false',
+      sourceKey,
+      completionIdentity: completionIdentity ?? {
+        text: text.trim().toLocaleLowerCase(),
+        owner: null,
+        sourceRevision: null,
+        sources: [],
+      },
+    });
   }
   if (supportsNativeContinuation) {
     blocks.push({
@@ -461,6 +474,19 @@ export const getAnalysisEditBlocks = (
       path: `all_action_items:${index}`,
       text: item.text,
       sourceKey: editBlockSourceKey(doc, `all_action_items:${index}`),
+      completionIdentity: {
+        text: item.text.trim().toLocaleLowerCase(),
+        owner:
+          typeof item.assignee === 'string'
+            ? item.assignee.trim().toLocaleLowerCase() || null
+            : null,
+        sourceRevision:
+          doc.generation_metadata?.source_provenance?.source_revision ?? null,
+        sources:
+          doc.generation_metadata?.source_provenance?.blocks[
+            `all_action_items:${index}`
+          ]?.sources ?? [],
+      },
       supportsCompletion: true,
     }),
   );

@@ -455,7 +455,7 @@ describe('identity shipping lifecycle coverage', () => {
     expect(db.isRetiredCommitment(candidateId)).toBe(true);
   });
 
-  it('publishes a fresh commitment set after its speaker identity is corrected', async () => {
+  it('replaces unreviewed extractions after a speaker correction while preserving reviewed history', async () => {
     db.deleteEntity(candidateId);
     const speaker = 'Speaker 1';
     handleIdentityRequest('SET_MEETING_IDENTITY_BINDING', {
@@ -465,7 +465,7 @@ describe('identity shipping lifecycle coverage', () => {
       individual: true,
       expectedRevision: db.identityStore.getRevision(),
     });
-    const generate = vi.fn<SemanticGenerate>();
+    const reviewed = db.getEntity(canonicalId);
     const extracted = {
       people: [],
       topics: [],
@@ -480,19 +480,18 @@ describe('identity shipping lifecycle coverage', () => {
         },
       ],
     };
-    const first = await processExtractedEntities(
-      extracted,
-      meetingId,
-      undefined,
-      undefined,
-      { generate },
-    );
+    const first = await processExtractedEntities(extracted, meetingId);
     const firstAction = first.entities.find(
       (entity) => entity.type === 'action_item',
     );
     expect(firstAction?.id).toBeDefined();
     expect(firstAction?.id).not.toBe(canonicalId);
-    expect(db.isRetiredCommitment(canonicalId)).toBe(true);
+    expect(db.isRetiredCommitment(canonicalId)).toBe(false);
+    expect(db.getEntity(canonicalId)).toEqual(reviewed);
+    expect(JSON.parse(firstAction?.metadata ?? '{}')).toMatchObject({
+      commitment_state: 'possible',
+      source_regeneration_review_required: true,
+    });
     const other = db.upsertEntity({
       type: 'person',
       name: 'Drew',
@@ -505,20 +504,17 @@ describe('identity shipping lifecycle coverage', () => {
       individual: true,
       expectedRevision: db.identityStore.getRevision(),
     });
-    const second = await processExtractedEntities(
-      extracted,
-      meetingId,
-      undefined,
-      undefined,
-      { generate },
-    );
+    const second = await processExtractedEntities(extracted, meetingId);
     const secondAction = second.entities.find(
       (entity) => entity.type === 'action_item',
     );
     expect(secondAction?.id).toBeDefined();
     expect(secondAction?.id).not.toBe(firstAction?.id);
     expect(db.isRetiredCommitment(firstAction?.id ?? '')).toBe(true);
-    expect(db.getEntity(canonicalId)?.assigned_to).toBe(personId);
-    expect(generate).not.toHaveBeenCalled();
+    expect(JSON.parse(secondAction?.metadata ?? '{}')).toMatchObject({
+      commitment_state: 'possible',
+      source_regeneration_review_required: true,
+    });
+    expect(db.getEntity(canonicalId)).toEqual(reviewed);
   });
 });

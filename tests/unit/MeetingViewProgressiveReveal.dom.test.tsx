@@ -152,6 +152,25 @@ describe('MeetingView progressive reveal', () => {
       />,
     );
 
+  it('shows the saved-recording failure without a false analysis spinner', async () => {
+    await act(async () =>
+      renderMeeting({
+        ...baseMeeting,
+        transcript_json: null,
+        transcript_status: 'needs_attention',
+        finalization_status: 'recovery_required',
+        finalization_error_category: 'journal_seal_failed',
+      }),
+    );
+    expect(container.textContent).toContain('Recording saved');
+    expect(container.textContent).not.toContain(
+      'The transcript is ready for analysis.',
+    );
+    expect(
+      container.querySelector('[aria-label="Preparing meeting analysis"]'),
+    ).toBeNull();
+  });
+
   it('renders legacy saved topics with omitted optional arrays', async () => {
     const savedAnalysis = JSON.parse(analyzedMeeting.analysis_json!);
     savedAnalysis.topics = [
@@ -912,6 +931,7 @@ describe('MeetingView progressive reveal', () => {
   it('shows a stable local queue status and replaces it when generation starts', async () => {
     const queuedMeeting = {
       ...baseMeeting,
+      transcript_status: 'validated' as const,
       analysis_run_json: JSON.stringify({
         notes_status: 'running',
         stage: 'queued',

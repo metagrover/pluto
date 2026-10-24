@@ -27,7 +27,10 @@ import {
   updateEntityStatus,
   upsertEntity,
 } from '../../electron/db';
-import { parseActionMetadata } from '../../src/utils/actionCommitment';
+import {
+  isPersonalAction,
+  parseActionMetadata,
+} from '../../src/utils/actionCommitment';
 import { applyMeetingNotesUserEdit } from '../../src/utils/meetingNotesEditRebase';
 
 afterAll(() => {
@@ -405,15 +408,17 @@ describe('meeting action entity and user edit synchronization', () => {
       id: meetingId,
       title: 'Design Call',
       analysis_json: JSON.stringify({
-        all_action_items: [],
+        all_action_items: [{ text: 'Review mobile layout', assignee: 'Me' }],
       }),
       user_edits_json: JSON.stringify({
-        'continuation:all_action_items:0': {
+        'native_continuations:all_action_items:0': {
           original: '[]',
           edited: JSON.stringify([
             {
               id: continuationId,
               text: continuationText,
+              kind: 'action',
+              assignee: 'Me',
               completed: false,
             },
           ]),
@@ -434,13 +439,15 @@ describe('meeting action entity and user edit synchronization', () => {
     expect(meta.origin).toBe('user');
     expect(meta.commitment_state).toBe('confirmed');
     expect(meta.continuation_id).toBe(continuationId);
+    expect(meta.assignee_name).toBe('Me');
+    expect(isPersonalAction(entity!, {})).toBe(true);
 
     // Delete continuation from user edits
     saveMeeting({
       id: meetingId,
       title: 'Design Call',
       user_edits_json: JSON.stringify({
-        'continuation:all_action_items:0': {
+        'native_continuations:all_action_items:0': {
           original: '[]',
           edited: JSON.stringify([]),
         },
@@ -451,6 +458,41 @@ describe('meeting action entity and user edit synchronization', () => {
     expect(deleteResult.continuationsRemoved).toBe(1);
     expect(getEntity(continuationEntityId)).toBeUndefined();
   });
+
+  it.each([
+    'continuation:all_action_items:0',
+    'native_continuations:all_action_items:0',
+  ])(
+    'does not invent task intent for an untyped row with no parent: %s',
+    (path) => {
+      const meetingId = `orphaned-${path}`;
+      const edits = {
+        [path]: {
+          original: '[]',
+          edited: JSON.stringify([
+            { id: 'untyped', text: 'Follow up with design' },
+          ]),
+        },
+      };
+      saveMeeting({
+        id: meetingId,
+        title: 'Orphaned continuation',
+        analysis_json: JSON.stringify({ all_action_items: [] }),
+        user_edits_json: JSON.stringify(edits),
+      });
+
+      expect(
+        syncMeetingActionEntitiesFromUserEdits(db, meetingId)
+          .continuationsCreated,
+      ).toBe(0);
+      expect(
+        getEntity(`action-continuation-${meetingId}-untyped`),
+      ).toBeUndefined();
+      expect(JSON.parse(getMeeting(meetingId)!.user_edits_json!)).toEqual(
+        edits,
+      );
+    },
+  );
 
   it('preserves existing confirmed and rejected commitment review states when editing text', () => {
     const meetingId = 'meeting-review-preserve-5';
@@ -878,10 +920,13 @@ describe('corrected saved evidence for pending dashboard suggestions', () => {
     expect(getEntity(entity.id)?.status).toBe('active');
   });
 
-  it('uses the existing deadline rules when a corrected due date is recorded', () => {
-    const { entity, meetingId } = seed('due', {}, 'monday');
+  it.each([
+    ['monday', '2026-10-19'],
+    ['Friday, November 13', '2026-11-13'],
+  ] as const)('normalizes corrected source deadline %s', (due, expected) => {
+    const { entity, meetingId } = seed(`due-${due}`, {}, due);
     syncMeetingActionEntitiesFromUserEdits(db, meetingId);
-    expect(getEntity(entity.id)?.due_date).toBe('2026-10-19');
+    expect(getEntity(entity.id)?.due_date).toBe(expected);
   });
 
   it.each([
