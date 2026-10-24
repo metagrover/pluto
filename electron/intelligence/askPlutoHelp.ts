@@ -1,5 +1,6 @@
 // Product guidance lives here rather than being invented from meeting notes.
-// Keep connection steps aligned with docs/chatgpt-connection.md and Settings.
+// Keep connection steps aligned with docs/chatgpt-connection.md,
+// docs/claude-connection.md, and Settings.
 export const buildPlutoHelpReply = (query: string): string | null => {
   const text = query.normalize('NFKC').replace(/[’]/g, "'").trim();
   const helpRequest =
@@ -15,6 +16,12 @@ export const buildPlutoHelpReply = (query: string): string | null => {
   )
     return null;
 
+  if (
+    /\bclaude\b/i.test(text) &&
+    /\b(?:connect\w*|setup|set ?up|access|integrat\w*|use)\b/i.test(text)
+  ) {
+    return 'To connect Pluto to Claude on this Mac:\n\n1. Open **Settings → Advanced → Claude connection**. Allow meeting-note access, then click **Connect to Claude**.\n2. Fully quit Claude (⌘Q) and reopen it to load Pluto.\n3. Start a new Claude Desktop chat. Check **+ → Connectors** for **pluto-notes** (or **pluto-notes-development** for a development build), then ask Claude to use Pluto. Allow note reads when asked.\n\nKeep Pluto running with access enabled. Retrieved notes are sent to Anthropic; raw transcripts and audio are not shared. ChatGPT access is managed separately.\n\nIf it still fails, tell me the connection status or error shown in Settings.\n\n[Open Claude connection settings](/settings/advanced)';
+  }
   if (
     /\bchat\s*gpt\b/i.test(text) &&
     /\b(?:connect\w*|setup|set ?up|plugin|access|integrat\w*|use)\b/i.test(text)

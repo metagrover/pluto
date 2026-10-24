@@ -1,5 +1,9 @@
 # Discuss Pluto meeting notes in ChatGPT
 
+Pluto also supports [Claude Desktop](claude-connection.md). Both connections can
+be enabled at the same time, with separate consent and credentials. Disabling
+one does not revoke the other.
+
 Pluto can serve its current meeting notes through a private, read-only MCP
 connection. ChatGPT can use the notes for discussion, feedback, comparisons,
 patterns, and follow-up drafts. It does not gain recording controls, edits,

@@ -17,6 +17,19 @@ describe('Ask Pluto product help', () => {
     expect(answer).not.toMatch(/confirm your identity|API key|tunnel/i);
   });
 
+  it.each([
+    'Help me connect Pluto to Claude',
+    'How do I use Claude with Pluto?',
+    'Why is my Claude connection not working?',
+  ])('explains the independent Claude notes connection: %s', (query) => {
+    const answer = buildPlutoHelpReply(query);
+    expect(answer).toContain('Settings → Advanced → Claude connection');
+    expect(answer).toContain('Fully quit Claude');
+    expect(answer).toContain('pluto-notes-development');
+    expect(answer).toContain('Retrieved notes are sent to Anthropic');
+    expect(answer).toContain('ChatGPT access is managed separately');
+  });
+
   it('answers recording setup and asks for the actual error on failure', () => {
     const answer = buildPlutoHelpReply('How do I start recording?');
     expect(answer).toContain('sidebar');
@@ -45,6 +58,7 @@ describe('Ask Pluto product help', () => {
     'What feedback did I receive?',
     'How did we decide to connect ChatGPT in the last meeting?',
     'What did we discuss about Pluto settings?',
+    'How did we decide to connect Claude in the last meeting?',
     'How do we connect the ChatGPT integration project to the launch plan?',
     'Summarize my meetings this week',
   ])('leaves meeting and project questions for retrieval: %s', (query) => {
