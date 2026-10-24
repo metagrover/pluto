@@ -353,18 +353,24 @@ export const formatNotesRepairFeedback = (error: unknown): string | null => {
   const message = error instanceof Error ? error.message : 'invalid_json';
   const groundingPattern =
     /^notes_editor_(quantity_scope|unsupported_condition|unsupported_pronoun):(title|overview|s\d{1,4}:(?:title|item:\d{1,4}))$/;
-  const commitment =
-    /^notes_editor_invalid_commitment:s(\d{1,4}):item:(\d{1,4}):correct_wording_kind_owner_or_due_from_source$/.exec(
-      message,
-    );
-  if (groundingPattern.test(message) || commitment) {
+  const commitmentPattern =
+    /^notes_editor_invalid_commitment:s(\d{1,4}):item:(\d{1,4}):(correct_wording_kind_owner_or_due_from_source|conditional_willingness_is_not_accepted__change_kind_to_point_and_preserve_can_or_could_not_will_in_text)$/;
+  if (groundingPattern.test(message) || commitmentPattern.test(message)) {
     const messages = new Set([
       message,
       ...(getSourceLedValidationFailures(error) ?? []).map(
-        ({ reason, target }) => `notes_editor_${reason}:${target}`,
+        ({ reason, target }) =>
+          reason === 'source_grounding'
+            ? `notes_editor_invalid_commitment:${target}:correct_wording_kind_owner_or_due_from_source`
+            : `notes_editor_${reason}:${target}`,
       ),
     ]);
     const feedback = [...messages].flatMap((diagnostic) => {
+      const commitment = commitmentPattern.exec(diagnostic);
+      if (commitment) {
+        // Compact writers receive array positions, not the parser's canonical ids.
+        return `The failed item is sections[${commitment[1]}].items[${commitment[2]}] (zero-based array indices). Its action/decision classification, wording, owner, due date or cited evidence is unproved. Re-read the original source for that item. A description or task-scope clarification is a point, not a settled choice. A permitted activity is not a promise to perform it; preserve the exact permission/negation wording when recording a settled policy. Unaccepted conditional willingness remains a point with can/could wording, not a promise with will. Do not change valid actions into points merely to avoid validation. Retain all supported operations, conditions, reasons and history with complete supporting references. Return the complete corrected JSON.`;
+      }
       const grounding = groundingPattern.exec(diagnostic);
       if (!grounding) return [];
       const reason = grounding[1] as
@@ -377,13 +383,7 @@ export const formatNotesRepairFeedback = (error: unknown): string | null => {
         .replace(/^s(\d+):item:(\d+)$/, 'sections[$1].items[$2]');
       return `${diagnostic}: ${REVIEW_RETRY_INSTRUCTIONS[reason]} Correct ${path}; retain unaffected supported content and complete source references.`;
     });
-    if (commitment) {
-      // Compact writers receive array positions, not the parser's canonical ids.
-      feedback.unshift(
-        `The failed item is sections[${commitment[1]}].items[${commitment[2]}] (zero-based array indices). Its action/decision classification, wording, owner, due date or cited evidence is unproved. Re-read the original source for that item. A description or task-scope clarification is a point, not a settled choice. A permitted activity is not a promise to perform it; preserve the exact permission/negation wording when recording a settled policy. Do not change valid actions into points merely to avoid validation. Retain all supported operations, conditions, reasons and history with complete supporting references. Return the complete corrected JSON.`,
-      );
-    }
-    return feedback.join('\n');
+    return [...new Set(feedback)].join('\n');
   }
   const polarity =
     /^notes_audit_invalid_commitment:([A-Za-z0-9][A-Za-z0-9:_-]{0,119}):correct_wording_or_kind_from_source:source_check_polarity_scope__separate_history_and_current_choice$/.exec(
@@ -585,7 +585,7 @@ const writeDraft = async (
         input.contextTokens,
         task,
         prompt,
-        'writer-audit-v6:source-labels:guardrails-v3:schema-v1',
+        'writer-audit-v7:source-labels:guardrails-v3:schema-v1',
         input.compactSourceSpeakers ?? false,
         input.sourceParagraphs ?? false,
       ]),

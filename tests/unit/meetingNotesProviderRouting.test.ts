@@ -252,7 +252,7 @@ it.each(['ollama', 'openai', 'openrouter', 'claude', 'gemini'] as const)(
         expect(schema).toBeDefined();
       else expect(schema).toBeUndefined();
     }
-    expect(result.generation_metadata?.prompt_version).toBe('notes-v93');
+    expect(result.generation_metadata?.prompt_version).toBe('notes-v94');
     expect(result.generation_metadata?.pipeline_version).toBe(
       'writer-audit-v1',
     );
@@ -283,7 +283,7 @@ it('uses only the compact writer for ordinary local product notes', async () => 
   expect(
     result.generation_metadata?.source_action_review_version,
   ).toBeUndefined();
-  expect(result.generation_metadata?.prompt_version).toBe('notes-v93');
+  expect(result.generation_metadata?.prompt_version).toBe('notes-v94');
 });
 
 it('emits a complete provisional bullet on actual streamed transport before writer completion', async () => {

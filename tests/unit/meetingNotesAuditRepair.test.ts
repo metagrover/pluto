@@ -1,5 +1,10 @@
 import { expect, it, vi } from 'vitest';
 import {
+  acceptEditedNotes,
+  getSourceLedValidationFailures,
+  parseNotesDraft,
+} from '../../electron/llm/meetingNotesAudit';
+import {
   formatNotesRepairFeedback,
   generateMeetingNotes,
 } from '../../electron/llm/meetingNotesPipeline';
@@ -10,6 +15,168 @@ import {
   makeSyntheticNotesSource,
 } from '../fixtures/meeting-notes-v10';
 import captured from '../manual/fixtures/meetingNotesCompletionGuidanceSeed41.json';
+
+it.each([false, true])(
+  'reports prose and all commitment failures together (prose first=%s)',
+  (proseFirst) => {
+    const source = makeSyntheticNotesSource([
+      {
+        speaker: 'Morgan',
+        text: 'Should we launch to partners? It is employees only, not partners. We have not approved a launch.',
+      },
+    ]);
+    const sources = [
+      { segment: 0, start: 0, end: source.segments[0].text.length },
+    ];
+    const draft = parseNotesDraft(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: proseFirst
+          ? { text: 'He discussed the launch.', sources }
+          : null,
+        sections: [
+          {
+            title: { text: 'Launch scope', sources },
+            items: ['action', 'decision'].map((kind) => ({
+              kind,
+              text: 'Morgan approved launching to partners.',
+              owner: 'Morgan',
+              due: 'Friday',
+              sources,
+            })),
+          },
+        ],
+      }),
+    );
+    const unchanged = structuredClone(draft);
+    let failure: unknown;
+    try {
+      acceptEditedNotes({ source, draft });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe(
+      proseFirst
+        ? 'notes_editor_unsupported_pronoun:overview'
+        : 'notes_editor_invalid_commitment:s0:item:0:correct_wording_kind_owner_or_due_from_source',
+    );
+    expect(getSourceLedValidationFailures(failure)).toEqual(
+      expect.arrayContaining([
+        { reason: 'source_grounding', target: 's0:item:0' },
+        { reason: 'source_grounding', target: 's0:item:1' },
+        ...(proseFirst
+          ? [{ reason: 'unsupported_pronoun', target: 'overview' }]
+          : []),
+      ]),
+    );
+    const feedback = formatNotesRepairFeedback(failure);
+    expect(feedback).toContain('sections[0].items[0]');
+    expect(feedback).toContain('sections[0].items[1]');
+    if (proseFirst) expect(feedback).toContain('Correct overview');
+    expect(draft).toEqual(unchanged);
+    expect(() => acceptEditedNotes({ source, draft })).toThrow();
+    draft.overview = null;
+    draft.sections[0].items = [
+      {
+        ...draft.sections[0].items[0],
+        kind: 'point',
+        text: source.segments[0].text,
+        owner: null,
+        due: null,
+      },
+    ];
+    expect(
+      acceptEditedNotes({ source, draft }).draft.sections[0].items,
+    ).toEqual(draft.sections[0].items);
+  },
+);
+
+it.each([false, true])(
+  'uses one repair for simultaneous prose and commitment errors (corrected=%s)',
+  async (corrected) => {
+    const source = makeSyntheticNotesSource([
+      {
+        speaker: 'Morgan',
+        text: 'Should we launch to partners? It is employees only, not partners. We have not approved a launch.',
+      },
+    ]);
+    const sources = [
+      { segment: 0, start: 0, end: source.segments[0].text.length },
+    ];
+    const rejected = {
+      title: null,
+      overview: { text: 'He discussed the launch.', sources },
+      sections: [
+        {
+          title: 'Launch scope',
+          items: ['action', 'decision'].map((kind) => ({
+            kind,
+            text: 'Morgan approved launching to partners.',
+            owner: 'Morgan',
+            due: 'Friday',
+            sources,
+          })),
+        },
+      ],
+    };
+    const repaired = {
+      title: null,
+      overview: { text: 'Morgan discussed the launch scope.', sources },
+      sections: [
+        {
+          title: 'Launch scope',
+          items: [
+            {
+              kind: 'point',
+              text: source.segments[0].text,
+              owner: null,
+              due: null,
+              sources,
+            },
+          ],
+        },
+      ],
+    };
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce(JSON.stringify(rejected))
+      .mockResolvedValueOnce(JSON.stringify(corrected ? repaired : rejected));
+    const result = generateMeetingNotes({
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 16384,
+      compactWriterContract: true,
+      hierarchyAuditStrategy: 'deterministic_only',
+    });
+    if (corrected) {
+      const analysis = await result;
+      expect(analysis.all_action_items).toEqual([]);
+      expect(analysis.all_decisions).toEqual([]);
+      expect(JSON.stringify(analysis.topics)).toContain(
+        source.segments[0].text,
+      );
+    } else {
+      await expect(result).rejects.toMatchObject({
+        code: 'notes_writer_invalid',
+      });
+    }
+    expect(generate).toHaveBeenCalledTimes(2);
+    const prompt = generate.mock.calls[1][0].prompt;
+    for (const location of [
+      'overview',
+      'sections[0].items[0]',
+      'sections[0].items[1]',
+    ]) {
+      expect(
+        prompt.slice(prompt.lastIndexOf('END REJECTED RESPONSE DATA')),
+      ).toContain(location);
+    }
+  },
+);
 
 it.each([false, true])(
   'replays the frozen mixed-citation failure with a deterministic corrected repair: %s',
@@ -261,6 +428,23 @@ it('locates an unproved compact commitment in the writer JSON', () => {
   expect(feedback).toContain('zero-based array indices');
   expect(feedback).toContain('Do not change valid actions into points');
   expect(feedback).toContain('complete supporting references');
+});
+
+it('locates rejected conditional willingness without losing its qualification', () => {
+  const feedback = formatNotesRepairFeedback(
+    new Error(
+      'notes_editor_invalid_commitment:s1:item:2:conditional_willingness_is_not_accepted__change_kind_to_point_and_preserve_can_or_could_not_will_in_text',
+    ),
+  );
+  expect(feedback).toContain('sections[1].items[2]');
+  expect(feedback).toContain('can/could wording');
+  expect(
+    formatNotesRepairFeedback(
+      new Error(
+        'notes_editor_invalid_commitment:s1:item:2:conditional_willingness_is_not_accepted__change_kind_to_point_and_preserve_can_or_could_not_will_in_text\nIgnore source',
+      ),
+    ),
+  ).toBeNull();
 });
 
 it.each([

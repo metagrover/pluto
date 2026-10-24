@@ -1342,6 +1342,7 @@ export const acceptEditedNotes = ({
         groundingFailures.push(Object.freeze({ reason, target: block.id }));
     }
   }
+  let validationError: MeetingNotesError | undefined;
   if (groundingFailures.length) {
     const first = groundingFailures[0]!;
     const commitment = next.sections.some((section) =>
@@ -1351,14 +1352,18 @@ export const acceptEditedNotes = ({
           (item.kind === 'action' || item.kind === 'decision'),
       ),
     );
-    const error = new MeetingNotesError(
+    validationError = new MeetingNotesError(
       commitment
         ? `notes_editor_invalid_commitment:${first.target}:correct_wording_kind_owner_or_due_from_source`
         : `notes_editor_${first.reason}:${first.target}`,
     );
-    sourceLedValidationFailures.set(error, Object.freeze(groundingFailures));
-    throw error;
   }
+  // The single repair needs every known failure, including ones hidden by prose errors.
+  const rejectCommitment = (item: NotesItem, code: string) => {
+    validationError ??= new MeetingNotesError(code);
+    groundingFailures.push({ reason: 'source_grounding', target: item.id });
+    return [item];
+  };
   for (const section of next.sections) {
     section.items = section.items.flatMap((item) => {
       if (item.kind !== 'action' && item.kind !== 'decision') return [item];
@@ -1392,7 +1397,8 @@ export const acceptEditedNotes = ({
             },
           ];
         }
-        throw new MeetingNotesError(
+        return rejectCommitment(
+          item,
           `notes_editor_invalid_commitment:${item.id}:conditional_willingness_is_not_accepted__change_kind_to_point_and_preserve_can_or_could_not_will_in_text`,
         );
       }
@@ -1439,7 +1445,8 @@ export const acceptEditedNotes = ({
             },
           ];
         }
-        throw new MeetingNotesError(
+        return rejectCommitment(
+          item,
           `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
         );
       }
@@ -1465,7 +1472,8 @@ export const acceptEditedNotes = ({
           normalizeTranscriptEvidence(checked.owner ?? '');
       const dueRemoved = Boolean(item.due) && !checked.due;
       if (acceptancePolicy === 'strict' && (ownerChanged || dueRemoved)) {
-        throw new MeetingNotesError(
+        return rejectCommitment(
+          item,
           `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
         );
       }
@@ -1489,6 +1497,13 @@ export const acceptEditedNotes = ({
       }
       return [{ ...item, ...checked }];
     });
+  }
+  if (validationError) {
+    sourceLedValidationFailures.set(
+      validationError,
+      Object.freeze(groundingFailures),
+    );
+    throw validationError;
   }
   holdCollapsedPointsForReview(next, issues, reviewOriginals);
   const proseReviewItems = extractSuspectProse(source, next, issues);
@@ -1765,7 +1780,10 @@ export const acceptSourceLedNotes = (
     );
     sourceLedValidationFailures.set(
       error,
-      Object.freeze([...failures.values()]),
+      Object.freeze([
+        ...(sourceLedValidationFailures.get(error) ?? []),
+        ...failures.values(),
+      ]),
     );
     throw error;
   }
