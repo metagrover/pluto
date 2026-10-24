@@ -1712,6 +1712,36 @@ export const buildSynthesizedAnswerPresentation = (
     .flatMap((passage) => passage.split(/\n+|(?<=[.!?])\s+/));
   // Owner fields are evidence; retrieval titles and raw dialogue are not identity proof.
   const recordedSpeakers = new Set(evidence.flatMap(recordedSpeakerLabels));
+  // A meeting title locates evidence; it does not establish a project.
+  const titleOnlyProjects = sources
+    .filter(
+      (source) =>
+        source.source_type !== 'artifact' &&
+        source.evidence_kind !== 'transcript',
+    )
+    .map((source) =>
+      (source.meeting_title || source.mid?.title || '')
+        .replace(/["“”*`]/g, '')
+        .trim(),
+    )
+    .filter(
+      (title) =>
+        title &&
+        !evidence.some((passage) =>
+          passage
+            .replace(/["“”*`]/g, '')
+            .toLocaleLowerCase()
+            .includes(title.toLocaleLowerCase()),
+        ),
+    )
+    .map((title) => title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .map((title) => {
+      const name = `(?<![\\p{L}\\p{N}])${title}(?![\\p{L}\\p{N}])`;
+      return new RegExp(
+        `(?:${name}\\s+project\\b|\\bproject\\s+(?:called\\s+)?${name})`,
+        'iu',
+      );
+    });
   const sourceDays = new Set(
     sources
       .flatMap((source) => [
@@ -1793,6 +1823,9 @@ export const buildSynthesizedAnswerPresentation = (
             }) ||
             (/\btoday\b/i.test(sentence) &&
               !sourceDays.has(new Date().toISOString().slice(0, 10)));
+          const unsupportedMetadataProject = titleOnlyProjects.some((pattern) =>
+            pattern.test(sentence.replace(/["“”*`]/g, '')),
+          );
           const unsupportedRecordedSpeaker = recordedSpeakerLabels(
             sentence,
           ).some((label) => !recordedSpeakers.has(label));
@@ -1806,7 +1839,8 @@ export const buildSynthesizedAnswerPresentation = (
             unsupportedDate ||
             unsupportedImplementation ||
             unsupportedCertainty ||
-            unsupportedRecordedSpeaker
+            unsupportedRecordedSpeaker ||
+            unsupportedMetadataProject
           )
             unsupportedClaims.push(sentence);
           return (
@@ -1815,7 +1849,8 @@ export const buildSynthesizedAnswerPresentation = (
             !unsupportedDate &&
             !unsupportedImplementation &&
             !unsupportedCertainty &&
-            !unsupportedRecordedSpeaker
+            !unsupportedRecordedSpeaker &&
+            !unsupportedMetadataProject
           );
         })
         .join(' '),

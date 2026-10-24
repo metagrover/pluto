@@ -460,6 +460,80 @@ describe('Citation Engine', () => {
       },
     );
 
+    it.each([
+      [
+        'Pottery evening',
+        'Dev completed the vase.',
+        'Dev completed the vase for the "Pottery evening" project.',
+      ],
+      [
+        'Field review (east)',
+        'Kai measured the path.',
+        'Kai measured the path for project Field review (east).',
+      ],
+      [
+        'Festival & access',
+        'Uma checked the ramp.',
+        'Uma checked the ramp for the **Festival & access** project.',
+      ],
+    ])(
+      'does not turn a meeting title into a project fact: %s',
+      (title, evidence, answer) => {
+        const context = [
+          { ...sources[0], meeting_title: title, evidence_text: evidence },
+        ];
+        const deltas: string[] = [];
+        const stream = createSynthesizedAnswerStream(context, (delta) =>
+          deltas.push(delta),
+        );
+        stream.push(answer);
+        const result = stream.finalize(answer);
+        expect(result.outcome).toBe('no_evidence');
+        expect(result.unsupportedClaimCount).toBe(1);
+        expect(deltas.join('')).toBe('');
+      },
+    );
+
+    it.each([
+      {
+        meeting_title: 'Canopy',
+        evidence_text: 'The Canopy project includes the final ramp check.',
+      },
+      {
+        meeting_title: 'Canopy',
+        evidence_text: 'Ramp check complete.',
+        source_type: 'artifact' as const,
+      },
+    ])(
+      'leaves recorded project names and artifact presentation unchanged: %j',
+      (source) => {
+        const answer = 'The Canopy project includes the ramp check.';
+        const result = buildSynthesizedAnswerPresentation(answer, [
+          { ...sources[0], ...source },
+        ]);
+        expect(result.answer).toBe(answer);
+        expect(result.unsupportedClaimCount).toBe(0);
+        expect(result.trustStatus).toBe('inferred');
+      },
+    );
+
+    it.each(['', '***', '**Canopy**'])(
+      'does not treat empty or marked-up metadata as a different project name: %s',
+      (title) => {
+        const result = buildSynthesizedAnswerPresentation(
+          'The Canopy project includes the ramp check.',
+          [
+            {
+              ...sources[0],
+              meeting_title: title,
+              evidence_text: 'The Canopy project includes the ramp check.',
+            },
+          ],
+        );
+        expect(result.unsupportedClaimCount).toBe(0);
+      },
+    );
+
     it.each(['## Owner', '**Owner**', 'Owner:', 'Owner\n\n## Timing'])(
       'still removes explicit or multi-paragraph orphan headings: %s',
       (answer) => {

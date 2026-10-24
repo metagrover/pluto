@@ -4,6 +4,13 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-24 - Keep meeting titles separate from project facts in saved answers
+
+- **Refines:** “Preserve uncertainty and short answers at saved-answer publication” (2026-10-24). A meeting title identifies a source; it does not establish a project with that name.
+- **Decision:** Withhold a synthesized sentence that directly calls a meeting-title-only name a project, when that name is absent from the supplied non-transcript evidence. Match complete literal titles in either project-name order, allowing presentation markup. Preserve recorded names and the existing artifact path. The existing single retry, inferred trust and publication buffering remain.
+- **Boundary:** This catches direct title-role promotion, not arbitrary invented names, paraphrased project identities, rationales or general entailment. A name appearing in evidence does not prove every claim about it. Broader source fidelity remains a release gate; no model, prompt, sampling, memory or retry-budget change accompanies this check.
+- **Evidence:** Three independent-domain regressions first reproduced title-to-project invention. The presentation suite now passes 121 tests. A fresh 23-control Phi run plus exact final presentation replay retains all previously passing answers and corrects the title-based project/rationale answer through the existing retry: 20/23 final source-reviewed controls pass, versus 17/23 raw model answers. This does not qualify live retrieval or release readiness.
+
 ## 2026-10-24 - Require recorded anonymous speaker labels in saved-answer evidence
 
 - **Refines:** “Preserve uncertainty and short answers at saved-answer publication” (2026-10-24). Preserving a short answer does not authorize an invented recorded identity.
