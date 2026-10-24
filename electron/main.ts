@@ -1100,7 +1100,7 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
       input.signal.throwIfAborted();
       if (!input.canCommit()) return;
       if (refreshed.requested !== refreshed.completed)
-        throw new Error('knowledge_document_refresh_incomplete');
+        throw new Error('knowledge_document_refresh_deferred');
     } catch (error) {
       if (!input.signal.aborted && input.canCommit())
         backgroundKnowledgeRefresh?.enqueue(`secondary:${input.meetingId}`);

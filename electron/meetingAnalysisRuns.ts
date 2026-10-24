@@ -516,7 +516,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       return Promise.resolve();
     secondaryByMeeting.set(input.meetingId, { runId: input.runId, controller });
     const update = (
-      secondaryStatus: 'running' | 'complete' | 'failed',
+      secondaryStatus: 'pending' | 'running' | 'complete' | 'failed',
       stage: string,
       code?: string,
     ) => {
@@ -578,6 +578,10 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       })
       .then(() => update('complete', 'complete'))
       .catch((error) => {
+        if (errorCode(error) === 'knowledge_document_refresh_deferred') {
+          update('pending', 'knowledge');
+          return;
+        }
         console.error(
           `[MeetingNotesCoordinator] Secondary run failed for meeting ${input.meetingId}:`,
           error,

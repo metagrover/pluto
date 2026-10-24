@@ -1820,81 +1820,99 @@ describe('meeting analysis run coordinator', () => {
     expect(onPublished).not.toHaveBeenCalled();
   });
 
-  it('keeps published notes when secondary work fails', async () => {
-    const updateSecondaryStatus = vi.fn();
-    const publishMeetingNotesIfCurrent = vi.fn().mockReturnValue(true);
-    const coordinator = createMeetingAnalysisRunCoordinator({
-      db: {
-        getMeeting: () => ({
-          id: 'meeting-c',
-          transcript_json: JSON.stringify({
-            segments: [{ speaker: 1, text: 'We agreed to ship.' }],
+  it.each([
+    [
+      'value_signals_failed',
+      'failed',
+      'secondary_failed',
+      'value_signals_failed',
+    ],
+    [
+      'knowledge_document_refresh_incomplete',
+      'failed',
+      'secondary_failed',
+      'knowledge_document_refresh_incomplete',
+    ],
+    ['knowledge_document_refresh_deferred', 'pending', 'knowledge', null],
+  ])(
+    'keeps published notes when secondary work returns %s',
+    async (error, status, stage, code) => {
+      const updateSecondaryStatus = vi.fn();
+      const publishMeetingNotesIfCurrent = vi.fn().mockReturnValue(true);
+      const coordinator = createMeetingAnalysisRunCoordinator({
+        db: {
+          getMeeting: () => ({
+            id: 'meeting-c',
+            transcript_json: JSON.stringify({
+              segments: [{ speaker: 1, text: 'We agreed to ship.' }],
+            }),
+            transcript_status: 'validated',
+            transcript_integrity_json: JSON.stringify({ verified: true }),
+            transcript_validated_at: '2026-08-27T00:00:00.000Z',
+            user_notes: '',
           }),
-          transcript_status: 'validated',
-          transcript_integrity_json: JSON.stringify({ verified: true }),
-          transcript_validated_at: '2026-08-27T00:00:00.000Z',
-          user_notes: '',
+          getMeetingAnalysisPublicationRevisions: () => ({
+            sourceRevision: 'source-c',
+            eligibilityRevision: 'eligible-c',
+            userNotesHash: 'notes-c',
+          }),
+          getMeetingAnalysisRun: () => null,
+          beginMeetingAnalysisRun: vi.fn(),
+          updateMeetingAnalysisRunStatus: vi.fn(),
+          updateMeetingAnalysisRunStatusIfCurrent: updateSecondaryStatus,
+          isMeetingAnalysisRunCurrent: () => true,
+          publishMeetingNotesIfCurrent,
+          getAllEntities: () => [],
+        },
+        getSettings: async () => ({ llm_provider: 'ollama' }),
+        getProvider: async () => ({
+          name: 'ollama',
+          generateStructuredAnalysis: async () => ({
+            analysis_schema_version: 3,
+            overview: 'Reviewed notes.',
+            topics: [],
+            all_action_items: [],
+            all_decisions: [],
+            meeting_type: 'general',
+            quality: {
+              format_pass: true,
+              retry_count: 0,
+              fallback_used: false,
+              issues: [],
+            },
+          }),
         }),
-        getMeetingAnalysisPublicationRevisions: () => ({
-          sourceRevision: 'source-c',
-          eligibilityRevision: 'eligible-c',
-          userNotesHash: 'notes-c',
-        }),
-        getMeetingAnalysisRun: () => null,
-        beginMeetingAnalysisRun: vi.fn(),
-        updateMeetingAnalysisRunStatus: vi.fn(),
-        updateMeetingAnalysisRunStatusIfCurrent: updateSecondaryStatus,
-        isMeetingAnalysisRunCurrent: () => true,
-        publishMeetingNotesIfCurrent,
-        getAllEntities: () => [],
-      },
-      getSettings: async () => ({ llm_provider: 'ollama' }),
-      getProvider: async () => ({
-        name: 'ollama',
-        generateStructuredAnalysis: async () => ({
-          analysis_schema_version: 3,
-          overview: 'Reviewed notes.',
-          topics: [],
-          all_action_items: [],
-          all_decisions: [],
-          meeting_type: 'general',
-          quality: {
-            format_pass: true,
-            retry_count: 0,
-            fallback_used: false,
-            issues: [],
-          },
-        }),
-      }),
-      createRunId: () => 'run-c',
-      runSecondary: async () => {
-        throw new Error('value_signals_failed');
-      },
-    });
+        createRunId: () => 'run-c',
+        runSecondary: async () => {
+          throw new Error(error!);
+        },
+      });
 
-    await expect(
-      coordinator.generateAndPublishMeetingNotes({
-        meetingId: 'meeting-c',
-        requestId: 'request-c',
-        template: 'auto',
-        reason: 'automatic',
-      }),
-    ).resolves.toEqual({
-      meetingId: 'meeting-c',
-      runId: 'run-c',
-      status: 'published',
-    });
-    await vi.waitFor(() => {
-      expect(updateSecondaryStatus).toHaveBeenCalledWith(
-        expect.objectContaining({
-          notesStatus: 'published',
-          secondaryStatus: 'failed',
-          errorCode: 'value_signals_failed',
+      await expect(
+        coordinator.generateAndPublishMeetingNotes({
+          meetingId: 'meeting-c',
+          requestId: 'request-c',
+          template: 'auto',
+          reason: 'automatic',
         }),
-      );
-    });
-    expect(publishMeetingNotesIfCurrent).toHaveBeenCalledTimes(1);
-  });
+      ).resolves.toEqual({
+        meetingId: 'meeting-c',
+        runId: 'run-c',
+        status: 'published',
+      });
+      await vi.waitFor(() => {
+        expect(updateSecondaryStatus).toHaveBeenCalledWith(
+          expect.objectContaining({
+            notesStatus: 'published',
+            secondaryStatus: status,
+            stage,
+            errorCode: code,
+          }),
+        );
+      });
+      expect(publishMeetingNotesIfCurrent).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('runs one primary meeting at a time and admits queued manuals before automatics', async () => {
     let releaseFirst!: () => void;
@@ -2346,6 +2364,28 @@ describe('published notes do not regenerate from secondary vocabulary', () => {
         inputRevision: 'legacy-fingerprint-before-extraction',
       }),
     );
+  });
+
+  it('retries deferred knowledge work without regenerating published notes', async () => {
+    const f = setup('pending');
+    const revision = f.run.input_revision;
+    f.secondary.mockRejectedValueOnce(
+      new Error('knowledge_document_refresh_deferred'),
+    );
+    await f.coordinator.generateAndPublishMeetingNotes(request);
+    await vi.waitFor(() => expect(f.secondary).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(f.run.secondary_status).toBe('pending'));
+    await f.coordinator.generateAndPublishMeetingNotes({
+      ...request,
+      requestId: 'deferred-retry',
+      reason: 'secondary',
+    });
+    await vi.waitFor(() => expect(f.run.secondary_status).toBe('complete'));
+    expect(f.secondary).toHaveBeenCalledTimes(2);
+    expect(f.run.input_revision).toBe(revision);
+    expect(f.run.notes_status).toBe('published');
+    expect(f.writer).not.toHaveBeenCalled();
+    expect(f.begin).not.toHaveBeenCalled();
   });
 
   it.each(['provider', 'model', 'template', 'prompt', 'seed', 'thinking'])(

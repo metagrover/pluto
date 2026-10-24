@@ -167,7 +167,7 @@ it.each(['ollama', undefined])(
   },
 );
 
-it.each(['paused', 'failed'])(
+it.each(['paused', 'failed', 'incomplete'])(
   'preserves published notes and queues source-checked secondary recovery when refresh is %s',
   async (mode) => {
     const f = fixture();
@@ -175,13 +175,17 @@ it.each(['paused', 'failed'])(
       f.refresh.mockResolvedValue({ requested: 2, completed: 0 });
     else
       f.refresh.mockRejectedValue(
-        new Error('knowledge_document_refresh_failed'),
+        new Error(
+          mode === 'incomplete'
+            ? 'knowledge_document_refresh_incomplete'
+            : 'knowledge_document_refresh_failed',
+        ),
       );
     await f.publish();
     await vi.waitFor(() =>
       expect(f.run()).toMatchObject({
         notes_status: 'published',
-        secondary_status: 'failed',
+        secondary_status: mode === 'paused' ? 'pending' : 'failed',
       }),
     );
     expect(f.enqueue).toHaveBeenCalledWith('secondary:knowledge-meeting');
