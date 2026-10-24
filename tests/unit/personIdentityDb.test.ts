@@ -15,12 +15,17 @@ afterAll(() => {
   fs.rmSync(fixture.directory, { recursive: true, force: true });
 });
 
-const saveMeeting = (id: string, day: number) =>
-  db.saveMeeting({
+const saveMeeting = (id: string, day: number) => {
+  // Preserve the fixture's ordering while keeping meetings in the active window.
+  // SQLite's datetime('now') uses the real clock, independently of JS fake timers.
+  const startedAt = new Date();
+  startedAt.setUTCDate(startedAt.getUTCDate() - (31 - day));
+  return db.saveMeeting({
     id,
     title: `Meeting ${id}`,
-    started_at: `2026-08-${String(day).padStart(2, '0')}T12:00:00.000Z`,
+    started_at: startedAt.toISOString(),
   });
+};
 
 describe('canonical person identity', () => {
   it('excludes the owner alias family from People and dossier creation', () => {
