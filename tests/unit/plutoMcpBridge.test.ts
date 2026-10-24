@@ -114,7 +114,7 @@ function expectUnavailable(result: { stdout: string; stderr: string }) {
     error: {
       code: -32000,
       message:
-        'Pluto is unavailable. Open Pluto and enable the ChatGPT connection in Settings.',
+        'Pluto is unavailable. Open Pluto and enable the note connection for your assistant in Settings.',
     },
   });
   expect(result.stdout + result.stderr).not.toContain(token);

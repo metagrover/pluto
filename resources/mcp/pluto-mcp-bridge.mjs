@@ -129,7 +129,7 @@ async function forward(line) {
   } catch {
     if (request.id !== undefined) {
       process.stdout.write(
-        `${JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: 'Pluto is unavailable. Open Pluto and enable the ChatGPT connection in Settings.' } })}\n`,
+        `${JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: 'Pluto is unavailable. Open Pluto and enable the note connection for your assistant in Settings.' } })}\n`,
       );
     }
   }

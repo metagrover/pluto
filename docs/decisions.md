@@ -2284,3 +2284,12 @@ evaluation is explicit and never runs or spends model usage in the unit suite.
 - **Experience:** Preview ChatGPT setup without switching the active provider. Browser sign-in and successful persistence of text-sharing consent precede activation. Confirm plan usage once, remember the provider, and show daily usage before optional technical settings. Keep recording and transcription local.
 - **Privacy:** Recheck the active provider and consent before admission and immediately before network egress. Switching away or revoking consent cancels active and queued ChatGPT inference without disconnecting the account or resetting usage.
 - **Scope:** This rollout excludes unfinished MTP runtime/default changes. Existing Ollama model defaults and custom model settings remain in place.
+
+
+## 2026-10-24 — Independent ChatGPT and Claude Desktop note connections
+
+- **Status:** Accepted.
+- **Decision:** Extend the local read-only meeting-note integration to Claude Desktop while preserving the ChatGPT personal plugin. Both are opt-in and may run simultaneously. Use separate saved consent settings, credentials, connection files, and loopback listeners so revocation or setup failure in one does not affect the other. Both expose the same bounded list, search, and read tools; neither exposes transcripts, audio, writes, or recording controls.
+- **Setup:** Merge only the owned Pluto entry into Claude Desktop’s local MCP configuration, preserve unrelated settings, and back up changed existing configuration privately. Refuse malformed configuration, symlinks, and conflicting entries. Keep development and release names distinct. Disabling closes that listener and removes its credential file, leaving host registration in place; quitting Pluto revokes both connections and saved opt-ins restore fresh credentials at launch.
+- **Privacy:** Retrieved notes go to OpenAI or Anthropic according to the selected client. Consent and revocation are per client; previously shared notes remain in that client. No hosted endpoint or additional provider API key is required.
+- **Verification boundary:** Official MCP clients and real Electron bridge processes verify fictional note reads and independent revocation. Automated renderer and configuration tests cover consent and preservation. Real Claude conversation behavior and signed packaged installation remain manual acceptance checks.

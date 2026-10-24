@@ -152,6 +152,11 @@ import {
   openChatGptDesktop,
 } from './mcp/chatgptDesktop';
 import {
+  CLAUDE_NOTES_ENABLED_SETTING,
+  CLAUDE_SETUP_URL,
+  installInClaudeDesktop,
+} from './mcp/claudeDesktop';
+import {
   PLUTO_MCP_ENABLED_SETTING,
   PLUTO_MCP_SETUP_URL,
   createPlutoMcpConnection,
@@ -1249,6 +1254,7 @@ function abortMeetingTasks(meetingId: string) {
 let stopIdentityReconciliation: (() => void) | undefined;
 let stopVoiceCandidateBackfill: (() => void) | undefined;
 let chatgptConnection: ReturnType<typeof createPlutoMcpConnection> | undefined;
+let claudeConnection: ReturnType<typeof createPlutoMcpConnection> | undefined;
 let stopOwnedAudioForShutdown: () => Promise<unknown> = async () => {};
 const shutdownMainProcessConsumers = async () => {
   plutoLog.info('Shutdown phase: capture');
@@ -1259,7 +1265,7 @@ const shutdownMainProcessConsumers = async () => {
   await commitmentReminderScheduler?.stop();
   commitmentReminderScheduler = null;
   plutoLog.info('Shutdown phase: local connection');
-  await chatgptConnection?.close();
+  await Promise.all([chatgptConnection?.close(), claudeConnection?.close()]);
   plutoLog.info('Shutdown phase: intelligence');
   for (const controller of activeMeetingTasks.values()) controller.abort();
   activeMeetingTasks.clear();
@@ -6440,6 +6446,65 @@ app.whenReady().then(async () => {
     },
   });
   await chatgptConnection.initialize();
+  claudeConnection = createPlutoMcpConnection({
+    dataSource: createPlutoMcpDataSource(getApplicationDatabase()),
+    directory: path.join(app.getPath('userData'), 'claude-connection'),
+    installPlugin: (connectionFile) => {
+      if (process.platform !== 'darwin')
+        throw new Error('claude_desktop_requires_macos');
+      return installInClaudeDesktop({
+        homeDirectory: app.getPath('home'),
+        executablePath: process.execPath,
+        bridgePath: app.isPackaged
+          ? path.join(process.resourcesPath, 'mcp', 'pluto-mcp-bridge.mjs')
+          : path.join(
+              app.getAppPath(),
+              'resources',
+              'mcp',
+              'pluto-mcp-bridge.mjs',
+            ),
+        connectionFile,
+        development: !app.isPackaged,
+      });
+    },
+    readEnabled: () => db.getSetting(CLAUDE_NOTES_ENABLED_SETTING) === 'true',
+    writeEnabled: (enabled) =>
+      db.setSetting(CLAUDE_NOTES_ENABLED_SETTING, String(enabled)),
+  });
+  await claudeConnection.initialize();
+  ipcMain.handle('PLUTO_CLAUDE_GET_STATUS', () =>
+    claudeConnection?.getStatus(),
+  );
+  ipcMain.handle('PLUTO_CLAUDE_SET_ENABLED', (_event, payload: unknown) => {
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      !('enabled' in payload) ||
+      typeof payload.enabled !== 'boolean'
+    )
+      throw new Error('invalid_connection_setting');
+    return claudeConnection?.setEnabled(payload.enabled);
+  });
+  ipcMain.handle('PLUTO_CLAUDE_OPEN', async () => {
+    if (process.platform !== 'darwin')
+      throw new Error('claude_desktop_requires_macos');
+    const { execFile } = await import('node:child_process');
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        '/usr/bin/open',
+        ['-a', 'Claude'],
+        { timeout: 10_000 },
+        (error) => {
+          if (error) reject(new Error('claude_desktop_unavailable'));
+          else resolve();
+        },
+      );
+    });
+  });
+  ipcMain.handle('PLUTO_CLAUDE_OPEN_SETUP_GUIDE', () =>
+    shell.openExternal(CLAUDE_SETUP_URL),
+  );
+
   ipcMain.handle('PLUTO_MCP_GET_STATUS', () => chatgptConnection?.getStatus());
   ipcMain.handle('PLUTO_MCP_SET_ENABLED', (_event, payload: unknown) => {
     if (
