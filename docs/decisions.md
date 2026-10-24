@@ -4,6 +4,13 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-24 - Require recorded anonymous speaker labels in saved-answer evidence
+
+- **Refines:** “Preserve uncertainty and short answers at saved-answer publication” (2026-10-24). Preserving a short answer does not authorize an invented recorded identity.
+- **Decision:** Withhold a synthesized sentence that introduces a `Remote Speaker` label absent from the supplied non-transcript evidence, before streaming or final publication. Compare complete labels, including their numbers. Retain canonical owner fields when preparing evidence, instead of stripping them as retrieval headings; retrieval headers, meeting titles and raw dialogue cannot authorize a label. Keep the existing single saved-answer retry and inferred trust.
+- **Boundary:** Label presence is necessary, not proof that the claimed task belongs to that speaker. Broader owner, state, scope and coverage checks remain release gates. Models, generation settings, source records and every memory protection remain unchanged.
+- **Evidence:** All 113 citation/presentation regressions pass. In 23 fresh standard Phi requests, initial answers match the prior baseline exactly; the existing retry corrects one fabricated-actor/state answer after withholding its invented label, improving final source-reviewed fidelity from 18/23 to 19/23. All previously passing final answers remain unchanged. This is provider/presentation acceptance, not live retrieval or release qualification.
+
 ## 2026-10-24 - Preserve uncertainty and short answers at saved-answer publication
 
 - **Refines:** “Quote only validated evidence in Ask Pluto source disclosures” (2026-10-17). Synthesized answers still disclose context and remain inferred; these checks do not establish semantic verification.

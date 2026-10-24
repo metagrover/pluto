@@ -826,7 +826,7 @@ const getSourceEvidenceCandidates = (source: RetrievalResult): string[] => {
           /^Meeting notes \(historical, not proof of current status\):\s*/,
           '',
         )
-        .replace(/^\[[^\]]+\]:?\s*/, '')
+        .replace(/^\[(?!Owner:)[^\]]+\]:?\s*/, '')
         .trim();
       if (!cleanLine) return [];
       const sentences = cleanLine
@@ -1668,6 +1668,11 @@ const contradictsRecordedUncertainty = (
   );
 };
 
+const recordedSpeakerLabels = (text: string): string[] =>
+  (text.match(/\bRemote\s+Speaker\s+(?:\d+|N)\b/gi) || []).map((label) =>
+    label.toLocaleLowerCase().replace(/\s+/g, ' '),
+  );
+
 /**
  * Treats synthesized notes, project profiles, and people profiles as the trust
  * boundary. Input sources establish provenance, not claim verification.
@@ -1705,6 +1710,8 @@ export const buildSynthesizedAnswerPresentation = (
     .filter((source) => source.evidence_kind !== 'transcript')
     .flatMap(getSourceEvidenceCandidates)
     .flatMap((passage) => passage.split(/\n+|(?<=[.!?])\s+/));
+  // Owner fields are evidence; retrieval titles and raw dialogue are not identity proof.
+  const recordedSpeakers = new Set(evidence.flatMap(recordedSpeakerLabels));
   const sourceDays = new Set(
     sources
       .flatMap((source) => [
@@ -1786,6 +1793,9 @@ export const buildSynthesizedAnswerPresentation = (
             }) ||
             (/\btoday\b/i.test(sentence) &&
               !sourceDays.has(new Date().toISOString().slice(0, 10)));
+          const unsupportedRecordedSpeaker = recordedSpeakerLabels(
+            sentence,
+          ).some((label) => !recordedSpeakers.has(label));
           const unsupportedCertainty = contradictsRecordedUncertainty(
             sentence,
             evidence,
@@ -1795,7 +1805,8 @@ export const buildSynthesizedAnswerPresentation = (
             unsupportedDuration ||
             unsupportedDate ||
             unsupportedImplementation ||
-            unsupportedCertainty
+            unsupportedCertainty ||
+            unsupportedRecordedSpeaker
           )
             unsupportedClaims.push(sentence);
           return (
@@ -1803,7 +1814,8 @@ export const buildSynthesizedAnswerPresentation = (
             !unsupportedDuration &&
             !unsupportedDate &&
             !unsupportedImplementation &&
-            !unsupportedCertainty
+            !unsupportedCertainty &&
+            !unsupportedRecordedSpeaker
           );
         })
         .join(' '),

@@ -386,12 +386,77 @@ describe('Citation Engine', () => {
     it.each(['None', 'Remote Speaker 2', 'Friday', 'Forty maps'])(
       'retains a single plain short answer without treating it as an orphan heading: %s',
       (answer) => {
-        const stream = createSynthesizedAnswerStream(sources, () => undefined);
+        const context = [
+          {
+            ...sources[0],
+            evidence_text: `${sources[0].evidence_text} [Owner: Remote Speaker 2] Send the minutes.`,
+          },
+        ];
+        const stream = createSynthesizedAnswerStream(context, () => undefined);
         stream.push(answer);
         expect(stream.streamedAnswer).toBe('');
         const presentation = stream.finalize(answer);
         expect(presentation.answer).toBe(answer);
         expect(presentation.trustStatus).toBe('inferred');
+      },
+    );
+
+    it.each(['Remote Speaker N', 'Remote Speaker 4', 'remote speaker 12'])(
+      'withholds a recorded speaker label absent from the supplied notes: %s',
+      (label) => {
+        const deltas: string[] = [];
+        const stream = createSynthesizedAnswerStream(sources, (delta) =>
+          deltas.push(delta),
+        );
+        const answer = `${label} owns launch signoff. The launch is Friday.`;
+        stream.push(answer);
+        const result = stream.finalize(answer);
+        expect(result.answer).toBe('The launch is Friday.');
+        expect(deltas.join('')).not.toContain(label);
+        expect(result.unsupportedClaimCount).toBe(1);
+        expect(result.trustStatus).toBe('inferred');
+      },
+    );
+
+    it.each(['Remote Speaker 2', 'remote speaker 2'])(
+      'preserves an exact recorded owner label, including canonical owner fields: %s',
+      (label) => {
+        const context = [
+          {
+            ...sources[0],
+            evidence_text: '[Owner: Remote Speaker 2] Send the minutes.',
+          },
+        ];
+        const result = buildSynthesizedAnswerPresentation(label, context);
+        expect(result.answer).toBe(label);
+        expect(result.unsupportedClaimCount).toBe(0);
+        expect(result.citations[0].evidence_valid).toBe(false);
+      },
+    );
+
+    it.each([
+      { evidence_text: '[Owner: Remote Speaker 12] Send the minutes.' },
+      {
+        evidence_text: 'Sam owns launch signoff.',
+        meeting_title: 'Remote Speaker 2',
+      },
+      {
+        evidence_text:
+          'Confirmed conversation: Remote Speaker 2 (2026-10-24) [meeting:m1]\nMeeting notes (historical, not proof of current status): Sam owns launch signoff.',
+      },
+      {
+        evidence_text: 'Remote Speaker 2 said yes.',
+        evidence_kind: 'transcript' as const,
+      },
+    ])(
+      'does not authorize a label using another number, metadata or raw transcript: %j',
+      (source) => {
+        const result = buildSynthesizedAnswerPresentation('Remote Speaker 2', [
+          { ...sources[0], ...source },
+        ]);
+        expect(result.answer).not.toContain('Remote Speaker 2');
+        expect(result.outcome).toBe('no_evidence');
+        expect(result.unsupportedClaimCount).toBe(1);
       },
     );
 
