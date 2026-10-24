@@ -585,7 +585,7 @@ const writeDraft = async (
         input.contextTokens,
         task,
         prompt,
-        'writer-audit-v7:source-labels:guardrails-v3:schema-v1',
+        'writer-audit-v8:source-labels:guardrails-v3:schema-v1',
         input.compactSourceSpeakers ?? false,
         input.sourceParagraphs ?? false,
       ]),

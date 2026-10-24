@@ -422,11 +422,15 @@ const resolveActionAssignee = (
       canonicalizeActionText(actionText, claimedAssignee),
     ).replace(new RegExp(`^${name} (?:is|are) (?:(?:currently|still) )?`), '');
     const verb = /^\p{L}+/u.exec(task)?.[0];
-    if (verb) {
+    const object = task.slice(verb?.length ?? 0).trim();
+    if (verb && object) {
       const forms = [`(?:will|shall) ${verb}`];
       if (verb.endsWith('ing'))
         forms.push(`(?:is|are) (?:(?:currently|still) )?${verb}`);
-      const namedTask = new RegExp(`^${name} (?:${forms.join('|')})\\b`, 'u');
+      const namedTask = new RegExp(
+        `^${name} (?:${forms.join('|')}) ${object}(?: |$)`,
+        'u',
+      );
       // A reporter's unrelated first-person work cannot override a named task subject.
       if (
         resolved.sourceLines.some((line) =>

@@ -2165,6 +2165,29 @@ describe('source-reviewed reported responsibility ownership', () => {
     );
   });
   it.each([
+    [
+      'Send the handover.',
+      'Mara will send invitations. I will send the handover.',
+    ],
+    [
+      'Send invitations.',
+      'Mara will send the handover. I will send invitations.',
+    ],
+    [
+      'Mara is preparing the handover.',
+      'Mara is preparing invitations. I will prepare the handover.',
+    ],
+    [
+      'Send the handover and invitations.',
+      'Mara will send the handover. I will send invitations.',
+    ],
+  ])(
+    'requires the complete reported task before overriding the reporter: %s',
+    (claim, evidence) => {
+      expect(check(claim, evidence)?.owner).not.toBe('Mara');
+    },
+  );
+  it.each([
     "I'll prepare the handover. Mara is reading the handover.",
     "I'll read the handover. Mara is not preparing the handover.",
     "I'll read the handover. Mara might be preparing the handover.",
