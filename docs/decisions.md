@@ -4,6 +4,13 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-24 - Withhold direct contradictions of recorded completed work
+
+- **Refines:** “Preserve uncertainty and short answers at saved-answer publication” (2026-10-24). A factual saved answer must not say an actor still needs to do the same task that the retrieved notes explicitly record as completed.
+- **Decision:** Withhold that sentence before streaming when the exact actor and ordered task predicate match an unqualified completed/finished or present-perfect statement with matching predicate stems. Normalize articles and inflection only; preserve direction, conjunctions and task scope. Any other or ambiguous same-actor context suspends the check, including explicit reopening. Keep the existing single retry, inferred trust, source preservation and every memory protection.
+- **Boundary:** This is a conservative direct-contradiction check, not a lifecycle or general entailment proof. Other grammar, irregular verbs, paraphrases and new duties can remain unresolved. It never rewrites a source, invents an action, or marks an answer grounded.
+- **Evidence:** The packaged app retrieved a completed task but answered that it still needed doing. Regression controls cover independent tasks, exact actor boundaries, ongoing and negated work, conditional completion, explicit reopening, direction, conjunctions and different task scopes. A fresh 23-case Phi run retains all previously passing final answers; the reopened-task sentences are withheld, but an unrequested readiness caveat remains, so full semantic acceptance conservatively stays 20/23.
+
 ## 2026-10-24 - Keep meeting titles separate from project facts in saved answers
 
 - **Refines:** “Preserve uncertainty and short answers at saved-answer publication” (2026-10-24). A meeting title identifies a source; it does not establish a project with that name.

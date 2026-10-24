@@ -1668,6 +1668,55 @@ const contradictsRecordedUncertainty = (
   );
 };
 
+const contradictsRecordedCompletion = (
+  claim: string,
+  evidence: string[],
+): boolean => {
+  if (/\b(?:not|never)\b/i.test(claim) || claim.trim().endsWith('?'))
+    return false;
+  const pending = claim
+    .replace(/\*+/g, '')
+    .match(/^(.+?)\s+still\s+needs?\s+to\s+(.+)$/iu);
+  if (!pending) return false;
+  const actor = pending[1].trim();
+  const task = pending[2].split(/\s+because\b/i)[0];
+  const taskTokens = (text: string) =>
+    (text.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) || [])
+      .filter((token) => !['a', 'an', 'the'].includes(token))
+      .map(stemToken);
+  const tokens = taskTokens(task);
+  if (tokens.length < 2) return false;
+  const passages = evidence.flatMap((passage) =>
+    passage.split(/(?<=[.!?;])\s+|\n+/u),
+  );
+  const escapedActor = actor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const actorPattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])${escapedActor}(?![\\p{L}\\p{N}])`,
+    'iu',
+  );
+  const scoped = passages.filter((passage) => actorPattern.test(passage));
+  // shortcut: Ambiguous same-actor context suspends this exact-task check; widen only with scoped lifecycle controls.
+  return (
+    scoped.length > 0 &&
+    scoped.every((passage) => {
+      if (/\b(?:not|never|if|unless|might|could|would)\b/i.test(passage))
+        return false;
+      const clean = passage.replace(/\*+/g, '').trim();
+      const completed =
+        clean.match(
+          /^(.+?)\s+(?:(?:has|have)\s+)?(?:already\s+)?(?:completed|finished)\s+(.+)$/iu,
+        ) ??
+        clean.match(/^(.+?)\s+(?:has|have)\s+(?:already\s+)?([a-z]+ed\b.+)$/iu);
+      return Boolean(
+        completed &&
+          completed[1].trim().toLocaleLowerCase() ===
+            actor.toLocaleLowerCase() &&
+          taskTokens(completed[2]).join(' ') === tokens.join(' '),
+      );
+    })
+  );
+};
+
 const recordedSpeakerLabels = (text: string): string[] =>
   (text.match(/\bRemote\s+Speaker\s+(?:\d+|N)\b/gi) || []).map((label) =>
     label.toLocaleLowerCase().replace(/\s+/g, ' '),
@@ -1829,6 +1878,10 @@ export const buildSynthesizedAnswerPresentation = (
           const unsupportedRecordedSpeaker = recordedSpeakerLabels(
             sentence,
           ).some((label) => !recordedSpeakers.has(label));
+          const unsupportedCompletion = contradictsRecordedCompletion(
+            sentence,
+            evidence,
+          );
           const unsupportedCertainty = contradictsRecordedUncertainty(
             sentence,
             evidence,
@@ -1840,7 +1893,8 @@ export const buildSynthesizedAnswerPresentation = (
             unsupportedImplementation ||
             unsupportedCertainty ||
             unsupportedRecordedSpeaker ||
-            unsupportedMetadataProject
+            unsupportedMetadataProject ||
+            unsupportedCompletion
           )
             unsupportedClaims.push(sentence);
           return (
@@ -1850,7 +1904,8 @@ export const buildSynthesizedAnswerPresentation = (
             !unsupportedImplementation &&
             !unsupportedCertainty &&
             !unsupportedRecordedSpeaker &&
-            !unsupportedMetadataProject
+            !unsupportedMetadataProject &&
+            !unsupportedCompletion
           );
         })
         .join(' '),
