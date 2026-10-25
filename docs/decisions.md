@@ -1,3 +1,10 @@
+## 2026-10-25 — Bound long-token scanning in request budgeting
+
+- **Refines:** The shared conservative notes token estimate; no numeric policy changes.
+- **Evidence:** A macOS package CI run timed out in real incremental planning while the separate full suite passed. A local CPU profile attributes substantial repeated work to the long-token density scan; the isolated planning suite takes about 13 seconds before and 8 seconds after this change in separate local runs.
+- **Decision:** Check the existing 65-character letter/number/underscore/dollar run only at word boundaries, avoiding overlapping attempts inside each word. Preserve whitespace counting, ASCII density, Unicode code-point behavior and every estimated token value. This is request-size accounting, not an interpretation of meeting language or completed work. Planning, source coverage, model review, cache invalidation, timeout and memory protections stay unchanged.
+- **Validation:** Existing real bounded-planning assertions remain; boundary controls include 64/65/66-character runs, punctuation, combining marks and astral Unicode letters. A private comparison retains identical estimates on 540 boundary and frozen-request cases. No native cold-load speedup or semantic improvement is inferred.
+
 ## 2026-10-25 — Keep manifest selectors separate from resident engine names
 
 - **Supersedes:** The backend equality and targeted-cleanup portions of “Bind warm admission and cleanup to the selected runtime artifact.”

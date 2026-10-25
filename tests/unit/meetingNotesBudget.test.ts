@@ -72,6 +72,30 @@ it('uses a conservative shared token estimate for dense and ordinary source text
   );
 });
 
+it.each([
+  { token: 'a'.repeat(64), dense: false },
+  { token: 'a'.repeat(65), dense: true },
+  { token: 'a'.repeat(66), dense: true },
+  { token: `(${'_$9'.repeat(22)})`, dense: true },
+  { token: '𐐀'.repeat(64), dense: false },
+  { token: '𐐀'.repeat(65), dense: true },
+  { token: `${'a'.repeat(40)}-${'b'.repeat(40)}`, dense: false },
+  { token: `${'a'.repeat(40)}\u0301${'b'.repeat(40)}`, dense: false },
+])(
+  'preserves token density at complete word boundaries: $token',
+  ({ token, dense }) => {
+    for (const text of [
+      token + ' ordinary words '.repeat(40),
+      'ordinary words '.repeat(40) + token,
+    ]) {
+      const bytes = Buffer.byteLength(text);
+      expect(estimateNotesTokens(text)).toBe(
+        dense ? bytes : Math.ceil(Math.ceil(bytes / 3) * 1.25),
+      );
+    }
+  },
+);
+
 it('partitions every source turn exactly once as primary coverage without tail loss', () => {
   const source = createNotesSource(
     JSON.stringify({

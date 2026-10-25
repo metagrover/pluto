@@ -39,7 +39,8 @@ const isTokenDense = (text: string): boolean => {
   if (!nonWhitespace) return false;
   const asciiLetters = (nonWhitespace.match(/[A-Za-z]/g) ?? []).length;
   return (
-    asciiLetters < nonWhitespace.length / 2 || /[\p{L}\p{N}_$]{65,}/u.test(text)
+    asciiLetters < nonWhitespace.length / 2 ||
+    /(?:^|[^\p{L}\p{N}_$])[\p{L}\p{N}_$]{65}/u.test(text)
   );
 };
 
