@@ -1020,6 +1020,7 @@ describe('UnifiedLLMProvider', () => {
     expect(requestBodies[0].options).toMatchObject({
       num_ctx: 4096,
       num_predict: 768,
+      draft_num_predict: 0,
     });
     expect(requestBodies[1]).toMatchObject({
       model: 'configured-analysis-model',
@@ -1028,6 +1029,7 @@ describe('UnifiedLLMProvider', () => {
     expect(requestBodies[1].options).toMatchObject({
       num_ctx: 4096,
       num_predict: 1024,
+      draft_num_predict: 0,
       top_k: 40,
       top_p: 1,
     });
@@ -2707,6 +2709,7 @@ it.each([
         num_ctx: expectedContext,
         num_predict: output,
         num_batch: 128,
+        draft_num_predict: 0,
       });
       expect(unloaded).toBe(unload);
       expect(capacity).toHaveBeenCalledWith(
@@ -2987,6 +2990,7 @@ it('unloads externally resident Gemma before POST then reuses bounded placement 
         num_batch: 128,
         num_gpu: 16,
         use_mmap: true,
+        draft_num_predict: 0,
       });
     expect(options.map((o) => o.num_predict)).toEqual([2048, 2048, 64, 2500]);
     expect(capacity.mock.calls.map(([input]) => input.resident)).toEqual([

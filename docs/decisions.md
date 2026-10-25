@@ -2684,3 +2684,10 @@ There is no additional reviewer, retry cascade, source fallback or semantic-revi
 Extends the allocation accounting of “Minimal local writer candidate without automatic model review (notes-v87).” For the established Gemma artifact, Ollama allocates at least 2048 context tokens because the model supports vision, including text-only requests. A requested 1024-token job therefore cannot establish a matching allocation or fresh residency proof. Account for and request the actual 2048-token minimum before memory admission; a caller budget below that floor refuses rather than silently exceeding its cap. Subsequent small requests can reuse the same verified allocation without another cold load.
 
 Exact model/digest/context matching, externally resident model eviction, memory reserves and sampling freshness, output limits, task caps, workload exclusion and unloading remain unchanged. This corrects unnecessary repeated loading; it does not remove the first cold-load cost or qualify Gemma/Phi semantic acceptance. No prewarming or additional residency is introduced.
+
+
+## 2026-10-25 — Keep speculative draft models outside local admission
+
+Extends “Match Gemma accounting to the runtime context floor.” Every local generation explicitly requests `draft_num_predict: 0`. Ollama can otherwise enable a model's speculative draft artifact by default. Pluto's admission and exact-residency proof cover the selected model and context, not an additional inference model, so a model refresh must not implicitly expand that allocation. Ollama 0.40.6 omits speculative runner arguments when this value is zero.
+
+Both Gemma and Phi, the selected-model allocation, context/output caps, reserves, freshness checks, watchdog, cancellation and confirmed unloading remain unchanged. No speculative acceleration is qualified or enabled by this change. Existing models without draft artifacts retain their inference path; an updated artifact still requires its own memory and semantic qualification. This closes an unbudgeted-allocation path; it does not resolve the remaining semantic failures or native first-load cost.

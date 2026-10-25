@@ -1937,6 +1937,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           : {}),
         temperature: this.getTemperature(task),
         num_thread: 8, // Ensure multi-threading is utilized
+        draft_num_predict: 0, // Draft models are outside the admitted allocation.
         ...getEstablishedGemmaLoadOptions(entry?.digest),
       },
       keep_alive: '2h', // Idle models can be released earlier under memory pressure.
