@@ -92,70 +92,17 @@ function fixture(...turns: string[]) {
 
 describe('source-grounded notes guardrails', () => {
   it.each([
-    ['send the outline', 'I have sent the outline.'],
-    ['provide the examples', 'I already provided the examples.'],
-    ['coordinate the review', 'I have coordinated the review.'],
-    ['rerun the report query', 'I have already rerun the report query.'],
-  ])(
-    'does not retain a completed promise to %s as a future task',
-    (task, completion) => {
-      const f = fixture(`I will ${task}.`, completion);
-      expect(findNotesGuardrailIssues(f.source, f.draft(f.item(task)))).toEqual(
-        [
-          expect.objectContaining({
-            code: 'conflicting_action',
-            sources: [f.spans[0], f.spans[1]],
-          }),
-        ],
-      );
-      expect(
-        findNotesGuardrailIssues(
-          f.source,
-          f.draft(f.item(completion, 'point', [f.spans[1]!])),
-        ),
-      ).toEqual([]);
-    },
-  );
-
-  it.each([
-    'I have to send the outline.',
+    'I have sent the outline.',
+    'I already sent the outline.',
+    'I did send the outline.',
     'I have not sent the outline.',
-    'Have I sent the outline?',
-    'I have sent a different report.',
-    'The issue is resolved.',
-    'I have sent the outline but I will send it again.',
-  ])('does not infer task completion from %s', (text) => {
+  ])('leaves completion interpretation to synthesis: %s', (text) => {
     const f = fixture('I will send the outline.', text);
     expect(
       findNotesGuardrailIssues(f.source, f.draft(f.item('Send the outline.'))),
     ).toEqual([]);
   });
 
-  it('does not transfer another speaker completion or ignore an explicit renewal', () => {
-    const f = fixture(
-      'I will send the outline.',
-      'I have sent the outline.',
-      'I will send the outline.',
-    );
-    const renewed = f.item('Send the outline.', 'action', [f.spans[2]!]);
-    expect(findNotesGuardrailIssues(f.source, f.draft(renewed))).toEqual([]);
-    const other = fixture(
-      'I will send the outline.',
-      'I have sent the outline.',
-    );
-    const otherSource = createNotesSource(
-      JSON.stringify([
-        { speaker: 'Rae', text: 'I will send the outline.' },
-        { speaker: 'Lee', text: 'I have sent the outline.' },
-      ]),
-    );
-    expect(
-      findNotesGuardrailIssues(
-        otherSource,
-        other.draft(other.item('Send the outline.')),
-      ),
-    ).toEqual([]);
-  });
   it('reuses source preparation while checking edited drafts and individual actions independently', () => {
     const f = fixture(
       'I will send the outline after legal approves.',
@@ -1194,11 +1141,9 @@ describe('known-owner commitment matching', () => {
     ['Casey', ' casey '],
     ['Me', 'Me'],
   ])(
-    'retains completion protection for the same exact normalized owner: %s / %s',
+    'leaves completed-work interpretation to synthesis for the same owner: %s / %s',
     (speaker, owner) => {
-      expect(ownerFixture(speaker, owner).map((issue) => issue.code)).toEqual([
-        'conflicting_action',
-      ]);
+      expect(ownerFixture(speaker, owner)).toEqual([]);
     },
   );
   it.each([
@@ -1209,9 +1154,7 @@ describe('known-owner commitment matching', () => {
     [null, 'Casey'],
   ])('preserves unknown-label behavior: %s / %s', (speaker, owner) => {
     const issues = ownerFixture(speaker, owner);
-    expect(issues.map((issue) => issue.code)).toEqual(
-      speaker === null ? [] : ['conflicting_action'],
-    );
+    expect(issues).toEqual([]);
   });
 });
 
@@ -1664,17 +1607,13 @@ describe('citation-proven introduced owners keep the shared task protections', (
     );
     expect(check('', 'Send the invitation after approval.')).toEqual([]);
   });
-  it('does not let introduced ownership reopen completed or cancelled work', () => {
+  it('leaves completion to synthesis while retaining cancellation evidence', () => {
     expect(
       check(
         'I have sent the invitation.',
         'Send the invitation after approval.',
       ),
-    ).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: 'conflicting_action' }),
-      ]),
-    );
+    ).toEqual([]);
     expect(
       check(
         'I am withdrawing my promise to send the invitation.',

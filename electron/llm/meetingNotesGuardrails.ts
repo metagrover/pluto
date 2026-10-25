@@ -21,8 +21,6 @@ const TASK_BOUNDARY = new RegExp(
 );
 const PROMISE =
   /^(?:yes[, ]+|okay[, ]+|sure[, ]+)?(?:i['’]ll|i will|i commit to)\s+(.+)$/i;
-const COMPLETED_PROMISE =
-  /^i(?:(?:['’]ve| have)\s+(?:already\s+)?|\s+already\s+|\s+)((?:sent|emailed|shared|reviewed|updated|prepared|written|drafted|created|checked|booked|scheduled|published|uploaded|finished|replaced|coordinated|provided|rerun)\s+.+)/i;
 export const CONDITION =
   /\b(?:only if|if|unless|until|once|after|when|provided(?: that)?|pending|subject to|conditional on|contingent (?:on|upon)|(?:not\s+)?(?:requires?|requiring))\b/i;
 // Recognizable trailing due phrases are metadata, not task identity. Do not
@@ -527,29 +525,6 @@ function cancels(
   );
 }
 
-function completes(entry: Sentence, candidate: Candidate): boolean {
-  if (
-    !candidate.speaker ||
-    entry.speaker !== candidate.speaker ||
-    entry.text.endsWith('?') ||
-    /\b(?:but|and)\s+i(?:['’]ll| will| need to| must)\b/i.test(entry.text)
-  )
-    return false;
-  const match = COMPLETED_PROMISE.exec(entry.text);
-  if (
-    !match ||
-    CONDITION.test(match[1]!.replace(/^\S+\s+/, '')) ||
-    (/^rerun\b/i.test(match[1]!) &&
-      !/^i(?:['’]ve| have| already)\b/i.test(entry.text))
-  )
-    return false;
-  const task = match[1]!
-    .split(/[;,]|\s+(?:and|but)\s+/i)[0]!
-    .replace(/^sent\b/i, 'send')
-    .replace(/^written\b/i, 'write');
-  return matchesTask(candidate.task, task);
-}
-
 function requiresWithdrawalContext(
   entry: Sentence,
   candidate: Candidate,
@@ -595,8 +570,7 @@ export function createNotesGuardrailChecker(
         (entry) =>
           entry.order > previous.order &&
           entry.order < candidate.order &&
-          (cancels(entry, previous, sourceCandidates) ||
-            completes(entry, previous)),
+          cancels(entry, previous, sourceCandidates),
       )
         ? repeatedSources.get(previous)!
         : [];
@@ -654,17 +628,13 @@ export function createNotesGuardrailChecker(
           entry.order > candidate.order &&
           cancels(entry, candidate, sourceCandidates),
       );
-      const completion = entries.find(
-        (entry) => entry.order > candidate.order && completes(entry, candidate),
-      );
-      const resolution = cancellation ?? completion;
       // A later explicit renewal is authoritative for the same speaking owner
       // and task. An unrelated promise cannot reactivate cancelled work.
       if (
-        resolution &&
+        cancellation &&
         sourceCandidates.some(
           (later) =>
-            later.order > resolution.order &&
+            later.order > cancellation.order &&
             later.speaker === candidate.speaker &&
             matchesTask(candidate.task, later.task) &&
             matchesTask(later.task, candidate.task),
@@ -672,10 +642,9 @@ export function createNotesGuardrailChecker(
       )
         continue;
       let code: NotesGuardrailIssue['code'] | null = null;
-      if (resolution) {
+      if (cancellation) {
         if (matching.length) code = 'conflicting_action';
         else if (
-          cancellation &&
           requiresWithdrawalContext(cancellation, candidate) &&
           !context.some(
             (block) =>
@@ -709,7 +678,7 @@ export function createNotesGuardrailChecker(
       if (code && (!diagnosticCodes || diagnosticCodes.includes(code))) {
         const sources = [
           ...candidate.sources,
-          ...(resolution ? [resolution.span] : []),
+          ...(cancellation ? [cancellation.span] : []),
         ].map((span) => ({ ...span }));
         const issue = { code, sources };
         issues.set(JSON.stringify(issue), issue);

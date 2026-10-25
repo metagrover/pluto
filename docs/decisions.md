@@ -1,3 +1,9 @@
+## 2026-10-25 — Let synthesis interpret completion instead of verb rules
+
+- **Supersedes:** “Withhold direct contradictions of recorded completed work” (2026-10-24), and the completion-recognition extension in notes guardrails.
+- **Decision:** Remove the hand-written past-tense verb recognizer and the chat actor/predicate completion matcher. The LLM interprets recorded lifecycle state from the supplied synthesis and canonical task fields, including completed work, cancellation, proposals, prerequisites and explicit reopening. The shared answer instruction asks it to correct a false premise rather than invent a reason. No replacement grammar, classifier, extra reviewer or retry is introduced.
+- **Preservation:** Source references, explicit user completion/adoption state, inferred answer trust, model routing, bounded calls, memory admission/watchdog and source data protection remain. Removing a wording filter does not establish semantic correctness: the original source-reviewed acceptance controls remain the quality gate.
+
 # Pluto Decision Log
 
 This is the default home for durable product, design, process, and architecture decisions.

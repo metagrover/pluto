@@ -1119,7 +1119,7 @@ describe('bounded source-bound semantic notes review', () => {
         .sources.map((span) => span.segment),
     ).toEqual([0, 2]);
   });
-  it.each(['I sent the guide to Iris.', 'Cancel sending the guide to Iris.'])(
+  it.each(['Cancel sending the guide to Iris.'])(
     'still holds a merged responsibility resolved later in the full source: %s',
     async (laterText) => {
       const notes = mergeFixture(undefined, undefined, laterText);
@@ -2611,7 +2611,6 @@ describe('full-source lifecycle review windows', () => {
   };
 
   it.each([
-    ['I sent the release file.', 'Casey sent the release file.'],
     [
       'Cancel the plan to send the release file.',
       'Casey cancelled the plan to send the release file.',
@@ -2648,33 +2647,6 @@ describe('full-source lifecycle review windows', () => {
       expect(notes.draft).toEqual(original);
     },
   );
-
-  it('holds a stale point-to-action promotion with exact future evidence available for repair', async () => {
-    const notes = lifecycleFixture(
-      'I sent the release file.',
-      'Casey',
-      'point',
-    );
-    const generated = vi.fn(async ({ prompt }) => {
-      expect(prompt).toContain('I sent the release file.');
-      return response({ text: 'Send the release file.', owner: 'Casey' });
-    });
-    const held = await reviewSourceBoundNotes(notes, generated);
-    expect(held.issues).toContain('semantic_notes_review_unavailable:task');
-    expect(held.draft.sections[0]!.items[0]!.kind).toBe('point');
-    const repaired = await reviewSourceBoundNotes(held, async ({ prompt }) => {
-      expect(prompt).toContain('I sent the release file.');
-      return response({
-        kind: 'point',
-        text: 'Casey sent the release file.',
-        owner: null,
-      });
-    });
-    expect(repaired.issues ?? []).not.toContain(
-      'semantic_notes_review_unavailable',
-    );
-    expect(repaired.draft.sections[0]!.items[0]!.kind).toBe('point');
-  });
 
   it.each([
     ['I sent the release file.', 'Morgan'],
@@ -2721,7 +2693,7 @@ describe('full-source lifecycle review windows', () => {
 
   it('refuses an over-budget later-state window instead of truncating it', async () => {
     const notes = lifecycleFixture(
-      'I sent the release file.',
+      'Cancel the plan to send the release file.',
       'Casey',
       'action',
       'Background '.repeat(1500),
@@ -2787,54 +2759,30 @@ describe('full-source lifecycle review windows', () => {
     };
   };
 
-  it('exhausts existing bounded repair instead of reopening completed work', async () => {
+  it('publishes the lifecycle interpretation supplied by synthesis', async () => {
     const input = pipelineLifecycle();
     const review = vi.fn(async ({ prompt }) => {
       const cases = JSON.parse(prompt.split('\n').at(-1)!);
       return JSON.stringify({
         resolutions: cases.map((entry: { id: string }) => ({
           id: entry.id,
-          kind: entry.id.endsWith('0') ? 'accepted_action' : 'point',
-          text: entry.id.endsWith('0')
-            ? 'Send the release file.'
-            : 'Casey sent the release file.',
-          owner: entry.id.endsWith('0') ? 'Casey' : null,
+          kind: 'point',
+          text: 'Casey sent the release file.',
+          owner: null,
           due: null,
           discussion: null,
         })),
       });
     });
-    await expect(
-      generateMeetingNotes({
-        ...input,
-        reviewSourceBoundNotes: (notes) =>
-          reviewSourceBoundNotes(notes, review),
-      }),
-    ).rejects.toThrow('notes_semantic_review_incomplete');
-    expect(review).toHaveBeenCalledTimes(2);
+    const result = await generateMeetingNotes({
+      ...input,
+      reviewSourceBoundNotes: (notes) => reviewSourceBoundNotes(notes, review),
+    });
+    expect(result.all_action_items).toEqual([]);
+    expect(review).toHaveBeenCalledOnce();
     expect(input.generate).toHaveBeenCalledOnce();
   });
 
-  it('checks full-source final state even when a callback bypasses semantic holding', async () => {
-    const input = pipelineLifecycle();
-    await expect(
-      generateMeetingNotes({
-        ...input,
-        reviewSourceBoundNotes: async (notes) => {
-          const item = notes.draft.sections[0]!.items[0]!;
-          return applySourceBoundSemanticReview(notes, [
-            {
-              ...item,
-              kind: 'action',
-              text: 'Send the release file.',
-              owner: 'Casey',
-            },
-          ]);
-        },
-      }),
-    ).rejects.toThrow('notes_semantic_review_incomplete');
-    expect(input.generate).toHaveBeenCalledOnce();
-  });
   it('keeps another owner completion from invalidating a broad reviewed source window', async () => {
     const source = createNotesSource(
       JSON.stringify([

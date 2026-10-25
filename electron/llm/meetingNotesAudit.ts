@@ -1887,7 +1887,7 @@ export const sourceBoundItemReviewWindow = (
   item: NotesItem,
 ): SourceSpan[] => {
   // A point may be promoted by the model. Probe the existing action guard only
-  // to discover its cited promise's later resolution; never change the item.
+  // to discover cancellation or prerequisite evidence; never change the item.
   const issues = findNotesGuardrailIssues(
     audited.source,
     {

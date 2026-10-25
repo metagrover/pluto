@@ -731,105 +731,22 @@ describe('Citation Engine', () => {
     );
 
     it.each([
-      [
-        'Morgan has checked the tools.',
-        'Morgan still needs to check the tools.',
-      ],
-      [
-        'Dev has already cleaned the brushes.',
-        'Dev still needs to clean the brushes because the class begins tomorrow.',
-      ],
-      [
-        'Noor finished packing the samples.',
-        'Noor still needs to pack the samples.',
-      ],
-      [
-        'May has completed sorting the cards.',
-        'May still needs to sort the cards.',
-      ],
-    ])(
-      'withholds unfinished-work claims contradicted by the same completed task: %s',
-      (evidence, answer) => {
-        const context = [{ ...sources[0], evidence_text: evidence }];
-        const deltas: string[] = [];
-        const stream = createSynthesizedAnswerStream(context, (delta) =>
-          deltas.push(delta),
-        );
-        stream.push(answer);
-        const result = stream.finalize(answer);
-        expect(result.outcome).toBe('no_evidence');
-        expect(result.unsupportedClaimCount).toBe(1);
-        expect(deltas.join('')).toBe('');
-        expect(result.trustStatus).toBe('inferred');
-      },
-    );
-
-    it.each([
-      [
-        'Morgan has been checking the tools.',
-        'Morgan still needs to check the tools.',
-      ],
-      [
-        'Morgan has to check the tools.',
-        'Morgan still needs to check the tools.',
-      ],
-      [
-        'Morgan has checked the tools. Morgan must check the tools again after repairs.',
-        'Morgan still needs to check the tools.',
-      ],
-      [
-        'Morgan has checked the tools. Morgan will bring the tools tomorrow.',
-        'Morgan still needs to check the tools.',
-      ],
-      ['Nora has checked the tools.', 'Morgan still needs to check the tools.'],
-      ['Jess has checked the tools.', 'Jes still needs to check the tools.'],
-      [
-        'Morgan has checked the tools. Morgan has been assigned to inspect the tools again.',
-        'Morgan still needs to check the tools.',
-      ],
-      [
-        'Morgan has checked the tools. The renewed inspection belongs to Morgan.',
-        'Morgan still needs to check the tools.',
-      ],
-      [
-        'Morgan has checked the tools. Morgan described another responsibility.',
-        'Morgan still needs to check the tools.',
-      ],
-      [
-        'Morgan has collected the cards from Ava.',
-        'Morgan still needs to collect the cards for Ava.',
-      ],
-      [
-        'Morgan has checked the tools and trays.',
-        'Morgan still needs to check the tools or trays.',
-      ],
-      [
-        'Morgan has checked the tools for the north workshop.',
-        'Morgan still needs to check the tools for the south workshop.',
-      ],
-      [
-        'Morgan has not checked the tools.',
-        'Morgan still needs to check the tools.',
-      ],
-      [
-        'If Morgan has checked the tools, Lee will bring the trays.',
-        'Morgan still needs to check the tools.',
-      ],
-      [
-        'Morgan has checked the tools.',
-        'Morgan does not still need to check the tools.',
-      ],
-      ['Morgan has checked the tools.', 'Morgan will check the tools again.'],
-    ])(
-      'does not infer a completion contradiction for different or unresolved scope: %s',
-      (evidence, answer) => {
-        const result = buildSynthesizedAnswerPresentation(answer, [
-          { ...sources[0], evidence_text: evidence },
-        ]);
-        expect(result.answer).toBe(answer);
-        expect(result.unsupportedClaimCount).toBe(0);
-      },
-    );
+      'Morgan has checked the tools.',
+      'Morgan did the tool inspection.',
+      'Morgan will check the tools again after repairs.',
+      'Morgan never completed the tool inspection.',
+    ])('leaves lifecycle interpretation to synthesis: %s', (evidence) => {
+      const answer = 'Morgan still needs to check the tools.';
+      const result = buildSynthesizedAnswerPresentation(answer, [
+        { ...sources[0], evidence_text: evidence },
+      ]);
+      expect(result.answer).toBe(answer);
+      expect(result.unsupportedClaimCount).toBe(0);
+      expect(result.trustStatus).toBe('inferred');
+      expect(
+        result.citations.every((citation) => !citation.evidence_valid),
+      ).toBe(true);
+    });
 
     it.each(['## Owner', '**Owner**', 'Owner:', 'Owner\n\n## Timing'])(
       'still removes explicit or multi-paragraph orphan headings: %s',
