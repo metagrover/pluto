@@ -416,6 +416,7 @@ let electronActiveOllamaModel: string | null = null;
 let ollamaActivityEpoch = 0;
 let lastOllamaActivityAt = 0;
 const pendingOllamaUnloads = new Set<string>();
+let ollamaMemoryReclaimDeadline = 0;
 
 /** Release only Pluto's idle resident model, never an active or newly used one. */
 export async function releaseIdleOllamaModel(
@@ -519,6 +520,7 @@ const requestConfirmedOllamaUnload = async (
   const request = process.versions.electron ? ollamaHttpFetch : fetch;
   // A cancelled transport or successful unload response does not prove the runner stopped.
   pendingOllamaUnloads.add(key);
+  ollamaMemoryReclaimDeadline = Date.now() + 2_000;
   const response = await request(`${baseUrl}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -533,6 +535,7 @@ const requestConfirmedOllamaUnload = async (
     const residents = readOllamaResidents(await status.json());
     if (!residents.has(key)) {
       pendingOllamaUnloads.delete(key);
+      ollamaMemoryReclaimDeadline = Date.now() + 2_000;
       return;
     }
     await delay(100, undefined, { signal });
@@ -642,7 +645,6 @@ export class UnifiedLLMProvider implements LLMProvider {
     model: string;
     contextTokens: number;
   } | null = null;
-  private ollamaMemoryReclaimDeadline = 0;
 
   constructor(
     private providerType: ProviderType,
@@ -1861,7 +1863,7 @@ export class UnifiedLLMProvider implements LLMProvider {
             });
             return;
           } catch (error) {
-            const remaining = this.ollamaMemoryReclaimDeadline - Date.now();
+            const remaining = ollamaMemoryReclaimDeadline - Date.now();
             if (
               !(error instanceof LocalModelMemoryError) ||
               isResident ||
@@ -1917,7 +1919,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       });
       await memory?.start(signal);
     }
-    this.ollamaMemoryReclaimDeadline = 0;
+    ollamaMemoryReclaimDeadline = 0;
     const progressAware =
       Boolean(notesBudget) || usesProgressAwareOllamaDeadline(task);
     const shouldStream = Boolean(onToken) || progressAware;
@@ -2369,7 +2371,6 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (this.establishedGemmaAllocation?.model === model)
       this.establishedGemmaAllocation = null;
     await requestConfirmedOllamaUnload(this.ollamaBaseUrl, model, signal);
-    this.ollamaMemoryReclaimDeadline = Date.now() + 2_000;
   }
 
   private getGeminiClient(): GoogleGenAI {

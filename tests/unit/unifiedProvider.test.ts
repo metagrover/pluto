@@ -42,6 +42,7 @@ import {
   deduplicateExtractedItems,
   getOllamaActiveGenerationTimeoutMs,
   getOllamaTimeoutMs,
+  releaseIdleOllamaModel,
   runWithLocalTranscription,
   setLocalTranscriptionModelUnloader,
   sliceTranscriptWindows,
@@ -2211,6 +2212,122 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
     );
   });
 });
+
+it.each(['recovered', 'pressure', 'cancelled'] as const)(
+  'shares the bounded page-reclaim wait after idle cleanup across providers: %s',
+  async (outcome) => {
+    const electron = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    const watcher = vi
+      .spyOn(modelMemory, 'watchLocalModelMemory')
+      .mockReturnValue({
+        signal: new AbortController().signal,
+        start: vi.fn(async () => {}),
+        dispose: vi.fn(async () => {}),
+        setResidentCheck: vi.fn(),
+      });
+    let resident = false;
+    let unloaded = false;
+    let lowReads = 0;
+    let generations = 0;
+    const controller = new AbortController();
+    const memory = vi
+      .spyOn(modelMemory, 'readLocalModelMemory')
+      .mockImplementation(async () => {
+        const low = unloaded && (outcome !== 'recovered' || lowReads === 0);
+        if (low) {
+          lowReads++;
+          if (outcome === 'cancelled') controller.abort();
+        }
+        return { available: (low ? 7 : 14) * 1024 ** 3, total: 16 * 1024 ** 3 };
+      });
+    const http = vi
+      .spyOn(ollamaTransport, 'ollamaHttpFetch')
+      .mockImplementation(async (url, init) => {
+        if (url.endsWith('/api/ps'))
+          return jsonResponse({
+            models: resident
+              ? [
+                  {
+                    name: 'phi4-mini:3.8b',
+                    digest: 'phi-test',
+                    context_length: 4096,
+                  },
+                ]
+              : [],
+          });
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [
+              {
+                name: 'phi4-mini:3.8b',
+                digest: 'phi-test',
+                size: 3 * 1024 ** 3,
+              },
+            ],
+          });
+        if (parseRequestBody(init).keep_alive === 0) {
+          resident = false;
+          unloaded = true;
+          return jsonResponse({ done: true });
+        }
+        resident = true;
+        generations++;
+        return jsonResponse({
+          response: 'Fictional answer.',
+          done: true,
+          done_reason: 'stop',
+        });
+      });
+    const stream = vi
+      .spyOn(ollamaTransport, 'ollamaHttpStream')
+      .mockImplementation(async (_url, _init, onChunk) => {
+        resident = true;
+        generations++;
+        onChunk(
+          `${JSON.stringify({ response: 'Fictional answer.', done: true, done_reason: 'stop' })}\n`,
+        );
+        return { ok: true, status: 200, statusText: 'OK' };
+      });
+    try {
+      const first = new UnifiedLLMProvider('ollama', {
+        ollama_fast_model: 'phi4-mini:3.8b',
+      });
+      await first.answerAskPluto('A fictional question.', { mode: 'fast' });
+      await releaseIdleOllamaModel(0);
+      expect(resident).toBe(false);
+      const second = new UnifiedLLMProvider('ollama', {
+        ollama_fast_model: 'phi4-mini:3.8b',
+      });
+      const answer = second.answerAskPluto('A fictional follow-up.', {
+        mode: 'fast',
+        signal: controller.signal,
+      });
+      if (outcome === 'recovered')
+        await expect(answer).resolves.toBe('Fictional answer.');
+      else if (outcome === 'pressure')
+        await expect(answer).rejects.toThrow('Not enough memory');
+      else await expect(answer).rejects.toThrow();
+      expect(lowReads).toBeGreaterThan(0);
+      expect(generations).toBe(outcome === 'recovered' ? 2 : 1);
+    } finally {
+      await releaseIdleOllamaModel(0);
+      memory.mockRestore();
+      watcher.mockRestore();
+      http.mockRestore();
+      stream.mockRestore();
+      if (electron)
+        Object.defineProperty(process.versions, 'electron', electron);
+      else Reflect.deleteProperty(process.versions, 'electron');
+    }
+  },
+);
 
 it.each([
   { residentContext: 8192, expectedContext: 8192, unload: false },
