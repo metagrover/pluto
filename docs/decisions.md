@@ -4,6 +4,13 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-24 - Preserve explicit self ownership from projected note actions
+
+- **Refines:** “Require recorded anonymous speaker labels in saved-answer evidence” and “Preserve uncertainty and short answers at saved-answer publication” (2026-10-24). A canonical `Me` owner is independent of the user's literal name; owner-looking prose alone cannot authorize a personal duty.
+- **Decision:** Retain explicit false completion state when projecting saved-note action blocks, alongside the existing owner and due fields. The shared synthesized presentation can preserve an exact “You need to …” task from a non-artifact note's typed `note_actions` when it records `Me` and explicit open state. Preserve the complete task predicate, condition and deadline; conflicting matching owner/completion records abstain. Completed or unknown state, other owners, raw transcript/section metadata and text-only labels cannot use this path. Existing source checks, single retry, inferred trust and every memory protection remain.
+- **Boundary:** This fixes loss of a recorded personal task; it does not prove general paraphrase entailment, current status beyond the saved projection, or relevance of other sentences. Broader Phi ownership/state and Gemma semantic/loading acceptance remain open in [PR #884](https://github.com/metagrover/pluto/pull/884). No model, prompt, source record, notes/cache version or allocation changes accompany it.
+- **Evidence:** Focused regressions cover the real saved-note projection through presentation, reversible completion edits, unknown or conflicting state, other owners, conditions, deadlines, metadata spoofing and streamed output. A text-tag-only prototype was discarded in favor of the existing typed projection.
+
 ## 2026-10-24 - Withhold direct contradictions of recorded completed work
 
 - **Refines:** “Preserve uncertainty and short answers at saved-answer publication” (2026-10-24). A factual saved answer must not say an actor still needs to do the same task that the retrieved notes explicitly record as completed.

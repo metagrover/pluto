@@ -118,6 +118,65 @@ it('renders canonical action fields naturally for local extracts without reading
   );
   expect(reported).not.toContain('Riley: Riley');
 });
+it('preserves projected self task ownership through presentation and respects completion edits', () => {
+  const meeting = {
+    id: 'synthetic-self-task',
+    title: 'Fictional correspondence',
+    analysis_json: JSON.stringify({
+      analysis_schema_version: 3,
+      overview: 'Recorded correspondence responsibilities.',
+      topics: [],
+      all_decisions: [],
+      all_action_items: [
+        {
+          text: 'Send the checked minutes to Ash.',
+          assignee: 'Me',
+          due: 'Tuesday',
+        },
+        { text: 'Book the room.', assignee: 'Remote Speaker 2' },
+      ],
+      meeting_type: 'general',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    }),
+  } as dbModule.PersistedMeeting;
+  const original = meeting.analysis_json;
+  const context = buildMeetingRetrievalResult(meeting);
+  expect(context.note_actions?.[0]).toMatchObject({
+    assignee: 'Me',
+    completed: false,
+    due: 'Tuesday',
+  });
+  const answer = 'You need to send the checked minutes to Ash by Tuesday.';
+  expect(buildSynthesizedAnswerPresentation(answer, [context]).answer).toBe(
+    answer,
+  );
+  expect(
+    buildSynthesizedAnswerPresentation('You need to book the room.', [context])
+      .unsupportedClaimCount,
+  ).toBe(1);
+  const completed = buildMeetingRetrievalResult({
+    ...meeting,
+    user_edits_json: JSON.stringify({
+      'completion:all_action_items:0': {
+        original: 'false',
+        edited: 'true',
+        edited_at: '2026-10-24T00:00:00Z',
+      },
+    }),
+  });
+  expect(completed.note_actions?.[0]?.completed).toBe(true);
+  expect(
+    buildSynthesizedAnswerPresentation(answer, [completed])
+      .unsupportedClaimCount,
+  ).toBe(1);
+  expect(meeting.analysis_json).toBe(original);
+});
+
 type EntitySearchRow = ReturnType<
   typeof dbModule.searchEntitiesWithMeetingContext
 >[number];

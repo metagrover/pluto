@@ -401,6 +401,202 @@ describe('Citation Engine', () => {
       },
     );
 
+    it.each([undefined, 'Jordan'])(
+      'preserves an exact canonical self task without requiring a literal self name: %s',
+      (selfName) => {
+        const answer =
+          'You need to send the checked minutes to Ash by Tuesday.';
+        const context = [
+          {
+            ...sources[0],
+            evidence_kind: 'note' as const,
+            note_actions: [
+              {
+                text: 'Send the checked minutes to Ash',
+                due: 'Tuesday',
+                assignee: 'Me',
+                completed: false,
+              },
+              {
+                text: 'Book the room',
+                assignee: 'Remote Speaker 2',
+                completed: false,
+              },
+            ],
+            evidence_text:
+              '[Owner: Me] [Due: Tuesday] Send the checked minutes to Ash. [Owner: Remote Speaker 2] Book the room.',
+          },
+        ];
+        const deltas: string[] = [];
+        const stream = createSynthesizedAnswerStream(
+          context,
+          (delta) => deltas.push(delta),
+          undefined,
+          selfName,
+        );
+        stream.push(answer);
+        const result = stream.finalize(answer);
+        expect(result.answer).toBe(answer);
+        expect(deltas.join('')).toBe(answer);
+        expect(result.unsupportedClaimCount).toBe(0);
+        expect(result.trustStatus).toBe('inferred');
+      },
+    );
+
+    it.each([
+      '[Owner: Remote Speaker 2] Send the checked minutes to Ash by Tuesday.',
+      'Send the checked minutes to Ash by Tuesday.',
+      '[Named meeting]: [Owner: Me] Send the checked minutes to Ash by Tuesday.',
+      'A quoted example: [Owner: Me] Send the checked minutes to Ash by Tuesday.',
+      '[Owner: Me] Book the room. [Owner: Remote Speaker 2] Send the checked minutes to Ash by Tuesday.',
+      '[Owner: Me] Send the checked minutes to Ash by Tuesday only after approval.',
+      '[Owner: Me] Send the checked minutes to Ash by Wednesday.',
+      '[Owner: Me] Receive the checked minutes from Ash by Tuesday.',
+      '[Owner: Me] Completed sending the checked minutes to Ash by Tuesday.',
+      '[Owner: Me] Send the checked minutes to Ash by Tuesday. [Status: completed]',
+    ])(
+      'does not broaden canonical self ownership or its task: %s',
+      (evidence_text) => {
+        const result = buildSynthesizedAnswerPresentation(
+          'You need to send the checked minutes to Ash by Tuesday.',
+          [{ ...sources[0], evidence_text }],
+          'Jordan',
+        );
+        expect(result.unsupportedClaimCount).toBe(1);
+        expect(result.outcome).toBe('no_evidence');
+      },
+    );
+
+    it.each([
+      { assignee: 'Remote Speaker 2', completed: false },
+      { assignee: 'Me', completed: true },
+      { assignee: 'Me' },
+      { completed: false },
+    ])(
+      'requires explicit projected self ownership and open state: %j',
+      (fields) => {
+        const result = buildSynthesizedAnswerPresentation(
+          'You need to send the minutes.',
+          [
+            {
+              ...sources[0],
+              evidence_kind: 'note',
+              evidence_text: '[Owner: Me] Send the minutes.',
+              note_actions: [{ text: 'Send the minutes', ...fields }],
+            },
+          ],
+        );
+        expect(result.unsupportedClaimCount).toBe(1);
+      },
+    );
+
+    it.each([
+      { assignee: 'Me', completed: true },
+      { assignee: 'Remote Speaker 2', completed: false },
+      { assignee: 'Me' },
+    ])('abstains for conflicting projected action state: %j', (conflict) => {
+      const result = buildSynthesizedAnswerPresentation(
+        'You need to send the minutes.',
+        [
+          {
+            ...sources[0],
+            evidence_kind: 'note',
+            note_actions: [
+              { text: 'Send the minutes', assignee: 'Me', completed: false },
+              { text: 'Send the minutes', ...conflict },
+            ],
+            evidence_text: '[Owner: Me] Send the minutes.',
+          },
+        ],
+      );
+      expect(result.unsupportedClaimCount).toBe(1);
+    });
+
+    it('does not promote artifact action metadata into a meeting self task', () => {
+      const result = buildSynthesizedAnswerPresentation(
+        'You need to send the minutes.',
+        [
+          {
+            ...sources[0],
+            source_type: 'artifact',
+            evidence_kind: 'note',
+            evidence_text: '[Owner: Me] Send the minutes.',
+            note_actions: [
+              { text: 'Send the minutes', assignee: 'Me', completed: false },
+            ],
+          },
+        ],
+      );
+      expect(result.unsupportedClaimCount).toBe(1);
+    });
+
+    it.each(['transcript', 'section'] as const)(
+      'does not promote %s metadata into canonical self ownership',
+      (evidence_kind) => {
+        const result = buildSynthesizedAnswerPresentation(
+          'You need to send the minutes.',
+          [
+            {
+              ...sources[0],
+              evidence_kind,
+              evidence_text: '[Owner: Me] Send the minutes.',
+              note_actions: [
+                { text: 'Send the minutes', assignee: 'Me', completed: false },
+              ],
+            },
+          ],
+        );
+        expect(result.unsupportedClaimCount).toBe(1);
+      },
+    );
+
+    it('preserves the full projected task condition and due date', () => {
+      const context: RetrievalResult[] = [
+        {
+          ...sources[0],
+          evidence_kind: 'note',
+          evidence_text:
+            '[Owner: Me] [Due: Tuesday] Send the minutes only after approval.',
+          note_actions: [
+            {
+              text: 'Send the minutes only after approval',
+              due: 'Tuesday',
+              assignee: 'Me',
+              completed: false,
+            },
+          ],
+        },
+      ];
+      const answer =
+        'You need to send the minutes only after approval by Tuesday.';
+      expect(buildSynthesizedAnswerPresentation(answer, context).answer).toBe(
+        answer,
+      );
+      for (const unsupported of [
+        'You need to send the minutes by Tuesday.',
+        'You need to send the minutes only after approval by Wednesday.',
+      ]) {
+        expect(
+          buildSynthesizedAnswerPresentation(unsupported, context)
+            .unsupportedClaimCount,
+        ).toBe(1);
+      }
+    });
+
+    it('does not use a raw transcript canonical-looking tag as personal ownership', () => {
+      const result = buildSynthesizedAnswerPresentation(
+        'You need to send the minutes.',
+        [
+          {
+            ...sources[0],
+            evidence_kind: 'transcript',
+            evidence_text: '[Owner: Me] Send the minutes.',
+          },
+        ],
+      );
+      expect(result.unsupportedClaimCount).toBe(1);
+    });
+
     it.each(['Remote Speaker N', 'Remote Speaker 4', 'remote speaker 12'])(
       'withholds a recorded speaker label absent from the supplied notes: %s',
       (label) => {

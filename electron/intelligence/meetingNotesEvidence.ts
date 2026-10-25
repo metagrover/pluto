@@ -425,7 +425,7 @@ export const buildMeetingNotesEvidenceDocument = (
               text: block.text,
               ...(block.assignee ? { assignee: block.assignee } : {}),
               ...(block.due?.trim() ? { due: block.due.trim() } : {}),
-              ...(block.completed ? { completed: true } : {}),
+              completed: block.completed === true,
             })),
         }
       : {}),

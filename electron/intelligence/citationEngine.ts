@@ -1791,6 +1791,30 @@ export const buildSynthesizedAnswerPresentation = (
         'iu',
       );
     });
+  // Projected ownership/state authorizes an exact task; owner-looking prose does not.
+  const canonicalSelfTasks = new Map<string, boolean>();
+  for (const source of sources) {
+    if (source.evidence_kind !== 'note' || source.source_type === 'artifact')
+      continue;
+    for (const action of source.note_actions || []) {
+      const text = action.text.trim().replace(/[.!]$/, '');
+      const due = action.due?.trim();
+      const task = (
+        due && !text.toLocaleLowerCase().includes(due.toLocaleLowerCase())
+          ? `${text} by ${due}`
+          : text
+      )
+        .toLocaleLowerCase()
+        .replace(/\s+/g, ' ');
+      // Conflicting projected ownership/completion cannot establish a personal duty.
+      canonicalSelfTasks.set(
+        task,
+        canonicalSelfTasks.get(task) !== false &&
+          action.assignee?.trim().toLocaleLowerCase() === 'me' &&
+          action.completed === false,
+      );
+    }
+  }
   const sourceDays = new Set(
     sources
       .flatMap((source) => [
@@ -1817,8 +1841,21 @@ export const buildSynthesizedAnswerPresentation = (
           const personalVerb = sentence.match(
             /\byou\s+(?:(?:previously|already|had|have|also|explicitly)\s+)*([a-z]+)\b/i,
           )?.[1];
+          const canonicalSelfTask = sentence.match(
+            /^You need to ([^.!?]+)\.$/i,
+          )?.[1];
+          const recordedSelfTask = Boolean(
+            canonicalSelfTask &&
+              canonicalSelfTasks.get(
+                canonicalSelfTask
+                  .trim()
+                  .toLocaleLowerCase()
+                  .replace(/\s+/g, ' '),
+              ) === true,
+          );
           const unsupportedPerson =
             personal &&
+            !recordedSelfTask &&
             (!selfName ||
               !evidence.some(
                 (passage) =>
