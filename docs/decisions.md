@@ -1,3 +1,10 @@
+## 2026-10-25 — Bind warm admission and cleanup to the selected runtime artifact
+
+- **Refines:** “Match Gemma accounting to the runtime context floor” and “Record local load ownership only when allocation can begin.”
+- **Decision:** Prefer the catalog variant whose digest/backend matches an existing resident allocation; otherwise retain the first catalog selection and explicitly request its declared backend. A resident name/context alone cannot authorize warm admission: a missing or changed digest, or a changed declared backend, requires confirmed unloading and unchanged cold admission. Fresh watchdog proof also checks the selected backend when known.
+- **Cleanup:** Track the owned backend before transport so cancellation, failed cleanup retries, idle release and native handoff unload the same variant that may have allocated memory. External-residency cleanup uses its discovered backend. Confirmation still requires the model name to disappear from the complete resident list. Legacy catalogs without backend metadata retain compatibility.
+- **Preservation:** No memory estimate or reserve is reduced. Context/output limits, exact digest/context proof and freshness, independent watchdog, cancellation and workload exclusion remain. Model selection settings and artifacts are unchanged; no semantic correction rule or model-quality claim is introduced. Tests cover catalog ordering, changed/missing digests, backend changes, proof invalidation and backend-targeted cleanup retry before native work.
+
 ## 2026-10-25 — Record local load ownership only when allocation can begin
 
 - **Refines:** “Share bounded memory reclaim accounting across owned unloads” (2026-10-25).

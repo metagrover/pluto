@@ -2213,6 +2213,132 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
   });
 });
 
+it.each([
+  'matching',
+  'changed-digest',
+  'changed-runner',
+  'missing-digest',
+] as const)(
+  'binds warm allocation to the selected catalog artifact and backend: %s',
+  async (state) => {
+    const electron = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    let resident: Record<string, unknown> | null = {
+      name: 'phi4-mini:3.8b',
+      digest:
+        state === 'missing-digest'
+          ? undefined
+          : state === 'changed-digest'
+            ? 'old-artifact'
+            : 'selected-artifact',
+      context_length: 4096,
+      runner: state === 'changed-runner' ? 'mlx' : 'llamacpp',
+    };
+    let proof: (() => Promise<boolean>) | undefined;
+    const events: string[] = [];
+    let request: Record<string, any> | undefined;
+    vi.spyOn(modelMemory, 'readLocalModelMemory').mockResolvedValue({
+      available: 14 * 1024 ** 3,
+      total: 16 * 1024 ** 3,
+    });
+    const capacity = vi.spyOn(modelMemory, 'assertLocalModelMemoryCapacity');
+    vi.spyOn(modelMemory, 'watchLocalModelMemory').mockReturnValue({
+      signal: new AbortController().signal,
+      start: vi.fn(async () => {}),
+      dispose: vi.fn(async () => {}),
+      setResidentCheck: vi.fn((_digest, check) => {
+        proof = check;
+      }),
+    });
+    vi.spyOn(ollamaTransport, 'ollamaHttpFetch').mockImplementation(
+      async (url, init) => {
+        if (url.endsWith('/api/ps'))
+          return jsonResponse({ models: resident ? [resident] : [] });
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [
+              ...(state === 'matching'
+                ? [
+                    {
+                      name: 'phi4-mini:3.8b',
+                      digest: 'another-backend',
+                      size: 12 * 1024 ** 3,
+                      details: { runner: 'mlx' },
+                    },
+                  ]
+                : []),
+              {
+                name: 'phi4-mini:3.8b',
+                digest: 'selected-artifact',
+                size: 3 * 1024 ** 3,
+                details: { runner: 'llamacpp' },
+              },
+            ],
+          });
+        expect(parseRequestBody(init).keep_alive).toBe(0);
+        expect(parseRequestBody(init).runner).toBe(
+          !events.includes('generate') && state === 'changed-runner'
+            ? 'mlx'
+            : 'llamacpp',
+        );
+        events.push('unload');
+        resident = null;
+        return jsonResponse({ done: true });
+      },
+    );
+    vi.spyOn(ollamaTransport, 'ollamaHttpStream').mockImplementation(
+      async (_url, init, onChunk) => {
+        request = parseRequestBody(init);
+        events.push('generate');
+        resident = {
+          name: 'phi4-mini:3.8b',
+          digest: 'selected-artifact',
+          context_length: 4096,
+          runner: 'llamacpp',
+        };
+        onChunk(
+          `${JSON.stringify({ response: 'Fictional answer.', done: true, done_reason: 'stop' })}\n`,
+        );
+        return { ok: true, status: 200, statusText: 'OK' };
+      },
+    );
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_fast_model: 'phi4-mini:3.8b',
+      });
+      await expect(
+        provider.answerAskPluto('A fictional question.', { mode: 'fast' }),
+      ).resolves.toBe('Fictional answer.');
+      expect(events).toEqual(
+        state === 'matching' ? ['generate'] : ['unload', 'generate'],
+      );
+      expect(request?.runner).toBe('llamacpp');
+      expect(capacity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelDigest: 'selected-artifact',
+          resident: state === 'matching',
+        }),
+      );
+      expect(await proof?.()).toBe(true);
+      resident!.runner = 'mlx';
+      expect(await proof?.()).toBe(false);
+      resident!.runner = 'llamacpp';
+    } finally {
+      await releaseIdleOllamaModel(0);
+      vi.restoreAllMocks();
+      if (electron)
+        Object.defineProperty(process.versions, 'electron', electron);
+      else Reflect.deleteProperty(process.versions, 'electron');
+    }
+  },
+);
+
 it.each(['recovered', 'pressure', 'cancelled'] as const)(
   'shares the bounded page-reclaim wait after idle cleanup across providers: %s',
   async (outcome) => {
@@ -3218,7 +3344,14 @@ it('blocks native admission after a watchdog abort until failed Ollama cleanup i
     async (url, init) => {
       if (url.endsWith('/api/tags'))
         return jsonResponse({
-          models: [{ name: 'gemma4:12b', digest, size: 7_556_508_396 }],
+          models: [
+            {
+              name: 'gemma4:12b',
+              digest,
+              size: 7_556_508_396,
+              details: { runner: 'llamacpp' },
+            },
+          ],
         });
       if (url.endsWith('/api/ps')) {
         if (unloads === 2) {
@@ -3229,11 +3362,19 @@ it('blocks native admission after a watchdog abort until failed Ollama cleanup i
         }
         return jsonResponse({
           models: resident
-            ? [{ name: 'gemma4:12b', digest, context_length: 7168 }]
+            ? [
+                {
+                  name: 'gemma4:12b',
+                  digest,
+                  context_length: 7168,
+                  runner: 'llamacpp',
+                },
+              ]
             : [],
         });
       }
       expect(parseRequestBody(init).keep_alive).toBe(0);
+      expect(parseRequestBody(init).runner).toBe('llamacpp');
       unloads++;
       events.push(unloads === 1 ? 'unload-failed' : 'unload-retried');
       return jsonResponse({ done: true }, unloads !== 1);
@@ -3241,6 +3382,7 @@ it('blocks native admission after a watchdog abort until failed Ollama cleanup i
   );
   vi.spyOn(ollamaTransport, 'ollamaHttpStream').mockImplementation(
     async (_url, init) => {
+      expect(parseRequestBody(init).runner).toBe('llamacpp');
       resident = true;
       events.push('generation-active');
       return await new Promise((_, reject) => {
