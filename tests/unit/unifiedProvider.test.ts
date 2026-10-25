@@ -2216,7 +2216,7 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
 it.each([
   'matching',
   'changed-digest',
-  'changed-runner',
+  'catalog-runtime-labels',
   'missing-digest',
 ] as const)(
   'binds warm allocation to the selected catalog artifact and backend: %s',
@@ -2238,7 +2238,7 @@ it.each([
             ? 'old-artifact'
             : 'selected-artifact',
       context_length: 4096,
-      runner: state === 'changed-runner' ? 'mlx' : 'llamacpp',
+      runner: 'llamacpp',
     };
     let proof: (() => Promise<boolean>) | undefined;
     const events: string[] = [];
@@ -2263,7 +2263,7 @@ it.each([
         if (url.endsWith('/api/tags'))
           return jsonResponse({
             models: [
-              ...(state === 'matching'
+              ...(state === 'matching' || state === 'catalog-runtime-labels'
                 ? [
                     {
                       name: 'phi4-mini:3.8b',
@@ -2277,16 +2277,15 @@ it.each([
                 name: 'phi4-mini:3.8b',
                 digest: 'selected-artifact',
                 size: 3 * 1024 ** 3,
-                details: { runner: 'llamacpp' },
+                details: {
+                  runner:
+                    state === 'catalog-runtime-labels' ? 'ggml' : 'llamacpp',
+                },
               },
             ],
           });
         expect(parseRequestBody(init).keep_alive).toBe(0);
-        expect(parseRequestBody(init).runner).toBe(
-          !events.includes('generate') && state === 'changed-runner'
-            ? 'mlx'
-            : 'llamacpp',
-        );
+        expect(parseRequestBody(init).runner).toBeUndefined();
         events.push('unload');
         resident = null;
         return jsonResponse({ done: true });
@@ -2316,19 +2315,23 @@ it.each([
         provider.answerAskPluto('A fictional question.', { mode: 'fast' }),
       ).resolves.toBe('Fictional answer.');
       expect(events).toEqual(
-        state === 'matching' ? ['generate'] : ['unload', 'generate'],
+        state === 'matching' || state === 'catalog-runtime-labels'
+          ? ['generate']
+          : ['unload', 'generate'],
       );
-      expect(request?.runner).toBe('llamacpp');
+      expect(request?.runner).toBe(
+        state === 'catalog-runtime-labels' ? 'ggml' : 'llamacpp',
+      );
       expect(capacity).toHaveBeenCalledWith(
         expect.objectContaining({
           modelDigest: 'selected-artifact',
-          resident: state === 'matching',
+          resident: state === 'matching' || state === 'catalog-runtime-labels',
         }),
       );
       expect(await proof?.()).toBe(true);
-      resident!.runner = 'mlx';
+      resident!.digest = 'different-artifact';
       expect(await proof?.()).toBe(false);
-      resident!.runner = 'llamacpp';
+      resident!.digest = 'selected-artifact';
     } finally {
       await releaseIdleOllamaModel(0);
       vi.restoreAllMocks();
@@ -3374,7 +3377,7 @@ it('blocks native admission after a watchdog abort until failed Ollama cleanup i
         });
       }
       expect(parseRequestBody(init).keep_alive).toBe(0);
-      expect(parseRequestBody(init).runner).toBe('llamacpp');
+      expect(parseRequestBody(init).runner).toBeUndefined();
       unloads++;
       events.push(unloads === 1 ? 'unload-failed' : 'unload-retried');
       return jsonResponse({ done: true }, unloads !== 1);

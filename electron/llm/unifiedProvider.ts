@@ -416,7 +416,6 @@ let electronActiveOllamaModel: string | null = null;
 let ollamaActivityEpoch = 0;
 let lastOllamaActivityAt = 0;
 const pendingOllamaUnloads = new Set<string>();
-const activeOllamaRunners = new Map<string, string>();
 let ollamaMemoryReclaimDeadline = 0;
 
 /** Release only Pluto's idle resident model, never an active or newly used one. */
@@ -490,17 +489,6 @@ const normalizeOllamaModelName = (value: unknown): string | null => {
     : normalized;
 };
 
-const readOllamaRunner = (value: unknown): string | undefined =>
-  typeof value === 'string'
-    ? value.trim().toLowerCase() || undefined
-    : undefined;
-
-type OllamaAllocationModel = {
-  size: number;
-  digest?: string;
-  details?: { runner?: string };
-};
-
 const readOllamaResidents = (payload: unknown): Map<string, string> => {
   const models = (payload as { models?: unknown } | null)?.models;
   if (!Array.isArray(models))
@@ -522,7 +510,6 @@ const requestConfirmedOllamaUnload = async (
   baseUrl: string,
   model: string,
   externalSignal?: AbortSignal,
-  requestedRunner?: string,
 ): Promise<void> => {
   const key = normalizeOllamaModelName(model);
   if (!key) throw new Error('ollama_residency_cleanup_failed');
@@ -533,18 +520,11 @@ const requestConfirmedOllamaUnload = async (
   const request = process.versions.electron ? ollamaHttpFetch : fetch;
   // A cancelled transport or successful unload response does not prove the runner stopped.
   pendingOllamaUnloads.add(key);
-  const runner = requestedRunner ?? activeOllamaRunners.get(key);
-  if (runner) activeOllamaRunners.set(key, runner);
   ollamaMemoryReclaimDeadline = Date.now() + 2_000;
   const response = await request(`${baseUrl}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      ...(runner ? { runner } : {}),
-      keep_alive: 0,
-      stream: false,
-    }),
+    body: JSON.stringify({ model, keep_alive: 0, stream: false }),
     signal,
   });
   if (!response.ok) throw new Error('ollama_residency_cleanup_failed');
@@ -555,7 +535,6 @@ const requestConfirmedOllamaUnload = async (
     const residents = readOllamaResidents(await status.json());
     if (!residents.has(key)) {
       pendingOllamaUnloads.delete(key);
-      activeOllamaRunners.delete(key);
       ollamaMemoryReclaimDeadline = Date.now() + 2_000;
       return;
     }
@@ -1777,12 +1756,12 @@ export class UnifiedLLMProvider implements LLMProvider {
     signal?.throwIfAborted();
     const residency = await this.reconcileOllamaResidency(model, signal);
     let resident = residency.resident;
-    if (resident) this.activateOllamaModel(model, residency.runner);
-    else {
-      this.activeOllamaModel = null;
-      if (process.versions.electron) electronActiveOllamaModel = null;
-    }
-    let entry: OllamaAllocationModel | undefined;
+    this.activeOllamaModel = resident ? model : null;
+    if (process.versions.electron)
+      electronActiveOllamaModel = resident ? model : null;
+    let entry:
+      | { size: number; digest?: string; details?: { runner?: string } }
+      | undefined;
     if (process.versions.electron) {
       const response = await this.ollamaFetch(
         '/api/tags',
@@ -1793,19 +1772,16 @@ export class UnifiedLLMProvider implements LLMProvider {
       if (!response.ok)
         throw new Error('Could not verify local model memory requirements.');
       const payload = await response.json();
-      const entries: OllamaAllocationModel[] = payload.models?.filter(
+      const entries: NonNullable<typeof entry>[] = payload.models?.filter(
         (item: { name?: string; model?: string }) =>
           normalizeOllamaModelName(item.name ?? item.model) ===
           normalizeOllamaModelName(model),
       );
-      // One tag can expose several backends; budget the artifact we will request.
+      // Catalog selectors and running engine labels differ; bind by artifact digest.
       entry =
         entries?.find(
           (item) =>
-            Boolean(residency.digest) &&
-            item.digest === residency.digest &&
-            (!readOllamaRunner(item.details?.runner) ||
-              readOllamaRunner(item.details?.runner) === residency.runner),
+            Boolean(residency.digest) && item.digest === residency.digest,
         ) ?? entries?.[0];
       if (!entry || !Number.isFinite(entry.size) || entry.size <= 0)
         throw new Error('Could not verify local model memory requirements.');
@@ -1815,16 +1791,13 @@ export class UnifiedLLMProvider implements LLMProvider {
         ? entry.digest
         : undefined;
     const runner =
-      readOllamaRunner(entry?.details?.runner) ??
-      (allocationDigest && allocationDigest === residency.digest
-        ? residency.runner
-        : undefined);
+      typeof entry?.details?.runner === 'string'
+        ? entry.details.runner.trim().toLowerCase() || undefined
+        : undefined;
     if (
       resident &&
       entry &&
-      (!allocationDigest ||
-        allocationDigest !== residency.digest ||
-        (runner && runner !== residency.runner))
+      (!allocationDigest || allocationDigest !== residency.digest)
     ) {
       await this.requestOllamaUnload(model, signal);
       resident = false;
@@ -1962,14 +1935,12 @@ export class UnifiedLLMProvider implements LLMProvider {
             model?: string;
             digest?: string;
             context_length?: number;
-            runner?: string;
           }) =>
             Boolean(allocationDigest) &&
             normalizeOllamaModelName(loaded.name ?? loaded.model) ===
               normalizeOllamaModelName(model) &&
             loaded.digest === allocationDigest &&
-            loaded.context_length === num_ctx &&
-            (!runner || readOllamaRunner(loaded.runner) === runner),
+            loaded.context_length === num_ctx,
         );
       });
       await memory?.start(signal);
@@ -2205,7 +2176,8 @@ export class UnifiedLLMProvider implements LLMProvider {
           }
         }
         combinedSignal.throwIfAborted();
-        this.activateOllamaModel(model, runner);
+        this.activeOllamaModel = model;
+        if (process.versions.electron) electronActiveOllamaModel = model;
         const response = await this.ollamaStream(
           useChatEndpoint ? '/api/chat' : '/api/generate',
           {
@@ -2284,7 +2256,8 @@ export class UnifiedLLMProvider implements LLMProvider {
     let response: Response;
     try {
       signal?.throwIfAborted();
-      this.activateOllamaModel(model, runner);
+      this.activeOllamaModel = model;
+      if (process.versions.electron) electronActiveOllamaModel = model;
       response = await this.ollamaFetch(
         useChatEndpoint ? '/api/chat' : '/api/generate',
         {
@@ -2329,16 +2302,6 @@ export class UnifiedLLMProvider implements LLMProvider {
       : (data.response ?? '');
   }
 
-  private activateOllamaModel(model: string, runner?: string): void {
-    this.activeOllamaModel = model;
-    if (!process.versions.electron) return;
-    electronActiveOllamaModel = model;
-    const key = normalizeOllamaModelName(model);
-    if (!key) return;
-    if (runner) activeOllamaRunners.set(key, runner);
-    else activeOllamaRunners.delete(key);
-  }
-
   private async unloadOllamaModel(
     model: string,
     signal?: AbortSignal,
@@ -2353,12 +2316,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private async reconcileOllamaResidency(
     targetModel: string,
     signal?: AbortSignal,
-  ): Promise<{
-    resident: boolean;
-    contextTokens?: number;
-    digest?: string;
-    runner?: string;
-  }> {
+  ): Promise<{ resident: boolean; contextTokens?: number; digest?: string }> {
     signal?.throwIfAborted();
     const deadlineController = new AbortController();
     const deadlineId = setTimeout(
@@ -2402,15 +2360,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           continue;
         signal?.throwIfAborted();
         try {
-          const loaded = payload.models.find(
-            (item: { name?: string; model?: string }) =>
-              normalizeOllamaModelName(item.name ?? item.model) === residentKey,
-          );
-          await this.requestOllamaUnload(
-            residentModel,
-            reconciliationSignal,
-            readOllamaRunner(loaded?.runner),
-          );
+          await this.requestOllamaUnload(residentModel, reconciliationSignal);
           signal?.throwIfAborted();
         } catch (error) {
           signal?.throwIfAborted();
@@ -2436,9 +2386,6 @@ export class UnifiedLLMProvider implements LLMProvider {
         ...(typeof loaded?.digest === 'string'
           ? { digest: loaded.digest }
           : {}),
-        ...(readOllamaRunner(loaded?.runner)
-          ? { runner: readOllamaRunner(loaded.runner) }
-          : {}),
         ...(Number.isSafeInteger(contextTokens) && contextTokens > 0
           ? { contextTokens }
           : {}),
@@ -2451,16 +2398,10 @@ export class UnifiedLLMProvider implements LLMProvider {
   private async requestOllamaUnload(
     model: string,
     signal?: AbortSignal,
-    runner?: string,
   ): Promise<void> {
     if (this.establishedGemmaAllocation?.model === model)
       this.establishedGemmaAllocation = null;
-    await requestConfirmedOllamaUnload(
-      this.ollamaBaseUrl,
-      model,
-      signal,
-      runner,
-    );
+    await requestConfirmedOllamaUnload(this.ollamaBaseUrl, model, signal);
     if (this.activeOllamaModel === model) this.activeOllamaModel = null;
     if (electronActiveOllamaModel === model) electronActiveOllamaModel = null;
   }

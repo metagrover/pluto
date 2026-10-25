@@ -1,3 +1,10 @@
+## 2026-10-25 — Keep manifest selectors separate from resident engine names
+
+- **Supersedes:** The backend equality and targeted-cleanup portions of “Bind warm admission and cleanup to the selected runtime artifact.”
+- **Evidence:** Installed Ollama reports the catalog selector `ggml` and resident engine `llamacpp` for the same digest. Generation accepts the catalog selector; sending the engine label as a selector fails cleanup. They are different API fields, not interchangeable backend identities.
+- **Decision:** Select the resident catalog row by exact artifact digest and pin new generation to that row's declared selector. Missing or changed resident digests require confirmed unloading and unchanged cold admission. Retain the shared name-based unload path: Ollama resolves its retained loaded model, and Pluto still requires absence from the complete resident list before proceeding. Do not infer or translate selector/engine equivalence.
+- **Preservation:** Exact digest/context proof, freshness, memory estimates/reserves, watchdog, limits, cancellation and workload exclusion remain. Tests cover catalog ordering, distinct selector/engine labels, missing/changed digests, proof invalidation and failed cleanup retry before native work. No synthesis, model artifact or configuration change is included.
+
 ## 2026-10-25 — Bind warm admission and cleanup to the selected runtime artifact
 
 - **Refines:** “Match Gemma accounting to the runtime context floor” and “Record local load ownership only when allocation can begin.”
