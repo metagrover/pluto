@@ -1,3 +1,9 @@
+## 2026-10-25 — Record local load ownership only when allocation can begin
+
+- **Refines:** “Share bounded memory reclaim accounting across owned unloads” (2026-10-25).
+- **Decision:** A reconciled resident model is tracked immediately; a cold model becomes active only immediately before the generation transport starts. Admission, missing native monitoring, or budget failure before any load must not create a model-cleanup request or a reclaim interval for nonexistent allocations. Confirmed provider unloads clear ownership at the shared provider boundary, including context-resize cleanup.
+- **Preservation:** A request that may have reached the runtime retains conservative ownership through cancellation and failure until confirmed unloading. Real unloads retain the same bounded reclaim wait. All memory estimates, reserves, freshness, watchdog, context/output limits, model artifacts and unload confirmation remain unchanged. This removes spurious cleanup/waiting; it does not resolve insufficient physical headroom, native weight repacking or semantic quality.
+
 ## 2026-10-25 — Let synthesis interpret completion instead of verb rules
 
 - **Supersedes:** “Withhold direct contradictions of recorded completed work” (2026-10-24), and the completion-recognition extension in notes guardrails.

@@ -2434,7 +2434,7 @@ it('requires cold-load capacity after unloading an undersized resident context',
     expect(capacity).toHaveBeenCalledWith(
       expect.objectContaining({ resident: false, contextTokens: 2048 }),
     );
-    expect(events.length).toBeGreaterThanOrEqual(1);
+    expect(events).toEqual(['unload']);
   } finally {
     memory.mockRestore();
     capacity.mockRestore();
@@ -3306,60 +3306,67 @@ it('blocks native admission after a watchdog abort until failed Ollama cleanup i
   }
 });
 
-it('refuses a stale addon missing the kernel export before any generation POST', async () => {
-  const electron = Object.getOwnPropertyDescriptor(
-    process.versions,
-    'electron',
-  );
-  Object.defineProperty(process.versions, 'electron', {
-    value: 'test',
-    configurable: true,
-  });
-  setLocalModelMemoryProbeReader();
-  vi.spyOn(console, 'warn').mockImplementation(() => {});
-  const stream = vi
-    .spyOn(ollamaTransport, 'ollamaHttpStream')
-    .mockRejectedValue(Error('Generation must not start'));
-  const transport = vi
-    .spyOn(ollamaTransport, 'ollamaHttpFetch')
-    .mockImplementation(async (url) => {
-      if (url.endsWith('/api/tags'))
-        return jsonResponse({
-          models: [
-            {
-              name: 'gemma4:12b',
-              digest:
-                '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c',
-              size: 7556508396,
-            },
-          ],
-        });
-      if (url.endsWith('/api/ps')) return jsonResponse({ models: [] });
-      return jsonResponse({ done: true });
+it.each(['unavailable', 'pressure'] as const)(
+  'refuses cold admission without an unload for a load that never started: %s',
+  async (outcome) => {
+    const electron = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
     });
-  try {
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'gemma4:12b',
-    });
-    await expect(
-      provider.generateText({
-        prompt: 'The fictional team discussed a schedule.',
-        task: 'notesWriter',
-        jsonMode: true,
-        notesBudget: { contextTokens: 8192, outputTokens: 2048 },
-        notesModel: 'gemma4:12b',
-      }),
-    ).rejects.toMatchObject({ name: 'LocalModelMemoryError' });
-    expect(stream).not.toHaveBeenCalled();
-    for (const [url, init] of transport.mock.calls) {
-      if (url.endsWith('/api/generate'))
-        expect(parseRequestBody(init).keep_alive).toBe(0);
-      expect(url.endsWith('/api/chat')).toBe(false);
+    setLocalModelMemoryProbeReader(
+      outcome === 'pressure'
+        ? () => ({ wallTimeMs: Date.now(), memoryPressureFreePercent: 20 })
+        : undefined,
+    );
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stream = vi
+      .spyOn(ollamaTransport, 'ollamaHttpStream')
+      .mockRejectedValue(Error('Generation must not start'));
+    const transport = vi
+      .spyOn(ollamaTransport, 'ollamaHttpFetch')
+      .mockImplementation(async (url) => {
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [
+              {
+                name: 'gemma4:12b',
+                digest:
+                  '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c',
+                size: 7556508396,
+              },
+            ],
+          });
+        if (url.endsWith('/api/ps')) return jsonResponse({ models: [] });
+        return jsonResponse({ done: true });
+      });
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'gemma4:12b',
+      });
+      await expect(
+        provider.generateText({
+          prompt: 'The fictional team discussed a schedule.',
+          task: 'notesWriter',
+          jsonMode: true,
+          notesBudget: { contextTokens: 8192, outputTokens: 2048 },
+          notesModel: 'gemma4:12b',
+        }),
+      ).rejects.toMatchObject({ name: 'LocalModelMemoryError' });
+      expect(stream).not.toHaveBeenCalled();
+      await releaseIdleOllamaModel(0);
+      expect(
+        transport.mock.calls.filter(([, init]) => init?.method === 'POST'),
+      ).toEqual([]);
+    } finally {
+      vi.restoreAllMocks();
+      setLocalModelMemoryProbeReader();
+      if (electron)
+        Object.defineProperty(process.versions, 'electron', electron);
+      else Reflect.deleteProperty(process.versions, 'electron');
     }
-  } finally {
-    vi.restoreAllMocks();
-    setLocalModelMemoryProbeReader();
-    if (electron) Object.defineProperty(process.versions, 'electron', electron);
-    else Reflect.deleteProperty(process.versions, 'electron');
-  }
-});
+  },
+);

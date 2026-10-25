@@ -1756,8 +1756,9 @@ export class UnifiedLLMProvider implements LLMProvider {
     signal?.throwIfAborted();
     const residency = await this.reconcileOllamaResidency(model, signal);
     let resident = residency.resident;
-    this.activeOllamaModel = model;
-    if (process.versions.electron) electronActiveOllamaModel = model;
+    this.activeOllamaModel = resident ? model : null;
+    if (process.versions.electron)
+      electronActiveOllamaModel = resident ? model : null;
     let entry: { size: number; digest?: string } | undefined;
     if (process.versions.electron) {
       const response = await this.ollamaFetch(
@@ -2148,6 +2149,9 @@ export class UnifiedLLMProvider implements LLMProvider {
             releaseNotesPowerBlocker = () => powerSaveBlocker.stop(id);
           }
         }
+        combinedSignal.throwIfAborted();
+        this.activeOllamaModel = model;
+        if (process.versions.electron) electronActiveOllamaModel = model;
         const response = await this.ollamaStream(
           useChatEndpoint ? '/api/chat' : '/api/generate',
           {
@@ -2225,6 +2229,9 @@ export class UnifiedLLMProvider implements LLMProvider {
 
     let response: Response;
     try {
+      signal?.throwIfAborted();
+      this.activeOllamaModel = model;
+      if (process.versions.electron) electronActiveOllamaModel = model;
       response = await this.ollamaFetch(
         useChatEndpoint ? '/api/chat' : '/api/generate',
         {
@@ -2275,12 +2282,6 @@ export class UnifiedLLMProvider implements LLMProvider {
   ): Promise<void> {
     try {
       await this.requestOllamaUnload(model, signal);
-      if (this.activeOllamaModel === model) {
-        this.activeOllamaModel = null;
-      }
-      if (electronActiveOllamaModel === model) {
-        electronActiveOllamaModel = null;
-      }
     } catch (error) {
       console.warn(`[Ollama] Failed to unload model ${model}:`, error);
     }
@@ -2371,6 +2372,8 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (this.establishedGemmaAllocation?.model === model)
       this.establishedGemmaAllocation = null;
     await requestConfirmedOllamaUnload(this.ollamaBaseUrl, model, signal);
+    if (this.activeOllamaModel === model) this.activeOllamaModel = null;
+    if (electronActiveOllamaModel === model) electronActiveOllamaModel = null;
   }
 
   private getGeminiClient(): GoogleGenAI {
