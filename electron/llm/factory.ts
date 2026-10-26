@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { ChatGPTError } from '../chatgpt/auth';
 import { getChatGPTAuth } from '../chatgpt/runtime';
 import type { LLMProvider, LLMSettings, ProviderType } from './provider';
@@ -10,24 +11,30 @@ let lastHealthCheck = 0;
 const HEALTH_CHECK_INTERVAL = 60_000; // 1 minute
 
 function getSettingsHash(settings: LLMSettings): string {
-  return JSON.stringify({
-    type: settings.llm_provider || 'ollama',
-    ollama: settings.ollama_model,
-    ollamaFast: settings.ollama_fast_model,
-    ollamaStructuredThinking: settings.ollama_structured_thinking,
-    ollamaSeed: settings.ollama_seed,
-    llm: settings.llm_model,
-    gemini: settings.gemini_model,
-    openai: settings.openai_model,
-    chatgpt: settings.chatgpt_model,
-    openrouter: settings.openrouter_model,
-    claude: settings.claude_model,
-    hasGemini: !!settings.gemini_api_key,
-    hasOpenAI: !!settings.openai_api_key,
-    hasOpenRouter: !!settings.openrouter_api_key,
-    hasClaude: !!settings.claude_api_key,
-    consents: settings.cloud_consents,
-  });
+  const type = settings.llm_provider || 'ollama';
+  const activeSettings = {
+    ollama: [
+      settings.ollama_model,
+      settings.ollama_fast_model,
+      settings.ollama_structured_thinking,
+      settings.ollama_seed,
+    ],
+    gemini: [settings.gemini_model, settings.gemini_api_key],
+    openai: [settings.openai_model, settings.openai_api_key],
+    chatgpt: [settings.chatgpt_model],
+    openrouter: [settings.openrouter_model, settings.openrouter_api_key],
+    claude: [settings.claude_model, settings.claude_api_key],
+  }[type];
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        type,
+        activeSettings,
+        consent:
+          type === 'ollama' ? undefined : settings.cloud_consents?.[type],
+      }),
+    )
+    .digest('hex');
 }
 
 export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
@@ -234,6 +241,10 @@ export function invalidateProviderCache() {
   pendingProviderPromise = null;
   lastSettingsHash = null;
   lastHealthCheck = 0;
+  invalidateSettingsCache();
+}
+
+export function invalidateSettingsCache() {
   cachedSettings = null;
   lastSettingsFetch = 0;
 }

@@ -829,7 +829,7 @@ import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import {
   getAllSettings,
   getProvider,
-  invalidateProviderCache,
+  invalidateSettingsCache,
 } from './llm/factory';
 import type { ApiKeyProviderId } from './llm/inferenceTypes';
 import { notesWriterPolicy } from './llm/meetingNotesBudget';
@@ -6740,7 +6740,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             : 'chatgpt_cloud_consent_required',
         ),
       );
-    invalidateProviderCache();
+    invalidateSettingsCache();
     if (
       key === 'automaticCommitmentReminders' ||
       key === 'commitmentReminderPreviews' ||
@@ -6794,14 +6794,14 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
         throw new Error('invalid_provider_credential');
       }
       db.setCredential(provider, input.value.trim());
-      invalidateProviderCache();
+      invalidateSettingsCache();
       return db.getCredentialStatus(provider);
     },
   );
   ipcMain.handle('PROVIDER_CREDENTIAL_DELETE', (_event, provider) => {
     const parsed = parseCloudProvider(provider);
     db.deleteCredential(parsed);
-    invalidateProviderCache();
+    invalidateSettingsCache();
     return db.getCredentialStatus(parsed);
   });
   ipcMain.handle('AUDIO_RETENTION_GET_STATUS', () => audioRetention.inspect());
