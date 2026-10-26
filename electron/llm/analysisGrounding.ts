@@ -860,7 +860,7 @@ const rejectedOfferDecisionClause = (
 const decisionCopyPredicate = (value: string) =>
   normalizeTranscriptEvidence(
     value.replace(/^\s*(?:the decision is|decision)\s+/i, ''),
-  );
+  ).replace(/^(?:do not|not to) /, 'not ');
 
 const hasUnsettledDecisionStatus = (text: string): boolean =>
   /\btentative(?:ly)?\b/i.test(text) ||

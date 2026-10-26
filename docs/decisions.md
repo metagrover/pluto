@@ -1,3 +1,9 @@
+## 2026-10-26 - Preserve source coverage and equivalent negative grammar in notes-v98
+
+- **Refines:** The notes-v87 minimal writer and notes-v89 strict-repair policy. Keep the single writer and existing bounded repair, source validation and memory admission.
+- **Decision:** Restore the compact writer's final source-coverage instruction. Require every settled choice to appear as a decision, and cite all claims in each block, including the overview. These are conversation-wide rules without meeting-specific examples or detection patterns. Compare equivalent leading negative grammatical forms in the existing exact-copy normalizer while preserving all predicate words, negation, permission and prerequisites; do not rewrite generated notes.
+- **Validation:** Regression controls reject changed polarity, permission and missing prerequisites in unrelated fictional domains. Full tests pass. Source-grounded live model and packaged acceptance remain separate release gates; mechanical counts alone do not qualify this candidate. Advance the shared prompt/cache identity to notes-v98.
+
 ## 2026-10-26 - Supply canonical task state through ordinary answer evidence
 
 - **Refines:** “2026-10-25 - Separate local question routing from factual synthesis.” Removes the candidate's conversational commitment-status shortcut.

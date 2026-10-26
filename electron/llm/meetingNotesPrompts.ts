@@ -163,6 +163,7 @@ export const buildCompactNotesWriterPrompt = ({
       'at most 3',
       `at most ${maxSourceSpans}`,
     ),
+    'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons, state changes and current commitments. Put every settled choice in a decision item. Include unaccepted offers with their latest disposition, and every speaker’s own feelings and reasons; others’ reactions do not replace them. Compact repetition, not facts.',
   ].join('\n');
 
 export const buildNotesAuditPrompt = ({
