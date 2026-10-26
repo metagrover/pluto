@@ -335,9 +335,19 @@ suite('private real meeting E2E', () => {
             if (result.remaining || result.routingRemaining)
               throw new Error('project_synthesis_timeout');
             for (const person of await ipc('GET_PEOPLE_BRIEFING_SUMMARIES')) {
-              const detail = await ipc('GET_PERSON_BRIEFING', person.id);
-              if (detail?.meetings?.some((m: any) => m.id === meetingId))
+              let detail = await ipc('GET_PERSON_BRIEFING', person.id);
+              if (detail?.meetings?.some((m: any) => m.id === meetingId)) {
+                if (!detail.isSelf) {
+                  expect(detail.knowledgeDoc?.id).toBeTruthy();
+                  const refreshed = await ipc(
+                    'REFRESH_KNOWLEDGE_DOC',
+                    detail.knowledgeDoc.id,
+                  );
+                  expect(refreshed?.status).toBe('up_to_date');
+                  detail = await ipc('GET_PERSON_BRIEFING', person.id);
+                }
                 observations.people.push(detail);
+              }
             }
             for (const project of await ipc('GET_PROJECT_PORTFOLIO')) {
               const brief = await ipc('GET_PROJECT_BRIEF', project.id);
