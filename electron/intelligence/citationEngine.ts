@@ -1814,8 +1814,8 @@ export const buildSynthesizedAnswerPresentation = (
                     .toLocaleLowerCase()
                     .includes(selfName.toLocaleLowerCase()) &&
                   (!personalVerb ||
-                    contentTokens(passage).includes(
-                      stemToken(personalVerb.toLowerCase()),
+                    contentTokens(personalVerb).every((token) =>
+                      contentTokens(passage).includes(token),
                     )) &&
                   claimIsSupportedByEvidence(sentence, passage, selfName),
               ));

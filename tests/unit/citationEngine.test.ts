@@ -2536,3 +2536,34 @@ describe('punctuation-scoped negation', () => {
     ).toBe(false);
   });
 });
+
+it.each([
+  ['completed', 'completed'],
+  ['finished', 'completed'],
+  ['repaired', 'fixed'],
+])(
+  'uses the same token normalization for personal %s claims and %s evidence',
+  (verb, recorded) => {
+    const source = {
+      meeting_id: 'workshop',
+      meeting_title: 'Workshop',
+      mid: null,
+      evidence_kind: 'note',
+      evidence_text: `Ari ${recorded} the equipment inventory.`,
+      score: 1,
+      score_breakdown: {
+        fts_rank: 0,
+        graph_proximity: 0,
+        recency_decay: 1,
+        mention_weight: 0,
+      },
+    } as RetrievalResult;
+    const presentation = buildSynthesizedAnswerPresentation(
+      `You ${verb} the equipment inventory.`,
+      [source],
+      'Ari',
+    );
+    expect(presentation.unsupportedClaimCount).toBe(0);
+    expect(presentation.answer).toContain(`You ${verb}`);
+  },
+);
