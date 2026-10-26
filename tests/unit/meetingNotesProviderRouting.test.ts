@@ -803,9 +803,11 @@ it.each([
   'notesAudit',
   'notesMerge',
   'entities',
+  'askPluto',
+  'askPlutoLive',
   'askPlutoDeep',
 ] as const)(
-  'uses the configured general model for saved work: %s',
+  'uses the configured general model for analysis and factual answers: %s',
   async (task) => {
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'generic-model',
@@ -818,13 +820,8 @@ it.each([
   },
 );
 
-it.each([
-  'askPluto',
-  'askPlutoLive',
-  'queryClassification',
-  'askPlutoScope',
-] as const)(
-  'uses the configured quick model for fast chat and routing: %s',
+it.each(['queryClassification', 'askPlutoScope'] as const)(
+  'uses the configured quick model for classification and routing: %s',
   async (task) => {
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'generic-model',
