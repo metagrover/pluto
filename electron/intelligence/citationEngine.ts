@@ -145,7 +145,7 @@ const certaintyPolarity = (
 
 const negationSignatures = (text: string): string[][] =>
   normalizeNegativeAvailability(text)
-    .split(/[.;!?]/)
+    .split(/[.,;!?]/)
     .flatMap((clause) => {
       const tokens = clause.match(/[\p{L}\p{N}'-]+/gu) || [];
       return tokens.flatMap((token, negationIndex) => {

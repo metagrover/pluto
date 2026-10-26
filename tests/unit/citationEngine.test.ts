@@ -2504,3 +2504,35 @@ describe('contrast recorded within one source', () => {
     }
   });
 });
+
+describe('punctuation-scoped negation', () => {
+  it.each([
+    'No, Ari completed the inventory.',
+    'No; Ari completed the inventory.',
+    'No. Ari completed the inventory.',
+  ])('does not negate a separate affirmative clause: %s', (claim) => {
+    expect(
+      claimIsSupportedByEvidence(claim, 'Ari completed the inventory.'),
+    ).toBe(true);
+  });
+  it.each([
+    'Ari did not complete the inventory.',
+    'No inventory was completed by Ari.',
+    'Ari completed the inventory without approval.',
+  ])('still rejects unsupported negation inside the claim: %s', (claim) => {
+    expect(
+      claimIsSupportedByEvidence(
+        claim,
+        'Ari completed the inventory with approval.',
+      ),
+    ).toBe(false);
+  });
+  it('keeps a negated evidence clause separate from the neighboring positive task', () => {
+    expect(
+      claimIsSupportedByEvidence(
+        'Ari completed the inventory.',
+        'Ari did not complete the inventory, Noor completed the invitations.',
+      ),
+    ).toBe(false);
+  });
+});
