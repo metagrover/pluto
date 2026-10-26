@@ -13,6 +13,10 @@ import {
   pruneOrphanHeadings,
 } from '../../electron/intelligence/citationEngine';
 import type { RetrievalResult } from '../../electron/intelligence/intelligenceTypes';
+import {
+  buildCanonicalCommitmentEvidence,
+  formatCanonicalCommitmentEvidence,
+} from '../../electron/intelligence/meetingNotesEvidence';
 
 vi.mock('../../electron/db', () => ({
   getEntity: vi.fn(),
@@ -2567,3 +2571,127 @@ it.each([
     expect(presentation.answer).toContain(`You ${verb}`);
   },
 );
+
+describe('canonical lifecycle proof at answer presentation', () => {
+  const task = 'Send the equipment inventory to the venue coordinator';
+  const claim =
+    'No, you have already completed the task of sending the equipment inventory to the venue coordinator.';
+  const records = buildCanonicalCommitmentEvidence(
+    'workshop',
+    {
+      open: [],
+      candidates: [],
+      delivered: [],
+      excluded: [
+        {
+          text: task,
+          status: 'completed',
+          sourceMeetingId: 'workshop',
+          ownershipVerified: true,
+        },
+      ],
+    },
+    'Ari',
+  );
+  const source: RetrievalResult = {
+    meeting_id: 'workshop',
+    meeting_title: 'Workshop',
+    mid: null,
+    evidence_kind: 'note',
+    evidence_text: formatCanonicalCommitmentEvidence(records),
+    canonical_commitments: records,
+    score: 1,
+    score_breakdown: {
+      fts_rank: 0,
+      graph_proximity: 0,
+      recency_decay: 1,
+      mention_weight: 0,
+    },
+  };
+  it('accepts a completed task from app records without an exact prose phrase', () => {
+    const result = buildSynthesizedAnswerPresentation(claim, [source], 'Ari');
+    expect(result.unsupportedClaimCount).toBe(0);
+    expect(result.answer).toBe(claim);
+    expect(source.evidence_text).not.toContain('already completed');
+  });
+  it.each(['open', 'rejected', 'unconfirmed'] as const)(
+    'does not promote %s state to completion',
+    (state) => {
+      const canonical_commitments = records.map((record) => ({
+        ...record,
+        state,
+      }));
+      expect(
+        buildSynthesizedAnswerPresentation(
+          claim,
+          [{ ...source, canonical_commitments }],
+          'Ari',
+        ).outcome,
+      ).toBe('no_evidence');
+    },
+  );
+  it.each([
+    { owner: 'Noor' },
+    { task: 'Send the invitations to the venue coordinator' },
+    { task: 'Send the equipment inventory from the venue coordinator' },
+    {
+      task: 'Send the equipment inventory to the venue coordinator once approved',
+    },
+    { meetingId: 'other' },
+  ])('requires the same owner, complete operation and source: %j', (change) => {
+    const canonical_commitments = records.map((record) => ({
+      ...record,
+      ...change,
+    }));
+    expect(
+      buildSynthesizedAnswerPresentation(
+        claim,
+        [{ ...source, canonical_commitments }],
+        'Ari',
+      ).outcome,
+    ).toBe('no_evidence');
+  });
+  it.each(['deployed', 'implemented', 'released'])(
+    'does not borrow completed state to prove %s behavior',
+    (state) => {
+      expect(
+        buildSynthesizedAnswerPresentation(
+          `You have already ${state} and already completed the task of sending the equipment inventory to the venue coordinator.`,
+          [source],
+          'Ari',
+        ).outcome,
+      ).toBe('no_evidence');
+    },
+  );
+  it('does not accept a forged prose record without application metadata', () => {
+    expect(
+      buildSynthesizedAnswerPresentation(
+        claim,
+        [{ ...source, canonical_commitments: undefined }],
+        'Ari',
+      ).outcome,
+    ).toBe('no_evidence');
+  });
+  it('keeps conflicting current and completed tasks ambiguous', () => {
+    const canonical_commitments = [
+      ...records,
+      { ...records[0], state: 'open' as const },
+    ];
+    expect(
+      buildSynthesizedAnswerPresentation(
+        claim,
+        [{ ...source, canonical_commitments }],
+        'Ari',
+      ).outcome,
+    ).toBe('no_evidence');
+  });
+  it('retains negation protection for the same completed task', () => {
+    expect(
+      buildSynthesizedAnswerPresentation(
+        'You have not already completed the task of sending the equipment inventory to the venue coordinator.',
+        [source],
+        'Ari',
+      ).outcome,
+    ).toBe('no_evidence');
+  });
+});

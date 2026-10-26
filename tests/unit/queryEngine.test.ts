@@ -4321,6 +4321,14 @@ describe('Query Engine', () => {
     const source = buildMeetingRetrievalResult(meeting);
     const result = applyAssigneeCommitmentState([source], null)[0];
     expect(result.evidence_text).toContain('"state":"completed"');
+    expect(result.canonical_commitments).toEqual([
+      {
+        owner: 'You',
+        state: 'completed',
+        task: 'Send the inventory',
+        meetingId: 'source',
+      },
+    ]);
     expect(result.evidence_text).toContain('"owner":"You"');
     expect(result.evidence_text).toContain(source.evidence_text);
     expect(

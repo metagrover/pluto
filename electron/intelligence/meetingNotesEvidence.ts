@@ -439,20 +439,30 @@ export const buildMeetingNotesEvidenceDocument = (
   };
 };
 
+export type CanonicalCommitmentEvidence = {
+  owner: string;
+  state: 'open' | 'unconfirmed' | 'completed' | 'rejected';
+  task: string;
+  meetingId: string;
+};
+
 /** App-owned lifecycle state is evidence, independent of query wording. */
 export const buildCanonicalCommitmentEvidence = (
   meetingId: string,
   commitments: ReturnType<typeof import('../db').getCanonicalPersonCommitments>,
   owner: string,
-): string => {
-  if (!commitments) return '';
+): CanonicalCommitmentEvidence[] => {
+  if (!commitments) return [];
   const items = [
-    ...commitments.open.map((item) => ({ ...item, state: 'open' })),
+    ...commitments.open.map((item) => ({ ...item, state: 'open' as const })),
     ...commitments.candidates.map((item) => ({
       ...item,
-      state: 'unconfirmed',
+      state: 'unconfirmed' as const,
     })),
-    ...commitments.delivered.map((item) => ({ ...item, state: 'completed' })),
+    ...commitments.delivered.map((item) => ({
+      ...item,
+      state: 'completed' as const,
+    })),
     ...(commitments.excluded ?? [])
       .filter((item) => item.ownershipVerified)
       .map((item) => ({ ...item, state: item.status })),
@@ -461,19 +471,19 @@ export const buildCanonicalCommitmentEvidence = (
       item.sourceMeetingId === meetingId &&
       !containsConfidentialAside(item.text),
   );
-  const records = [
-    ...new Set(
-      items.map((item) =>
-        JSON.stringify({
-          owner,
-          state: item.state,
-          task: item.text,
-          meetingId,
-        }),
-      ),
-    ),
+  return [
+    ...new Map(
+      items.map((item) => {
+        const record = { owner, state: item.state, task: item.text, meetingId };
+        return [JSON.stringify(record), record] as const;
+      }),
+    ).values(),
   ];
-  return records.length
-    ? `[Canonical commitment state — overrides older notes; unconfirmed is not an accepted responsibility]:\n${records.join('\n')}`
-    : '';
 };
+
+export const formatCanonicalCommitmentEvidence = (
+  records: readonly CanonicalCommitmentEvidence[],
+): string =>
+  records.length
+    ? `[Canonical commitment state — overrides older notes; unconfirmed is not an accepted responsibility]:\n${records.map((record) => JSON.stringify(record)).join('\n')}`
+    : '';

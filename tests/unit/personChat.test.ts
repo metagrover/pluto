@@ -556,6 +556,15 @@ it('supplies canonical closed work for both people independently of query phrasi
   expect(context.retrievalResults[0].evidence_text).toContain(
     '"state":"completed"',
   );
+  expect(context.retrievalResults[0].canonical_commitments).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        owner: 'You',
+        state: 'completed',
+        meetingId: 'confirmed',
+      }),
+    ]),
+  );
   expect(
     buildPersonChatPrompt({
       query: 'What happened with the inventory?',

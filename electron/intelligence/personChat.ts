@@ -16,6 +16,7 @@ import type { RetrievalResult } from './intelligenceTypes';
 import {
   buildCanonicalCommitmentEvidence,
   buildMeetingNotesEvidenceDocument,
+  formatCanonicalCommitmentEvidence,
 } from './meetingNotesEvidence';
 import { excerptQueryEvidence } from './queryEvidenceExcerpt';
 
@@ -196,32 +197,30 @@ export const buildPersonChatContext = (input: {
     if (containsConfidentialAside(`${fullNotes} ${meeting?.user_notes ?? ''}`))
       return [];
     if (contactRecall && fullNotes && !notes) return [];
-    const canonicalState =
+    const canonicalRecords =
       meeting && briefing.evidence === 'confirmed'
         ? [
-            buildCanonicalCommitmentEvidence(
+            ...buildCanonicalCommitmentEvidence(
               briefing.id,
               input.canonicalPersonCommitments ?? detail.commitments,
               detail.isSelf ? input.selfName || 'You' : detail.person.name,
             ),
             ...(!detail.isSelf
-              ? [
-                  buildCanonicalCommitmentEvidence(
-                    briefing.id,
-                    input.canonicalSelfCommitments,
-                    input.selfName || 'You',
-                  ),
-                ]
+              ? buildCanonicalCommitmentEvidence(
+                  briefing.id,
+                  input.canonicalSelfCommitments,
+                  input.selfName || 'You',
+                )
               : []),
           ]
-            .filter(Boolean)
-            .join('\n')
-        : '';
+        : [];
+    const canonicalState = formatCanonicalCommitmentEvidence(canonicalRecords);
     return [
       {
         briefing,
         notes,
         canonicalState,
+        canonicalRecords,
         sourceRevision: document?.sourceRevision,
         score: scoreText(
           queryWords,
@@ -248,6 +247,7 @@ export const buildPersonChatContext = (input: {
     briefing,
     notes,
     canonicalState,
+    canonicalRecords,
     sourceRevision,
     score,
   } of selected) {
@@ -279,6 +279,7 @@ export const buildPersonChatContext = (input: {
       mid: null,
       evidence_kind: meetingContext ? 'note' : 'commitment',
       evidence_text: body,
+      canonical_commitments: canonicalRecords,
       source_revision: sourceRevision,
       score,
       score_breakdown: {

@@ -1,4 +1,8 @@
-import { normalizeEvidenceText } from '../../src/utils/evidenceText';
+import {
+  containsEvidencePhrase,
+  evidencePhrase,
+  normalizeEvidenceText,
+} from '../../src/utils/evidenceText';
 import { deriveCitationTrustStatus } from '../../src/utils/trustStatus';
 import { getEntity, getMeetingMid } from '../db';
 import type { CitationChain, RetrievalResult } from './intelligenceTypes';
@@ -1766,6 +1770,28 @@ export const buildSynthesizedAnswerPresentation = (
       );
     }
   }
+  const canonicalTasks = sources
+    .filter(
+      (source) =>
+        source.source_type !== 'artifact' &&
+        source.evidence_kind !== 'transcript',
+    )
+    .flatMap((source) =>
+      (source.canonical_commitments ?? []).filter(
+        (record) => record.meetingId === source.meeting_id,
+      ),
+    );
+  const completedTasks = canonicalTasks.filter(
+    (record) =>
+      record.state === 'completed' &&
+      !canonicalTasks.some(
+        (other) =>
+          normalizeEvidenceText(other.owner) ===
+            normalizeEvidenceText(record.owner) &&
+          evidencePhrase(other.task) === evidencePhrase(record.task) &&
+          other.state !== 'completed',
+      ),
+  );
   const sourceDays = new Set(
     sources
       .flatMap((source) => [
@@ -1835,8 +1861,21 @@ export const buildSynthesizedAnswerPresentation = (
             sentence.match(
               /\b(?:being used|in use|(?:already|now) (?:implemented|deployed|released|completed))\b/gi,
             ) || [];
+          const supportedCanonicalCompletion = completedTasks.some(
+            (record) =>
+              containsEvidencePhrase(sentence, record.task) &&
+              claimIsSupportedByEvidence(
+                sentence,
+                `${record.owner} completed ${record.task}`,
+                selfName,
+              ),
+          );
           const unsupportedImplementation = implementation.some(
             (phrase) =>
+              !(
+                supportedCanonicalCompletion &&
+                phrase.toLowerCase().endsWith('completed')
+              ) &&
               !evidence.some((passage) =>
                 passage
                   .toLocaleLowerCase()

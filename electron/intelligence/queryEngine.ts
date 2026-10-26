@@ -25,6 +25,7 @@ import {
   type MeetingNotesEvidenceDocument,
   buildCanonicalCommitmentEvidence,
   buildMeetingNotesEvidenceDocument,
+  formatCanonicalCommitmentEvidence,
 } from './meetingNotesEvidence';
 export { containsConfidentialAside } from './evidencePrivacy';
 import { excerptQueryEvidence } from './queryEvidenceExcerpt';
@@ -1326,7 +1327,7 @@ export const applyAssigneeCommitmentState = (
     )
       return source;
     const meeting = dbModule.getAskPlutoMeeting(source.meeting_id);
-    const selfState =
+    const canonicalRecords =
       meeting &&
       !containsConfidentialAside(
         `${meeting.title}\n${meeting.user_notes}\n${buildMeetingNotesEvidenceDocument(meeting).notesText}`,
@@ -1336,7 +1337,8 @@ export const applyAssigneeCommitmentState = (
             canonical,
             selfName,
           )
-        : '';
+        : [];
+    const selfState = formatCanonicalCommitmentEvidence(canonicalRecords);
     const excluded =
       recall?.excludedCommitments?.filter(
         (item) => item.sourceMeetingId === source.meeting_id,
@@ -1347,6 +1349,7 @@ export const applyAssigneeCommitmentState = (
     if (!selfState && !assigneeState) return source;
     return {
       ...source,
+      canonical_commitments: canonicalRecords,
       evidence_text: [selfState, assigneeState, source.evidence_text]
         .filter(Boolean)
         .join('\n'),
