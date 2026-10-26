@@ -2421,10 +2421,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private async resolveOllamaModel(task?: LLMTask): Promise<string> {
     return resolveConfiguredOllamaModel(
       this.settings,
-      task === 'askPluto' ||
-        task === 'askPlutoLive' ||
-        task === 'queryClassification' ||
-        task === 'askPlutoScope',
+      task === 'queryClassification' || task === 'askPlutoScope',
     );
   }
 

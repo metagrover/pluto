@@ -1,3 +1,10 @@
+## 2026-10-25 - Separate local question routing from factual synthesis
+
+- **Supersedes:** “2026-10-20 - Route saved Fast chat through the configured fast model” and the fast-model selection clause of “2026-09-30 - Ground live chat in checked transcript wording on the fast model.”
+- **Evidence:** Both tested Phi precisions can reopen completed work or change ownership in synthetic factual answers. Increasing precision and adding synthesis stages did not reliably resolve those errors.
+- **Decision:** Phi remains the default for query classification and meeting scope. All factual Ask Pluto synthesis, including saved Fast, Deep, and live answers, uses the configured general model, defaulting to Gemma. Preserve each mode's evidence boundaries, budgets, citations, canonical state, and independent memory admission. A failed general model must not silently fall back to Phi. Settings retain both existing model keys and describe their roles.
+- **Validation:** Routing regression covers all three answer modes and both classification tasks; failure tests retain explicit model selection. Model quality and hardware acceptance remain separate gates.
+
 ## 2026-10-26 — Normalize duplicate request-local wire citations
 
 - **Context:** Local models can repeat an internal source marker in prose while already supplying the same citation in the structured sources field, causing avoidable bounded repairs and publication refusal.

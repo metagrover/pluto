@@ -996,7 +996,7 @@ describe('UnifiedLLMProvider', () => {
     }
   });
 
-  it('uses configured Fast and Deep models while preserving mode budgets', async () => {
+  it('uses the configured analysis model while preserving Fast and Deep budgets', async () => {
     const requestBodies: Array<Record<string, unknown>> = [];
     installFetchMock((_url, init) => {
       requestBodies.push(parseRequestBody(init));
@@ -1015,7 +1015,7 @@ describe('UnifiedLLMProvider', () => {
     await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
 
     expect(requestBodies[0]).toMatchObject({
-      model: 'configured-fast-model',
+      model: 'configured-analysis-model',
       think: false,
     });
     expect(requestBodies[0].options).toMatchObject({
@@ -1560,13 +1560,11 @@ describe('UnifiedLLMProvider', () => {
       await expect(
         provider.answerAskPluto('Fictional question', { mode }),
       ).rejects.toThrow('Unavailable');
-      expect(requested).toEqual([
-        mode === 'fast' ? 'configured-fast-model' : 'configured-analysis-model',
-      ]);
+      expect(requested).toEqual(['configured-analysis-model']);
     },
   );
 
-  it('uses Phi for saved Fast and active chat while keeping Gemma for Deep', async () => {
+  it('uses the analysis model for factual answers and Phi only for routing', async () => {
     const selectedModels: string[] = [];
     let resident = true;
     installFetchMock(
@@ -1601,10 +1599,17 @@ describe('UnifiedLLMProvider', () => {
     await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
     await provider.answerAskPluto('What are we discussing?', { live: true });
 
+    await provider.classifyQueryIntent('Classify this query.');
+    await provider.classifyQueryIntent('Scope this query.', {
+      purpose: 'meetingScope',
+    });
+
     expect(selectedModels).toEqual([
       'gemma4:12b',
-      'phi4-mini:3.8b',
       'gemma4:12b',
+      'gemma4:12b',
+      'gemma4:12b',
+      'phi4-mini:3.8b',
       'phi4-mini:3.8b',
     ]);
   });
@@ -2309,6 +2314,7 @@ it.each([
     );
     try {
       const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
         ollama_fast_model: 'phi4-mini:3.8b',
       });
       await expect(
@@ -2426,12 +2432,14 @@ it.each(['recovered', 'pressure', 'cancelled'] as const)(
       });
     try {
       const first = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
         ollama_fast_model: 'phi4-mini:3.8b',
       });
       await first.answerAskPluto('A fictional question.', { mode: 'fast' });
       await releaseIdleOllamaModel(0);
       expect(resident).toBe(false);
       const second = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
         ollama_fast_model: 'phi4-mini:3.8b',
       });
       const answer = second.answerAskPluto('A fictional follow-up.', {
@@ -3285,6 +3293,7 @@ it('blocks native admission when first-use reconciliation leaves an unconfirmed 
   try {
     await expect(
       new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
         ollama_fast_model: 'phi4-mini:3.8b',
       }).generateText({
         prompt: 'A fictional question.',

@@ -1330,8 +1330,8 @@ export const SettingsTab = ({
                 </SettingsRow>
                 <SettingsRow
                   htmlFor="ollama-model"
-                  label="Local Analysis & Deep Model"
-                  helper={`Used for meeting preparation and deeper cross-meeting analysis. Leave blank to use ${OLLAMA_GENERAL_MODEL}.`}
+                  label="Local Analysis & Answers Model"
+                  helper={`Used for notes, meeting preparation, and Ask Pluto answers. Leave blank to use ${OLLAMA_GENERAL_MODEL}.`}
                 >
                   <Input
                     id="ollama-model"
@@ -1348,8 +1348,8 @@ export const SettingsTab = ({
                 </SettingsRow>
                 <SettingsRow
                   htmlFor="ollama-fast-model"
-                  label="Fast Chat Model"
-                  helper={`Quick Ask Pluto answers use ${OLLAMA_QUICK_CHAT_MODEL} by default. Deep questions continue to use the analysis model.`}
+                  label="Local Routing Model"
+                  helper={`Classifies questions and selects their scope. Defaults to ${OLLAMA_QUICK_CHAT_MODEL}; the analysis model writes factual answers.`}
                 >
                   <Input
                     id="ollama-fast-model"
