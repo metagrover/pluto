@@ -145,7 +145,7 @@ The source database and audio are read-only. All provisional, validation, canoni
 
 **Root cause**
 
-- Native modules were compiled against a different Node/Electron ABI than the runtime (Electron 40 expects ABI 143).
+- Native modules were compiled for an ABI that does not match the running Node or Electron version.
 
 **Fix**
 

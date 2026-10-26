@@ -99,7 +99,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "@electron/rebuild": "^4.0.3",
+    "@electron/rebuild": "^4.2.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/fast-levenshtein": "^0.0.4",
     "@types/react": "^18.2.64",
@@ -107,34 +107,39 @@
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.23",
     "drizzle-kit": "^0.31.10",
-    "electron": "40.8.0",
-    "electron-builder": "^26.8.1",
-    "happy-dom": "^20.11.1",
+    "electron": "42.11.16",
+    "electron-builder": "^26.18.0",
+    "happy-dom": "^21.0.4",
     "lefthook": "^1.7.0",
-    "postcss": "^8.5.6",
+    "postcss": "^8.5.32",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.23.13",
     "typescript": "^5.2.2",
-    "vite": "^7.3.5",
+    "vite": "^7.3.7",
     "vite-plugin-electron": "^0.28.6",
     "vite-plugin-electron-renderer": "^0.14.5",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.12"
   },
   "main": "dist-electron/bootstrap.js",
   "pnpm": {
     "overrides": {
-      "@xmldom/xmldom@<0.8.13": "0.8.13",
+      "@xmldom/xmldom@<0.8.15": "0.8.15",
       "lodash@>=4.0.0 <=4.17.23": "4.18.0",
       "minimatch": "10.2.4",
       "tmp@<0.2.7": "0.2.7",
-      "tar": "7.5.11",
+      "tar": "7.5.21",
       "picomatch@<2.3.2": "2.3.2",
       "picomatch@>=4.0.0 <4.0.4": "4.0.4",
       "rollup@>=4.0.0 <4.59.0": ">=4.59.0",
       "minimatch@>=10.0.0 <10.2.3": ">=10.2.3",
       "esbuild@<0.28.1": "0.28.1",
       "form-data@<4.0.6": "4.0.6",
-      "tmp": "0.2.7"
+      "tmp": "0.2.7",
+      "browserslist@>=4.0.0 <4.28.7": "4.28.7",
+      "ip-address@>=10.0.0 <10.7.4": "10.7.4",
+      "fast-uri@>=3.0.0 <3.1.9": "3.1.9",
+      "postcss-selector-parser@>=6.0.0 <6.1.5": "6.1.5",
+      "@babel/core@>=7.0.0 <7.29.6": "7.29.6"
     }
   },
   "volta": {
