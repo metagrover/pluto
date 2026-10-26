@@ -8193,10 +8193,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             task: conversationResolution.task,
             relation: conversationResolution.relation,
           });
-          configuredModel = resolveConfiguredProviderModel(
-            settings,
-            reasoningMode === 'fast',
-          );
+          configuredModel = resolveConfiguredProviderModel(settings);
           recallCompletedAt = Date.now();
           retrievalStartedAt = recallCompletedAt;
 

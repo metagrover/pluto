@@ -300,7 +300,7 @@ describe('Ask Pluto query IPC boundary', () => {
   });
 
   it.each([
-    ['fast', 'phi4-mini:3.8b'],
+    ['fast', 'gemma4:12b'],
     ['deep', 'gemma4:12b'],
   ])(
     'reports the actual %s model in answer performance diagnostics',
