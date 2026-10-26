@@ -200,7 +200,7 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
       </h2>
       <p className="mt-3 text-[15px] leading-6 text-pro-text-main/75">
         Get useful meeting notes and answers with the intelligence you prefer.
-        Recording and transcription stay on this Mac either way.
+        Recording and transcription stay on this Mac.
       </p>
       <fieldset
         disabled={busy || showWelcome}
