@@ -24,6 +24,38 @@ import { getAnalysisEditBlocks } from '../../src/utils/analysisDocument';
 import { rebaseMeetingNotesEdits } from '../../src/utils/meetingNotesEditRebase';
 import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
 
+it('keeps a grounded decision when its optional author metadata is unsupported', () => {
+  const text = 'Kiran decided to use shared storage.';
+  const source = createNotesSource(
+    JSON.stringify([{ speaker: 'Tariq', text }]),
+  );
+  const sources = [{ segment: 0, start: 0, end: text.length }];
+  const draft = parseNotesDraft(
+    JSON.stringify({
+      meetingType: 'general',
+      overview: null,
+      sections: [
+        {
+          title: { text: 'Storage', sources },
+          items: [
+            { kind: 'decision', text, owner: 'Tariq', due: null, sources },
+          ],
+        },
+      ],
+    }),
+  );
+  const before = structuredClone({ source, draft });
+  const accepted = acceptEditedNotes({ source, draft });
+  const item = accepted.draft.sections[0]!.items[0]!;
+  expect(item.text).toBe(text);
+  expect(item.sources).toEqual(sources);
+  expect(item.owner).toBeNull();
+  expect(
+    projectAuditedNotes(accepted).all_decisions[0]?.decided_by,
+  ).toBeUndefined();
+  expect({ source, draft }).toEqual(before);
+});
+
 it.each([
   ['The decision is to keep the introduction static.', undefined],
   ['We decided to keep the introduction static.', undefined],

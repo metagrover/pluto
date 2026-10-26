@@ -1,3 +1,9 @@
+## 2026-10-26 — Retain grounded decisions with unproved optional author metadata
+
+- **Context:** Strict local writer acceptance could reject a source-supported decision solely because its optional author field could not be validated, including a reporter misidentified as the deciding person.
+- **Decision:** Supersede only that author-field refusal in “Minimal local writer candidate without automatic model review (notes-v87)” and its notes-v89 strict-repair extension. Retain the decision wording and exact citations after existing source acceptance, and clear an unproved optional author. LLM synthesis still supplies the decision. Action ownership, deadlines, source spans, polarity, conditions, quantities, identity confirmation and memory protection retain their existing checks.
+- **Evidence:** A regression preserves a reported third-party decision while removing the incorrect reporter attribution; existing action and decision attribution checks remain green. Live model quality and package acceptance remain separate gates. See [PR #884](https://github.com/metagrover/pluto/pull/884).
+
 ## 2026-10-25 — Bound long-token scanning in request budgeting
 
 - **Refines:** The shared conservative notes token estimate; no numeric policy changes.

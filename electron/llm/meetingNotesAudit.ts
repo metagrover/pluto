@@ -1471,7 +1471,11 @@ export const acceptEditedNotes = ({
         normalizeTranscriptEvidence(item.owner ?? '') !==
           normalizeTranscriptEvidence(checked.owner ?? '');
       const dueRemoved = Boolean(item.due) && !checked.due;
-      if (acceptancePolicy === 'strict' && (ownerChanged || dueRemoved)) {
+      // A decision author is optional; unproved metadata must not discard its grounded text.
+      if (
+        acceptancePolicy === 'strict' &&
+        ((item.kind === 'action' && ownerChanged) || dueRemoved)
+      ) {
         return rejectCommitment(
           item,
           `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
