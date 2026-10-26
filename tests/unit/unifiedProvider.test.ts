@@ -3016,7 +3016,7 @@ it.each([
   { outcome: 'aborted' },
   { outcome: 'resident-again' },
 ])(
-  'waits only for memory released by a confirmed unload ($outcome)',
+  'reclaims a pressured allocation at the required context only after confirmed unload ($outcome)',
   async ({ outcome }) => {
     const nativeWatcher = vi
       .spyOn(modelMemory, 'watchLocalModelMemory')
@@ -3041,13 +3041,18 @@ it.each([
     let resident = true;
     let reads = 0;
     let generates = 0;
+    const generatedContexts: number[] = [];
     let emptyChecks = 0;
     let reappeared = false;
     const memory = vi
       .spyOn(modelMemory, 'readLocalModelMemory')
       .mockImplementation(async () => ({
         available:
-          (++reads === 1 ? 3 : outcome === 'recovered' && reads >= 3 ? 14 : 8) *
+          (++reads === 1
+            ? 3
+            : outcome === 'recovered' && reads >= 3
+              ? 10.6
+              : 8) *
           1024 ** 3,
         total: 16 * 1024 ** 3,
       }));
@@ -3079,6 +3084,11 @@ it.each([
           return jsonResponse({ done: true });
         }
         generates++;
+        generatedContexts.push(
+          Number(
+            (parseRequestBody(init).options as Record<string, unknown>).num_ctx,
+          ),
+        );
         return jsonResponse({ response: 'Done.', done: true });
       });
     try {
@@ -3118,7 +3128,10 @@ it.each([
             : 'LocalModelMemoryError',
       );
       expect(generates).toBe(outcome === 'recovered' ? 1 : 0);
-      if (outcome === 'recovered') expect(reads).toBe(3);
+      if (outcome === 'recovered') {
+        expect(reads).toBe(3);
+        expect(generatedContexts).toEqual([2048]);
+      }
       if (outcome === 'timeout') expect(reads).toBeLessThanOrEqual(23);
     } finally {
       nativeWatcher.mockRestore();

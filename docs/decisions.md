@@ -1,3 +1,9 @@
+## 2026-10-25 - Size reclaimed local allocations for the current request
+
+- **Supersedes:** The retained-context behavior of “2026-10-20 - Reuse bounded resident Ollama contexts between stages” and “2026-10-20 - Keep Gemma allocations bounded across downstream tasks,” only after memory pressure requires a confirmed unload.
+- **Decision:** Keep a compatible larger resident context while it passes admission. Once that allocation has been unloaded and confirmed absent, cold-load only the context required by the current complete request. Reusing the old size after discarding its cache can cause an unnecessary refusal. Preserve the cold-load reserve, reclaim deadline, cancellation, artifact proof and independent native watchdog.
+- **Validation:** The reclaim regression recovers at a memory level that admits the required 2,048-token context but rejects the discarded 7,168-token context. Insufficient memory, cancellation and a reappearing resident still refuse admission.
+
 ## 2026-10-25 - Separate local question routing from factual synthesis
 
 - **Supersedes:** “2026-10-20 - Route saved Fast chat through the configured fast model” and the fast-model selection clause of “2026-09-30 - Ground live chat in checked transcript wording on the fast model.”

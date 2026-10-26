@@ -1844,7 +1844,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     );
     if (notesBudget && requiredContext > budget.num_ctx)
       throw new MeetingNotesError('notes_input_overflow');
-    const num_ctx =
+    let num_ctx =
       resident &&
       residency.contextTokens !== undefined &&
       residency.contextTokens >= requiredContext &&
@@ -1915,7 +1915,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         await this.requestOllamaUnload(model, signal);
         if ((await this.reconcileOllamaResidency(model, signal)).resident)
           throw error;
-        // Reclaim warm runtime allocations, then require the unchanged cold-load reserve.
+        // Released caches no longer justify retaining a larger context than this request needs.
+        num_ctx = requiredContext;
         await checkCapacity(false);
       }
       signal?.throwIfAborted();
