@@ -4,6 +4,7 @@ import {
   parseUserEditsJson,
 } from '../../src/utils/analysisDocument';
 import { buildMeetingNotesDocument } from '../../src/utils/meetingNotesDocument';
+import { containsConfidentialAside } from './evidencePrivacy';
 
 export type SavedMeetingEvidencePolicy =
   | 'notes_only'
@@ -436,4 +437,43 @@ export const buildMeetingNotesEvidenceDocument = (
     sections,
     hasUsableNotes,
   };
+};
+
+/** App-owned lifecycle state is evidence, independent of query wording. */
+export const buildCanonicalCommitmentEvidence = (
+  meetingId: string,
+  commitments: ReturnType<typeof import('../db').getCanonicalPersonCommitments>,
+  owner: string,
+): string => {
+  if (!commitments) return '';
+  const items = [
+    ...commitments.open.map((item) => ({ ...item, state: 'open' })),
+    ...commitments.candidates.map((item) => ({
+      ...item,
+      state: 'unconfirmed',
+    })),
+    ...commitments.delivered.map((item) => ({ ...item, state: 'completed' })),
+    ...(commitments.excluded ?? [])
+      .filter((item) => item.ownershipVerified)
+      .map((item) => ({ ...item, state: item.status })),
+  ].filter(
+    (item) =>
+      item.sourceMeetingId === meetingId &&
+      !containsConfidentialAside(item.text),
+  );
+  const records = [
+    ...new Set(
+      items.map((item) =>
+        JSON.stringify({
+          owner,
+          state: item.state,
+          task: item.text,
+          meetingId,
+        }),
+      ),
+    ),
+  ];
+  return records.length
+    ? `[Canonical commitment state — overrides older notes; unconfirmed is not an accepted responsibility]:\n${records.join('\n')}`
+    : '';
 };

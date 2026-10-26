@@ -782,7 +782,6 @@ import {
 import {
   applyAssigneeCommitmentState,
   buildAssigneeActionRecall,
-  buildCommitmentStatusRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
   buildMeetingRetrievalResult,
@@ -5923,35 +5922,6 @@ app.whenReady().then(async () => {
         sendStatus('reading_person');
         const detail = db.getPersonBriefing(personId);
         if (!detail) throw new Error('Person not found');
-        const commitmentStatus = buildCommitmentStatusRecall(
-          query,
-          db.getAskPlutoMeetingHeaders(),
-          detail.meetings
-            .filter((meeting) => meeting.evidence === 'confirmed')
-            .map((meeting) => meeting.id),
-        );
-        if (commitmentStatus) {
-          const message = personChatStore.appendMessage({
-            threadId,
-            personId,
-            role: 'assistant',
-            content: commitmentStatus.answer.replace(
-              /\s*\[Source\s+\d+\]/gi,
-              '',
-            ),
-            citations: commitmentStatus.citations.map((citation) => ({
-              id: `meeting:${citation.meeting_id}`,
-              type: 'meeting' as const,
-              meetingId: citation.meeting_id,
-              title: citation.meeting_title,
-              date: null,
-              evidenceClass: 'commitment' as const,
-              excerpt: citation.evidence_span || '',
-              answerUsage: 'used_during_generation' as const,
-            })),
-          });
-          return { status: 'answered', message } satisfies PersonChatResponse;
-        }
         const recall = resolvePersonChatRecallQuery(query, priorPersonMessages);
         const meetingScope =
           resolveExplicitMeetingScope(query, detail.meetings) ??
@@ -5961,7 +5931,16 @@ app.whenReady().then(async () => {
         const scopedMeetingIds = meetingScope
           ? new Set(meetingScope.meetings.map((meeting) => String(meeting.id)))
           : null;
+        const canonicalSelfId = db.identityStore.getSelfPersonId();
         const context = buildPersonChatContext({
+          selfName: canonicalSelfId
+            ? db.identityStore.getProfile().preferredName
+            : undefined,
+          canonicalSelfCommitments: canonicalSelfId
+            ? db.getCanonicalPersonCommitments(canonicalSelfId)
+            : undefined,
+          canonicalPersonCommitments:
+            db.getCanonicalPersonCommitments(personId),
           detail: scopedMeetingIds
             ? {
                 ...detail,
@@ -7725,51 +7704,6 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               outcome: 'answered' as const,
             };
           }
-          const previousScope = latestAssistantTurn(priorTurns)?.resolvedScope;
-          const commitmentStatus = buildCommitmentStatusRecall(
-            queryText,
-            meetingHeaders,
-            /\b(?:this|current) meeting\b/i.test(queryText)
-              ? currentMeeting.meetingId
-                ? [currentMeeting.meetingId]
-                : []
-              : resolveExplicitMeetingScope(queryText, meetingHeaders)
-                ? undefined
-                : previousScope && previousScope.kind !== 'global'
-                  ? previousScope.meetingIds
-                  : undefined,
-          );
-          if (commitmentStatus) {
-            turnMode = 'lookup';
-            retrievalPolicy = 'fresh';
-            contextCount = commitmentStatus.citations.length;
-            return {
-              status: 'answered' as const,
-              ...commitmentStatus,
-              trustStatus: commitmentStatus.citations.length
-                ? ('grounded' as const)
-                : ('needs_review' as const),
-              unsupportedClaimCount: 0,
-              currentMeeting: currentMeetingStatus,
-              retrievalSummary: {
-                matchedMeetingCount: new Set(
-                  commitmentStatus.citations.map(
-                    (citation) => citation.meeting_id,
-                  ),
-                ).size,
-                includedMeetingCount: new Set(
-                  commitmentStatus.citations.map(
-                    (citation) => citation.meeting_id,
-                  ),
-                ).size,
-                preparedEvidenceCount: commitmentStatus.citations.length,
-                transcriptOnlyCount: 0,
-                omittedMeetingCount: 0,
-                commitmentCount: commitmentStatus.citations.length,
-                retrievalLevel: 'commitment' as const,
-              },
-            };
-          }
           conversationResolutionStartedAt = Date.now();
           const conversationResolution = resolveAskPlutoConversation(
             queryText,
@@ -8906,6 +8840,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               ),
             ),
             assigneeRecall || personWorkAssignmentRecall,
+            confirmedSelfName,
           );
           contextCount = context.length;
           if (removedTranscriptPassageCount > 0) {

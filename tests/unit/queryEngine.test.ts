@@ -6,7 +6,6 @@ import { buildSynthesizedAnswerPresentation } from '../../electron/intelligence/
 import {
   applyAssigneeCommitmentState,
   buildAssigneeActionRecall,
-  buildCommitmentStatusRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
   buildMeetingRetrievalResult,
@@ -253,268 +252,6 @@ describe('Query Engine', () => {
     vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue([]);
     vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
     vi.mocked(dbModule.getMeetingsForEntity).mockReturnValue([]);
-  });
-
-  describe('conversational commitment status', () => {
-    const meeting = {
-      id: 'planning',
-      title: 'Product planning',
-      started_at: '2026-10-01T12:00:00Z',
-      enhanced_notes: '',
-      user_notes: '',
-    } as dbModule.PersistedMeeting;
-    const task = {
-      id: 'task',
-      text: 'Schedule a focus session with Maya to review the onboarding flow',
-      sourceMeetingId: 'planning',
-      sourceMeetingTitle: 'Product planning',
-      status: 'completed' as const,
-      dueDate: null,
-      evidence: 'I will arrange it',
-      updatedAt: '2026-10-01T13:00:00Z',
-    };
-    beforeEach(() => {
-      vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue('self');
-      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
-      vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
-        open: [],
-        delivered: [],
-        candidates: [],
-        excluded: [
-          {
-            text: task.text,
-            status: 'completed',
-            sourceMeetingId: 'planning',
-            ownershipVerified: true,
-          },
-        ],
-      });
-    });
-    it.each([
-      'Do I still need to meet Maya?',
-      'What do I still owe Maya?',
-      'Is my onboarding review done?',
-      'Am I done with the onboarding review?',
-      "What's the status of my onboarding review?",
-      'Have I finished the onboarding review?',
-    ])('answers normal wording from canonical closed history: %s', (query) => {
-      const result = buildCommitmentStatusRecall(query, [meeting]);
-      expect(result?.answer).toContain('Marked completed');
-      expect(result?.citations).toMatchObject([
-        {
-          meeting_id: 'planning',
-          evidence_kind: 'commitment',
-          evidence_valid: true,
-        },
-      ]);
-      expect(factoryModule.getProvider).not.toHaveBeenCalled();
-    });
-    it.each(['open', 'candidates'] as const)(
-      'keeps %s distinct from completed',
-      (kind) => {
-        vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
-          open: [],
-          delivered: [],
-          candidates: [],
-          [kind]: [{ ...task, status: 'active' }],
-        });
-        expect(
-          buildCommitmentStatusRecall('Do I still need to meet Maya?', [
-            meeting,
-          ])?.answer,
-        ).toContain(kind === 'open' ? 'Still open' : 'Needs confirmation');
-      },
-    );
-    it('reports rejection without calling it completed', () => {
-      vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
-        open: [],
-        delivered: [],
-        candidates: [],
-        excluded: [
-          {
-            text: task.text,
-            status: 'rejected',
-            sourceMeetingId: 'planning',
-            ownershipVerified: true,
-          },
-        ],
-      });
-      expect(
-        buildCommitmentStatusRecall('Do I still need to meet Maya?', [meeting])
-          ?.answer,
-      ).toContain('Rejected, not an open commitment');
-    });
-    it('asks which task when a new open task also matches completed history', () => {
-      vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
-        open: [
-          {
-            ...task,
-            id: 'new',
-            text: 'Meet Maya for the launch review',
-            status: 'active',
-          },
-        ],
-        delivered: [task],
-        candidates: [],
-      });
-      const result = buildCommitmentStatusRecall(
-        'Do I still need to meet Maya?',
-        [meeting],
-      );
-      expect(result?.outcome).toBe('partial');
-      expect(result?.answer).toContain('Which one');
-      expect(result?.answer).toContain('Still open');
-      expect(result?.answer).toContain('Marked completed');
-    });
-    it.each(['Is it done?', 'Do I still need to meet her?'])(
-      'clarifies unresolved references: %s',
-      (query) => {
-        expect(buildCommitmentStatusRecall(query, [meeting])?.answer).toContain(
-          'Which task',
-        );
-      },
-    );
-    it('does not answer another persons completion question as the users own status', () => {
-      expect(
-        buildCommitmentStatusRecall(
-          'Is Maya done with the onboarding review?',
-          [meeting],
-        )?.answer,
-      ).toContain('Whose task');
-    });
-    it.each([
-      'Is the focus session done?',
-      'What is the status of the focus session?',
-    ])('leaves unmatched meeting status to source retrieval: %s', (query) => {
-      const notes = {
-        ...meeting,
-        enhanced_notes: 'The focus session finished on October 19.',
-      };
-      vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
-        open: [],
-        delivered: [],
-        candidates: [],
-      });
-      expect(buildCommitmentStatusRecall(query, [notes])).toBeNull();
-      vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(null);
-      expect(buildCommitmentStatusRecall(query, [notes])).toBeNull();
-      expect(factoryModule.getProvider).not.toHaveBeenCalled();
-    });
-    it.each(['completed', 'rejected'] as const)(
-      'keeps matching canonical %s authoritative for a meeting status question',
-      (status) => {
-        vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
-          open: [],
-          delivered: [],
-          candidates: [],
-          excluded: [
-            {
-              text: task.text,
-              status,
-              sourceMeetingId: 'planning',
-              ownershipVerified: true,
-            },
-          ],
-        });
-        const result = buildCommitmentStatusRecall(
-          'Is the focus session done?',
-          [meeting],
-        );
-        expect(result?.answer).toContain(
-          status === 'completed'
-            ? 'Marked completed'
-            : 'Rejected, not an open commitment',
-        );
-        expect(result?.citations[0]?.evidence_kind).toBe('commitment');
-      },
-    );
-    it.each([
-      'Mark the focus session done',
-      'Cancel the focus session task',
-      'Dismiss the focus session task',
-    ])(
-      'does not interpret a mutating request as a status lookup: %s',
-      (query) =>
-        expect(buildCommitmentStatusRecall(query, [meeting])).toBeNull(),
-    );
-    it('does not infer completion for an unmatched task', () => {
-      expect(
-        buildCommitmentStatusRecall('Did I send the deck?', [meeting])?.answer,
-      ).toContain("doesn't mean it's completed");
-    });
-    it('requires confirmed self identity', () => {
-      vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(null);
-      expect(
-        buildCommitmentStatusRecall('Do I still need to meet Maya?', [meeting])
-          ?.answer,
-      ).toContain('Confirm which person');
-    });
-    it('keeps source and caller scope bounds', () => {
-      expect(
-        buildCommitmentStatusRecall(
-          'Do I still need to meet Maya?',
-          [meeting],
-          ['other'],
-        )?.citations,
-      ).toEqual([]);
-      const other = { ...meeting, id: 'other', title: 'Launch review' };
-      expect(
-        buildCommitmentStatusRecall(
-          'Is my onboarding review from Launch review done?',
-          [meeting, other],
-        )?.citations,
-      ).toEqual([]);
-      expect(
-        buildCommitmentStatusRecall(
-          'Is my onboarding review from 2026-09-01 done?',
-          [meeting],
-        )?.citations,
-      ).toEqual([]);
-    });
-    it('does not treat closed suppression history as proof of personal ownership', () => {
-      vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
-        open: [],
-        delivered: [],
-        candidates: [],
-        excluded: [
-          {
-            text: task.text,
-            status: 'completed',
-            sourceMeetingId: 'planning',
-            ownershipVerified: false,
-          },
-        ],
-      });
-      expect(
-        buildCommitmentStatusRecall('Do I still need to meet Maya?', [meeting])
-          ?.citations,
-      ).toEqual([]);
-    });
-    it('does not expose deleted or confidential sources', () => {
-      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
-      expect(
-        buildCommitmentStatusRecall('Do I still need to meet Maya?', [meeting])
-          ?.citations,
-      ).toEqual([]);
-      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
-        ...meeting,
-        user_notes: 'Off the record: onboarding review',
-      });
-      expect(
-        buildCommitmentStatusRecall('Do I still need to meet Maya?', [meeting])
-          ?.citations,
-      ).toEqual([]);
-    });
-    it.each([
-      'What did Maya say?',
-      'Did I discuss pricing with Maya?',
-      'Have I mentioned the retention risk before?',
-      'Draft a message asking if the onboarding review is done',
-      'Is the onboarding review a good idea?',
-      'What are my tasks?',
-    ])('leaves other requests on their existing route: %s', (query) => {
-      expect(buildCommitmentStatusRecall(query, [meeting])).toBeNull();
-    });
   });
 
   it('uses only synthesized live notes for current-meeting retrieval', () => {
@@ -4558,6 +4295,65 @@ describe('Query Engine', () => {
       );
       expect(recall.answer).not.toContain('**Focus now**');
     });
+  });
+
+  it('applies canonical self state to ordinary retrieval without parsing question phrasing', () => {
+    const meeting = {
+      id: 'source',
+      title: 'Review',
+      enhanced_notes: 'The inventory will be sent.',
+    } as dbModule.PersistedMeeting;
+    vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue('self');
+    vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
+      open: [],
+      candidates: [],
+      delivered: [],
+      excluded: [
+        {
+          text: 'Send the inventory',
+          status: 'completed',
+          sourceMeetingId: 'source',
+          ownershipVerified: true,
+        },
+      ],
+    });
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
+    const source = buildMeetingRetrievalResult(meeting);
+    const result = applyAssigneeCommitmentState([source], null)[0];
+    expect(result.evidence_text).toContain('"state":"completed"');
+    expect(result.evidence_text).toContain('"owner":"You"');
+    expect(result.evidence_text).toContain(source.evidence_text);
+    expect(
+      buildExtractiveTemporalSummary('What are the action items?', [result]),
+    ).toBeNull();
+    expect(source.evidence_text).not.toContain('Canonical commitment state');
+    expect(
+      applyAssigneeCommitmentState(
+        [{ ...source, meeting_id: 'other' }],
+        null,
+      )[0].evidence_text,
+    ).not.toContain('Canonical commitment state');
+    expect(
+      applyAssigneeCommitmentState(
+        [{ ...source, source_type: 'artifact' }],
+        null,
+      )[0].evidence_text,
+    ).not.toContain('Canonical commitment state');
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
+    expect(
+      applyAssigneeCommitmentState([source], null)[0].evidence_text,
+    ).not.toContain('Canonical commitment state');
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
+      ...meeting,
+      user_notes: 'Off the record',
+    });
+    expect(
+      applyAssigneeCommitmentState([source], null)[0].evidence_text,
+    ).not.toContain('Canonical commitment state');
+    vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(null);
+    expect(
+      applyAssigneeCommitmentState([source], null)[0].evidence_text,
+    ).not.toContain('Canonical commitment state');
   });
 
   describe('Ask Pluto assignment and long-note recovery', () => {

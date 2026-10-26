@@ -7,7 +7,6 @@ import {
 } from '../db';
 
 import type {
-  CitationChain,
   MidFrontmatter,
   ParsedQuery,
   RetrievalResult,
@@ -24,6 +23,7 @@ import { findExplicitProjectScopes } from './askPlutoProjectScopes';
 import { containsConfidentialAside } from './evidencePrivacy';
 import {
   type MeetingNotesEvidenceDocument,
+  buildCanonicalCommitmentEvidence,
   buildMeetingNotesEvidenceDocument,
 } from './meetingNotesEvidence';
 export { containsConfidentialAside } from './evidencePrivacy';
@@ -1024,190 +1024,6 @@ const readStructuredActionItems = (
   }
 };
 
-export const buildCommitmentStatusRecall = (
-  query: string,
-  meetings: dbModule.PersistedMeeting[],
-  meetingIds?: readonly string[],
-): {
-  answer: string;
-  citations: CitationChain[];
-  outcome: 'answered' | 'no_evidence' | 'partial';
-} | null => {
-  const value = query.trim().replace(/’/g, "'");
-  if (
-    /^(?:have|did) i\b/i.test(value) &&
-    !/^(?:have|did) i (?:already )?(?:done|finish(?:ed)?|complete(?:d)?|send|sent)\b/i.test(
-      value,
-    )
-  )
-    return null;
-  const question = value.match(
-    /^(?:do i (?:still )?(?:need|have) to|what do i (?:still )?owe|what(?:'s| is) the status of|am i (?:done|finished)(?: with)?|have i(?: already)?|did i(?: already)?|is|are)\s+(.+?)[?.!]*$/i,
-  );
-  if (
-    !question ||
-    (!/^(?:do i|what do i|what(?:'s| is) the status of|am i|have i|did i)\b/i.test(
-      value,
-    ) &&
-      !/\b(?:done|completed?|finished|outstanding|pending|open|closed|rejected|cancelled)\b/i.test(
-        value,
-      )) ||
-    /\b(?:draft|write|rewrite|explain|why|how|what if)\b/i.test(value)
-  )
-    return null;
-
-  const reply = (answer: string) => ({
-    answer,
-    citations: [],
-    outcome: 'no_evidence' as const,
-  });
-  if (
-    /^(?:is|are)\s+(?!it\b|this\b|that\b)[\p{L}'-]+\s+(?:done|finished|complete|completed)\b/iu.test(
-      value,
-    )
-  ) {
-    return reply('Whose task do you mean? Try the task name or “my task”.');
-  }
-  const personalTaskQuestion = /\b(?:i|my|me|mine|our)\b/i.test(value);
-  const selfId = dbModule.identityStore.getSelfPersonId();
-  if (!selfId)
-    return personalTaskQuestion
-      ? reply(
-          'Confirm which person is you in Pluto so I can check your saved tasks.',
-        )
-      : null;
-  const canonical = dbModule.getCanonicalPersonCommitments(selfId);
-  if (!canonical)
-    return personalTaskQuestion
-      ? reply("I couldn't read your saved task status. Please retry.")
-      : null;
-
-  const scope = resolveExplicitMeetingScope(value, meetings);
-  const temporal = resolveTemporalQuery(value);
-  const target = removeTemporalPhrase(question[1], temporal).replace(
-    /\b(?:from|in|during)\b.*$/i,
-    '',
-  );
-  const tokens = (text: string) =>
-    (
-      text
-        .toLowerCase()
-        .replace(/\b(?:meeting|meetings|meet|session|sessions)\b/g, 'meet')
-        .replace(/\b(?:sent|sending)\b/g, 'send')
-        .replace(/\b(?:scheduled|scheduling)\b/g, 'schedule')
-        .match(/[\p{L}\p{N}]+/gu) || []
-    )
-      .filter(
-        (token) =>
-          !/^(?:a|an|the|my|our|i|we|me|it|that|this|her|him|them|to|with|for|of|still|already|yet|need|have|been|done|complete|completed|finish|finished|outstanding|pending|open|closed|rejected|cancelled|or|is|are|did|do|not)$/.test(
-            token,
-          ),
-      )
-      .map((token) =>
-        token.length > 5 && token.endsWith('ing')
-          ? token.slice(0, -3)
-          : token.length > 4 && token.endsWith('ed')
-            ? token.slice(0, -2)
-            : token.length > 3 && token.endsWith('s')
-              ? token.slice(0, -1)
-              : token,
-      );
-  const wanted = tokens(target);
-  if (
-    !wanted.length ||
-    wanted.every((token) => ['meet', 'send', 'schedule'].includes(token))
-  ) {
-    return reply(
-      'Which task do you mean? Give me the person or a few words from the task.',
-    );
-  }
-  const items = [
-    ...canonical.open.map((item) => ({ ...item, savedStatus: 'open' })),
-    ...canonical.candidates.map((item) => ({
-      ...item,
-      savedStatus: 'unconfirmed',
-    })),
-    ...canonical.delivered.map((item) => ({
-      ...item,
-      savedStatus: 'completed',
-    })),
-    ...(canonical.excluded || [])
-      .filter((item) => item.ownershipVerified)
-      .map((item) => ({
-        ...item,
-        savedStatus: item.status,
-      })),
-  ];
-  const seen = new Set<string>();
-  const matches = items.flatMap((item) => {
-    const key = `${item.sourceMeetingId}:${item.text}:${item.savedStatus}`;
-    if (seen.has(key)) return [];
-    seen.add(key);
-    const words = new Set(tokens(item.text));
-    if (!wanted.every((token) => words.has(token))) return [];
-    if (meetingIds && !meetingIds.includes(item.sourceMeetingId)) return [];
-    if (
-      scope &&
-      !scope.meetings.some(
-        (meeting) => String(meeting.id) === item.sourceMeetingId,
-      )
-    )
-      return [];
-    const meeting = dbModule.getAskPlutoMeeting(item.sourceMeetingId);
-    // Task state survives failed note regeneration; deleted/private sources do not.
-    if (
-      !meeting ||
-      containsConfidentialAside(
-        `${item.text}\n${meeting.title}\n${buildMeetingNotesEvidenceDocument(meeting).notesText}`,
-      )
-    )
-      return [];
-    if (temporal && /\bfrom\b/i.test(value)) {
-      const occurred = meeting.started_at || meeting.created_at || '';
-      if (
-        occurred < temporal.range.fromInclusive ||
-        occurred >= temporal.range.toExclusive
-      )
-        return [];
-    }
-    return [{ ...item, meeting }];
-  });
-  if (!matches.length)
-    return personalTaskQuestion
-      ? reply(
-          "I couldn't match that to a saved task of yours. That doesn't mean it's completed. Try a few words from the task.",
-        )
-      : null;
-  if (matches.length > 4)
-    return reply(
-      'Several saved tasks match. Which one do you mean? Add a few more words from the task.',
-    );
-  const lines = matches.map((item, index) => {
-    const state =
-      item.savedStatus === 'completed'
-        ? 'Marked completed'
-        : item.savedStatus === 'rejected'
-          ? 'Rejected, not an open commitment'
-          : item.savedStatus === 'unconfirmed'
-            ? 'Needs confirmation; not a confirmed commitment'
-            : 'Still open';
-    return `${state}: ${item.text}. [Source ${index + 1}]`;
-  });
-  return {
-    answer: `${matches.length > 1 ? 'I found more than one matching task. Which one do you mean?\n\n' : ''}${lines.join('\n')}`,
-    outcome: matches.length > 1 ? 'partial' : 'answered',
-    citations: matches.map((item, index) => ({
-      claim: lines[index].replace(/ \[Source \d+\]$/, ''),
-      meeting_id: item.sourceMeetingId,
-      meeting_title: item.meeting.title || 'Untitled meeting',
-      evidence_span: `Saved commitment: ${item.text}\nSaved status: ${item.savedStatus}`,
-      evidence_valid: true,
-      trust_status: 'grounded',
-      evidence_kind: 'commitment',
-    })),
-  };
-};
-
 export const buildAssigneeActionRecall = (
   query: string,
   meetings: dbModule.PersistedMeeting[],
@@ -1497,18 +1313,46 @@ export const extractNamedPersonQuestionSubject = (
 export const applyAssigneeCommitmentState = (
   context: RetrievalResult[],
   recall: ReturnType<typeof buildAssigneeActionRecall>,
-): RetrievalResult[] =>
-  context.map((source) => {
+  selfName = 'You',
+): RetrievalResult[] => {
+  const selfId = dbModule.identityStore.getSelfPersonId();
+  const canonical = selfId
+    ? dbModule.getCanonicalPersonCommitments(selfId)
+    : undefined;
+  return context.map((source) => {
+    if (
+      source.source_type === 'artifact' ||
+      source.evidence_kind === 'transcript'
+    )
+      return source;
+    const meeting = dbModule.getAskPlutoMeeting(source.meeting_id);
+    const selfState =
+      meeting &&
+      !containsConfidentialAside(
+        `${meeting.title}\n${meeting.user_notes}\n${buildMeetingNotesEvidenceDocument(meeting).notesText}`,
+      )
+        ? buildCanonicalCommitmentEvidence(
+            source.meeting_id,
+            canonical,
+            selfName,
+          )
+        : '';
     const excluded =
       recall?.excludedCommitments?.filter(
         (item) => item.sourceMeetingId === source.meeting_id,
       ) || [];
-    if (!excluded.length) return source;
+    const assigneeState = excluded.length
+      ? `[Canonical commitment state — overrides older notes]:\n${excluded.map((item) => `${recall?.assignee} — ${item.status}: ${item.text}`).join('\n')}`
+      : '';
+    if (!selfState && !assigneeState) return source;
     return {
       ...source,
-      evidence_text: `[Canonical commitment state — overrides older notes]:\n${excluded.map((item) => `${recall?.assignee} — ${item.status}: ${item.text}`).join('\n')}\n[Meeting]: ${source.meeting_title || source.meeting_id}\n${source.evidence_text}`,
+      evidence_text: [selfState, assigneeState, source.evidence_text]
+        .filter(Boolean)
+        .join('\n'),
     };
   });
+};
 
 export const buildNamedPersonEvidenceQuery = (
   query: string,
@@ -3241,6 +3085,13 @@ export const buildExtractiveTemporalSummary = (
   query: string,
   context: RetrievalResult[],
 ): string | null => {
+  // Historical extracts cannot resolve authoritative lifecycle overrides.
+  if (
+    context.some((source) =>
+      source.evidence_text.includes('[Canonical commitment state'),
+    )
+  )
+    return null;
   const field = EXTRACTIVE_DECISION_QUERY.test(query)
     ? 'Decisions'
     : EXTRACTIVE_ACTION_QUERY.test(query)

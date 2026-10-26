@@ -368,32 +368,6 @@ describe('Ask Pluto query IPC boundary', () => {
     },
   );
 
-  it('continues to evidence retrieval when canonical status lookup declines a question', () => {
-    const start = queryHandler.indexOf('if (commitmentStatus) {');
-    const end = queryHandler.indexOf(
-      'conversationResolutionStartedAt =',
-      start,
-    );
-    expect(start).toBeGreaterThan(0);
-    const route = new Function(
-      'commitmentStatus',
-      'currentMeetingStatus',
-      `let turnMode, retrievalPolicy, contextCount; ${queryHandler.slice(start, end).replaceAll(' as const', '')} return { continueToEvidenceRetrieval: true };`,
-    );
-    expect(route(null, {})).toEqual({ continueToEvidenceRetrieval: true });
-    const canonical = {
-      answer: 'Marked completed: Focus session.',
-      citations: [{ meeting_id: 'planning' }],
-      outcome: 'answered',
-    };
-    expect(route(canonical, {})).toMatchObject({
-      status: 'answered',
-      answer: canonical.answer,
-      trustStatus: 'grounded',
-      retrievalSummary: { retrievalLevel: 'commitment' },
-    });
-  });
-
   it('returns end-to-end performance diagnostics for real IPC benchmarks', () => {
     expect(queryHandler).toContain('buildPerformanceDiagnostics');
     expect(queryHandler).toContain('conversationResolutionMs:');

@@ -517,3 +517,73 @@ it('routes ordinary contact questions to factual recall before coaching cues', (
     'advice',
   );
 });
+
+it('supplies canonical closed work for both people independently of query phrasing', () => {
+  const canonical = {
+    open: [],
+    delivered: [],
+    candidates: [],
+    excluded: [
+      {
+        text: 'Send the equipment inventory',
+        status: 'completed' as const,
+        sourceMeetingId: 'confirmed',
+        ownershipVerified: true,
+      },
+    ],
+  };
+  const context = buildPersonChatContext({
+    detail,
+    query: 'What happened with the inventory?',
+    canonicalSelfCommitments: canonical,
+    canonicalPersonCommitments: {
+      ...canonical,
+      excluded: [
+        {
+          ...canonical.excluded[0],
+          text: 'Replace the equipment inventory',
+          status: 'rejected',
+        },
+      ],
+    },
+    getMeeting: (id) => ({
+      id,
+      enhanced_notes: 'Maya discussed the equipment inventory.',
+    }),
+  });
+  expect(context.evidence).toContain('"owner":"You","state":"completed"');
+  expect(context.evidence).toContain('"owner":"Maya","state":"rejected"');
+  expect(context.retrievalResults[0].evidence_text).toContain(
+    '"state":"completed"',
+  );
+  expect(
+    buildPersonChatPrompt({
+      query: 'What happened with the inventory?',
+      context,
+      messages: [],
+    }),
+  ).toContain('Canonical commitment state overrides historical note wording');
+});
+it('retains canonical task evidence when notes are unavailable without inventing conversation facts', () => {
+  const context = buildPersonChatContext({
+    detail,
+    query: 'What happened with the inventory?',
+    canonicalSelfCommitments: {
+      open: [],
+      delivered: [],
+      candidates: [],
+      excluded: [
+        {
+          text: 'Send the inventory',
+          status: 'completed',
+          sourceMeetingId: 'confirmed',
+          ownershipVerified: true,
+        },
+      ],
+    },
+    getMeeting: (id) => ({ id, enhanced_notes: '' }),
+  });
+  expect(context.retrievalResults[0].evidence_kind).toBe('commitment');
+  expect(context.evidence).toContain('Saved meeting notes are unavailable');
+  expect(context.evidence).toContain('"state":"completed"');
+});

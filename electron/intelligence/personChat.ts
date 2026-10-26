@@ -13,7 +13,10 @@ import {
 } from './conversationController';
 import { containsConfidentialAside } from './evidencePrivacy';
 import type { RetrievalResult } from './intelligenceTypes';
-import { buildMeetingNotesEvidenceDocument } from './meetingNotesEvidence';
+import {
+  buildCanonicalCommitmentEvidence,
+  buildMeetingNotesEvidenceDocument,
+} from './meetingNotesEvidence';
 import { excerptQueryEvidence } from './queryEvidenceExcerpt';
 
 const CONTEXT_CHAR_LIMIT = 9_000;
@@ -129,6 +132,13 @@ export interface PersonChatContext {
 export const buildPersonChatContext = (input: {
   detail: PersonBriefingDetail;
   query: string;
+  selfName?: string;
+  canonicalSelfCommitments?: ReturnType<
+    typeof import('../db').getCanonicalPersonCommitments
+  >;
+  canonicalPersonCommitments?: ReturnType<
+    typeof import('../db').getCanonicalPersonCommitments
+  >;
   getMeeting: (meetingId: string) =>
     | (PersistedMeeting & {
         speakerDisplayNames?: Readonly<Record<string, string>>;
@@ -186,14 +196,36 @@ export const buildPersonChatContext = (input: {
     if (containsConfidentialAside(`${fullNotes} ${meeting?.user_notes ?? ''}`))
       return [];
     if (contactRecall && fullNotes && !notes) return [];
+    const canonicalState =
+      meeting && briefing.evidence === 'confirmed'
+        ? [
+            buildCanonicalCommitmentEvidence(
+              briefing.id,
+              input.canonicalPersonCommitments ?? detail.commitments,
+              detail.isSelf ? input.selfName || 'You' : detail.person.name,
+            ),
+            ...(!detail.isSelf
+              ? [
+                  buildCanonicalCommitmentEvidence(
+                    briefing.id,
+                    input.canonicalSelfCommitments,
+                    input.selfName || 'You',
+                  ),
+                ]
+              : []),
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : '';
     return [
       {
         briefing,
         notes,
+        canonicalState,
         sourceRevision: document?.sourceRevision,
         score: scoreText(
           queryWords,
-          `${briefing.title} ${briefing.context ?? ''} ${notes}`,
+          `${briefing.title} ${briefing.context ?? ''} ${notes} ${canonicalState}`,
         ),
       },
     ];
@@ -212,7 +244,13 @@ export const buildPersonChatContext = (input: {
   const selectedMeetingIds = new Set(
     selected.map(({ briefing }) => briefing.id),
   );
-  for (const { briefing, notes, sourceRevision, score } of selected) {
+  for (const {
+    briefing,
+    notes,
+    canonicalState,
+    sourceRevision,
+    score,
+  } of selected) {
     const meetingContext = excerptQueryEvidence(
       notes,
       [...queryWords].join(' '),
@@ -225,17 +263,21 @@ export const buildPersonChatContext = (input: {
         : briefing.evidence === 'scheduled'
           ? 'Scheduled/invited; attendance is not confirmed'
           : 'Mention only; participation is not confirmed';
-    const body = `${label}: ${briefing.title} (${date || 'date unknown'}) [meeting:${briefing.id}]\n${meetingContext ? `Meeting notes (historical, not proof of current status): ${meetingContext}` : 'Saved meeting notes are unavailable. Do not infer what was said from other conversations or an older profile.'}`;
+    const body = `${canonicalState ? `${canonicalState}\n` : ''}${label}: ${briefing.title} (${date || 'date unknown'}) [meeting:${briefing.id}]\n${meetingContext ? `Meeting notes (historical, not proof of current status): ${meetingContext}` : 'Saved meeting notes are unavailable. Do not infer what was said from other conversations or an older profile.'}`;
     if (!append(body)) continue;
     // Missing notes establish an evidence gap, not support for a factual answer.
-    if (!meetingContext || briefing.evidence === 'scheduled') continue;
+    if (
+      (!meetingContext && !canonicalState) ||
+      briefing.evidence === 'scheduled'
+    )
+      continue;
     retrievalResults.push({
       meeting_id: briefing.id,
       meeting_title: briefing.title,
       source_type: 'meeting',
       source_id: briefing.id,
       mid: null,
-      evidence_kind: 'note',
+      evidence_kind: meetingContext ? 'note' : 'commitment',
       evidence_text: body,
       source_revision: sourceRevision,
       score,
@@ -393,6 +435,7 @@ Answer naturally and directly. Do not recap the user's premise or repeat known r
 
 TRUST RULES
 - Claims about ${input.context.personName} require PERSON EVIDENCE below.
+- Canonical commitment state overrides historical note wording. Keep completed/rejected work closed, distinguish unconfirmed candidates from accepted responsibilities, and never infer completion from a missing task. User-owned tasks are not necessarily owed to this person.
 - If notes describe a meeting topic without speaker attribution, explain what the notes record and say the speaker is not established; do not deny the topic was discussed.
 - Only explicitly attributed statements may support claims about what ${input.context.personName} said. Meeting-level context can support claims about the meeting, not the person.
 - A mention does not prove participation. A calendar event does not prove attendance.

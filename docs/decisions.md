@@ -1,3 +1,10 @@
+## 2026-10-26 - Supply canonical task state through ordinary answer evidence
+
+- **Refines:** “2026-10-25 - Separate local question routing from factual synthesis.” Removes the candidate's conversational commitment-status shortcut.
+- **Decision:** Delete English question-pattern matching, verb stemming and handcrafted task-status answers. Pass scoped canonical ownership and lifecycle records into the existing workspace and person-chat evidence paths regardless of question phrasing. The configured factual model interprets the complete question; classification models do not infer task identity or state. Completed and rejected records override historical notes, unconfirmed candidates remain distinct, and absence never proves completion.
+- **Boundaries:** Keep source meeting scope, confirmed self identity, verified closed ownership, confidential-source exclusion and original notes. Canonical task records can survive missing regenerated notes, while the missing conversation evidence remains explicit. No production meeting strings or model/memory-policy changes are included.
+- **Validation:** Focused regressions cover lifecycle distinctions, both owners, source scope, missing/deleted/private sources, unverified ownership and immutable source text. Live model fidelity and safe local allocation remain separate release gates.
+
 ## 2026-10-25 - Size reclaimed local allocations for the current request
 
 - **Supersedes:** The retained-context behavior of “2026-10-20 - Reuse bounded resident Ollama contexts between stages” and “2026-10-20 - Keep Gemma allocations bounded across downstream tasks,” only after memory pressure requires a confirmed unload.
