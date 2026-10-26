@@ -319,7 +319,14 @@ suite('private real meeting E2E', () => {
         });
         if (generated)
           await stage('people-and-projects', async () => {
-            await ipc('REFRESH_KNOWLEDGE_FOR_MEETING_NOW', meetingId);
+            const people = await ipc('GET_PEOPLE_BRIEFING_SUMMARIES');
+            for (const person of people)
+              await ipc('GET_PERSON_BRIEFING', person.id);
+            const refresh = await ipc(
+              'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
+              meetingId,
+            );
+            expect(refresh.completed).toBe(refresh.requested);
             const deadline = Date.now() + timeoutMs;
             let result: any;
             do {
@@ -334,18 +341,11 @@ suite('private real meeting E2E', () => {
             );
             if (result.remaining || result.routingRemaining)
               throw new Error('project_synthesis_timeout');
-            for (const person of await ipc('GET_PEOPLE_BRIEFING_SUMMARIES')) {
-              let detail = await ipc('GET_PERSON_BRIEFING', person.id);
+            for (const person of people) {
+              const detail = await ipc('GET_PERSON_BRIEFING', person.id);
               if (detail?.meetings?.some((m: any) => m.id === meetingId)) {
-                if (!detail.isSelf) {
-                  expect(detail.knowledgeDoc?.id).toBeTruthy();
-                  const refreshed = await ipc(
-                    'REFRESH_KNOWLEDGE_DOC',
-                    detail.knowledgeDoc.id,
-                  );
-                  expect(refreshed?.status).toBe('up_to_date');
-                  detail = await ipc('GET_PERSON_BRIEFING', person.id);
-                }
+                if (!detail.isSelf)
+                  expect(detail.knowledgeDoc?.status).toBe('up_to_date');
                 observations.people.push(detail);
               }
             }
