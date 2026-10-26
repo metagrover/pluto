@@ -351,6 +351,16 @@ const withOneTransientLeafRetry = async <T>(
  * Other errors retain the original diagnostic path, not terminal instructions. */
 export const formatNotesRepairFeedback = (error: unknown): string | null => {
   const message = error instanceof Error ? error.message : 'invalid_json';
+  const sourceLabel =
+    /^notes_editor_source_label:(title|overview|s\d{1,4}:(?:title|item:\d{1,4}))$/.exec(
+      message,
+    );
+  if (sourceLabel) {
+    const path = sourceLabel[1]!
+      .replace(/^s(\d+):title$/, 'sections[$1].title')
+      .replace(/^s(\d+):item:(\d+)$/, 'sections[$1].items[$2]');
+    return `Correct ${path}: remove request-local source labels from the prose; cite them only in sources arrays. Preserve supported factual wording and valid source references. Return the complete corrected JSON.`;
+  }
   const groundingPattern =
     /^notes_editor_(quantity_scope|unsupported_condition|unsupported_pronoun):(title|overview|s\d{1,4}:(?:title|item:\d{1,4}))$/;
   const commitmentPattern =
