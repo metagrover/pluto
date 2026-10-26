@@ -7,6 +7,12 @@ import {
 import { calculateOllamaContextBudget } from '../../electron/llm/unifiedProvider';
 
 describe('getAskPlutoPrompt', () => {
+  it('preserves canonical task identity in ordinary factual answers', () => {
+    expect(getAskPlutoPrompt('Is this finished?', [], 'factual')).toContain(
+      'quote the task text exactly and preserve its owner, state, and conditions',
+    );
+  });
+
   it('distinguishes a recorded speaker owner from an unknown real name', () => {
     const prompt = getAskPlutoPrompt('Who agreed to send it?', [], 'factual');
     expect(prompt).toContain(

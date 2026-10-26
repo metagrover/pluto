@@ -14,6 +14,7 @@ import {
 import { containsConfidentialAside } from './evidencePrivacy';
 import type { RetrievalResult } from './intelligenceTypes';
 import {
+  CANONICAL_COMMITMENT_ANSWER_GUIDANCE,
   buildCanonicalCommitmentEvidence,
   buildMeetingNotesEvidenceDocument,
   formatCanonicalCommitmentEvidence,
@@ -435,6 +436,7 @@ export const buildPersonChatPrompt = (input: {
 Answer naturally and directly. Do not recap the user's premise or repeat known relationship context before doing the requested task. Ask a follow-up question only when the task cannot be completed responsibly without the answer; never add one by habit.
 
 TRUST RULES
+- ${CANONICAL_COMMITMENT_ANSWER_GUIDANCE}
 - Claims about ${input.context.personName} require PERSON EVIDENCE below.
 - Canonical commitment state overrides historical note wording. Keep completed/rejected work closed, distinguish unconfirmed candidates from accepted responsibilities, and never infer completion from a missing task. User-owned tasks are not necessarily owed to this person.
 - If notes describe a meeting topic without speaker attribution, explain what the notes record and say the speaker is not established; do not deny the topic was discussed.

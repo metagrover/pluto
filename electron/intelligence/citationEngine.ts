@@ -1866,7 +1866,7 @@ export const buildSynthesizedAnswerPresentation = (
               containsEvidencePhrase(sentence, record.task) &&
               claimIsSupportedByEvidence(
                 sentence,
-                `${record.owner} completed ${record.task}`,
+                `${record.owner} has already completed the task "${record.task}"`,
                 selfName,
               ),
           );

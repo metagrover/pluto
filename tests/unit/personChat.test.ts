@@ -572,6 +572,15 @@ it('supplies canonical closed work for both people independently of query phrasi
       messages: [],
     }),
   ).toContain('Canonical commitment state overrides historical note wording');
+  expect(
+    buildPersonChatPrompt({
+      query: 'Is this finished?',
+      context,
+      messages: [],
+    }),
+  ).toContain(
+    'quote the task text exactly and preserve its owner, state, and conditions',
+  );
 });
 it('retains canonical task evidence when notes are unavailable without inventing conversation facts', () => {
   const context = buildPersonChatContext({

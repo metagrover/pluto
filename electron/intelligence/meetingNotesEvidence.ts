@@ -439,6 +439,9 @@ export const buildMeetingNotesEvidenceDocument = (
   };
 };
 
+export const CANONICAL_COMMITMENT_ANSWER_GUIDANCE =
+  'When reporting canonical commitment status, quote the task text exactly and preserve its owner, state, and conditions. Do not conjugate or paraphrase the quoted task.';
+
 export type CanonicalCommitmentEvidence = {
   owner: string;
   state: 'open' | 'unconfirmed' | 'completed' | 'rejected';
