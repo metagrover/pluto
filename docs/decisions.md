@@ -1,7 +1,7 @@
 ## 2026-10-26 - Preserve trusted notes policy during bounded repair (notes-v99)
 
 - **Supersedes:** Only the prompt/cache identity in “Preserve source coverage and equivalent negative grammar in notes-v98.”
-- **Decision:** Keep the existing content, prose and source rules as active instructions during the existing bounded repair. Remove their duplicate from prior-prompt data; the original source and rejected response remain data. No additional model call, reviewer, output allowance or memory-policy change is introduced.
+- **Decision:** Keep the existing content, prose and source rules as active instructions during the existing bounded repair. Remove their duplicate from prior-prompt data; the original source and rejected response remain data. The existing required-overview check also runs inside that repair boundary, so a missing overview can use the already available repair; an unsupported overview still refuses publication without a fallback summary. No additional model call, reviewer, output allowance or memory-policy change is introduced.
 - **Validation:** The repair regression checks that all three shared policies occur before prior-prompt data and are not duplicated inside it. Model fidelity and packaged acceptance remain separate gates.
 
 ## 2026-10-26 - Separate task lifecycle evidence from confirmed ownership

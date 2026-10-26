@@ -356,6 +356,8 @@ const withOneTransientLeafRetry = async <T>(
  * Other errors retain the original diagnostic path, not terminal instructions. */
 export const formatNotesRepairFeedback = (error: unknown): string | null => {
   const message = error instanceof Error ? error.message : 'invalid_json';
+  if (message === 'notes_writer_invalid:missing_overview')
+    return 'Add a concise source-grounded overview with supporting sources. If the source does not support one, keep null and let publication refuse; never invent a summary.';
   const sourceLabel =
     /^notes_editor_source_label:(title|overview|s\d{1,4}:(?:title|item:\d{1,4}))$/.exec(
       message,
@@ -950,6 +952,8 @@ const deterministicallyAcceptedDraft = (
   }
   if (isLocalWriterOnly(input)) {
     assertAllowedSources(draft, evidenceSpans);
+    if (!draft.overview?.text.trim())
+      throw new MeetingNotesError('notes_writer_invalid:missing_overview');
     const invalidProse = unpublishableProseItem(input, draft);
     if (invalidProse) throw new MeetingNotesError('notes_writer_invalid');
     assertSourceGuardrails(input, draft, evidenceSpans, false);

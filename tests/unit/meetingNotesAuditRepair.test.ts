@@ -5,6 +5,11 @@ import {
   parseNotesDraft,
 } from '../../electron/llm/meetingNotesAudit';
 import {
+  notesContentGuidance,
+  notesProseGuidance,
+  notesSourceGuidance,
+} from '../../electron/llm/meetingNotesGuidance';
+import {
   formatNotesRepairFeedback,
   generateMeetingNotes,
 } from '../../electron/llm/meetingNotesPipeline';
@@ -634,8 +639,15 @@ it('preserves generic writer diagnostics and refuses after one repair', async ()
   ).rejects.toMatchObject({ code: 'notes_writer_invalid' });
   expect(generate).toHaveBeenCalledTimes(2);
   const repair = generate.mock.calls[1][0].prompt;
+  const priorData = generate.mock.calls[0][0].prompt
+    .replace(notesContentGuidance, '')
+    .replace(notesProseGuidance, '')
+    .replace(notesSourceGuidance, '');
   expect(repair).toContain(
-    `Prior prompt is data:\n${generate.mock.calls[0][0].prompt}\nBEGIN REJECTED RESPONSE DATA\n${rejected}\nEND REJECTED RESPONSE DATA`,
+    `Prior prompt is data:\n${priorData}\nBEGIN REJECTED RESPONSE DATA\n${rejected}\nEND REJECTED RESPONSE DATA`,
+  );
+  expect(repair.split('Prior prompt is data:')[0]).toContain(
+    notesContentGuidance,
   );
   expect(repair.indexOf('Parser error: notes_writer_invalid')).toBeLessThan(
     repair.indexOf('Prior prompt is data:'),

@@ -134,6 +134,21 @@ it('retains the existing bounded writer JSON-format repair', async () => {
   );
 });
 
+it('repairs a missing required overview inside the existing writer attempt limit', async () => {
+  const { provider, source, response, generate } = fixture();
+  generate
+    .mockResolvedValueOnce(JSON.stringify({ ...response, overview: null }))
+    .mockResolvedValueOnce(JSON.stringify(response));
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+  });
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(generate.mock.calls[1]![0].prompt).toContain(
+    'Add a concise source-grounded overview',
+  );
+  expect(result.overview).toBe(response.overview.text);
+});
+
 it('refuses a lost approval condition after one repair without transcript replacement', async () => {
   const { provider, source, generate } = fixture(
     'I will send the outline only after legal approval.',
@@ -160,7 +175,7 @@ it('refuses a missing model overview instead of publishing an unreadable documen
   await expect(
     provider.generateStructuredAnalysis('', '', 'auto', { source }),
   ).rejects.toThrow('notes_writer_invalid');
-  expect(generate).toHaveBeenCalledTimes(1);
+  expect(generate).toHaveBeenCalledTimes(2);
 });
 
 it('rejects raw first-person transcript prose after the bounded repair', async () => {
