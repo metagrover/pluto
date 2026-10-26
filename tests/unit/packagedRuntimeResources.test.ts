@@ -312,11 +312,15 @@ __attribute__((visibility("default"))) napi_value napi_register_module_v1(napi_e
         appPath,
       ]);
       try {
-        const verification = execFileAsync(process.execPath, [
-          path.join(projectRoot, 'scripts/verify_packaged_runtime.mjs'),
-          '--',
-          appPath,
-        ]);
+        const verification = execFileAsync(
+          process.execPath,
+          [
+            path.join(projectRoot, 'scripts/verify_packaged_runtime.mjs'),
+            '--',
+            appPath,
+          ],
+          { env: { ...process.env, ELECTRON_RUN_AS_NODE: '0' } },
+        );
         if (mediaToolState === 'valid')
           await expect(verification).resolves.toMatchObject({
             stdout: 'Verified Pluto icon and 7 packaged runtimes.\n',

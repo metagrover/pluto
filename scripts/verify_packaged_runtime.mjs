@@ -109,8 +109,8 @@ const notificationBridge = path.join(resourcesPath, 'notification-bridge.node');
 if (!statSync(notificationBridge).isFile())
   throw new Error('Packaged notification bridge is missing.');
 execFileSync('codesign', ['--verify', '--strict', notificationBridge]);
-// Exercise the packaged addon in the matching Electron host, without starting
-// Pluto, opening its profile, or invoking any notification permission API.
+// Exercise the addon in Electron’s Node host without starting the desktop GUI,
+// opening a profile, or invoking any notification permission API.
 const memorySmokeDirectory = mkdtempSync(
   path.join(os.tmpdir(), 'pluto-native-memory-'),
 );
@@ -119,23 +119,19 @@ try {
   writeFileSync(
     smoke,
     `
-const {app}=require('electron');
-app.setPath('userData', ${JSON.stringify(memorySmokeDirectory)});
-app.whenReady().then(()=>{
-  try {
+try {
+    if(!process.versions.electron||process.env.ELECTRON_RUN_AS_NODE!=='1')throw Error('Packaged memory verification requires the Electron Node host.');
     const bridge=require(${JSON.stringify(notificationBridge)});
     if(typeof bridge.memoryPressureSample!=='function')throw Error('Packaged kernel memory export missing.');
     const sample=bridge.memoryPressureSample();
     const age=Date.now()-sample.wallTimeMs;
     if(!Number.isSafeInteger(sample.wallTimeMs)||!Number.isInteger(sample.memoryPressureFreePercent)||sample.memoryPressureFreePercent<0||sample.memoryPressureFreePercent>100||age<0||age>100)throw Error('Packaged kernel memory export returned an invalid sample.');
-    app.exit(0);
-  } catch(error) {console.error(String(error));app.exit(1);}
-});
+} catch(error) {console.error(String(error));process.exitCode=1;}
 `,
     { mode: 0o600 },
   );
   const environment = { ...process.env };
-  environment.ELECTRON_RUN_AS_NODE = undefined;
+  environment.ELECTRON_RUN_AS_NODE = '1';
   execFileSync(createRequire(import.meta.url)('electron'), [smoke], {
     env: environment,
     timeout: 10_000,
