@@ -737,14 +737,15 @@ describe('local attribution benchmark reporting', () => {
     const report = await runLocalSpeakerAttributionBenchmark({
       manifestPath,
       outputPath,
-      timeoutMs: 2_000,
+      // This checks protocol/privacy; parallel-CI Python startup is not a latency gate.
+      timeoutMs: 10_000,
       candidateIds: [],
     });
 
-    expect(report.results.map(({ status }) => status)).toEqual([
-      'ok',
-      'failed',
-    ]);
+    expect(
+      report.results.map(({ status }) => status),
+      JSON.stringify(report.results),
+    ).toEqual(['ok', 'failed']);
     expect(report.summary).toMatchObject({ successfulRuns: 1, failedRuns: 1 });
     const json = readFileSync(outputPath, 'utf8');
     const markdown = readFileSync(path.join(directory, 'report.md'), 'utf8');
@@ -758,7 +759,7 @@ describe('local attribution benchmark reporting', () => {
       expect(json).not.toContain(unsafe);
       expect(markdown).not.toContain(unsafe);
     }
-  });
+  }, 30_000);
 
   it('uses non-zero exit codes only for harness failures and rejects private output locations', async () => {
     const stdout = vi
