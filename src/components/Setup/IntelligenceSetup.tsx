@@ -68,6 +68,7 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
       return;
     }
     let mounted = true;
+    setOpenRouterConfigured(false);
     setCheckingOpenRouter(true);
     void Promise.all([
       invoke('PROVIDER_CREDENTIAL_STATUS', 'openrouter'),

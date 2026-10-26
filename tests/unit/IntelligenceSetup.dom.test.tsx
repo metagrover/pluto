@@ -113,6 +113,38 @@ describe('First-run intelligence choice', () => {
     act(() => f.root.unmount());
   });
 
+  it('requires a fresh key when rechecking saved credentials fails', async () => {
+    const f = await renderSetup(
+      { llm_provider: 'openrouter' },
+      false,
+      undefined,
+      true,
+    );
+    await f.choose('ollama');
+    const originalInvoke = f.invoke.getMockImplementation()!;
+    f.invoke.mockImplementation(async (channel, value) => {
+      if (channel === 'PROVIDER_CREDENTIAL_STATUS')
+        throw Error('key status unavailable');
+      return originalInvoke(channel, value);
+    });
+    await f.choose('openrouter');
+    expect(f.container.textContent).toContain('Enter a key to continue');
+    expect(
+      f.container.querySelector<HTMLButtonElement>('#intelligence-continue')!
+        .disabled,
+    ).toBe(true);
+    await f.submit();
+    expect(f.complete).not.toHaveBeenCalled();
+    expect(
+      f.invoke.mock.calls.some(
+        ([channel, value]) =>
+          channel === 'SET_SETTING' &&
+          value.key === 'intelligence_setup_complete',
+      ),
+    ).toBe(false);
+    act(() => f.root.unmount());
+  });
+
   it('stores a new OpenRouter key securely before consent and provider activation', async () => {
     const f = await renderSetup();
     await f.choose('openrouter');
