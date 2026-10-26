@@ -1,6 +1,10 @@
 import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('electron', () => ({
+  powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn() },
+}));
+
 const geminiGetGenerativeModelMock = vi.fn();
 const geminiGenerateContentMock = vi.fn();
 
