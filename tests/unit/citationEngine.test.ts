@@ -1006,6 +1006,50 @@ describe('Citation Engine', () => {
       expect(presentation.unsupportedClaimCount).toBe(0);
     });
 
+    it.each([false, true])(
+      'shows the relevant source section and passage (long section: %s)',
+      (long) => {
+        const decision =
+          'Keep the existing room names because visitors know them.';
+        const action =
+          'Sam will send the floor plan to Lee once the access review passes.';
+        const prefix = long
+          ? `${'The room inventory has already been inspected. '.repeat(10)}\n`
+          : '';
+        const summary = `${prefix}${action}`;
+        const presentation = buildSynthesizedAnswerPresentation(action, [
+          {
+            ...sources[0],
+            evidence_text: `${decision}\n${summary}`,
+            retrieved_sections: [
+              {
+                section_id: 'decisions',
+                heading: 'Decisions',
+                kind: 'outcomes',
+                summary: decision,
+                trust_status: 'grounded',
+                source_revision: 'r1',
+              },
+              {
+                section_id: 'actions',
+                heading: 'Actions',
+                kind: 'outcomes',
+                summary,
+                trust_status: 'grounded',
+                source_revision: 'r1',
+              },
+            ],
+          },
+        ]);
+        expect(presentation.citations[0]).toMatchObject({
+          section_id: 'actions',
+          evidence_span: action,
+          evidence_valid: false,
+          trust_status: 'inferred',
+        });
+      },
+    );
+
     it('attaches response-level provenance without requiring inline markers', () => {
       const presentation = buildSynthesizedAnswerPresentation(
         'The release plan has a clear owner and a Friday target.',
@@ -2640,6 +2684,21 @@ describe('canonical lifecycle proof at answer presentation', () => {
       ),
     ).toMatchObject({ answer, unsupportedClaimCount: 0, outcome: 'answered' });
   });
+  it.each([
+    'No, you do not need to send the equipment inventory to the venue coordinator, as you have already completed the task "Send the equipment inventory to the venue coordinator".',
+    'You do not need to repeat the task "Send the equipment inventory to the venue coordinator"; it is completed.',
+  ])(
+    'does not confuse a closed obligation with a negated completion: %s',
+    (answer) => {
+      expect(
+        buildSynthesizedAnswerPresentation(answer, [source], 'Ari'),
+      ).toMatchObject({
+        answer,
+        unsupportedClaimCount: 0,
+        outcome: 'answered',
+      });
+    },
+  );
   it('accepts completion for another person using that person’s canonical record', () => {
     const canonical_commitments = records.map((record) => ({
       ...record,
@@ -2662,6 +2721,27 @@ describe('canonical lifecycle proof at answer presentation', () => {
         'Ari',
       ),
     ).toMatchObject({ answer, unsupportedClaimCount: 0, outcome: 'answered' });
+  });
+  it('retains a closed task without treating an unconfirmed owner as completion proof', () => {
+    const canonical_commitments = records.map((record) => ({
+      ...record,
+      owner: null,
+    }));
+    const result = buildSynthesizedAnswerPresentation(
+      claim,
+      [
+        {
+          ...source,
+          canonical_commitments,
+          evidence_text: formatCanonicalCommitmentEvidence(
+            canonical_commitments,
+          ),
+        },
+      ],
+      'Ari',
+    );
+    expect(result.outcome).toBe('no_evidence');
+    expect(result.unsupportedClaimCount).toBe(1);
   });
   it.each(['open', 'rejected', 'unconfirmed'] as const)(
     'does not promote %s state to completion',

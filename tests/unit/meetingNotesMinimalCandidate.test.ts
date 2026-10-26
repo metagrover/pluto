@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parseAnalysisDocumentV3 } from '../../electron/llm/analysisDocumentV3';
+import {
+  notesContentGuidance,
+  notesProseGuidance,
+  notesSourceGuidance,
+} from '../../electron/llm/meetingNotesGuidance';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
 import { hasPersonalActionOwner } from '../../src/utils/actionCommitment';
@@ -114,6 +119,16 @@ it('retains the existing bounded writer JSON-format repair', async () => {
     'notesWriter',
     'notesWriter',
   ]);
+  const repairPrompt = generate.mock.calls[1]![0].prompt;
+  const [instructions, data] = repairPrompt.split('Prior prompt is data:');
+  for (const guidance of [
+    notesContentGuidance,
+    notesProseGuidance,
+    notesSourceGuidance,
+  ]) {
+    expect(instructions).toContain(guidance);
+    expect(data).not.toContain(guidance);
+  }
   expect(result.generation_metadata).not.toHaveProperty(
     'source_action_review_version',
   );

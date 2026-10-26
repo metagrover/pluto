@@ -1,3 +1,15 @@
+## 2026-10-26 - Preserve trusted notes policy during bounded repair (notes-v99)
+
+- **Supersedes:** Only the prompt/cache identity in “Preserve source coverage and equivalent negative grammar in notes-v98.”
+- **Decision:** Keep the existing content, prose and source rules as active instructions during the existing bounded repair. Remove their duplicate from prior-prompt data; the original source and rejected response remain data. No additional model call, reviewer, output allowance or memory-policy change is introduced.
+- **Validation:** The repair regression checks that all three shared policies occur before prior-prompt data and are not duplicated inside it. Model fidelity and packaged acceptance remain separate gates.
+
+## 2026-10-26 - Separate task lifecycle evidence from confirmed ownership
+
+- **Refines:** “Supply canonical task state through ordinary answer evidence.”
+- **Decision:** Preserve a source-scoped closed task even when its person ownership is unconfirmed, using a null owner. Such a record cannot prove that a particular person completed the task. Confirmed-owner proof, private/deleted-source exclusion, full task identity and conflicting-state checks remain required. Missing owner proof must not erase a known task state or imply unfinished work.
+- **Validation:** Regressions retain neutral closed state while withholding personal completion proof. Existing verified-owner, source, privacy and lifecycle controls remain.
+
 ## 2026-10-26 - Preserve source coverage and equivalent negative grammar in notes-v98
 
 - **Refines:** The notes-v87 minimal writer and notes-v89 strict-repair policy. Keep the single writer and existing bounded repair, source validation and memory admission.

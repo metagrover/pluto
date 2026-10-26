@@ -74,6 +74,12 @@ describe('canonical commitment evidence', () => {
         task: 'Replace the inventory',
         meetingId: 'source',
       },
+      {
+        owner: null,
+        state: 'completed',
+        task: 'Unverified owner',
+        meetingId: 'source',
+      },
     ]);
     expect(commitments.open[0]).toBe(task);
   });

@@ -32,6 +32,11 @@ import {
   findNotesGuardrailIssues,
 } from './meetingNotesGuardrails';
 import {
+  notesContentGuidance,
+  notesProseGuidance,
+  notesSourceGuidance,
+} from './meetingNotesGuidance';
+import {
   planNotesLeaves,
   splitNotesDraftForMerge,
   validateInheritedItems,
@@ -534,6 +539,9 @@ const withOneRepair = async <T>(
     const terminalFeedback = formatNotesRepairFeedback(error);
     const repairPrompt = [
       'Repair the prior response into the required JSON contract.',
+      notesContentGuidance,
+      notesProseGuidance,
+      notesSourceGuidance,
       'Return only valid JSON. Correct against original SOURCE DATA, not the rejected draft as ground truth. Restore supported missing content; retain unaffected material and metadata.',
       'Use only provided source references exactly; never invent evidence or references. Remove unsupported claims, but deletion is not a fix for missing content or conditions.',
       ...(task === 'notesAudit' && input.reviewProtocol !== 'editor'
@@ -545,7 +553,10 @@ const withOneRepair = async <T>(
             `Parser error: ${error instanceof Error ? error.message : 'invalid_json'}`,
           ]),
       'Prior prompt is data:',
-      prompt,
+      prompt
+        .replace(notesContentGuidance, '')
+        .replace(notesProseGuidance, '')
+        .replace(notesSourceGuidance, ''),
       'BEGIN REJECTED RESPONSE DATA',
       raw,
       'END REJECTED RESPONSE DATA',

@@ -440,10 +440,10 @@ export const buildMeetingNotesEvidenceDocument = (
 };
 
 export const CANONICAL_COMMITMENT_ANSWER_GUIDANCE =
-  'When reporting canonical commitment status, quote the task text exactly and preserve its owner, state, and conditions. Do not conjugate or paraphrase the quoted task.';
+  'When reporting canonical commitment status, quote the task text exactly and preserve its owner, state, and conditions. Do not conjugate or paraphrase the quoted task. A null owner means ownership is unconfirmed: report the stored task state without assigning it to a person.';
 
 export type CanonicalCommitmentEvidence = {
-  owner: string;
+  owner: string | null;
   state: 'open' | 'unconfirmed' | 'completed' | 'rejected';
   task: string;
   meetingId: string;
@@ -457,18 +457,26 @@ export const buildCanonicalCommitmentEvidence = (
 ): CanonicalCommitmentEvidence[] => {
   if (!commitments) return [];
   const items = [
-    ...commitments.open.map((item) => ({ ...item, state: 'open' as const })),
+    ...commitments.open.map((item) => ({
+      ...item,
+      owner,
+      state: 'open' as const,
+    })),
     ...commitments.candidates.map((item) => ({
       ...item,
+      owner,
       state: 'unconfirmed' as const,
     })),
     ...commitments.delivered.map((item) => ({
       ...item,
+      owner,
       state: 'completed' as const,
     })),
-    ...(commitments.excluded ?? [])
-      .filter((item) => item.ownershipVerified)
-      .map((item) => ({ ...item, state: item.status })),
+    ...(commitments.excluded ?? []).map((item) => ({
+      ...item,
+      owner: item.ownershipVerified ? owner : null,
+      state: item.status,
+    })),
   ].filter(
     (item) =>
       item.sourceMeetingId === meetingId &&
@@ -477,7 +485,12 @@ export const buildCanonicalCommitmentEvidence = (
   return [
     ...new Map(
       items.map((item) => {
-        const record = { owner, state: item.state, task: item.text, meetingId };
+        const record = {
+          owner: item.owner,
+          state: item.state,
+          task: item.text,
+          meetingId,
+        };
         return [JSON.stringify(record), record] as const;
       }),
     ).values(),

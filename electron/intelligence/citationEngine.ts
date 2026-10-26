@@ -188,10 +188,7 @@ const negationConflicts = (claim: string, evidence: string): boolean => {
   const supportsSignature = (text: string, signature: string[]): boolean => {
     const tokens = new Set(contentTokens(text));
     return (
-      signature.length > 0 &&
-      signature.filter((token) => tokens.has(token)).length /
-        signature.length >=
-        0.75
+      signature.length > 0 && signature.every((token) => tokens.has(token))
     );
   };
   if (claimSignatures.length === 0) {
@@ -1784,10 +1781,11 @@ export const buildSynthesizedAnswerPresentation = (
   const completedTasks = canonicalTasks.filter(
     (record) =>
       record.state === 'completed' &&
+      record.owner !== null &&
       !canonicalTasks.some(
         (other) =>
-          normalizeEvidenceText(other.owner) ===
-            normalizeEvidenceText(record.owner) &&
+          normalizeEvidenceText(other.owner ?? '') ===
+            normalizeEvidenceText(record.owner ?? '') &&
           evidencePhrase(other.task) === evidencePhrase(record.task) &&
           other.state !== 'completed',
       ),
@@ -1945,10 +1943,17 @@ export const buildSynthesizedAnswerPresentation = (
           if (seenSources.has(sourceKey)) return [];
           seenSources.add(sourceKey);
 
-          const section = source.retrieved_sections?.[0];
-          const evidenceSpan = (section?.summary || source.evidence_text)
-            .trim()
-            .slice(0, 320);
+          const matchingSpan =
+            getBestEvidenceSpan(source, cleanAnswer, selfName) ||
+            source.evidence_text.trim().slice(0, 320);
+          const section = source.retrieved_sections?.find(
+            (candidate) =>
+              matchingSpan && candidate.summary.includes(matchingSpan),
+          );
+          const evidenceSpan =
+            section && section.summary.trim().length <= 320
+              ? section.summary.trim()
+              : matchingSpan;
           return [
             {
               claim:

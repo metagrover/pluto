@@ -4411,8 +4411,14 @@ describe('Query Engine', () => {
         task: 'Send the inventory',
         meetingId: 'source',
       },
+      {
+        owner: null,
+        state: 'completed',
+        task: 'Send the invitations',
+        meetingId: 'source',
+      },
     ]);
-    expect(result.evidence_text).not.toContain('invitations');
+    expect(result.evidence_text).toContain('invitations');
     expect(result.evidence_text).not.toContain('budget');
     vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
       ...meeting,
