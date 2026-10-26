@@ -4364,6 +4364,68 @@ describe('Query Engine', () => {
     ).not.toContain('Canonical commitment state');
   });
 
+  it('carries named-person lifecycle records with the same ownership and source boundaries', () => {
+    const meeting = {
+      id: 'source',
+      title: 'Review',
+      enhanced_notes: 'Morgan discussed the inventory.',
+    } as dbModule.PersistedMeeting;
+    vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(null);
+    vi.mocked(dbModule.findEntity).mockReturnValue({
+      id: 'morgan',
+      name: 'Morgan',
+      type: 'person',
+    } as dbModule.Entity);
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
+    vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
+      open: [],
+      candidates: [],
+      delivered: [],
+      excluded: [
+        {
+          text: 'Send the inventory',
+          status: 'completed',
+          sourceMeetingId: 'source',
+          ownershipVerified: true,
+        },
+        {
+          text: 'Send the invitations',
+          status: 'completed',
+          sourceMeetingId: 'source',
+          ownershipVerified: false,
+        },
+        {
+          text: 'Send the budget',
+          status: 'rejected',
+          sourceMeetingId: 'other',
+          ownershipVerified: true,
+        },
+      ],
+    });
+    const recall = buildAssigneeActionRecall("What's assigned to Morgan?", [
+      meeting,
+    ]);
+    const source = buildMeetingRetrievalResult(meeting);
+    const result = applyAssigneeCommitmentState([source], recall)[0];
+    expect(result.canonical_commitments).toEqual([
+      {
+        owner: 'Morgan',
+        state: 'completed',
+        task: 'Send the inventory',
+        meetingId: 'source',
+      },
+    ]);
+    expect(result.evidence_text).not.toContain('invitations');
+    expect(result.evidence_text).not.toContain('budget');
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
+      ...meeting,
+      user_notes: 'Off the record',
+    });
+    expect(applyAssigneeCommitmentState([source], recall)[0]).toBe(source);
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
+    expect(applyAssigneeCommitmentState([source], recall)[0]).toBe(source);
+  });
+
   describe('Ask Pluto assignment and long-note recovery', () => {
     it('does not mistake one completed task for complete coverage of its source', () => {
       vi.mocked(dbModule.findEntity).mockReturnValue({
@@ -4410,7 +4472,9 @@ describe('Query Engine', () => {
           [buildMeetingRetrievalResult(meeting)],
           recall,
         )[0].evidence_text,
-      ).toContain('Morgan — completed: Archive the checklist.');
+      ).toContain(
+        '"owner":"Morgan","state":"completed","task":"Archive the checklist."',
+      );
       expect(recall?.answer).not.toContain('- Archive');
     });
     it('selects relevant middle evidence before long-note budgeting', async () => {

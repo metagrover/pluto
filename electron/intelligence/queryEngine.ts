@@ -1035,11 +1035,9 @@ export const buildAssigneeActionRecall = (
   coverageLimited: boolean;
   mentionedMeetingCount: number;
   commitmentCount: number;
-  excludedCommitments?: Array<{
-    text: string;
-    status: 'completed' | 'rejected';
-    sourceMeetingId: string;
-  }>;
+  canonicalCommitments?: ReturnType<
+    typeof dbModule.getCanonicalPersonCommitments
+  >;
 } | null => {
   const assignee = parseAssigneeActionQuery(query);
   if (!assignee) return null;
@@ -1110,13 +1108,6 @@ export const buildAssigneeActionRecall = (
       else grouped.set(item.sourceMeetingId, { meeting, items: [item] });
     }
     const groups = [...grouped.values()];
-    const excluded =
-      canonicalCommitments.excluded ||
-      canonicalCommitments.delivered.map((item) => ({
-        text: item.text,
-        status: 'completed' as const,
-        sourceMeetingId: item.sourceMeetingId,
-      }));
     const context = groups.map(({ meeting, items }) => {
       const source = buildMeetingRetrievalResult(meeting, 'Commitment source');
       const document = buildMeetingNotesEvidenceDocument(meeting);
@@ -1192,7 +1183,7 @@ export const buildAssigneeActionRecall = (
     );
     return {
       assignee: subject,
-      excludedCommitments: excluded,
+      canonicalCommitments,
       answer:
         lines.filter(Boolean).length > 0
           ? lines.join('\n')
@@ -1332,25 +1323,25 @@ export const applyAssigneeCommitmentState = (
       !containsConfidentialAside(
         `${meeting.title}\n${meeting.user_notes}\n${buildMeetingNotesEvidenceDocument(meeting).notesText}`,
       )
-        ? buildCanonicalCommitmentEvidence(
-            source.meeting_id,
-            canonical,
-            selfName,
-          )
+        ? [
+            ...buildCanonicalCommitmentEvidence(
+              source.meeting_id,
+              canonical,
+              selfName,
+            ),
+            ...buildCanonicalCommitmentEvidence(
+              source.meeting_id,
+              recall?.canonicalCommitments,
+              recall?.assignee === 'you' ? selfName : (recall?.assignee ?? ''),
+            ),
+          ]
         : [];
-    const selfState = formatCanonicalCommitmentEvidence(canonicalRecords);
-    const excluded =
-      recall?.excludedCommitments?.filter(
-        (item) => item.sourceMeetingId === source.meeting_id,
-      ) || [];
-    const assigneeState = excluded.length
-      ? `[Canonical commitment state — overrides older notes]:\n${excluded.map((item) => `${recall?.assignee} — ${item.status}: ${item.text}`).join('\n')}`
-      : '';
-    if (!selfState && !assigneeState) return source;
+    const stateEvidence = formatCanonicalCommitmentEvidence(canonicalRecords);
+    if (!stateEvidence) return source;
     return {
       ...source,
       canonical_commitments: canonicalRecords,
-      evidence_text: [selfState, assigneeState, source.evidence_text]
+      evidence_text: [stateEvidence, source.evidence_text]
         .filter(Boolean)
         .join('\n'),
     };

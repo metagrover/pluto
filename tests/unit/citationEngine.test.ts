@@ -2614,6 +2614,29 @@ describe('canonical lifecycle proof at answer presentation', () => {
     expect(result.answer).toBe(claim);
     expect(source.evidence_text).not.toContain('already completed');
   });
+  it('accepts completion for another person using that person’s canonical record', () => {
+    const canonical_commitments = records.map((record) => ({
+      ...record,
+      owner: 'Noor',
+    }));
+    const answer =
+      'Noor has already completed the task of sending the equipment inventory to the venue coordinator.';
+    expect(
+      buildSynthesizedAnswerPresentation(
+        answer,
+        [
+          {
+            ...source,
+            canonical_commitments,
+            evidence_text: formatCanonicalCommitmentEvidence(
+              canonical_commitments,
+            ),
+          },
+        ],
+        'Ari',
+      ),
+    ).toMatchObject({ answer, unsupportedClaimCount: 0, outcome: 'answered' });
+  });
   it.each(['open', 'rejected', 'unconfirmed'] as const)(
     'does not promote %s state to completion',
     (state) => {
