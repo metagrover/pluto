@@ -45,7 +45,14 @@ it('keeps a grounded decision when its optional author metadata is unsupported',
     }),
   );
   const before = structuredClone({ source, draft });
-  const accepted = acceptEditedNotes({ source, draft });
+  expect(() => acceptEditedNotes({ source, draft })).toThrow(
+    /invalid_commitment/,
+  );
+  const accepted = acceptEditedNotes({
+    source,
+    draft,
+    omitUnprovedDecisionAuthors: true,
+  });
   const item = accepted.draft.sections[0]!.items[0]!;
   expect(item.text).toBe(text);
   expect(item.sources).toEqual(sources);

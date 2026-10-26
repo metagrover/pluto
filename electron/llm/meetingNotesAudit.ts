@@ -1305,6 +1305,7 @@ export const acceptEditedNotes = ({
   proposals = [],
   acceptancePolicy = 'strict',
   compactNormalization = false,
+  omitUnprovedDecisionAuthors = false,
   reviewOriginals: inheritedOriginals,
 }: {
   source: NotesSource;
@@ -1314,6 +1315,7 @@ export const acceptEditedNotes = ({
   proposals?: NotesAudit['terminology'];
   acceptancePolicy?: 'strict' | 'conservative';
   compactNormalization?: boolean;
+  omitUnprovedDecisionAuthors?: boolean;
 }): AuditedNotes => {
   const next = structuredClone(draft);
   const reviewOriginals = new Map(
@@ -1471,10 +1473,12 @@ export const acceptEditedNotes = ({
         normalizeTranscriptEvidence(item.owner ?? '') !==
           normalizeTranscriptEvidence(checked.owner ?? '');
       const dueRemoved = Boolean(item.due) && !checked.due;
-      // A decision author is optional; unproved metadata must not discard its grounded text.
+      // Only unreviewed writer metadata may be omitted; reconciled attribution stays strict.
       if (
         acceptancePolicy === 'strict' &&
-        ((item.kind === 'action' && ownerChanged) || dueRemoved)
+        ((ownerChanged &&
+          !(omitUnprovedDecisionAuthors && item.kind === 'decision')) ||
+          dueRemoved)
       ) {
         return rejectCommitment(
           item,

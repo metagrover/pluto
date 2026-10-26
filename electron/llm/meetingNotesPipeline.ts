@@ -942,7 +942,11 @@ const deterministicallyAcceptedDraft = (
     const invalidProse = unpublishableProseItem(input, draft);
     if (invalidProse) throw new MeetingNotesError('notes_writer_invalid');
     assertSourceGuardrails(input, draft, evidenceSpans, false);
-    const audited = acceptEditedNotes({ source: input.source, draft });
+    const audited = acceptEditedNotes({
+      source: input.source,
+      draft,
+      omitUnprovedDecisionAuthors: true,
+    });
     return {
       draft: audited.draft,
       audit: { changes: [], verdicts: [], dispositions: [], terminology: [] },

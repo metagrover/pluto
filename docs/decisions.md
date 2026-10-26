@@ -1,7 +1,13 @@
+## 2026-10-26 — Normalize duplicate request-local wire citations
+
+- **Context:** Local models can repeat an internal source marker in prose while already supplying the same citation in the structured sources field, causing avoidable bounded repairs and publication refusal.
+- **Decision:** Supersede only the no-normalization rule for that redundant wire annotation in the notes-v87 minimal writer policy. Remove a bracketed marker only when every label resolves in the current request, appears in that same block's sources array, is not a literal identifier in original source data, and has an unambiguous following boundary. Preserve all exact source spans and factual wording. Unknown, uncited and ambiguous markers retain the existing validation path. This is output-format handling; LLM synthesis still determines meeting meaning and lifecycle state.
+- **Evidence:** Decoder regressions cover exact span preservation, unknown references, cross-block citations, literal room identifiers and adjacent words. Model quality and memory profiles require separate acceptance. See [PR #884](https://github.com/metagrover/pluto/pull/884).
+
 ## 2026-10-26 — Retain grounded decisions with unproved optional author metadata
 
 - **Context:** Strict local writer acceptance could reject a source-supported decision solely because its optional author field could not be validated, including a reporter misidentified as the deciding person.
-- **Decision:** Supersede only that author-field refusal in “Minimal local writer candidate without automatic model review (notes-v87)” and its notes-v89 strict-repair extension. Retain the decision wording and exact citations after existing source acceptance, and clear an unproved optional author. LLM synthesis still supplies the decision. Action ownership, deadlines, source spans, polarity, conditions, quantities, identity confirmation and memory protection retain their existing checks.
+- **Decision:** Supersede only that author-field refusal in “Minimal local writer candidate without automatic model review (notes-v87)” and its notes-v89 strict-repair extension. For unreviewed local writer output, retain the decision wording and exact citations after existing source acceptance, and clear an unproved optional author. Source reconciliation and reviewed attribution retain strict refusal. LLM synthesis still supplies the decision. Action ownership, deadlines, source spans, polarity, conditions, quantities, identity confirmation and memory protection retain their existing checks.
 - **Evidence:** A regression preserves a reported third-party decision while removing the incorrect reporter attribution; existing action and decision attribution checks remain green. Live model quality and package acceptance remain separate gates. See [PR #884](https://github.com/metagrover/pluto/pull/884).
 
 ## 2026-10-25 — Bound long-token scanning in request budgeting
