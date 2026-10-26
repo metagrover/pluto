@@ -2756,3 +2756,10 @@ Both Gemma and Phi, the selected-model allocation, context/output caps, reserves
 Extends “Match Gemma accounting to the runtime context floor.” The existing two-second cold-admission reclaim window now belongs to the shared confirmed-unload path, including idle cleanup, rather than a provider instance. Ask Pluto and person chat cleanup can remove a runner before macOS reports its pages available; an immediately following provider must receive the same bounded opportunity to recheck memory. Record the window when an owned unload starts and refresh it when runner removal is confirmed, so transport cancellation does not erase an unload already in progress.
 
 Every retry still requires a fresh memory sample and an empty runner list. Persistent pressure refuses, cancellation stops the wait, and pending unload confirmation remains mandatory. Reserves, exact digest/context residency proof, watchdog, context/output limits, task deadlines, workload exclusion, and the existing cleanup policy are unchanged. This corrects premature refusal after cleanup; it does not retain models, eliminate physical cold loading, or qualify unresolved semantic gates.
+
+
+## 2026-10-25 - Include the accepted OpenRouter provider in first-run intelligence setup
+
+- **Supersedes:** The two-choice onboarding clause in “2026-10-15 - Choose intelligence once during first-run setup” (the 2026-10-07 provider restriction remains unchanged).
+- **Decision:** First-run intelligence setup offers Ollama, ChatGPT, and OpenRouter, matching the providers available in Settings. OpenRouter uses the existing protected credential IPC, stores its model choice, and records versioned text-sharing consent before provider activation. The renderer receives only credential status, never a saved key.
+- **Validation:** DOM regressions cover saved-key reuse, new-key storage before consent and activation, and storage failure without activation; existing Ollama and ChatGPT setup checks remain in place.
