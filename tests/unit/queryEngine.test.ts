@@ -4,7 +4,7 @@ import { restrictEvidenceToMeetingIds } from '../../electron/intelligence/askPlu
 import { resolveSemanticMeetingScope } from '../../electron/intelligence/askPlutoSemanticScope';
 import { buildSynthesizedAnswerPresentation } from '../../electron/intelligence/citationEngine';
 import {
-  applyAssigneeCommitmentState,
+  applyCanonicalCommitmentState,
   buildAssigneeActionRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
@@ -252,6 +252,7 @@ describe('Query Engine', () => {
     vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue([]);
     vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
     vi.mocked(dbModule.getMeetingsForEntity).mockReturnValue([]);
+    vi.mocked(dbModule.getMeetingEntities).mockReturnValue([]);
   });
 
   it('uses only synthesized live notes for current-meeting retrieval', () => {
@@ -4319,7 +4320,7 @@ describe('Query Engine', () => {
     });
     vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
     const source = buildMeetingRetrievalResult(meeting);
-    const result = applyAssigneeCommitmentState([source], null)[0];
+    const result = applyCanonicalCommitmentState([source])[0];
     expect(result.evidence_text).toContain('"state":"completed"');
     expect(result.canonical_commitments).toEqual([
       {
@@ -4336,31 +4337,27 @@ describe('Query Engine', () => {
     ).toBeNull();
     expect(source.evidence_text).not.toContain('Canonical commitment state');
     expect(
-      applyAssigneeCommitmentState(
-        [{ ...source, meeting_id: 'other' }],
-        null,
-      )[0].evidence_text,
+      applyCanonicalCommitmentState([{ ...source, meeting_id: 'other' }])[0]
+        .evidence_text,
     ).not.toContain('Canonical commitment state');
     expect(
-      applyAssigneeCommitmentState(
-        [{ ...source, source_type: 'artifact' }],
-        null,
-      )[0].evidence_text,
+      applyCanonicalCommitmentState([{ ...source, source_type: 'artifact' }])[0]
+        .evidence_text,
     ).not.toContain('Canonical commitment state');
     vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
     expect(
-      applyAssigneeCommitmentState([source], null)[0].evidence_text,
+      applyCanonicalCommitmentState([source])[0].evidence_text,
     ).not.toContain('Canonical commitment state');
     vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
       ...meeting,
       user_notes: 'Off the record',
     });
     expect(
-      applyAssigneeCommitmentState([source], null)[0].evidence_text,
+      applyCanonicalCommitmentState([source])[0].evidence_text,
     ).not.toContain('Canonical commitment state');
     vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(null);
     expect(
-      applyAssigneeCommitmentState([source], null)[0].evidence_text,
+      applyCanonicalCommitmentState([source])[0].evidence_text,
     ).not.toContain('Canonical commitment state');
   });
 
@@ -4402,11 +4399,11 @@ describe('Query Engine', () => {
         },
       ],
     });
-    const recall = buildAssigneeActionRecall("What's assigned to Morgan?", [
-      meeting,
-    ]);
+    vi.mocked(dbModule.getMeetingEntities).mockReturnValue([
+      { id: 'morgan', name: 'Morgan', type: 'person' },
+    ] as any);
     const source = buildMeetingRetrievalResult(meeting);
-    const result = applyAssigneeCommitmentState([source], recall)[0];
+    const result = applyCanonicalCommitmentState([source])[0];
     expect(result.canonical_commitments).toEqual([
       {
         owner: 'Morgan',
@@ -4421,9 +4418,9 @@ describe('Query Engine', () => {
       ...meeting,
       user_notes: 'Off the record',
     });
-    expect(applyAssigneeCommitmentState([source], recall)[0]).toBe(source);
+    expect(applyCanonicalCommitmentState([source])[0]).toBe(source);
     vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
-    expect(applyAssigneeCommitmentState([source], recall)[0]).toBe(source);
+    expect(applyCanonicalCommitmentState([source])[0]).toBe(source);
   });
 
   describe('Ask Pluto assignment and long-note recovery', () => {
@@ -4454,6 +4451,9 @@ describe('Query Engine', () => {
           },
         ],
       } as any);
+      vi.mocked(dbModule.getMeetingEntities).mockReturnValue([
+        { id: 'person-m', name: 'Morgan', type: 'person' },
+      ] as any);
       const recall = buildAssigneeActionRecall("What's assigned to Morgan?", [
         meeting,
       ]);
@@ -4462,16 +4462,12 @@ describe('Query Engine', () => {
         commitmentCount: 0,
       });
       expect(
-        applyAssigneeCommitmentState(
-          [buildMeetingRetrievalResult(meeting)],
-          recall,
-        )[0].evidence_text,
+        applyCanonicalCommitmentState([buildMeetingRetrievalResult(meeting)])[0]
+          .evidence_text,
       ).toContain('acceptance report');
       expect(
-        applyAssigneeCommitmentState(
-          [buildMeetingRetrievalResult(meeting)],
-          recall,
-        )[0].evidence_text,
+        applyCanonicalCommitmentState([buildMeetingRetrievalResult(meeting)])[0]
+          .evidence_text,
       ).toContain(
         '"owner":"Morgan","state":"completed","task":"Archive the checklist."',
       );

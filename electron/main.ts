@@ -780,7 +780,7 @@ import {
   updateAlertStatus,
 } from './intelligence/proactiveEngine';
 import {
-  applyAssigneeCommitmentState,
+  applyCanonicalCommitmentState,
   buildAssigneeActionRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
@@ -8822,7 +8822,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                   unguardedContext,
                 )
               : unguardedContext;
-          const context = applyAssigneeCommitmentState(
+          const context = applyCanonicalCommitmentState(
             enforceSynthesizedOnlyContext(
               restrictEvidenceToMeetingIds(
                 effectiveProjectRecall ||
@@ -8839,7 +8839,6 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                 boundedMeetingIds,
               ),
             ),
-            assigneeRecall || personWorkAssignmentRecall,
             confirmedSelfName,
           );
           contextCount = context.length;

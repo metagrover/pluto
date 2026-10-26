@@ -1035,9 +1035,6 @@ export const buildAssigneeActionRecall = (
   coverageLimited: boolean;
   mentionedMeetingCount: number;
   commitmentCount: number;
-  canonicalCommitments?: ReturnType<
-    typeof dbModule.getCanonicalPersonCommitments
-  >;
 } | null => {
   const assignee = parseAssigneeActionQuery(query);
   if (!assignee) return null;
@@ -1183,7 +1180,6 @@ export const buildAssigneeActionRecall = (
     );
     return {
       assignee: subject,
-      canonicalCommitments,
       answer:
         lines.filter(Boolean).length > 0
           ? lines.join('\n')
@@ -1302,15 +1298,15 @@ export const extractNamedPersonQuestionSubject = (
 
 // Apply authoritative state after source selection so a source shared by a
 // closed task and a new assignment retains both without widening the scope.
-export const applyAssigneeCommitmentState = (
+export const applyCanonicalCommitmentState = (
   context: RetrievalResult[],
-  recall: ReturnType<typeof buildAssigneeActionRecall>,
   selfName = 'You',
 ): RetrievalResult[] => {
   const selfId = dbModule.identityStore.getSelfPersonId();
-  const canonical = selfId
-    ? dbModule.getCanonicalPersonCommitments(selfId)
-    : undefined;
+  const cache = new Map<
+    string,
+    ReturnType<typeof dbModule.getCanonicalPersonCommitments>
+  >();
   return context.map((source) => {
     if (
       source.source_type === 'artifact' ||
@@ -1318,24 +1314,29 @@ export const applyAssigneeCommitmentState = (
     )
       return source;
     const meeting = dbModule.getAskPlutoMeeting(source.meeting_id);
-    const canonicalRecords =
-      meeting &&
-      !containsConfidentialAside(
+    if (
+      !meeting ||
+      containsConfidentialAside(
         `${meeting.title}\n${meeting.user_notes}\n${buildMeetingNotesEvidenceDocument(meeting).notesText}`,
       )
-        ? [
-            ...buildCanonicalCommitmentEvidence(
-              source.meeting_id,
-              canonical,
-              selfName,
-            ),
-            ...buildCanonicalCommitmentEvidence(
-              source.meeting_id,
-              recall?.canonicalCommitments,
-              recall?.assignee === 'you' ? selfName : (recall?.assignee ?? ''),
-            ),
-          ]
-        : [];
+    )
+      return source;
+    const owners = new Map(
+      dbModule
+        .getMeetingEntities(source.meeting_id)
+        .filter((person) => person.type === 'person')
+        .map((person) => [person.id, person.name]),
+    );
+    if (selfId) owners.set(selfId, selfName);
+    const canonicalRecords = [...owners].flatMap(([id, owner]) => {
+      if (!cache.has(id))
+        cache.set(id, dbModule.getCanonicalPersonCommitments(id));
+      return buildCanonicalCommitmentEvidence(
+        source.meeting_id,
+        cache.get(id),
+        owner,
+      );
+    });
     const stateEvidence = formatCanonicalCommitmentEvidence(canonicalRecords);
     if (!stateEvidence) return source;
     return {
