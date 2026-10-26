@@ -94,7 +94,7 @@ jobs:
 
       - name: Build and Package DMG
         env:
-          # In unsigned mode, electron-builder packages an ad-hoc / unsigned DMG
+          # Use an explicit ad-hoc identity for the unsigned distribution.
           CSC_IDENTITY_AUTO_DISCOVERY: false
           # PR installer checks need the same ad-hoc signature as tagged builds.
           CSC_FOR_PULL_REQUEST: true
@@ -102,7 +102,7 @@ jobs:
           pnpm run prebuild
           pnpm exec tsc
           pnpm exec vite build
-          pnpm exec electron-builder --mac --publish never
+          pnpm exec electron-builder --mac --publish never --config.mac.identity=-
 
       - name: Verify package and generate checksums
         run: |
