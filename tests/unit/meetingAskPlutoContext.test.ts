@@ -1022,3 +1022,56 @@ describe('meeting-scoped Ask Pluto context', () => {
     expect(response.answer).toContain('Also an IPO is planned.');
   });
 });
+
+it('preserves current task state ahead of historical saved-meeting actions', () => {
+  const context = buildMeetingAskPlutoContext({
+    meeting: makeMeeting(),
+    query: 'Who owns the checklist?',
+    canonicalCommitments: [
+      {
+        owner: 'Riley',
+        state: 'completed',
+        task: 'Send the migration checklist',
+        meetingId: 'meeting-1',
+      },
+      {
+        owner: 'Avery',
+        state: 'open',
+        task: 'Review the API schema',
+        meetingId: 'meeting-1',
+      },
+      {
+        owner: null,
+        state: 'completed',
+        task: 'Renew the permit',
+        meetingId: 'other',
+      },
+    ],
+  });
+  const state = context.evidenceItems[0];
+  expect(state.id).toBe('canonical-commitments');
+  expect(state.text).toContain('"state":"completed"');
+  expect(state.text).toContain('"state":"open"');
+  expect(state.text).not.toContain('Renew the permit');
+  expect(
+    context.evidenceItems.some((item) => item.kind === 'action_item'),
+  ).toBe(true);
+  expect(
+    buildPreparedMeetingAskPlutoResponse('What are the next steps?', context),
+  ).toBeNull();
+  expect(
+    buildPreparedMeetingAskPlutoResponse('What did we decide?', context),
+  ).not.toBeNull();
+  for (const assistanceRoute of [
+    { mode: 'general' },
+    { mode: 'recall', recallKind: 'fact' },
+  ] as const) {
+    const prompt = buildMeetingAskPlutoPrompt({
+      query: 'Who owns the checklist?',
+      context,
+      assistanceRoute,
+    });
+    expect(prompt).toContain('Whenever mentioning a canonical task');
+    expect(prompt).toContain('"state":"completed"');
+  }
+});

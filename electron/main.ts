@@ -9706,6 +9706,9 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                   speakerDisplayNames:
                     db.getMeetingNotesIdentityProjection(meetingId)
                       .speakerDisplayNames,
+                  canonicalCommitments: applyCanonicalCommitmentState([
+                    buildMeetingRetrievalResult(meeting),
+                  ])[0].canonical_commitments,
                 });
               })();
 

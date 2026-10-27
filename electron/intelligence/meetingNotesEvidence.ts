@@ -440,7 +440,7 @@ export const buildMeetingNotesEvidenceDocument = (
 };
 
 export const CANONICAL_COMMITMENT_ANSWER_GUIDANCE =
-  'Canonical commitment state overrides older notes; unconfirmed is not an accepted responsibility. When reporting canonical commitment status, quote the task text exactly and preserve its owner, state, and conditions. Do not conjugate or paraphrase the quoted task. A null owner means ownership is unconfirmed: report the stored task state without assigning it to a person.';
+  'Canonical commitment state overrides older notes; unconfirmed is not an accepted responsibility. Completed or rejected responsibilities are historical: report their recorded state instead of presenting them as pending, ongoing, or future work, regardless of how the question is phrased. Whenever mentioning a canonical task, quote the task text exactly and preserve its owner, state, and conditions. Do not conjugate or paraphrase the quoted task. A null owner means ownership is unconfirmed: report the stored task state without assigning it to a person.';
 
 export type CanonicalCommitmentEvidence = {
   owner: string | null;

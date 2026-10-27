@@ -7,8 +7,17 @@ import {
 import { calculateOllamaContextBudget } from '../../electron/llm/unifiedProvider';
 
 describe('getAskPlutoPrompt', () => {
-  it('preserves canonical task identity in ordinary factual answers', () => {
-    expect(getAskPlutoPrompt('Is this finished?', [], 'factual')).toContain(
+  it('preserves canonical lifecycle when answering task details', () => {
+    const prompt = getAskPlutoPrompt(
+      'Who is sending it, and under what condition?',
+      [],
+      'factual',
+    );
+    expect(prompt).toContain(
+      'report their recorded state instead of presenting them as pending, ongoing, or future work, regardless of how the question is phrased',
+    );
+    expect(prompt).toContain('Whenever mentioning a canonical task');
+    expect(prompt).toContain(
       'quote the task text exactly and preserve its owner, state, and conditions',
     );
   });

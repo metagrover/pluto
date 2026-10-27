@@ -18,7 +18,10 @@ import {
   stripMeetingAskPlutoTimestampNarration,
 } from './meetingAskPlutoStream';
 import {
+  CANONICAL_COMMITMENT_ANSWER_GUIDANCE,
+  type CanonicalCommitmentEvidence,
   buildMeetingNotesEvidenceDocument,
+  formatCanonicalCommitmentEvidence,
   resolveSavedMeetingEvidencePolicy,
 } from './meetingNotesEvidence';
 
@@ -319,12 +322,14 @@ export const buildMeetingAskPlutoContext = ({
   entities = [],
   attentionItems = [],
   speakerDisplayNames = {},
+  canonicalCommitments = [],
 }: {
   meeting: PersistedMeeting;
   query: string;
   entities?: MeetingAskPlutoContextEntity[];
   attentionItems?: MeetingAskPlutoAttentionItem[];
   speakerDisplayNames?: Readonly<Record<string, string>>;
+  canonicalCommitments?: readonly CanonicalCommitmentEvidence[];
 }): MeetingAskPlutoContext => {
   const scope = buildScope(meeting);
   const evidenceItems: MeetingAskPlutoEvidenceItem[] = [];
@@ -354,6 +359,20 @@ export const buildMeetingAskPlutoContext = ({
     text: segment.text,
     quote: segment.quote,
   }));
+
+  const canonicalState = formatCanonicalCommitmentEvidence(
+    canonicalCommitments.filter(
+      (record) => record.meetingId === scope.meetingId,
+    ),
+  );
+  if (canonicalState)
+    addEvidence(evidenceItems, {
+      id: 'canonical-commitments',
+      kind: 'note',
+      meetingId: scope.meetingId,
+      title: 'Current task state',
+      text: canonicalState,
+    });
 
   if (notesDocument.notesText) {
     addEvidence(evidenceItems, {
@@ -727,6 +746,12 @@ export const buildPreparedMeetingAskPlutoResponse = (
       ? 'action_item'
       : null;
   if (!kind || context.truncatedEvidenceKinds?.includes(kind)) return null;
+  // Historical action lists cannot override current lifecycle state.
+  if (
+    kind === 'action_item' &&
+    context.evidenceItems.some((item) => item.id === 'canonical-commitments')
+  )
+    return null;
 
   const selected = context.evidenceItems
     .map((item, index) => ({ item, index }))
@@ -864,6 +889,7 @@ ${assistancePolicy}
 ${conversationPolicy}
 
 Rules:
+- ${CANONICAL_COMMITMENT_ANSWER_GUIDANCE}
 - Ground meeting-specific factual claims only in Meeting evidence. Use explicit statements. Cite each factual sentence or bullet with [Evidence N]. If unsupported, say “The meeting didn't establish that.” Treat live evidence as partial.
 - Answer conversationally and directly, matching the requested depth. Synthesize across the relevant evidence. Do not merely repeat transcript lines. Meeting grounding is implicit. Never begin with “Based on the meeting evidence provided”.
 - Label inference “My interpretation is…”. Label outside general advice “This wasn't discussed, but generally…”. Never add unrelated issues as reasons or agreed actions.
@@ -887,6 +913,7 @@ Scope boundary: ${context.boundary}
 Trust note: ${context.statusNote}
 
 Rules:
+${CANONICAL_COMMITMENT_ANSWER_GUIDANCE}
 1. Ground every meeting-specific factual claim only in the meeting evidence below. Never invent meeting facts.
 2. For a meeting-fact question the evidence does not support, say: “The meeting didn't establish that.” State the specific missing detail only when useful.
 3. Cite factual claims with [Evidence N]. For authorship, distinguish the person who explicitly created, built, wrote, or prepared the work from someone who presented, discussed, owns, or was introduced near it. A name appearing near the topic is not proof of authorship.
