@@ -26,6 +26,8 @@ describe('Ask Pluto product help', () => {
     expect(answer).toContain('Settings → Advanced → Claude connection');
     expect(answer).toContain('Fully quit Claude');
     expect(answer).toContain('pluto-notes-development');
+    expect(answer).toContain('Developer → Local MCP servers');
+    expect(answer).toContain('won’t appear in the public connector directory');
     expect(answer).toContain('Retrieved notes are sent to Anthropic');
     expect(answer).toContain('ChatGPT access is managed separately');
   });

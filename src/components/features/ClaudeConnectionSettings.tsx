@@ -1,4 +1,3 @@
-import { Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { PlutoMcpSnapshot } from '../../../electron/mcp/types';
 import {
@@ -7,6 +6,7 @@ import {
   openClaudeSetupGuide,
   setClaudeConnectionEnabled,
 } from '../../api/claudeConnection';
+import claudeLogo from '../../assets/brand/claude.svg';
 
 const actionClass =
   'rounded-lg border border-pro-border bg-pro-surface px-3 py-2 text-[13px] font-medium text-pro-text-main hover:bg-pro-bg disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent';
@@ -81,8 +81,9 @@ export const ClaudeConnectionSettings = () => {
         Claude (⌘Q), then reopen it to load Pluto.
       </li>
       <li>
-        <strong className="font-medium">Check Connectors in a new chat.</strong>{' '}
-        Use the + menu and look for {label}. Allow note reads when Claude asks.
+        <strong className="font-medium">Check Claude’s local servers.</strong>{' '}
+        Open Claude Settings → Developer → Local MCP servers and look for{' '}
+        {label}. Then start a new chat and enable it in the + → Connectors menu.
       </li>
       <li>
         Try asking:{' '}
@@ -101,7 +102,7 @@ export const ClaudeConnectionSettings = () => {
         id="claude-connection-heading"
         className="mb-3 ml-1 flex items-center gap-2 text-[13px] font-semibold text-pro-text-main"
       >
-        <Sparkles className="h-5 w-5" aria-hidden="true" />
+        <img src={claudeLogo} alt="" aria-hidden="true" className="h-5 w-5" />
         Claude connection
       </h3>
       <div className="space-y-4 rounded-xl border border-pro-border/60 bg-pro-surface/70 p-4">
@@ -124,7 +125,7 @@ export const ClaudeConnectionSettings = () => {
               : !status
                 ? 'Connection unavailable'
                 : ready
-                  ? 'Note access enabled'
+                  ? 'Local setup ready'
                   : status.enabled
                     ? 'Connection needs attention'
                     : 'Access disabled'}
@@ -159,22 +160,16 @@ export const ClaudeConnectionSettings = () => {
             </button>
           </div>
         ) : null}
-        <div className="border-t border-pro-border/60 pt-4">
-          {ready ? (
-            <details className="text-xs leading-relaxed text-pro-text-main/75">
-              <summary className="cursor-pointer font-medium text-pro-text-main">
-                How to use Pluto in Claude
-              </summary>
-              <div className="mt-3">{steps}</div>
-            </details>
-          ) : (
-            <div className="space-y-3">
-              <h4 className="text-xs font-medium text-pro-text-main">
-                After you connect
-              </h4>
-              {steps}
-            </div>
-          )}
+        <div className="space-y-3 border-t border-pro-border/60 pt-4">
+          <h4 className="text-xs font-medium text-pro-text-main">
+            {ready ? 'Load Pluto in Claude' : 'After you connect'}
+          </h4>
+          <p className="text-xs leading-relaxed text-pro-text-main/75">
+            Pluto is a local connector. It won’t appear in Claude’s public
+            connector directory. Restart Claude after first connecting, then
+            check its local servers below.
+          </p>
+          {steps}
         </div>
         <div className="space-y-3 border-t border-pro-border/60 pt-4">
           <p
@@ -232,9 +227,11 @@ export const ClaudeConnectionSettings = () => {
                 Your organization may restrict local connectors.
               </p>
               <p>
-                Note access enabled means Pluto is ready; it does not confirm a
-                successful conversation in Claude. Disabling access leaves the
-                connector configured but stops future reads.
+                Local setup ready means Pluto has prepared access; it does not
+                confirm that Claude has loaded the connector. If Claude shows
+                “No servers added,” fully quit it with ⌘Q and reopen it.
+                Disabling access leaves the connector configured but stops
+                future reads.
               </p>
               <button
                 type="button"

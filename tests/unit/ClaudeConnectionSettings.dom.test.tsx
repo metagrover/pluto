@@ -93,7 +93,7 @@ describe('Claude meeting note access', () => {
     expect(api.setClaudeConnectionEnabled).toHaveBeenCalledWith(true);
     expect(api.openClaude).toHaveBeenCalledOnce();
     expect(container.querySelector('[role="status"]')?.textContent).toBe(
-      'Note access enabled',
+      'Local setup ready',
     );
   });
 
@@ -138,7 +138,7 @@ describe('Claude meeting note access', () => {
       container.querySelector<HTMLInputElement>('input')!.click(),
     );
     await act(async () => button(container, 'Connect to Claude').click());
-    expect(container.textContent).toContain('Note access enabled');
+    expect(container.textContent).toContain('Local setup ready');
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'Install Claude Desktop',
     );
@@ -155,6 +155,19 @@ describe('Claude meeting note access', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'setup guide could not be opened',
     );
+  });
+
+  it('keeps the local-server handoff visible after setup instead of sending users to the directory', async () => {
+    api.getClaudeConnectionStatus.mockResolvedValue(ready);
+    const container = await render();
+    const steps = container.querySelector('ol')!;
+    expect(steps.closest('details')).toBeNull();
+    expect(steps.textContent).toContain('Restart Claude once');
+    expect(steps.textContent).toContain('Developer → Local MCP servers');
+    expect(container.textContent).toContain(
+      'won’t appear in Claude’s public connector directory',
+    );
+    expect(container.textContent).toContain('No servers added');
   });
 
   it('uses the development connector name', async () => {

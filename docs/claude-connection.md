@@ -12,10 +12,15 @@ It does not expose raw transcripts, audio, database access, edits, or recording 
 2. Open **Settings → Advanced → Claude connection** in Pluto.
 3. Read the disclosure, allow meeting-note access, and click **Connect to Claude**.
 4. Fully quit Claude (⌘Q), then reopen it. Keep Pluto running with access enabled.
-5. Start a new chat in Claude. In the **+ → Connectors** menu, check for
-   **pluto-notes**. Development builds use **pluto-notes-development**.
+5. In Claude Settings, open **Developer → Local MCP servers** and check for
+   **pluto-notes**. Development builds use **pluto-notes-development**. Then start
+   a new chat and enable Pluto in **+ → Connectors**.
 6. Ask “Use Pluto to tell me what we decided in my latest meeting.” Allow note
    reads when Claude asks.
+
+Pluto is registered locally, so it does not appear in Claude’s public connector
+directory. If Developer settings show **No servers added** after connecting,
+fully quit Claude with ⌘Q and reopen it; opening another window is not enough.
 
 No separate Node installation or Anthropic API key is required. Pluto uses its
 bundled Electron runtime and the shipped stdio MCP bridge. This setup targets
@@ -50,7 +55,7 @@ connections restart with fresh credentials on the next launch.
   Claude's Developer settings, then disable access in Pluto and reconnect.
   Another Pluto profile's entry is treated as a conflict; development and release
   builds have distinct names and can coexist.
-- **Note access enabled** means Pluto prepared local access. It does not confirm
+- **Local setup ready** means Pluto prepared local access. It does not confirm
   that Claude has loaded the connector or successfully answered a question.
 - Update Claude Desktop, fully restart it after connecting, and check its
   Developer settings for connection errors. Organization policies may restrict
