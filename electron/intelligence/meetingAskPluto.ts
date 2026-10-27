@@ -489,7 +489,7 @@ export const buildMeetingAskPlutoContext = ({
     scope,
     trustStatus,
     boundary:
-      'Only use evidence from this meeting supplied below. Saved meeting notes are authoritative unless the request explicitly asks for exact wording or the notes are unavailable. Do not use any other meeting, project, person, or global memory unless the user explicitly asks to broaden scope.',
+      'Only use evidence from this meeting supplied below. Canonical task records are authoritative for current task state. Meeting notes describe historical discussion and remain authoritative for other recorded facts unless the request explicitly asks for exact wording or the notes are unavailable. Do not use any other meeting, project, person, or global memory unless the user explicitly asks to broaden scope.',
     statusNote,
     evidenceItems: boundedEvidenceItems,
     ...(truncatedEvidenceKinds.size > 0

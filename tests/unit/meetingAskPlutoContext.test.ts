@@ -1050,6 +1050,9 @@ it('preserves current task state ahead of historical saved-meeting actions', () 
   });
   const state = context.evidenceItems[0];
   expect(state.id).toBe('canonical-commitments');
+  expect(context.boundary).toContain(
+    'Canonical task records are authoritative for current task state',
+  );
   expect(state.text).toContain('"state":"completed"');
   expect(state.text).toContain('"state":"open"');
   expect(state.text).not.toContain('Renew the permit');
