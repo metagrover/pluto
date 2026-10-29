@@ -44,6 +44,8 @@ export interface MeetingNotesBlock {
 }
 
 export interface NativeMeetingNoteContinuation {
+  kind?: 'action' | 'decision' | 'note' | 'paragraph' | 'review';
+  assignee?: string | null;
   id: string;
   text: string;
   completed?: boolean;
@@ -297,6 +299,10 @@ const expandNativeContinuations = (
         authorship: 'human' as const,
         edited: true,
         completed: continuation.completed,
+        ...(continuation.kind ? { blockType: continuation.kind } : {}),
+        ...(Object.hasOwn(continuation, 'assignee')
+          ? { assignee: continuation.assignee ?? undefined }
+          : {}),
         nativeContinuation: {
           parentPath: block.path!,
           id: continuation.id,

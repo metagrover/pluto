@@ -62,6 +62,32 @@ const eouUpdate = (): NativeEvent => ({
 });
 
 describe('NativeJsonLineProcess live events', () => {
+  it('waits for exit and force-stops a worker that ignores graceful termination', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new FakeChild();
+      const runtime = makeProcess(child);
+      child.kill.mockImplementation((signal?: string) => {
+        if (signal === 'SIGKILL') child.emit('exit', null, 'SIGKILL');
+        return true;
+      });
+      runtime.start();
+      let finished = false;
+      const stopping = runtime.terminateAndWait().then(() => {
+        finished = true;
+      });
+      await Promise.resolve();
+      expect(finished).toBe(false);
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      await vi.advanceTimersByTimeAsync(2_000);
+      await stopping;
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+      expect(finished).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('delivers strict byte progress correlated to a prepare request', async () => {
     const child = new FakeChild();
     const process = makeProcess(child);

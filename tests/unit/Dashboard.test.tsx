@@ -1048,6 +1048,7 @@ describe('Dashboard', () => {
             assignee_name: 'Me',
             commitment_state: 'possible',
             origin: 'extraction',
+            source_action_review_version: 1,
             source_meeting_id: 'meeting-1',
           }),
         }),

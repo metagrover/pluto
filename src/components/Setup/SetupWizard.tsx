@@ -464,8 +464,8 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
           <ObservatoryPanel
             eyebrow="Intelligence setup"
             title="Your intelligence, your choice."
-            description="Use local models with Ollama, or connect the ChatGPT plan you already have."
-            footer="Recording and transcription stay on this Mac either way."
+            description="Use local models with Ollama, your ChatGPT plan, or an OpenRouter API key."
+            footer="Recording and transcription stay on this Mac."
           />
           <section
             aria-label="Intelligence setup"

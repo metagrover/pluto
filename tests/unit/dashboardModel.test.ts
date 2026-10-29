@@ -2459,6 +2459,7 @@ describe('buildDashboardHomeModel', () => {
             assignee_name: 'Me',
             commitment_state: 'possible',
             origin: 'extraction',
+            source_action_review_version: 1,
             source_meeting_id: '42',
           }),
         }),
@@ -2489,6 +2490,7 @@ describe('buildDashboardHomeModel', () => {
             assignee_name: 'Me',
             commitment_state: 'possible',
             origin: 'extraction',
+            source_action_review_version: 1,
             source_meeting_id: 'meeting-missing',
           }),
         }),
@@ -3529,6 +3531,7 @@ describe('buildDashboardHomeModel', () => {
         assigned_to: 'person-me',
         metadata: JSON.stringify({
           commitment_state: 'possible',
+          owner_source: 'user',
           assignee_name: 'Alex',
           source_meeting_id: 'meeting-new',
         }),

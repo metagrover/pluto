@@ -2,6 +2,7 @@ import type { AskPlutoConversationContext } from '../../src/types/askPlutoQuery'
 import type { AskPlutoResearchTask } from './askPlutoConversation';
 import type { ConversationTurnMode } from './conversationController';
 import type { RetrievalResult } from './intelligenceTypes';
+import { CANONICAL_COMMITMENT_ANSWER_GUIDANCE } from './meetingNotesEvidence';
 import { excerptQueryEvidence } from './queryEvidenceExcerpt';
 
 export const getIntentClassificationPrompt = (query: string): string => {
@@ -275,6 +276,7 @@ ${details.join('\n')}`;
                           : 'Write a readable chat response in short paragraphs. For summaries, lead with a one-sentence synthesis, then use bullets only when they materially improve the clarity of distinct decisions or action items. Do not create one bullet per source or repeat the same point. Include participant names, decisions, and action items only when the evidence supports them.';
   const formatGuidance = [
     taskGuidance,
+    CANONICAL_COMMITMENT_ANSWER_GUIDANCE,
     options.conversationMode === 'challenge'
       ? 'Re-evaluate the prior answer against the current synthesized Context. Say what was overstated, give the latest dated supported picture, and identify any remaining uncertainty. Do not merely agree or restate the earlier answer. Do not claim that newer notes do not exist just because this bounded search did not retrieve them.'
       : '',

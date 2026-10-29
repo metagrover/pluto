@@ -186,6 +186,7 @@ describe('Dashboard interactions', () => {
           commitment_state: 'possible',
           full_description: fullDescription,
           source_meeting_id: 'meeting-1',
+          source_action_review_version: 1,
           source_evidence: sourceEvidence,
         }),
       }),
@@ -1212,7 +1213,7 @@ describe('Dashboard interactions', () => {
 
     await act(async () => {
       Array.from(container.querySelectorAll('button'))
-        .find((button) => button.textContent?.includes('View all'))
+        .find((button) => button.textContent?.trim() === 'View all')
         ?.click();
     });
 

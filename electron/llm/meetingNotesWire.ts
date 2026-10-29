@@ -16,10 +16,16 @@ export const createNotesWireRequest = (
   const bySpan = new Map(
     spans.map((span, index) => [spanKey(span), `R${index}`]),
   );
+  const literalLabels = new Set<string>();
   const encoded = prompt
     .replace(
       /BEGIN SOURCE DATA\n([\s\S]*?)\nEND SOURCE DATA/g,
       (_packet, data: string) => {
+        for (const line of data.split('\n').filter(Boolean)) {
+          const { text } = JSON.parse(line) as { text: string };
+          for (const label of text.match(/\b[RP]\d+(?:\.\d+)?\b/g) ?? [])
+            literalLabels.add(label);
+        }
         if (NOTES_EXPERIMENTS_ENABLED && sourceParagraphs) {
           const groups: Array<{
             turns: Array<{ speaker: unknown; text: string }>;
@@ -138,7 +144,7 @@ export const createNotesWireRequest = (
   const decodeValue = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(decodeValue);
     if (!value || typeof value !== 'object') return value;
-    return Object.fromEntries(
+    const decoded = Object.fromEntries(
       Object.entries(value).map(([key, entry]) => {
         if (key !== 'sources' || !Array.isArray(entry))
           return [key, decodeValue(entry)];
@@ -153,6 +159,29 @@ export const createNotesWireRequest = (
         ];
       }),
     );
+    if (
+      typeof decoded.text === 'string' &&
+      'sources' in value &&
+      Array.isArray(value.sources)
+    ) {
+      const citedLabels = value.sources;
+      // Normalize duplicate wire annotations, preserving literal source identifiers and all citations.
+      decoded.text = decoded.text.replace(
+        /\s*\[([RP]\d+(?:\.\d+)?(?:,\s*[RP]\d+(?:\.\d+)?)*)\](?=\s|[.!?,;:]|$)/g,
+        (marker, group: string) =>
+          group
+            .split(/,\s*/)
+            .every(
+              (label) =>
+                citedLabels.includes(label) &&
+                byLabel.has(label) &&
+                !literalLabels.has(label),
+            )
+            ? ''
+            : marker,
+      );
+    }
+    return decoded;
   };
   return {
     sourceLabels: [...byLabel.keys()],

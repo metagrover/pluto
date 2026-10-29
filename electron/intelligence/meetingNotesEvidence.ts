@@ -4,6 +4,7 @@ import {
   parseUserEditsJson,
 } from '../../src/utils/analysisDocument';
 import { buildMeetingNotesDocument } from '../../src/utils/meetingNotesDocument';
+import { containsConfidentialAside } from './evidencePrivacy';
 
 export type SavedMeetingEvidencePolicy =
   | 'notes_only'
@@ -43,6 +44,7 @@ export interface MeetingNotesEvidenceDocument {
   meetingId: string;
   title: string;
   notesText: string;
+  notePassages: Array<{ text: string; kind: string }>;
   decisionsText: string;
   actionItemsText: string;
   actions?: Array<{
@@ -231,6 +233,33 @@ export const buildMeetingNotesEvidenceDocument = (
         ),
       )
     : uniqueText([clean(meeting.enhanced_notes), clean(meeting.user_notes)]);
+  const notePassages = notesDocument
+    ? orderedNoteSections
+        .flatMap((section) =>
+          section.blocks.flatMap((block) =>
+            block.blockType === 'review'
+              ? []
+              : [
+                  {
+                    text: uniqueText([
+                      block.text,
+                      ...(block.nativeContinuations || []).map(
+                        (continuation) => continuation.text,
+                      ),
+                    ]),
+                    kind: section.kind,
+                  },
+                ],
+          ),
+        )
+        .filter((passage) => passage.text)
+    : [clean(meeting.enhanced_notes), clean(meeting.user_notes)].flatMap(
+        (text) =>
+          text
+            .split(/\n\s*\n/)
+            .filter(Boolean)
+            .map((text) => ({ text, kind: 'legacy' })),
+      );
   const decisionsText = uniqueText(
     settledBlocks
       ? settledBlocks
@@ -386,6 +415,7 @@ export const buildMeetingNotesEvidenceDocument = (
     meetingId: String(meeting.id),
     title: clean(meeting.title) || 'Untitled meeting',
     notesText,
+    notePassages,
     decisionsText,
     actionItemsText,
     ...(notesDocument
@@ -396,7 +426,7 @@ export const buildMeetingNotesEvidenceDocument = (
               text: block.text,
               ...(block.assignee ? { assignee: block.assignee } : {}),
               ...(block.due?.trim() ? { due: block.due.trim() } : {}),
-              ...(block.completed ? { completed: true } : {}),
+              completed: block.completed === true,
             })),
         }
       : {}),
@@ -408,3 +438,68 @@ export const buildMeetingNotesEvidenceDocument = (
     hasUsableNotes,
   };
 };
+
+export const CANONICAL_COMMITMENT_ANSWER_GUIDANCE =
+  'Canonical commitment state overrides older notes; unconfirmed is not an accepted responsibility. Only open responsibilities may be presented as next steps or work still to do. Completed or rejected responsibilities are historical: report their recorded state instead of presenting them as pending, ongoing, or future work, regardless of how the question is phrased. Whenever mentioning a canonical task, quote the task text exactly and preserve its owner, state, and conditions. Do not conjugate or paraphrase the quoted task. A null owner means ownership is unconfirmed: report the stored task state without assigning it to a person.';
+
+export type CanonicalCommitmentEvidence = {
+  owner: string | null;
+  state: 'open' | 'unconfirmed' | 'completed' | 'rejected';
+  task: string;
+  meetingId: string;
+};
+
+/** App-owned lifecycle state is evidence, independent of query wording. */
+export const buildCanonicalCommitmentEvidence = (
+  meetingId: string,
+  commitments: ReturnType<typeof import('../db').getCanonicalPersonCommitments>,
+  owner: string,
+): CanonicalCommitmentEvidence[] => {
+  if (!commitments) return [];
+  const items = [
+    ...commitments.open.map((item) => ({
+      ...item,
+      owner,
+      state: 'open' as const,
+    })),
+    ...commitments.candidates.map((item) => ({
+      ...item,
+      owner,
+      state: 'unconfirmed' as const,
+    })),
+    ...commitments.delivered.map((item) => ({
+      ...item,
+      owner,
+      state: 'completed' as const,
+    })),
+    ...(commitments.excluded ?? []).map((item) => ({
+      ...item,
+      owner: item.ownershipVerified ? owner : null,
+      state: item.status,
+    })),
+  ].filter(
+    (item) =>
+      item.sourceMeetingId === meetingId &&
+      !containsConfidentialAside(item.text),
+  );
+  return [
+    ...new Map(
+      items.map((item) => {
+        const record = {
+          owner: item.owner,
+          state: item.state,
+          task: item.text,
+          meetingId,
+        };
+        return [JSON.stringify(record), record] as const;
+      }),
+    ).values(),
+  ];
+};
+
+export const formatCanonicalCommitmentEvidence = (
+  records: readonly CanonicalCommitmentEvidence[],
+): string =>
+  records.length
+    ? `[Canonical commitment state]:\n${records.map((record) => JSON.stringify(record)).join('\n')}`
+    : '';

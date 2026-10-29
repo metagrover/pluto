@@ -4,7 +4,7 @@ import { restrictEvidenceToMeetingIds } from '../../electron/intelligence/askPlu
 import { resolveSemanticMeetingScope } from '../../electron/intelligence/askPlutoSemanticScope';
 import { buildSynthesizedAnswerPresentation } from '../../electron/intelligence/citationEngine';
 import {
-  applyAssigneeCommitmentState,
+  applyCanonicalCommitmentState,
   buildAssigneeActionRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
@@ -117,6 +117,65 @@ it('renders canonical action fields naturally for local extracts without reading
   );
   expect(reported).not.toContain('Riley: Riley');
 });
+it('preserves projected self task ownership through presentation and respects completion edits', () => {
+  const meeting = {
+    id: 'synthetic-self-task',
+    title: 'Fictional correspondence',
+    analysis_json: JSON.stringify({
+      analysis_schema_version: 3,
+      overview: 'Recorded correspondence responsibilities.',
+      topics: [],
+      all_decisions: [],
+      all_action_items: [
+        {
+          text: 'Send the checked minutes to Ash.',
+          assignee: 'Me',
+          due: 'Tuesday',
+        },
+        { text: 'Book the room.', assignee: 'Remote Speaker 2' },
+      ],
+      meeting_type: 'general',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    }),
+  } as dbModule.PersistedMeeting;
+  const original = meeting.analysis_json;
+  const context = buildMeetingRetrievalResult(meeting);
+  expect(context.note_actions?.[0]).toMatchObject({
+    assignee: 'Me',
+    completed: false,
+    due: 'Tuesday',
+  });
+  const answer = 'You need to send the checked minutes to Ash by Tuesday.';
+  expect(buildSynthesizedAnswerPresentation(answer, [context]).answer).toBe(
+    answer,
+  );
+  expect(
+    buildSynthesizedAnswerPresentation('You need to book the room.', [context])
+      .unsupportedClaimCount,
+  ).toBe(1);
+  const completed = buildMeetingRetrievalResult({
+    ...meeting,
+    user_edits_json: JSON.stringify({
+      'completion:all_action_items:0': {
+        original: 'false',
+        edited: 'true',
+        edited_at: '2026-10-24T00:00:00Z',
+      },
+    }),
+  });
+  expect(completed.note_actions?.[0]?.completed).toBe(true);
+  expect(
+    buildSynthesizedAnswerPresentation(answer, [completed])
+      .unsupportedClaimCount,
+  ).toBe(1);
+  expect(meeting.analysis_json).toBe(original);
+});
+
 type EntitySearchRow = ReturnType<
   typeof dbModule.searchEntitiesWithMeetingContext
 >[number];
@@ -136,6 +195,7 @@ vi.mock('../../electron/db', () => ({
   walkEntityGraph: vi.fn(),
   getTemporalMeetings: vi.fn(),
   getMeetingsForEntity: vi.fn().mockReturnValue([]),
+  getMeetingEntities: vi.fn().mockReturnValue([]),
   getMeeting: vi.fn(),
   getAskPlutoMeeting: vi.fn(),
   getAskPlutoMeetingHeaders: vi.fn().mockReturnValue([]),
@@ -192,6 +252,7 @@ describe('Query Engine', () => {
     vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue([]);
     vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
     vi.mocked(dbModule.getMeetingsForEntity).mockReturnValue([]);
+    vi.mocked(dbModule.getMeetingEntities).mockReturnValue([]);
   });
 
   it('uses only synthesized live notes for current-meeting retrieval', () => {
@@ -517,6 +578,127 @@ describe('Query Engine', () => {
       expect(result[0].evidence_text).not.toContain('Cobalt');
       expect(dbModule.searchMeetingNotesFts).toHaveBeenCalled();
       expect(dbModule.searchMeetingsFts).not.toHaveBeenCalled();
+    });
+
+    it('retries an empty search once with bounded local aliases while retaining scope and current evidence', async () => {
+      const meeting = {
+        id: 'staffing',
+        title: 'Operations',
+        started_at: '2026-10-16T12:00:00Z',
+        enhanced_notes: 'A headcount freeze is in effect.',
+        transcript_json: 'RAW_RECALL_TRANSCRIPT_SENTINEL',
+      } as FtsRow;
+      vi.mocked(dbModule.searchMeetingNotesFts).mockImplementation((query) =>
+        query.includes('headcount') ? [meeting] : [],
+      );
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
+      vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue([meeting]);
+      vi.mocked(factoryModule.getAllSettings).mockResolvedValue({
+        llm_provider: 'ollama',
+      } as LLMSettings);
+      const answerAskPluto = vi.fn().mockResolvedValue(
+        JSON.stringify({
+          expanded_keywords: [
+            'headcount freeze',
+            'invented approval',
+            null,
+            'x'.repeat(61),
+          ],
+        }),
+      );
+      vi.mocked(factoryModule.getProvider).mockResolvedValue({
+        answerAskPluto,
+      } as unknown as LLMProvider);
+      const parsed = {
+        keywords: ['hiring', 'constraints'],
+        expanded_keywords: [],
+        entity_mentions: [],
+        intent: 'factual' as const,
+        temporal_range: {
+          from: '2026-10-01T00:00:00Z',
+          to: '2026-10-18T00:00:00Z',
+        },
+      };
+      const result = await retrieveContext(parsed, {
+        query: 'What are the hiring constraints?',
+        meetingIds: ['staffing'],
+        expandQuery: true,
+      });
+      expect(result.map((source) => source.meeting_id)).toEqual(['staffing']);
+      expect(result[0].evidence_text).toContain(
+        'A headcount freeze is in effect.',
+      );
+      expect(result[0].evidence_text).not.toContain('hiring constraints');
+      expect(answerAskPluto).toHaveBeenCalledTimes(1);
+      expect(answerAskPluto.mock.calls[0][0]).not.toContain(
+        'RAW_RECALL_TRANSCRIPT_SENTINEL',
+      );
+      expect(
+        vi.mocked(dbModule.searchMeetingNotesFts).mock.calls.flat().join(' '),
+      ).not.toContain('invented approval');
+      expect(dbModule.searchMeetingNotesFts).toHaveBeenCalledWith(
+        '"headcount"* AND "freeze"*',
+        expect.objectContaining({
+          meetingIds: ['staffing'],
+          from: parsed.temporal_range.from,
+          to: parsed.temporal_range.to,
+        }),
+      );
+      answerAskPluto.mockClear();
+      await retrieveContext(
+        { ...parsed, keywords: ['headcount'] },
+        { query: 'What is the headcount freeze?', expandQuery: true },
+      );
+      expect(answerAskPluto).not.toHaveBeenCalled();
+    });
+
+    it('keeps optional recall failures empty, skips cloud expansion, and propagates cancellation', async () => {
+      const parsed = {
+        keywords: ['hiring'],
+        expanded_keywords: [],
+        entity_mentions: [],
+        intent: 'factual' as const,
+        temporal_range: null,
+      };
+      vi.mocked(dbModule.getAskPlutoMeetingHeaders).mockReturnValue([
+        { id: 'staffing' },
+      ]);
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
+        id: 'staffing',
+        title: 'Operations',
+        enhanced_notes: 'A headcount freeze is in effect.',
+      });
+      vi.mocked(factoryModule.getAllSettings).mockResolvedValue({
+        llm_provider: 'openai',
+      } as LLMSettings);
+      expect(
+        await retrieveContext(parsed, {
+          query: 'What limits hiring?',
+          expandQuery: true,
+        }),
+      ).toEqual([]);
+      expect(factoryModule.getProvider).not.toHaveBeenCalled();
+      vi.mocked(factoryModule.getAllSettings).mockResolvedValue({
+        llm_provider: 'ollama',
+      } as LLMSettings);
+      const answerAskPluto = vi.fn().mockRejectedValue(new Error('offline'));
+      vi.mocked(factoryModule.getProvider).mockResolvedValue({
+        answerAskPluto,
+      } as unknown as LLMProvider);
+      expect(
+        await retrieveContext(parsed, {
+          query: 'What limits hiring?',
+          expandQuery: true,
+        }),
+      ).toEqual([]);
+      expect(answerAskPluto).toHaveBeenCalledTimes(1);
+      await expect(
+        retrieveContext(parsed, {
+          query: 'hiring',
+          expandQuery: true,
+          signal: AbortSignal.abort(),
+        }),
+      ).rejects.toThrow();
     });
 
     it('uses matching note sections before transcript evidence', async () => {
@@ -4116,6 +4298,137 @@ describe('Query Engine', () => {
     });
   });
 
+  it('applies canonical self state to ordinary retrieval without parsing question phrasing', () => {
+    const meeting = {
+      id: 'source',
+      title: 'Review',
+      enhanced_notes: 'The inventory will be sent.',
+    } as dbModule.PersistedMeeting;
+    vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue('self');
+    vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
+      open: [],
+      candidates: [],
+      delivered: [],
+      excluded: [
+        {
+          text: 'Send the inventory',
+          status: 'completed',
+          sourceMeetingId: 'source',
+          ownershipVerified: true,
+        },
+      ],
+    });
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
+    const source = buildMeetingRetrievalResult(meeting);
+    const result = applyCanonicalCommitmentState([source])[0];
+    expect(result.evidence_text).toContain('"state":"completed"');
+    expect(result.canonical_commitments).toEqual([
+      {
+        owner: 'You',
+        state: 'completed',
+        task: 'Send the inventory',
+        meetingId: 'source',
+      },
+    ]);
+    expect(result.evidence_text).toContain('"owner":"You"');
+    expect(result.evidence_text).toContain(source.evidence_text);
+    expect(
+      buildExtractiveTemporalSummary('What are the action items?', [result]),
+    ).toBeNull();
+    expect(source.evidence_text).not.toContain('Canonical commitment state');
+    expect(
+      applyCanonicalCommitmentState([{ ...source, meeting_id: 'other' }])[0]
+        .evidence_text,
+    ).not.toContain('Canonical commitment state');
+    expect(
+      applyCanonicalCommitmentState([{ ...source, source_type: 'artifact' }])[0]
+        .evidence_text,
+    ).not.toContain('Canonical commitment state');
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
+    expect(
+      applyCanonicalCommitmentState([source])[0].evidence_text,
+    ).not.toContain('Canonical commitment state');
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
+      ...meeting,
+      user_notes: 'Off the record',
+    });
+    expect(
+      applyCanonicalCommitmentState([source])[0].evidence_text,
+    ).not.toContain('Canonical commitment state');
+    vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(null);
+    expect(
+      applyCanonicalCommitmentState([source])[0].evidence_text,
+    ).not.toContain('Canonical commitment state');
+  });
+
+  it('carries named-person lifecycle records with the same ownership and source boundaries', () => {
+    const meeting = {
+      id: 'source',
+      title: 'Review',
+      enhanced_notes: 'Morgan discussed the inventory.',
+    } as dbModule.PersistedMeeting;
+    vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(null);
+    vi.mocked(dbModule.findEntity).mockReturnValue({
+      id: 'morgan',
+      name: 'Morgan',
+      type: 'person',
+    } as dbModule.Entity);
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(meeting);
+    vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
+      open: [],
+      candidates: [],
+      delivered: [],
+      excluded: [
+        {
+          text: 'Send the inventory',
+          status: 'completed',
+          sourceMeetingId: 'source',
+          ownershipVerified: true,
+        },
+        {
+          text: 'Send the invitations',
+          status: 'completed',
+          sourceMeetingId: 'source',
+          ownershipVerified: false,
+        },
+        {
+          text: 'Send the budget',
+          status: 'rejected',
+          sourceMeetingId: 'other',
+          ownershipVerified: true,
+        },
+      ],
+    });
+    vi.mocked(dbModule.getMeetingEntities).mockReturnValue([
+      { id: 'morgan', name: 'Morgan', type: 'person' },
+    ] as any);
+    const source = buildMeetingRetrievalResult(meeting);
+    const result = applyCanonicalCommitmentState([source])[0];
+    expect(result.canonical_commitments).toEqual([
+      {
+        owner: 'Morgan',
+        state: 'completed',
+        task: 'Send the inventory',
+        meetingId: 'source',
+      },
+      {
+        owner: null,
+        state: 'completed',
+        task: 'Send the invitations',
+        meetingId: 'source',
+      },
+    ]);
+    expect(result.evidence_text).toContain('invitations');
+    expect(result.evidence_text).not.toContain('budget');
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
+      ...meeting,
+      user_notes: 'Off the record',
+    });
+    expect(applyCanonicalCommitmentState([source])[0]).toBe(source);
+    vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue(undefined);
+    expect(applyCanonicalCommitmentState([source])[0]).toBe(source);
+  });
+
   describe('Ask Pluto assignment and long-note recovery', () => {
     it('does not mistake one completed task for complete coverage of its source', () => {
       vi.mocked(dbModule.findEntity).mockReturnValue({
@@ -4144,6 +4457,9 @@ describe('Query Engine', () => {
           },
         ],
       } as any);
+      vi.mocked(dbModule.getMeetingEntities).mockReturnValue([
+        { id: 'person-m', name: 'Morgan', type: 'person' },
+      ] as any);
       const recall = buildAssigneeActionRecall("What's assigned to Morgan?", [
         meeting,
       ]);
@@ -4152,17 +4468,15 @@ describe('Query Engine', () => {
         commitmentCount: 0,
       });
       expect(
-        applyAssigneeCommitmentState(
-          [buildMeetingRetrievalResult(meeting)],
-          recall,
-        )[0].evidence_text,
+        applyCanonicalCommitmentState([buildMeetingRetrievalResult(meeting)])[0]
+          .evidence_text,
       ).toContain('acceptance report');
       expect(
-        applyAssigneeCommitmentState(
-          [buildMeetingRetrievalResult(meeting)],
-          recall,
-        )[0].evidence_text,
-      ).toContain('Morgan — completed: Archive the checklist.');
+        applyCanonicalCommitmentState([buildMeetingRetrievalResult(meeting)])[0]
+          .evidence_text,
+      ).toContain(
+        '"owner":"Morgan","state":"completed","task":"Archive the checklist."',
+      );
       expect(recall?.answer).not.toContain('- Archive');
     });
     it('selects relevant middle evidence before long-note budgeting', async () => {

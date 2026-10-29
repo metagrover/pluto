@@ -1,13 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatGPTStatus } from '../../../electron/chatgpt/types';
 import type { OllamaReadiness } from '../../../electron/llm/ollamaReadiness';
-import { CLOUD_CONSENT_VERSION } from '../../../electron/llm/providerCatalog';
+import {
+  CLOUD_CONSENT_VERSION,
+  PROVIDER_DEFAULT_MODELS,
+  cloudConsentSettingKey,
+} from '../../../electron/llm/providerCatalog';
 import chatGPTLogo from '../../assets/brand/chatgpt.svg';
 import { ChatGPTPlanWelcome } from '../features/ChatGPTPlanWelcome';
 import { OllamaReadinessStatus } from '../features/OllamaReadinessStatus';
 
+type SetupProvider = 'ollama' | 'chatgpt' | 'openrouter';
+
 export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
-  const [provider, setProvider] = useState<'ollama' | 'chatgpt' | null>(null);
+  const [provider, setProvider] = useState<SetupProvider | null>(null);
+  const [openRouterModel, setOpenRouterModel] = useState(
+    PROVIDER_DEFAULT_MODELS.openrouter,
+  );
+  const [openRouterKey, setOpenRouterKey] = useState('');
+  const [openRouterConfigured, setOpenRouterConfigured] = useState(false);
+  const [checkingOpenRouter, setCheckingOpenRouter] = useState(false);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [canceling, setCanceling] = useState(false);
@@ -29,7 +41,8 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
     ])
       .then(([saved, status, model]) => {
         if (!mounted) return;
-        if (saved === 'ollama' || saved === 'chatgpt') setProvider(saved);
+        if (saved === 'ollama' || saved === 'chatgpt' || saved === 'openrouter')
+          setProvider(saved);
         setConnected(
           Boolean(
             (status as ChatGPTStatus | null)?.planEnabled &&
@@ -49,14 +62,66 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
     };
   }, []);
 
-  const finishSetup = async (choice: 'ollama' | 'chatgpt') => {
+  useEffect(() => {
+    if (provider !== 'openrouter') {
+      setOpenRouterKey('');
+      return;
+    }
+    let mounted = true;
+    setOpenRouterConfigured(false);
+    setCheckingOpenRouter(true);
+    void Promise.all([
+      invoke('PROVIDER_CREDENTIAL_STATUS', 'openrouter'),
+      invoke('GET_SETTING', 'openrouter_model'),
+    ])
+      .then(([status, model]) => {
+        if (!mounted) return;
+        setOpenRouterConfigured(
+          Boolean((status as { configured?: boolean } | null)?.configured),
+        );
+        setOpenRouterModel(
+          typeof model === 'string' && model.trim()
+            ? model
+            : PROVIDER_DEFAULT_MODELS.openrouter,
+        );
+      })
+      .catch(() => {
+        if (mounted)
+          setError('Could not check your saved key. Enter a key to continue.');
+      })
+      .finally(() => {
+        if (mounted) setCheckingOpenRouter(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [provider]);
+
+  const finishSetup = async (choice: SetupProvider) => {
     setBusy(true);
     setError('');
     setShowWelcome(false);
     try {
-      if (choice === 'chatgpt') {
+      if (choice === 'openrouter') {
+        if (checkingOpenRouter || !openRouterModel.trim()) return;
+        if (openRouterKey.trim()) {
+          await invoke('PROVIDER_CREDENTIAL_SET', {
+            provider: 'openrouter',
+            value: openRouterKey,
+          });
+          setOpenRouterKey('');
+          setOpenRouterConfigured(true);
+        } else if (!openRouterConfigured) {
+          return;
+        }
         await invoke('SET_SETTING', {
-          key: 'cloud_consent_chatgpt',
+          key: 'openrouter_model',
+          value: openRouterModel.trim(),
+        });
+      }
+      if (choice === 'chatgpt' || choice === 'openrouter') {
+        await invoke('SET_SETTING', {
+          key: cloudConsentSettingKey(choice),
           value: CLOUD_CONSENT_VERSION,
         });
       }
@@ -78,6 +143,10 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
     if (!provider) return;
     if (provider === 'ollama') {
       if (!recordingOnly && localReadiness?.status !== 'ready') return;
+      await finishSetup(provider);
+      return;
+    }
+    if (provider === 'openrouter') {
       await finishSetup(provider);
       return;
     }
@@ -132,7 +201,7 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
       </h2>
       <p className="mt-3 text-[15px] leading-6 text-pro-text-main/75">
         Get useful meeting notes and answers with the intelligence you prefer.
-        Recording and transcription stay on this Mac either way.
+        Recording and transcription stay on this Mac.
       </p>
       <fieldset
         disabled={busy || showWelcome}
@@ -183,7 +252,72 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
             </span>
           </span>
         </label>
+        <label className="flex cursor-pointer items-start gap-4 py-5">
+          <input
+            type="radio"
+            name="intelligence-provider"
+            value="openrouter"
+            checked={provider === 'openrouter'}
+            onChange={() => {
+              setProvider('openrouter');
+              setError('');
+            }}
+            className="mt-1 h-4 w-4 accent-pro-accent"
+          />
+          <span>
+            <span className="block text-[15px] font-semibold">
+              OpenRouter · Your API key
+            </span>
+            <span className="mt-1 block text-[13px] leading-5 text-pro-text-main/75">
+              Choose a cloud model with OpenRouter. Requests are billed to your
+              OpenRouter account.
+            </span>
+          </span>
+        </label>
       </fieldset>
+      {provider === 'openrouter' ? (
+        <div className="mt-4 space-y-3">
+          <div>
+            <label htmlFor="openrouter-model" className="text-sm font-medium">
+              Model
+            </label>
+            <input
+              className="mt-1 w-full rounded-lg border border-pro-border/80 bg-pro-bg px-3 py-2.5 text-[14px] font-medium text-pro-text-main outline-none focus:border-pro-accent focus:ring-1 focus:ring-pro-accent/50"
+              id="openrouter-model"
+              value={openRouterModel}
+              disabled={busy || checkingOpenRouter}
+              onChange={(event) => setOpenRouterModel(event.target.value)}
+            />
+          </div>
+          <div>
+            <label htmlFor="openrouter-key" className="text-sm font-medium">
+              {openRouterConfigured
+                ? 'Replace saved API key (optional)'
+                : 'API key'}
+            </label>
+            <input
+              className="mt-1 w-full rounded-lg border border-pro-border/80 bg-pro-bg px-3 py-2.5 text-[14px] font-medium text-pro-text-main outline-none focus:border-pro-accent focus:ring-1 focus:ring-pro-accent/50"
+              id="openrouter-key"
+              type="password"
+              autoComplete="off"
+              value={openRouterKey}
+              disabled={busy || checkingOpenRouter}
+              onChange={(event) => setOpenRouterKey(event.target.value)}
+            />
+          </div>
+          <p className="text-[13px] leading-5 text-pro-text-main/75">
+            {checkingOpenRouter
+              ? 'Checking your saved key…'
+              : 'Keys are saved in macOS secure storage, which may ask for Keychain permission.'}
+          </p>
+          <p className="text-[13px] leading-5 text-pro-text-main/75">
+            Choosing Use OpenRouter allows relevant transcript text, notes,
+            questions, and context to be sent to OpenRouter and your selected
+            model provider, including for automatic People and Project updates.
+            Recording and transcription stay on this Mac.
+          </p>
+        </div>
+      ) : null}
       {provider === 'ollama' ? (
         <div className="mt-4">
           <OllamaReadinessStatus onReadiness={setLocalReadiness} />
@@ -215,6 +349,10 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
             !provider ||
             busy ||
             showWelcome ||
+            (provider === 'openrouter' &&
+              (checkingOpenRouter ||
+                !openRouterModel.trim() ||
+                (!openRouterConfigured && !openRouterKey.trim()))) ||
             (provider === 'ollama' && localReadiness?.status !== 'ready')
           }
           onClick={() => void continueSetup()}
@@ -233,7 +371,9 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
                 : 'Continue with ChatGPT'
               : provider === 'ollama'
                 ? 'Use Ollama'
-                : 'Choose an option'}
+                : provider === 'openrouter'
+                  ? 'Use OpenRouter'
+                  : 'Choose an option'}
         </button>
         {provider === 'ollama' && localReadiness?.status !== 'ready' ? (
           <button

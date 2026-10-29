@@ -36,7 +36,8 @@ import type {
 import {
   getActionSourceMeetingId,
   getCommitmentState,
-  hasPersonalActionOwner,
+  isExplicitOtherActionOwner,
+  isUnresolvedInheritedActionOwner,
   mergeCommitmentReview,
   normalizeActionText,
   parseActionMetadata,
@@ -3955,13 +3956,21 @@ export const deleteMeeting = (id: string | number) => {
     throw new Error('Meeting recovery must complete before deletion');
   }
 
-  // 1. Delete audio file if it exists
-  if (meeting.audio_path && fs.existsSync(meeting.audio_path)) {
+  // Keep the record retryable until every saved audio source is removed.
+  const audioPaths = new Set([
+    meeting.audio_path,
+    meeting.system_audio_path,
+    meeting.mixed_audio_path,
+  ]);
+  for (const audioPath of audioPaths) {
+    if (!audioPath) continue;
     try {
-      fs.unlinkSync(meeting.audio_path);
-      dbLog.debug(`Deleted audio file: ${meeting.audio_path}`);
+      fs.unlinkSync(audioPath);
+      dbLog.debug(`Deleted audio file: ${audioPath}`);
     } catch (e) {
-      dbLog.warn(`Failed to delete audio file: ${meeting.audio_path}`, e);
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      dbLog.warn(`Failed to delete audio file: ${audioPath}`, e);
+      throw e;
     }
   }
 
@@ -7034,27 +7043,57 @@ export const isRetiredCommitment = (id: string): boolean =>
     )
     .get(id) || isMeetingRegenerationRetired(getEntity(id)?.metadata ?? null);
 
+/** Reviewed source history cannot silently authorize a new automatic lifecycle. */
+export const hasReviewedActionSource = (meetingId: string): boolean =>
+  Boolean(
+    db
+      .prepare(`
+  SELECT 1 FROM entities WHERE type = 'action_item'
+  AND (status = 'completed' OR json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.commitment_state') IN ('confirmed', 'rejected')
+    OR json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.origin') = 'user'
+    OR json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.owner_source') = 'user')
+  AND (json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.source_meeting_id') = ? OR EXISTS (
+    SELECT 1 FROM json_each(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.dreamingSources') source,
+    json_each(CASE WHEN json_valid(source.value) THEN source.value ELSE '{}' END, '$.meetingIds') meeting WHERE meeting.value = ?
+  )) LIMIT 1
+`)
+      .get(meetingId, meetingId),
+  );
+
 export const retireMeetingDerivedCommitments = (
   meetingId: string,
   retiredAt = new Date().toISOString(),
 ): number => {
   const rows = db
     .prepare(
-      `SELECT id, metadata FROM entities
+      `SELECT id, metadata, status FROM entities
        WHERE type = 'action_item'
          AND json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.origin') = 'extraction'
          AND json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.source_meeting_id') = ?
          AND json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.meeting_regeneration_retired_at') IS NULL`,
     )
-    .all(meetingId) as Array<{ id: string; metadata: string | null }>;
+    .all(meetingId) as Array<{
+    id: string;
+    metadata: string | null;
+    status: string | null;
+  }>;
   const update = db.prepare(
     'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
   );
+  let retired = 0;
   for (const row of rows) {
     const metadata = JSON.parse(row.metadata || '{}') as Record<
       string,
       unknown
     >;
+    // User decisions survive a generated snapshot being replaced.
+    if (
+      row.status === 'completed' ||
+      metadata.commitment_state === 'confirmed' ||
+      metadata.commitment_state === 'rejected' ||
+      metadata.owner_source === 'user'
+    )
+      continue;
     update.run(
       JSON.stringify({
         ...metadata,
@@ -7062,8 +7101,9 @@ export const retireMeetingDerivedCommitments = (
       }),
       row.id,
     );
+    retired++;
   }
-  return rows.length;
+  return retired;
 };
 
 export const wasCommitmentRestored = (id: string): boolean =>
@@ -10143,6 +10183,7 @@ export const getCanonicalPersonCommitments = (
         text: string;
         status: 'completed' | 'rejected';
         sourceMeetingId: string;
+        ownershipVerified?: boolean;
       }>;
     })
   | undefined => {
@@ -10189,7 +10230,8 @@ export const getCanonicalPersonCommitments = (
     };
     if (
       briefing.isSelf &&
-      !hasPersonalActionOwner(canonicalAction, selfOptions)
+      (isExplicitOtherActionOwner(canonicalAction, selfOptions) ||
+        isUnresolvedInheritedActionOwner(canonicalAction, selfOptions))
     )
       return [];
     const metadata = parseActionMetadata(action.metadata);
@@ -10204,6 +10246,15 @@ export const getCanonicalPersonCommitments = (
             : action.name,
         status: rejected ? ('rejected' as const) : ('completed' as const),
         sourceMeetingId,
+        ownershipVerified: Boolean(
+          (canonicalAction.assigned_to === briefing.person.id &&
+            metadata.owner_source === 'user') ||
+            (briefing.isSelf &&
+              (metadata.origin === 'user' ||
+                (metadata.commitment_state === 'confirmed' &&
+                  typeof metadata.reviewed_at === 'string' &&
+                  metadata.reviewed_at.trim()))),
+        ),
       },
     ];
   });

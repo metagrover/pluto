@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import {
   groundPersonKnowledgeV2Document,
@@ -6,6 +7,8 @@ import {
 import {
   compilePersonKnowledgeChunk,
   getPersonKnowledgeChunkPrompt,
+  getPersonKnowledgeChunkResponseSchema,
+  personProfilePreservesEvidence,
 } from '../../electron/personKnowledgeSynthesis';
 
 const sources = [
@@ -24,6 +27,32 @@ const sources = [
 ];
 
 describe('compact person knowledge synthesis', () => {
+  it('rejects consolidation that drops evidence or moves it to another section', () => {
+    const profile = compilePersonKnowledgeChunk('Avery', 0, sources, {
+      profile: sources.map((source) => ({
+        section: 'responsibilities',
+        summary: source.evidence.slice('Summary: '.length),
+        citations: [
+          {
+            meeting_id: source.id,
+            quote: source.evidence.slice('Summary: '.length),
+          },
+        ],
+      })),
+    }).person_profile!;
+    expect(personProfilePreservesEvidence(profile, profile)).toBe(true);
+    expect(personProfilePreservesEvidence(profile, profile.slice(0, 1))).toBe(
+      false,
+    );
+    expect(
+      personProfilePreservesEvidence(
+        profile,
+        profile.map((claim) => ({ ...claim, section: 'unknowns' })),
+      ),
+    ).toBe(false);
+    expect(personProfilePreservesEvidence(profile, [])).toBe(false);
+  });
+
   it('preserves a comprehensive profile through merge and grounding, including one-source context', () => {
     const chunk = compilePersonKnowledgeChunk('Avery', 0, sources, {
       profile: [
@@ -239,4 +268,53 @@ describe('person reference position', () => {
     );
     expect(chunk.person_profile).toHaveLength(0);
   });
+});
+
+it('tells profile synthesis to leave unclear timing and undefined acronyms unresolved', () => {
+  const prompt = getPersonKnowledgeChunkPrompt('Avery', sources);
+  expect(prompt).toContain('never a concrete deadline or urgent priority');
+  expect(prompt).toContain(
+    'without expansion unless the evidence defines them',
+  );
+});
+
+it('constrains generated person citations to the supplied meeting ids', () => {
+  const require = createRequire(import.meta.url);
+  const Ajv = createRequire(require.resolve('electron-builder'))('ajv');
+  const validator = new Ajv({ allErrors: true });
+  const schema = getPersonKnowledgeChunkResponseSchema(sources);
+  const response = {
+    topics: [],
+    profile: [
+      {
+        section: 'responsibilities',
+        title: '',
+        summary: 'Avery added the client tenure to the UI.',
+        citations: [
+          {
+            meeting_id: 'meeting-one',
+            quote: 'Avery added the client tenure to the UI.',
+          },
+        ],
+      },
+    ],
+  };
+  expect(validator.validate(schema, response)).toBe(true);
+  for (const invalidId of [
+    'meeting-one (July 10)',
+    'meeting-on',
+    'another-meeting',
+  ]) {
+    response.profile[0]!.citations[0]!.meeting_id = invalidId;
+    expect(validator.validate(schema, response)).toBe(false);
+  }
+  expect(
+    validator.validate(getPersonKnowledgeChunkResponseSchema([]), {
+      topics: [],
+      profile: [],
+    }),
+  ).toBe(true);
+  expect(
+    validator.validate(getPersonKnowledgeChunkResponseSchema([]), response),
+  ).toBe(false);
 });

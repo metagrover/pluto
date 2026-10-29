@@ -5,6 +5,59 @@ import {
 } from '../../electron/personSynthesisSources';
 
 describe('person synthesis sources', () => {
+  it('includes named topic summaries after fresh notes replace key points', () => {
+    const activity = collectPersonSynthesisActivity(
+      [
+        {
+          id: 'm1',
+          title: 'Pilot review',
+          started_at: '2026-09-20',
+          created_at: null,
+          duration_seconds: null,
+          context: null,
+          evidence: 'confirmed',
+        },
+      ],
+      [
+        {
+          id: 'm1',
+          analysis_json: JSON.stringify({
+            analysis_schema_version: 3,
+            overview: 'Pilot review',
+            topics: [
+              {
+                summary: 'Avery visited Spain with family for ten days.',
+                key_points: [],
+              },
+              {
+                summary: 'Morgan approved the pilot risk assessment.',
+                key_points: [],
+              },
+              {
+                summary: 'The team discussed the pilot launch.',
+                key_points: [],
+              },
+            ],
+          }),
+        },
+      ],
+      'Avery',
+      [],
+    );
+    expect(activity.map((item) => item.text)).toEqual([
+      'Avery visited Spain with family for ten days.',
+    ]);
+    expect(
+      focusPersonSynthesisSources(
+        [{ id: 'm1', evidence: 'Old notes' }],
+        activity,
+        'Avery',
+      ),
+    ).toEqual([
+      expect.objectContaining({ id: 'm1', evidence: activity[0].text }),
+    ]);
+  });
+
   it('uses attributable notes across more than five meetings without treating attendance as activity', () => {
     const meetings = Array.from({ length: 8 }, (_, index) => ({
       id: `meeting-${index}`,

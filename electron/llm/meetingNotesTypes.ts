@@ -1,8 +1,9 @@
 import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 import type { AnalysisProvider, MeetingType } from './analysisTypes';
+import type { REVIEW_RETRY_INSTRUCTIONS } from './meetingNotesSemanticReview';
 
 // Shared by generation metadata and persistent run/cache identity.
-export const NOTES_PROMPT_VERSION = 'notes-v55';
+export const NOTES_PROMPT_VERSION = 'notes-v99';
 export const NOTES_OLLAMA_MODEL = OLLAMA_GENERAL_MODEL;
 export const NOTES_EDITOR_PROMPT_VERSION = NOTES_PROMPT_VERSION;
 
@@ -18,9 +19,17 @@ export type SourceSegment = {
   text: string;
 };
 
+export type CitedSpeakerAlias = {
+  readonly speaker: string;
+  readonly name: string;
+  readonly introductionSources: readonly SourceSpan[];
+};
+
 export type NotesSource = {
   revision: string;
   segments: readonly SourceSegment[];
+  /** Application-confirmed projected identities; never derived from model output. */
+  readonly protectedSpeakerLabels?: readonly string[];
 };
 
 export type SupportedText = {
@@ -111,6 +120,17 @@ export type NotesContext = {
   entityHints: string[];
 };
 
+/** Application-only diagnostics. Model/source strings never become instructions. */
+export type NotesReviewFailure = Readonly<{
+  target: string | null;
+  reason: keyof typeof REVIEW_RETRY_INSTRUCTIONS;
+}>;
+export type SourceLedReviewRetry = Readonly<{
+  candidate: string;
+  failures: readonly NotesReviewFailure[];
+  sourceRevision: string;
+}>;
+
 export type GenerateMeetingNotesInput = {
   /** Complete-document review used by the compact direct pipeline. */
   reviewProtocol?: 'editor';
@@ -120,13 +140,22 @@ export type GenerateMeetingNotesInput = {
   sourceParagraphs?: boolean;
   /** Internal chunk-size experiment; the default remains 8,000 characters. */
   maxSourceCharactersPerLeaf?: 8000 | 12000 | 16000;
-  /** Model review policy; production currently uses deterministic_only. */
+  /** Local production uses static checks; model audit modes are explicit diagnostics. */
   hierarchyAuditStrategy?: 'every_node' | 'final_only' | 'deterministic_only';
   /** Compact writer with source validation and optional model editing. */
   compactWriterContract?: boolean;
   source: NotesSource;
   context: NotesContext;
   generate: GenerateNotesText;
+  /** Explicit source-review diagnostic; not attached by the local production provider. */
+  reviewSourceLedNotes?: (notes: {
+    source: NotesSource;
+    draft: NotesDraft;
+    reviewFailure?: string;
+    repair?: SourceLedReviewRetry;
+    context?: NotesContext;
+    model?: string;
+  }) => Promise<import('./meetingNotesAudit').AuditedNotes>;
   reviewSourceBoundNotes?: (
     notes: import('./meetingNotesAudit').AuditedNotes,
   ) => Promise<import('./meetingNotesAudit').AuditedNotes>;

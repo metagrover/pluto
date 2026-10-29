@@ -106,6 +106,20 @@ export const resolveMeetingRegenerationFailurePresentation = (
     ' ',
   );
   if (
+    /notes_memory_capacity|LocalModelMemoryError|not enough memory|protect system memory|safely load/i.test(
+      evidence,
+    )
+  ) {
+    return {
+      title: 'Local model needs more memory',
+      detail: withPreservationCopy(
+        'Close other apps and try again when more memory is available.',
+        input.hasExistingNotes,
+      ),
+      canRetry: false,
+    };
+  }
+  if (
     /api key|not configured|unauthorized|forbidden|authentication|credentials/i.test(
       evidence,
     )
@@ -237,6 +251,14 @@ export const resolveMeetingFailurePresentation = (
     };
   }
   if (input.downstreamFailed) {
+    if (input.downstreamFailureCode === 'notes_memory_capacity') {
+      return {
+        title: 'Local model needs more memory',
+        detail:
+          'Your transcript is safe. Close other apps and try again when more memory is available.',
+        actionLabel: null,
+      };
+    }
     if (input.downstreamFailureCode === 'chatgpt_sign_in_required') {
       return {
         title: 'ChatGPT wasn’t connected',

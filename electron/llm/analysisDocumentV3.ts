@@ -313,6 +313,14 @@ const parseGenerationMetadata = (
               structured_thinking: rawGenerationOptions.structured_thinking,
             }
           : {}),
+        ...(typeof rawGenerationOptions.speaker_identity_revision ===
+          'string' &&
+        /^[a-f0-9]{64}$/.test(rawGenerationOptions.speaker_identity_revision)
+          ? {
+              speaker_identity_revision:
+                rawGenerationOptions.speaker_identity_revision,
+            }
+          : {}),
         ...(Number.isSafeInteger(rawGenerationOptions.seed)
           ? { seed: rawGenerationOptions.seed as number }
           : {}),
@@ -330,7 +338,8 @@ const parseGenerationMetadata = (
       ? { generation_options: generationOptions }
       : {}),
     ...(terminology ? { terminology } : {}),
-    ...(record.pipeline_version === 'writer-audit-v1' ||
+    ...(record.pipeline_version === 'writer-only-v1' ||
+    record.pipeline_version === 'writer-audit-v1' ||
     record.pipeline_version === 'writer-editor-v1' ||
     record.pipeline_version === 'writer-editor-bounded-v1'
       ? { pipeline_version: record.pipeline_version }

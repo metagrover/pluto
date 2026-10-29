@@ -1,6 +1,8 @@
 const OMITTED = '\n[Text omitted]\n';
-const normalizeWord = (word: string): string =>
-  word.replace(/ies$/, 'y').replace(/(?:ing|ed|s)$/, '');
+const normalizeWord = (word: string): string => {
+  const stem = word.replace(/ies$/, 'y').replace(/(?:ing|ed|s)$/, '');
+  return stem.length > 4 ? stem.replace(/(?:al|e)$/, '') : stem;
+};
 const STOP = new Set(
   'a an and are as at be been by can concrete did do does each explain for from give has have how i in is it latest me my of on or our please recent show specific tell that the their them these this those to was we were what when which who will with would you your next steps owner owners date dates'
     .split(' ')
@@ -68,6 +70,8 @@ export function excerptQueryEvidence(
   };
   const add = (index: number) => {
     if (index < 0 || index >= lines.length || selected.has(index)) return;
+    if ([...selected].some((previous) => lines[previous] === lines[index]))
+      return;
     selected.add(index);
     if (render().length > budget) selected.delete(index);
   };

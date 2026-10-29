@@ -24,6 +24,13 @@ export type DownstreamProcessingPresentation =
 export const getDownstreamProcessingPresentation = (
   meeting: Partial<Meeting>,
 ): DownstreamProcessingPresentation => {
+  if (meeting.finalization_status === 'recovery_required') {
+    return {
+      state: 'failed',
+      title: "Couldn't finish the transcript",
+      detail: 'Your recording is safe.',
+    };
+  }
   let run: {
     notes_status?: string;
     secondary_status?: string;
@@ -114,17 +121,30 @@ export const getDownstreamProcessingPresentation = (
     };
   }
 
+  if (meeting.transcript_status === 'validating') {
+    return {
+      state: 'loading',
+      title: 'Finalizing transcript',
+      detail:
+        'Checking recorded speech and speaker labels before preparing notes.',
+    };
+  }
+
   if (run.notes_status === 'failed' || run.notes_status === 'cancelled')
     return {
       state: 'failed',
       title:
-        run.error_code === 'chatgpt_daily_limit'
-          ? 'ChatGPT requests are paused'
-          : 'Notes need another pass',
+        run.error_code === 'notes_memory_capacity'
+          ? 'Local model needs more memory'
+          : run.error_code === 'chatgpt_daily_limit'
+            ? 'ChatGPT requests are paused'
+            : 'Notes need another pass',
       detail:
-        run.error_code === 'chatgpt_daily_limit'
-          ? 'Your transcript is saved. Review Usage protection in Settings → Intelligence, or wait until tomorrow.'
-          : 'Your transcript is ready. Try again to continue.',
+        run.error_code === 'notes_memory_capacity'
+          ? 'Your transcript is safe. Close other apps and try again when more memory is available.'
+          : run.error_code === 'chatgpt_daily_limit'
+            ? 'Your transcript is saved. Review Usage protection in Settings → Intelligence, or wait until tomorrow.'
+            : 'Your transcript is ready. Try again to continue.',
       ...(typeof run.error_code === 'string'
         ? { failureCode: run.error_code }
         : {}),

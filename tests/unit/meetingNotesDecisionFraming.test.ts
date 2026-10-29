@@ -75,6 +75,28 @@ describe('exact explicit decision predicate with equivalent framing', () => {
   });
 
   it.each([
+    [
+      'remove the archive',
+      'Read-only copies may be shared with auditors after approval',
+    ],
+    [
+      'change the timetable',
+      'Only the evening session may be moved once the tutor agrees',
+    ],
+  ])(
+    'normalizes negative grammatical framing without changing the predicate: %s',
+    (predicate, permission) => {
+      const evidence = `The decision is not to ${predicate}. ${permission}.`;
+      const text = `Do not ${predicate}; ${permission}.`;
+      expect(review(text, evidence)).toEqual({ text, owner: null, due: null });
+      expect(review(text.replace('Do not', 'Do'), evidence)).toBeNull();
+      expect(review(text.replace('may', 'will'), evidence)).toBeNull();
+      const shortened = `Do not ${predicate}; ${permission.split(/ after | once /)[0]}.`;
+      expect(review(shortened, evidence)).toBeNull();
+    },
+  );
+
+  it.each([
     claim.replace('not to publish', 'to publish'),
     claim.replace('may be published', 'will be published'),
     claim.replace('only aggregate counts', 'all responses'),

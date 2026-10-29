@@ -1,5 +1,8 @@
 import { expect, it, vi } from 'vitest';
-import type { AuditedNotes } from '../../electron/llm/meetingNotesAudit';
+import {
+  type AuditedNotes,
+  acceptSourceLedNotes,
+} from '../../electron/llm/meetingNotesAudit';
 import { estimateNotesTokens } from '../../electron/llm/meetingNotesBudget';
 import { buildNotesEditorPrompt } from '../../electron/llm/meetingNotesEditor';
 import * as hierarchy from '../../electron/llm/meetingNotesHierarchy';
@@ -9,6 +12,7 @@ import {
 } from '../../electron/llm/meetingNotesPipeline';
 import { buildCompactNotesWriterPrompt } from '../../electron/llm/meetingNotesPrompts';
 import { reviewSourceBoundNotes } from '../../electron/llm/meetingNotesSemanticReview';
+import { quoteCitedSourcePassages } from '../../electron/llm/meetingNotesSource';
 import {
   MeetingNotesError,
   NOTES_PROMPT_VERSION,
@@ -70,11 +74,30 @@ it('preserves the exact failure criterion and pending state of conditional discu
     compactWriterContract: true,
     hierarchyAuditStrategy: 'deterministic_only',
     generate,
+    reviewSourceBoundNotes: (notes) =>
+      reviewSourceBoundNotes(notes, async () =>
+        JSON.stringify({
+          resolutions: [
+            {
+              id: notes.draft.sections[0]!.items[0]!.id,
+              kind: 'point',
+              text: 'The map offer would be declined only if the accessibility test fails. The test remains pending, so no decision has been made.',
+              owner: null,
+              due: null,
+              discussion: null,
+            },
+          ],
+        }),
+      ),
   });
   expect(generate).toHaveBeenCalledOnce();
   expect(result.all_action_items).toHaveLength(0);
   expect(result.all_decisions).toHaveLength(0);
-  expect(JSON.stringify(result.topics)).toContain(text);
+  expect(JSON.stringify(result.topics)).toContain(
+    'only if the accessibility test fails',
+  );
+  expect(JSON.stringify(result.topics)).toContain('test remains pending');
+  expect(JSON.stringify(result.topics)).not.toContain('Milo:');
 });
 
 it('retains an omitted withdrawal and its reason as cited discussion without reviving the task', async () => {
@@ -94,6 +117,34 @@ it('retains an omitted withdrawal and its reason as cited discussion without rev
     contextTokens: 16384,
     compactWriterContract: true,
     hierarchyAuditStrategy: 'deterministic_only',
+    reviewSourceBoundNotes: (notes) =>
+      reviewSourceBoundNotes(notes, async () =>
+        JSON.stringify({
+          resolutions: [
+            ...notes.draft.sections
+              .flatMap((section) => section.items)
+              .filter((item) => !item.id.startsWith('source-cancellation:'))
+              .map((item) => ({
+                id: item.id,
+                kind: 'point',
+                text: 'The gallery inspection is complete.',
+                owner: null,
+                due: null,
+                discussion: null,
+              })),
+            {
+              id: notes.draft.sections[0]!.items.find((item) =>
+                item.id.startsWith('source-cancellation:'),
+              )!.id,
+              kind: 'point',
+              text: 'Milo withdrew the promise to replace the camera list because the corrected list already exists.',
+              owner: null,
+              due: null,
+              discussion: null,
+            },
+          ],
+        }),
+      ),
     generate: async () =>
       JSON.stringify({
         title: null,
@@ -120,9 +171,9 @@ it('retains an omitted withdrawal and its reason as cited discussion without rev
       }),
   });
   expect(result.all_action_items).toHaveLength(0);
-  expect(JSON.stringify(result.topics)).toContain('withdrawing my promise');
+  expect(JSON.stringify(result.topics)).toContain('Milo withdrew the promise');
   expect(JSON.stringify(result.topics)).toContain(
-    'The corrected list already exists',
+    'the corrected list already exists',
   );
   expect(result.quality.issues).not.toContain(
     'notes_guardrail:missing_cancellation_context',
@@ -134,85 +185,100 @@ it('retains an omitted withdrawal and its reason as cited discussion without rev
   ).toBe(true);
 });
 
-it.each(['repair', 'missing-condition', 'cancelled', 'unavailable'])(
-  'holds an unsafe action for source review: %s',
-  async (mode) => {
-    const source = makeSyntheticNotesSource([
-      {
-        speaker: 'Milo',
-        text: 'If legal approves, I will publish the plan by Friday.',
-      },
-      ...(mode === 'cancelled'
-        ? [
-            {
-              speaker: 'Milo',
-              text: 'Actually, cancel the plan to publish the plan.',
-            },
-          ]
-        : []),
-    ]);
-    const sources = [
-      { segment: 0, start: 0, end: source.segments[0]!.text.length },
-    ];
-    const review = vi.fn(async (notes: AuditedNotes) => {
-      expect(notes.draft.sections[0].items[0].kind).toBe('point');
-      return reviewSourceBoundNotes(notes, async () => {
-        if (mode === 'unavailable') throw new Error('provider_unavailable');
-        return JSON.stringify({
-          resolutions: [
-            {
-              id: notes.draft.sections[0].items[0].id,
-              kind: 'accepted_action',
-              text:
-                mode === 'missing-condition'
-                  ? 'Publish the plan by Friday'
-                  : 'Publish the plan by Friday if legal approves',
-              owner: 'Milo',
-              due: 'Friday',
-              discussion: null,
-            },
-          ],
-        });
+it.each([
+  'repair',
+  'repair-once',
+  'missing-condition',
+  'cancelled',
+  'unavailable',
+])('holds an unsafe action for source review: %s', async (mode) => {
+  const source = makeSyntheticNotesSource([
+    {
+      speaker: 'Milo',
+      text: 'If legal approves, I will publish the plan by Friday.',
+    },
+    ...(mode === 'cancelled'
+      ? [
+          {
+            speaker: 'Milo',
+            text: 'Actually, cancel the plan to publish the plan.',
+          },
+        ]
+      : []),
+  ]);
+  const sources = [
+    { segment: 0, start: 0, end: source.segments[0]!.text.length },
+  ];
+  let reviewCount = 0;
+  const review = vi.fn(async (notes: AuditedNotes) => {
+    reviewCount += 1;
+    expect(notes.draft.sections[0].items[0].kind).toBe('point');
+    return reviewSourceBoundNotes(notes, async () => {
+      if (mode === 'unavailable') throw new Error('provider_unavailable');
+      return JSON.stringify({
+        resolutions: [
+          {
+            id: notes.draft.sections[0].items[0].id,
+            kind: 'accepted_action',
+            text:
+              mode === 'missing-condition' ||
+              (mode === 'repair-once' && reviewCount === 1)
+                ? 'Publish the plan by Friday'
+                : 'Publish the plan by Friday if legal approves',
+            owner: 'Milo',
+            due: 'Friday',
+            discussion: null,
+          },
+        ],
       });
     });
-    const result = await generateMeetingNotes({
-      source,
-      context: makeNotesContext(),
-      provider: 'ollama',
-      model: 'gemma4:12b',
-      contextTokens: 16384,
-      compactWriterContract: true,
-      hierarchyAuditStrategy: 'deterministic_only',
-      reviewSourceBoundNotes: review,
-      generate: async () =>
-        JSON.stringify({
-          title: null,
-          sections: [
-            {
-              title: 'Publication',
-              items: [
-                {
-                  kind: 'action',
-                  text: 'Publish the plan by Friday',
-                  owner: 'Milo',
-                  due: 'Friday',
-                  sources,
-                },
-              ],
-            },
-          ],
-        }),
-    });
-    expect(review).toHaveBeenCalledOnce();
-    expect(result.all_action_items).toHaveLength(mode === 'repair' ? 1 : 0);
-    if (mode === 'repair') {
-      expect(result.all_action_items[0]!.text).toContain('if legal approves');
-      expect(result.quality.issues).not.toContain(
-        'notes_guardrail:missing_condition',
-      );
-    } else expect(JSON.stringify(result.topics)).toContain('legal approves');
-  },
-);
+  });
+  const generation = generateMeetingNotes({
+    source,
+    context: makeNotesContext(),
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16384,
+    compactWriterContract: true,
+    hierarchyAuditStrategy: 'deterministic_only',
+    reviewSourceBoundNotes: review,
+    generate: async () =>
+      JSON.stringify({
+        title: null,
+        sections: [
+          {
+            title: 'Publication',
+            items: [
+              {
+                kind: 'action',
+                text: 'Publish the plan by Friday',
+                owner: 'Milo',
+                due: 'Friday',
+                sources,
+              },
+            ],
+          },
+        ],
+      }),
+  });
+  if (mode === 'repair' || mode === 'repair-once') {
+    const result = await generation;
+    expect(review).toHaveBeenCalledTimes(mode === 'repair' ? 1 : 2);
+    expect(result.all_action_items).toHaveLength(1);
+    expect(result.all_action_items[0]!.text).toContain('if legal approves');
+    expect(result.quality.issues).not.toContain(
+      'notes_guardrail:missing_condition',
+    );
+    expect(result.quality.issues).not.toContain(
+      'semantic_notes_review_unavailable',
+    );
+  } else {
+    await expect(generation).rejects.toThrow(
+      'notes_semantic_review_incomplete',
+    );
+    expect(review).toHaveBeenCalledTimes(2);
+  }
+});
 
 const spanFor = (prompt: string, marker: string) => {
   const descriptor = sourceDescriptors(prompt).find((entry) =>
@@ -471,7 +537,7 @@ it('fails a malformed compact writer without a model repair call', async () => {
   expect(onRepair).not.toHaveBeenCalled();
 });
 
-it('publishes a deterministically accepted direct draft after a malformed compact editor', async () => {
+it('refuses a malformed local whole-source editor after one repair', async () => {
   const fixture = makeDirectNotesFixture();
   const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
   const generate = vi
@@ -498,7 +564,7 @@ it('publishes a deterministically accepted direct draft after a malformed compac
     .mockResolvedValue('{');
   const onRepair = vi.fn();
 
-  const result = await generateMeetingNotes({
+  const error = await generateMeetingNotes({
     reviewProtocol: 'editor',
     compactWriterContract: true,
     source: fixture.source,
@@ -508,21 +574,17 @@ it('publishes a deterministically accepted direct draft after a malformed compac
     model: 'qwen3.5:9b',
     contextTokens: 16_384,
     onRepair,
-  });
+  }).catch((failure: unknown) => failure);
 
-  expect(generate).toHaveBeenCalledTimes(2);
-  expect(onRepair).not.toHaveBeenCalled();
-  expect(result.all_action_items).toEqual([
-    expect.objectContaining({ text: 'Send the outline' }),
-  ]);
-  expect(result.quality.issues).toContain('notes_direct_audit_fallback:schema');
-  expect(result.title).toBeUndefined();
-  expect(result.generation_metadata.audit_status).toBe(
-    'complete_with_warnings',
-  );
+  expect(error).toMatchObject({
+    code: 'notes_audit_invalid',
+    validationCategory: 'schema',
+  });
+  expect(generate).toHaveBeenCalledTimes(3);
+  expect(onRepair).toHaveBeenCalledTimes(1);
 });
 
-it('publishes a deterministically accepted direct draft after an editor guardrail failure', async () => {
+it('refuses a local whole-source editor guardrail failure after one repair', async () => {
   const fixture = makeDirectNotesFixture();
   const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
   const generate = vi
@@ -546,7 +608,7 @@ it('publishes a deterministically accepted direct draft after an editor guardrai
         ],
       }),
     )
-    .mockResolvedValueOnce(
+    .mockResolvedValue(
       JSON.stringify({
         title: null,
         meetingType: 'general',
@@ -558,7 +620,7 @@ it('publishes a deterministically accepted direct draft after an editor guardrai
       }),
     );
 
-  const result = await generateMeetingNotes({
+  const error = await generateMeetingNotes({
     reviewProtocol: 'editor',
     compactWriterContract: true,
     source: fixture.source,
@@ -567,16 +629,16 @@ it('publishes a deterministically accepted direct draft after an editor guardrai
     provider: 'ollama',
     model: 'gemma4:12b',
     contextTokens: 16_384,
-  });
+  }).catch((failure: unknown) => failure);
 
-  expect(result.all_action_items).toHaveLength(1);
-  expect(result.quality.issues).toContain(
-    'notes_direct_audit_fallback:guardrail',
-  );
-  expect(generate).toHaveBeenCalledTimes(2);
+  expect(error).toMatchObject({
+    code: 'notes_audit_invalid',
+    validationCategory: 'guardrail',
+  });
+  expect(generate).toHaveBeenCalledTimes(3);
 });
 
-it('publishes a deterministically accepted direct draft after an editor semantic validation failure', async () => {
+it('refuses a local whole-source editor semantic validation failure after one repair', async () => {
   const fixture = makeDirectNotesFixture();
   const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
   const generate = vi
@@ -600,7 +662,7 @@ it('publishes a deterministically accepted direct draft after an editor semantic
         ],
       }),
     )
-    .mockResolvedValueOnce(
+    .mockResolvedValue(
       JSON.stringify({
         title: null,
         meetingType: 'general',
@@ -620,7 +682,7 @@ it('publishes a deterministically accepted direct draft after an editor semantic
       }),
     );
 
-  const result = await generateMeetingNotes({
+  const error = await generateMeetingNotes({
     reviewProtocol: 'editor',
     compactWriterContract: true,
     source: fixture.source,
@@ -629,15 +691,13 @@ it('publishes a deterministically accepted direct draft after an editor semantic
     provider: 'ollama',
     model: 'gemma4:12b',
     contextTokens: 16_384,
-  });
+  }).catch((failure: unknown) => failure);
 
-  expect(result.all_action_items).toEqual([
-    expect.objectContaining({ text: 'Send the outline' }),
-  ]);
-  expect(result.quality.issues).toContain(
-    'notes_direct_audit_fallback:guardrail',
-  );
-  expect(generate).toHaveBeenCalledTimes(2);
+  expect(error).toMatchObject({
+    code: 'notes_audit_invalid',
+    validationCategory: 'guardrail',
+  });
+  expect(generate).toHaveBeenCalledTimes(3);
 });
 
 it('retries a truncated direct compact writer once with the concise contract', async () => {
@@ -806,7 +866,7 @@ it('keeps an unknown direct editor source fail-closed with a sanitized category'
         ],
       }),
     )
-    .mockResolvedValueOnce(
+    .mockResolvedValue(
       JSON.stringify({
         title: null,
         meetingType: 'general',
@@ -850,7 +910,7 @@ it('keeps an unknown direct editor source fail-closed with a sanitized category'
     code: 'notes_audit_invalid',
     validationCategory: 'source_reference',
   });
-  expect(generate).toHaveBeenCalledTimes(2);
+  expect(generate).toHaveBeenCalledTimes(3);
 });
 
 it('splits a truncated compact leaf instead of retrying the same packet', async () => {
@@ -897,7 +957,7 @@ it('splits a truncated compact leaf instead of retrying the same packet', async 
       generate,
       provider: 'ollama',
       model: 'gemma4:12b',
-      contextTokens: 9_216,
+      contextTokens: 9_472,
       onRepartition,
     });
 
@@ -1137,7 +1197,7 @@ it('plans compact leaves against source output capacity as well as input fit', a
   ).rejects.toThrow('stop-after-output-aware-planning');
 
   expect(onPlan).toHaveBeenCalledWith({ plannedLeafCount: 3 });
-});
+}, 15_000);
 
 it.each(['notes_context_exhausted', 'notes_audit_invalid'] as const)(
   'publishes a deterministically checked compact leaf after %s',
@@ -1277,7 +1337,7 @@ it('recovers deterministically and records missing_action as advisory when leaf 
   }
 });
 
-it('filters conflicting actions and records missing_action in deterministic_only compact leaves', async () => {
+it('refuses conflicting compact actions rather than filtering them from writer-only leaves', async () => {
   const text =
     'I will send the outline by Friday. Actually, cancel the plan to send the outline. I will prepare the slides.';
   const source = makeSyntheticNotesSource([
@@ -1304,6 +1364,10 @@ it('filters conflicting actions and records missing_action in deterministic_only
     }
     return JSON.stringify({
       title: null,
+      overview: {
+        text: 'Milo cancelled the outline delivery and will prepare the slides.',
+        sources: [span0, span1, span2],
+      },
       sections: [
         {
           title: 'Tasks',
@@ -1322,31 +1386,26 @@ it('filters conflicting actions and records missing_action in deterministic_only
   });
 
   try {
-    const result = await generateMeetingNotes({
-      hierarchyAuditStrategy: 'deterministic_only',
-      compactWriterContract: true,
-      source,
-      context: makeNotesContext(),
-      generate,
-      provider: 'ollama',
-      model: 'gemma4:12b',
-      contextTokens: 8_192,
-    });
-
-    expect(result.all_action_items).toEqual([]);
-    expect(result.quality.issues).toContain('notes_guardrail:missing_action');
-    expect(result.quality.issues).toContain(
-      'notes_guardrail:conflicting_action:leaf0:s0:item:0',
-    );
-    expect(result.generation_metadata.audit_status).toBe(
-      'complete_with_warnings',
-    );
+    await expect(
+      generateMeetingNotes({
+        hierarchyAuditStrategy: 'deterministic_only',
+        compactWriterContract: true,
+        source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'gemma4:12b',
+        contextTokens: 8_192,
+      }),
+    ).rejects.toThrow(/notes_writer_invalid/);
+    // This bounded 8K path still refuses before another model request.
+    expect(generate).toHaveBeenCalledTimes(1);
   } finally {
     plan.mockRestore();
   }
 });
 
-it('preserves conservative acceptance issues alongside leaf review fallback warnings', async () => {
+it('requires prose repair after a leaf editor failure preserves conditional willingness', async () => {
   const text = 'If legal approves, I can draft the announcement.';
   const source = makeSyntheticNotesSource([
     { speaker: 'Milo', text: `${text} ${'Context '.repeat(3_000)}` },
@@ -1383,25 +1442,18 @@ it('preserves conservative acceptance issues alongside leaf review fallback warn
   });
 
   try {
-    const result = await generateMeetingNotes({
-      reviewProtocol: 'editor',
-      compactWriterContract: true,
-      source,
-      context: makeNotesContext(),
-      generate,
-      provider: 'ollama',
-      model: 'gemma4:12b',
-      contextTokens: 8_192,
-    });
-
-    expect(result.all_action_items).toEqual([]);
-    expect(result.topics[0]?.summary).toBe(text);
-    expect(result.quality.issues).toEqual(
-      expect.arrayContaining([
-        'notes_leaf_audit_fallback:notes_audit_invalid',
-        'deterministic_reclassified_conditional_willingness:leaf0:s0:item:0',
-      ]),
-    );
+    await expect(
+      generateMeetingNotes({
+        reviewProtocol: 'editor',
+        compactWriterContract: true,
+        source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'gemma4:12b',
+        contextTokens: 8_192,
+      }),
+    ).rejects.toThrow('notes_semantic_review_incomplete');
   } finally {
     plan.mockRestore();
   }
@@ -1924,7 +1976,7 @@ it('packs larger writer-only chunks within the same context without reserving a 
   const source = makeSyntheticNotesSource(
     Array.from({ length: 36 }, (_, index) => ({
       speaker: 'Nira',
-      text: `Turn ${index}: ${'context '.repeat(160)}`,
+      text: `The community hall has a side entrance. ${'context '.repeat(160)}`,
     })),
   );
   const counts: number[] = [];
@@ -1943,15 +1995,18 @@ it('packs larger writer-only chunks within the same context without reserving a 
       ).toBeLessThanOrEqual(maxSourceCharactersPerLeaf);
       const span = request.sourceSpans![0]!;
       return JSON.stringify({
-        meetingType: 'general',
-        title: { text: 'Context', sources: [span] },
+        title: { text: 'Community Hall', sources: [span] },
+        overview: {
+          text: 'The community hall has a side entrance.',
+          sources: [span],
+        },
         sections: [
           {
-            title: 'Context',
+            title: 'Community Hall',
             items: [
               {
                 kind: 'point',
-                text: 'Context',
+                text: 'The community hall has a side entrance.',
                 owner: null,
                 due: null,
                 sources: [span],
@@ -2003,13 +2058,17 @@ it('uses the provider wire prompt to admit a full writer-only meeting', async ()
     const span = spans[0]!;
     return JSON.stringify({
       title: { text: 'Product Roadmap', sources: [span] },
+      overview: {
+        text: 'The current product roadmap was discussed.',
+        sources: [span],
+      },
       sections: [
         {
           title: 'Product Roadmap',
           items: [
             {
               kind: 'point',
-              text: 'We discussed the current product roadmap.',
+              text: 'The current product roadmap was discussed.',
               owner: null,
               due: null,
               sources: [span],
@@ -2061,13 +2120,13 @@ it('can benchmark a direct draft with deterministic checks and no model audit', 
 
 it('can benchmark oversized compact leaves with deterministic checks and no model audits', async () => {
   const source = makeSyntheticNotesSource([
-    { speaker: 'Milo', text: 'First product fact. '.repeat(2_000) },
-    { speaker: 'Nira', text: 'Second product fact. '.repeat(2_000) },
+    { speaker: 'Milo', text: 'The red lamp works. '.repeat(2_000) },
+    { speaker: 'Nira', text: 'The blue lamp works. '.repeat(2_000) },
   ]);
   const spans = source.segments.map((segment) => ({
     segment: segment.index,
     start: 0,
-    end: 20,
+    end: segment.text.indexOf('.') + 1,
   }));
   const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(
     spans.map((span) => ({
@@ -2080,15 +2139,18 @@ it('can benchmark oversized compact leaves with deterministic checks and no mode
   );
   const generate = vi.fn(async (request: NotesRequest) => {
     const span = sourceDescriptors(request.prompt)[0]!.descriptor;
+    const fact = source.segments[span.segment]!.text.slice(0, span.end);
+    const title = span.segment === 0 ? 'Red lamp' : 'Blue lamp';
     return JSON.stringify({
-      title: { text: `Leaf ${span.segment + 1} Topic`, sources: [span] },
+      title: { text: title, sources: [span] },
+      overview: { text: fact, sources: [span] },
       sections: [
         {
-          title: `Leaf ${span.segment + 1}`,
+          title,
           items: [
             {
               kind: 'point',
-              text: `Supported fact ${span.segment + 1}`,
+              text: fact,
               owner: null,
               due: null,
               sources: [span],
@@ -2116,8 +2178,8 @@ it('can benchmark oversized compact leaves with deterministic checks and no mode
       'notesWriter',
     ]);
     expect(result.topics.map((section) => section.title)).toEqual([
-      'Leaf 1',
-      'Leaf 2',
+      'Red lamp',
+      'Blue lamp',
     ]);
     expect(result.generation_metadata.hierarchy).toEqual({
       depth: 1,
@@ -2125,9 +2187,7 @@ it('can benchmark oversized compact leaves with deterministic checks and no mode
       max_depth: 1,
       max_nodes: 6,
     });
-    expect(result.generation_metadata.pipeline_version).toBe(
-      'writer-editor-bounded-v1',
-    );
+    expect(result.generation_metadata.pipeline_version).toBe('writer-only-v1');
   } finally {
     plan.mockRestore();
   }
@@ -2139,6 +2199,7 @@ it('can benchmark the compact writer contract in one bounded call', async () => 
   const generate = vi.fn().mockResolvedValue(
     JSON.stringify({
       title: { text: 'Outline Review', sources: [span] },
+      overview: { text: 'Milo will send the outline.', sources: [span] },
       sections: [
         {
           title: 'Outline',
@@ -2180,34 +2241,47 @@ it('can benchmark the compact writer contract in one bounded call', async () => 
   ]);
 });
 
-it('strips unsupported owner and due fields in the deterministic-only benchmark', async () => {
-  const fixture = makeDirectNotesFixture();
-  const draft = structuredClone(fixture.draft);
-  const action = draft.sections[0]!.items[0]!;
-  action.owner = 'Nira';
-  action.due = 'Friday';
-  const generate = vi.fn().mockResolvedValue(JSON.stringify(draft));
+it.each(['owner', 'due'] as const)(
+  'refuses an unsupported compact %s field instead of silently correcting it',
+  async (field) => {
+    const fixture = makeDirectNotesFixture();
+    const draft = structuredClone(fixture.draft);
+    const action = draft.sections[0]!.items[0]!;
+    if (field === 'owner') action.owner = 'Nira';
+    else action.due = 'Friday';
+    const generate = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        title: null,
+        overview: draft.overview,
+        sections: draft.sections.map((section) => ({
+          title: section.title.text,
+          items: section.items.map(({ kind, text, owner, due, sources }) => ({
+            kind,
+            text,
+            owner,
+            due,
+            sources,
+          })),
+        })),
+      }),
+    );
 
-  const result = await generateMeetingNotes({
-    reviewProtocol: 'editor',
-    hierarchyAuditStrategy: 'deterministic_only',
-    source: fixture.source,
-    context: makeNotesContext(),
-    generate,
-    provider: 'ollama',
-    model: 'qwen3.5:9b',
-    contextTokens: 16_384,
-  });
-
-  expect(result.all_action_items).toEqual([
-    expect.objectContaining({
-      text: 'Send the outline',
-      assignee: 'Milo',
-    }),
-  ]);
-  expect(result.all_action_items[0]).not.toHaveProperty('due');
-  expect(generate).toHaveBeenCalledTimes(1);
-});
+    await expect(
+      generateMeetingNotes({
+        reviewProtocol: 'editor',
+        hierarchyAuditStrategy: 'deterministic_only',
+        compactWriterContract: true,
+        source: fixture.source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'qwen3.5:9b',
+        contextTokens: 16_384,
+      }),
+    ).rejects.toThrow(/notes_writer_invalid/);
+    expect(generate).toHaveBeenCalledTimes(1);
+  },
+);
 
 it('plans leaves from leaf work without reserving capacity for a hypothetical merge', async () => {
   const text = 'Agenda update. '.repeat(850);
@@ -3747,4 +3821,498 @@ it('fails at the node ceiling before making a partial hierarchy request', async 
 
 it('keeps the documented depth ceiling alongside the enforced node ceiling', () => {
   expect(NOTES_HIERARCHY_LIMITS).toEqual({ maxDepth: 8, maxNodes: 128 });
+});
+
+it.each([false, true])(
+  'does not publish internal source quotations or unfinished review wording (unfinished: %s)',
+  async (unfinished) => {
+    const text = 'I will send the guide after the approval.';
+    const source = makeSyntheticNotesSource([{ speaker: 'Sora', text }]);
+    const sources = [{ segment: 0, start: 0, end: text.length }];
+    const generate = async () =>
+      JSON.stringify({
+        title: null,
+        sections: [
+          {
+            title: 'Guide',
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the guide after the',
+                owner: 'Sora',
+                due: null,
+                sources,
+              },
+            ],
+          },
+        ],
+      });
+    await expect(
+      generateMeetingNotes({
+        source,
+        context: makeNotesContext(),
+        provider: 'ollama',
+        model: 'fixture-model',
+        compactWriterContract: true,
+        hierarchyAuditStrategy: 'deterministic_only',
+        contextTokens: 16384,
+        generate,
+        reviewSourceBoundNotes: async (notes) => {
+          if (unfinished) {
+            notes.draft.sections[0]!.items[0] = {
+              ...notes.draft.sections[0]!.items[0]!,
+              kind: 'action',
+              text: 'Send the guide after the',
+              owner: 'Sora',
+            };
+          }
+          return notes;
+        },
+      }),
+    ).rejects.toThrow('notes_semantic_review_incomplete');
+  },
+);
+
+it.each([
+  'If you need help, I can send the outline.',
+  'Please send the outline.',
+])(
+  'does not publish raw discussion after an editor failure: %s',
+  async (text) => {
+    const source = makeSyntheticNotesSource([{ speaker: 'Sora', text }]);
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          title: null,
+          sections: [
+            {
+              title: 'Outline',
+              items: [
+                {
+                  kind: 'action',
+                  text: 'Send the outline',
+                  owner: 'Sora',
+                  due: null,
+                  sources: [{ segment: 0, start: 0, end: text.length }],
+                },
+              ],
+            },
+          ],
+        }),
+      )
+      .mockResolvedValue('{');
+    await expect(
+      generateMeetingNotes({
+        reviewProtocol: 'editor',
+        compactWriterContract: true,
+        source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'gemma4:12b',
+        contextTokens: 16384,
+      }),
+    ).rejects.toThrow('notes_audit_invalid');
+    expect(generate).toHaveBeenCalledTimes(3);
+  },
+);
+
+it('does not publish first-person decisions from a review callback', async () => {
+  const text = 'We decided to run the pilot after security approval.';
+  const source = makeSyntheticNotesSource([{ speaker: 'Sora', text }]);
+  const sources = [{ segment: 0, start: 0, end: text.length }];
+  await expect(
+    generateMeetingNotes({
+      source,
+      context: makeNotesContext(),
+      provider: 'ollama',
+      model: 'fixture-model',
+      compactWriterContract: true,
+      hierarchyAuditStrategy: 'deterministic_only',
+      contextTokens: 16384,
+      generate: async () =>
+        JSON.stringify({
+          title: null,
+          sections: [
+            {
+              title: 'Pilot',
+              items: [
+                {
+                  kind: 'decision',
+                  text: 'The team decided to run the pilot after security approval.',
+                  owner: null,
+                  due: null,
+                  sources,
+                },
+              ],
+            },
+          ],
+        }),
+      reviewSourceBoundNotes: async (notes) => {
+        const item = notes.draft.sections[0]!.items[0]!;
+        Object.assign(item, { kind: 'decision', text, owner: null });
+        return notes;
+      },
+    }),
+  ).rejects.toThrow('notes_semantic_review_incomplete');
+});
+
+it.each([true, false])(
+  'requires model prose repair when duplicate points hide source clauses (repair: %s)',
+  async (repair) => {
+    const text =
+      'Do not deploy before staging tests pass. The meeting at 5 is only proposed.';
+    const source = makeSyntheticNotesSource([{ speaker: 'Sora', text }]);
+    const sources = [{ segment: 0, start: 0, end: text.length }];
+    const draft = {
+      title: null,
+      overview: { text: 'The meeting at 5 is only proposed.', sources },
+      sections: [
+        {
+          title: 'Rollout',
+          items: [0, 1].map(() => ({
+            kind: 'point',
+            text: 'The meeting at 5 is only proposed.',
+            owner: null,
+            due: null,
+            sources,
+          })),
+        },
+      ],
+    };
+    const generating = generateMeetingNotes({
+      source,
+      context: makeNotesContext(),
+      provider: 'ollama',
+      model: 'fixture-model',
+      compactWriterContract: true,
+      hierarchyAuditStrategy: 'deterministic_only',
+      contextTokens: 16384,
+      generate: async () => JSON.stringify(draft),
+      ...(repair
+        ? {
+            reviewSourceBoundNotes: (notes: AuditedNotes) =>
+              reviewSourceBoundNotes(notes, async ({ prompt }) => {
+                const cases = JSON.parse(prompt.split('\n').at(-1)!);
+                return JSON.stringify({
+                  resolutions: cases.map((entry: { id: string }) => ({
+                    id: entry.id,
+                    kind: 'point',
+                    text: 'Deployment must wait for staging tests to pass; the meeting at 5 remains a proposal.',
+                    owner: null,
+                    due: null,
+                    discussion: null,
+                  })),
+                });
+              }),
+          }
+        : {}),
+    });
+    if (!repair) {
+      await expect(generating).rejects.toThrow(
+        'notes_semantic_review_incomplete',
+      );
+      return;
+    }
+    const result = await generating;
+    expect(JSON.stringify(result.topics)).toContain(
+      'Deployment must wait for staging tests to pass',
+    );
+    expect(JSON.stringify(result.topics)).not.toContain('Sora:');
+    expect(result.quality.issues).not.toContain(
+      'deterministic_collapsed_points:s0:item:0',
+    );
+  },
+);
+
+const directCompactEditorRepairFixture = () => {
+  const source = makeSyntheticNotesSource([
+    { speaker: 'Them', text: 'We' },
+    {
+      speaker: 'Dana',
+      text: 'had planned to migrate ten workspaces, but cancel that plan.',
+    },
+    {
+      speaker: 'Dana',
+      text: 'We decided to run a pilot with three workspaces first, because testing is incomplete.',
+    },
+  ]);
+  const spans = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: segment.text.length,
+  }));
+  const writer = {
+    title: null,
+    sections: [
+      {
+        title: 'Pilot plan',
+        items: [
+          {
+            kind: 'point',
+            text: 'The team discussed its workspace pilot plan.',
+            owner: null,
+            due: null,
+            sources: spans.slice(1),
+          },
+        ],
+      },
+    ],
+  };
+  const invalid: {
+    title: null;
+    meetingType: string;
+    overview: null;
+    sections: {
+      title: { text: string; sources: typeof spans };
+      items: {
+        kind: string;
+        text: string;
+        owner: string | null;
+        due: null;
+        sources: typeof spans;
+      }[];
+    }[];
+  } = {
+    title: null,
+    meetingType: 'general',
+    overview: null,
+    sections: [
+      {
+        title: { text: 'Pilot plan', sources: spans.slice(1) },
+        items: [
+          {
+            kind: 'decision',
+            text: 'The plan to migrate ten workspaces is cancelled in favor of a pilot with three workspaces because testing is incomplete.',
+            owner: null,
+            due: null,
+            sources: spans.slice(1),
+          },
+        ],
+      },
+    ],
+  };
+  const repaired = structuredClone(invalid);
+  repaired.sections[0]!.items = [
+    {
+      kind: 'point',
+      text: 'The plan to migrate ten workspaces was cancelled.',
+      owner: null,
+      due: null,
+      sources: [spans[1]!],
+    },
+    {
+      kind: 'decision',
+      text: 'Run a pilot with three workspaces first because testing is incomplete.',
+      owner: 'Dana',
+      due: null,
+      sources: [spans[2]!],
+    },
+  ];
+  const input = {
+    source,
+    context: makeNotesContext(),
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16384,
+    compactWriterContract: true,
+    reviewProtocol: 'editor' as const,
+    hierarchyAuditStrategy: 'final_only' as const,
+  };
+  return { input, writer, invalid, repaired };
+};
+
+it('repairs a combined cancellation decision once in the strict local whole-source editor', async () => {
+  const { input, writer, invalid, repaired } =
+    directCompactEditorRepairFixture();
+  const generate = vi
+    .fn()
+    .mockResolvedValueOnce(JSON.stringify(writer))
+    .mockResolvedValueOnce(JSON.stringify(invalid))
+    .mockResolvedValueOnce(JSON.stringify(repaired));
+  const result = await generateMeetingNotes({ ...input, generate });
+  expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+    'notesAudit',
+  ]);
+  expect(generate.mock.calls[2]![0].prompt).toContain(
+    'The failed item is sections[0].items[0]',
+  );
+  expect(generate.mock.calls[2]![0].prompt).toContain(JSON.stringify(invalid));
+  expect(result.all_decisions).toHaveLength(1);
+  expect(result.all_decisions[0]!.text).toContain('three workspaces');
+  expect(
+    result.topics
+      .flatMap((topic) => topic.key_points.map((point) => point.text))
+      .join(' '),
+  ).toContain('ten workspaces');
+  expect(result.quality.retry_count).toBe(1);
+  expect(result.quality.issues).not.toEqual(
+    expect.arrayContaining([
+      expect.stringContaining('notes_direct_audit_fallback'),
+    ]),
+  );
+});
+
+it.each(['same invalid decision', 'unsupported repaired action'])(
+  'refuses an exhausted whole-source editor repair without writer fallback: %s',
+  async (failure) => {
+    const { input, writer, invalid, repaired } =
+      directCompactEditorRepairFixture();
+    if (failure === 'unsupported repaired action')
+      repaired.sections[0]!.items = [
+        {
+          kind: 'action',
+          text: 'Publish the production rollout.',
+          owner: 'Dana',
+          due: null,
+          sources: invalid.sections[0]!.items[0]!.sources,
+        },
+      ];
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce(JSON.stringify(writer))
+      .mockResolvedValueOnce(JSON.stringify(invalid))
+      .mockResolvedValueOnce(
+        JSON.stringify(
+          failure === 'same invalid decision' ? invalid : repaired,
+        ),
+      );
+    await expect(
+      generateMeetingNotes({ ...input, generate }),
+    ).rejects.toMatchObject({
+      code: 'notes_audit_invalid',
+      validationCategory: 'guardrail',
+    });
+    expect(generate).toHaveBeenCalledTimes(3);
+  },
+);
+
+it('reports the existing raw-source prose guard inside the same editor repair loop', async () => {
+  const source = makeSyntheticNotesSource([
+    { speaker: 'Dana', text: 'The pilot is paused.' },
+  ]);
+  const spans = [
+    { segment: 0, start: 0, end: source.segments[0]!.text.length },
+  ];
+  const item = {
+    kind: 'point',
+    text: 'The pilot remains paused.',
+    owner: null,
+    due: null,
+    sources: spans,
+  };
+  const writer = { title: null, sections: [{ title: 'Pilot', items: [item] }] };
+  const edited = {
+    title: null,
+    meetingType: 'general',
+    overview: null,
+    sections: [
+      {
+        title: { text: 'Pilot', sources: spans },
+        items: [{ ...item, text: quoteCitedSourcePassages(source, spans) }],
+      },
+    ],
+  };
+  const repaired = structuredClone(edited);
+  repaired.sections[0]!.items = [item];
+  const generate = vi
+    .fn()
+    .mockResolvedValueOnce(JSON.stringify(writer))
+    .mockResolvedValueOnce(JSON.stringify(edited))
+    .mockResolvedValueOnce(JSON.stringify(repaired));
+  const result = await generateMeetingNotes({
+    source,
+    context: makeNotesContext(),
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16384,
+    compactWriterContract: true,
+    reviewProtocol: 'editor',
+    hierarchyAuditStrategy: 'final_only',
+    generate,
+  });
+  expect(generate).toHaveBeenCalledTimes(3);
+  expect(generate.mock.calls[2]![0].prompt).toContain(
+    'notes_guardrail:unpublishable_prose:',
+  );
+  expect(JSON.stringify(result.topics)).toContain(item.text);
+});
+
+it('collects bounded compact writer leaves before one genuine whole-source review callback', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 4 }, (_, index) => ({
+      speaker: 'Remote Speaker 1',
+      text: `The lamp number ${index + 1} is blue. ${'context '.repeat(500)}`,
+    })),
+  );
+  const generate = vi.fn(async (request: NotesRequest) => {
+    expect(request.task).toBe('notesWriter');
+    const rows = sourceDescriptors(request.prompt);
+    return JSON.stringify({
+      title: null,
+      overview: null,
+      sections: [
+        {
+          title: 'Lamps',
+          items: rows.map(({ descriptor }) => ({
+            kind: 'point',
+            text: `The lamp number ${descriptor.segment + 1} is blue.`,
+            owner: null,
+            due: null,
+            sources: [descriptor],
+          })),
+        },
+      ],
+    });
+  });
+  const reviewer = vi.fn(
+    async ({
+      source: actualSource,
+      draft,
+    }: { source: typeof source; draft: NotesDraft }) => {
+      expect(actualSource).toBe(source);
+      expect(
+        draft.sections
+          .flatMap((section) => section.items)
+          .flatMap((item) => item.sources)
+          .map((span) => span.segment)
+          .sort(),
+      ).toEqual([0, 1, 2, 3]);
+      // Mock review response, not model-quality proof: real admission remains in use.
+      return acceptSourceLedNotes(source, {
+        ...draft,
+        overview: {
+          id: 'overview',
+          text: 'The lamps are blue.',
+          sources: [
+            { segment: 0, start: 0, end: source.segments[0]!.text.length },
+          ],
+        },
+      });
+    },
+  );
+  const result = await generateMeetingNotes({
+    source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 8192,
+    compactWriterContract: true,
+    hierarchyAuditStrategy: 'every_node',
+    reviewSourceLedNotes: reviewer,
+  });
+  expect(generate.mock.calls.length).toBeGreaterThan(1);
+  expect(generate.mock.calls.length).toBeLessThanOrEqual(6);
+  expect(
+    generate.mock.calls.every(([request]) => request.task === 'notesWriter'),
+  ).toBe(true);
+  expect(reviewer).toHaveBeenCalledTimes(1);
+  expect(result.generation_metadata.source_action_review_version).toBe(1);
+  expect(result.topics.map((topic) => topic.summary)).toEqual(
+    [1, 2, 3, 4].map((index) => `The lamp number ${index} is blue.`),
+  );
 });

@@ -4,7 +4,7 @@ interface PersonReadStream {
   current_read: string;
 }
 
-export const PERSON_CONTEXT_SYNTHESIS_VERSION = 15;
+export const PERSON_CONTEXT_SYNTHESIS_VERSION = 17;
 
 export const isCurrentPersonDossier = (
   status: string | null | undefined,

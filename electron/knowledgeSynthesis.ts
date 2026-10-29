@@ -46,6 +46,8 @@ import {
 import {
   compilePersonKnowledgeChunk,
   getPersonKnowledgeChunkPrompt,
+  getPersonKnowledgeChunkResponseSchema,
+  personProfilePreservesEvidence,
 } from './personKnowledgeSynthesis';
 import {
   collectPersonSynthesisActivity,
@@ -1154,7 +1156,13 @@ const synthesizeKnowledgeChunkWithRetry = async (params: {
                   params.chunk.sourceMeetings,
                   params.claimCorrections,
                 ),
-                { signal: params.signal, workClass: params.workClass },
+                {
+                  signal: params.signal,
+                  workClass: params.workClass,
+                  responseSchema: getPersonKnowledgeChunkResponseSchema(
+                    params.chunk.sourceMeetings,
+                  ),
+                },
               ),
             ),
           )
@@ -1354,7 +1362,11 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
           profileSources,
           params.claimCorrections,
         ),
-        { signal: params.signal, workClass: params.workClass },
+        {
+          signal: params.signal,
+          workClass: params.workClass,
+          responseSchema: getPersonKnowledgeChunkResponseSchema(profileSources),
+        },
       );
       params.signal?.throwIfAborted();
       const consolidated = compilePersonKnowledgeChunk(
@@ -1363,7 +1375,11 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
         profileSources,
         parseKnowledgeJsonResponse(raw),
       );
-      return consolidated.person_profile?.length
+      return consolidated.person_profile?.length &&
+        personProfilePreservesEvidence(
+          merged.person_profile ?? [],
+          consolidated.person_profile,
+        )
         ? {
             ...mergeKnowledgeV2Documents(
               { type: 'person_context', title: params.doc.title },

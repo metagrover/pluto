@@ -266,7 +266,8 @@ export const AudioManager = ({
   const resolvedTranscriptionSettings = resolveTranscriptionSettings(
     transcriptionSettings,
   );
-  const CHUNK_SECONDS = 5;
+  // Live transcription reads durable chunks, so this also bounds its input delay.
+  const CHUNK_SECONDS = 2;
   // Refs - Dual Recording for source-based speaker labeling
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const micMimeTypeRef = useRef<string | null>(null);
@@ -577,7 +578,6 @@ export const AudioManager = ({
           format,
         },
       );
-      if (format !== 'wav') return null;
       const complete = (await window.ipcRenderer.invoke(
         'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
         {
@@ -587,7 +587,7 @@ export const AudioManager = ({
           source,
           sequence,
           rawChecksumSha256,
-          repairData: data,
+          ...(format === 'wav' ? { repairData: data } : {}),
         },
       )) as { manifest: JournalManifestState; receipt: JournalAudioReceipt };
       captureJournalStateRef.current = complete.manifest;

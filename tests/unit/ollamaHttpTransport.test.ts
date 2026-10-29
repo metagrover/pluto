@@ -51,6 +51,69 @@ describe('ollamaHttpFetch', () => {
     await expect(response.json()).resolves.toEqual({ response: 'durable' });
   });
 
+  it.each([
+    { transport: 'fetch', bodyType: 'string' },
+    { transport: 'stream', bodyType: 'string' },
+    { transport: 'fetch', bodyType: 'bytes' },
+    { transport: 'stream', bodyType: 'bytes' },
+  ])(
+    'frames a large Unicode $bodyType body for $transport cancellation before response headers',
+    async ({ transport, bodyType }) => {
+      const controller = new AbortController();
+      const bodyText = JSON.stringify({
+        prompt: 'Meeting notes ✓ café 🌙 '.repeat(1024),
+      });
+      const body =
+        bodyType === 'bytes' ? Buffer.from(bodyText, 'utf8') : bodyText;
+      let headers: Record<string, string | string[] | undefined> = {};
+      let receivedBody = '';
+      let upstreamClosed = false;
+      let resolveReceived!: () => void;
+      const received = new Promise<void>((resolve) => {
+        resolveReceived = resolve;
+      });
+      const server = createServer((request, response) => {
+        headers = request.headers;
+        response.on('close', () => {
+          upstreamClosed = true;
+        });
+        request.setEncoding('utf8');
+        request.on('data', (chunk) => {
+          receivedBody += chunk;
+        });
+        request.on('end', resolveReceived);
+      });
+      servers.push(server);
+      await new Promise<void>((resolve) =>
+        server.listen(0, '127.0.0.1', resolve),
+      );
+      const address = server.address();
+      if (!address || typeof address === 'string')
+        throw new Error('no address');
+      const url = `http://127.0.0.1:${address.port}/api/chat`;
+      const init = { method: 'POST', body, signal: controller.signal };
+      const generation =
+        transport === 'fetch'
+          ? ollamaHttpFetch(url, init)
+          : ollamaHttpStream(url, init, () => undefined);
+      const rejected = expect(generation).rejects.toMatchObject({
+        name: 'AbortError',
+      });
+      try {
+        await received;
+      } finally {
+        controller.abort();
+      }
+      await rejected;
+      await vi.waitFor(() => expect(upstreamClosed).toBe(true));
+      expect(receivedBody).toBe(bodyText);
+      expect(headers['content-length']).toBe(
+        String(Buffer.byteLength(bodyText, 'utf8')),
+      );
+      expect(headers['transfer-encoding']).toBeUndefined();
+    },
+  );
+
   it('rejects when the response stream terminates before completion', async () => {
     const server = createServer((_request, response) => {
       response.writeHead(200, { 'content-type': 'application/json' });

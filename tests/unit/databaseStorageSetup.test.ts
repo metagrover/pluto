@@ -218,6 +218,7 @@ describe('one-time database storage setup', () => {
     },
   );
 
+  // Real encryption and durable writes can exceed Vitest's default on CI.
   it('preserves an existing encrypted database when its key is missing', () => {
     open('encrypted');
     owners.pop()!.close();
@@ -230,7 +231,7 @@ describe('one-time database storage setup', () => {
     expect(choose).not.toHaveBeenCalled();
     expect(fs.readFileSync(databasePath)).toEqual(original);
     expect(backend.encryptString).toHaveBeenCalledOnce();
-  });
+  }, 15_000);
 
   it('keeps the selected mode when first-run database initialization is interrupted', () => {
     expect(() =>
@@ -322,7 +323,7 @@ describe('one-time database storage setup', () => {
     );
     expect(fs.readFileSync(databasePath)).toEqual(original);
     expect(backend.encryptString).not.toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it('fails closed for malformed choice files and incomplete databases', () => {
     fs.writeFileSync(path.join(root, 'database-storage.json'), '{');

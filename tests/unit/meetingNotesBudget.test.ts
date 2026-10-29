@@ -3,6 +3,8 @@ import {
   bisectNotesSourceSpans,
   calculateNotesRequestBudget,
   estimateNotesTokens,
+  notesContextTokens,
+  notesWriterPolicy,
   partitionNotesSource,
   planNotesCapacity,
 } from '../../electron/llm/meetingNotesBudget';
@@ -69,6 +71,30 @@ it('uses a conservative shared token estimate for dense and ordinary source text
     Buffer.byteLength(`const ${'identifier'.repeat(8)} = 1`),
   );
 });
+
+it.each([
+  { token: 'a'.repeat(64), dense: false },
+  { token: 'a'.repeat(65), dense: true },
+  { token: 'a'.repeat(66), dense: true },
+  { token: `(${'_$9'.repeat(22)})`, dense: true },
+  { token: '𐐀'.repeat(64), dense: false },
+  { token: '𐐀'.repeat(65), dense: true },
+  { token: `${'a'.repeat(40)}-${'b'.repeat(40)}`, dense: false },
+  { token: `${'a'.repeat(40)}\u0301${'b'.repeat(40)}`, dense: false },
+])(
+  'preserves token density at complete word boundaries: $token',
+  ({ token, dense }) => {
+    for (const text of [
+      token + ' ordinary words '.repeat(40),
+      'ordinary words '.repeat(40) + token,
+    ]) {
+      const bytes = Buffer.byteLength(text);
+      expect(estimateNotesTokens(text)).toBe(
+        dense ? bytes : Math.ceil(Math.ceil(bytes / 3) * 1.25),
+      );
+    }
+  },
+);
 
 it('partitions every source turn exactly once as primary coverage without tail loss', () => {
   const source = createNotesSource(
@@ -220,3 +246,29 @@ it('prefers a whitespace boundary when bisecting one oversized source span', () 
     [{ segment: 0, start: 6, end: text.length }],
   ]);
 });
+
+it.each([undefined, null, '', 'ollama'])(
+  'uses the bounded compact writer without model review for local/default provider %s',
+  (provider) => {
+    expect(notesWriterPolicy(provider)).toEqual({
+      compactWriterContract: true,
+      hierarchyAuditStrategy: 'deterministic_only',
+    });
+    expect(notesContextTokens(provider)).toBe(16_384);
+  },
+);
+
+it.each(['chatgpt', 'openai', 'openrouter', 'claude', 'gemini'])(
+  'preserves the existing compact writer contract for %s',
+  (provider) => {
+    expect(notesWriterPolicy(provider)).toEqual({
+      compactWriterContract: true,
+    });
+    expect(notesWriterPolicy(provider)).not.toHaveProperty(
+      'hierarchyAuditStrategy',
+    );
+    expect(notesContextTokens(provider)).toBe(
+      provider === 'chatgpt' ? 131_072 : 16_384,
+    );
+  },
+);

@@ -2,7 +2,9 @@ import { expect, it } from 'vitest';
 import {
   completeCitedSourceWindow,
   createNotesSource,
+  hasBareNotesReferent,
   resolveSourceSpan,
+  sourceBoundReviewWindow,
 } from '../../electron/llm/meetingNotesSource';
 
 it('completes partial turns so a review sees negation and named actors, omitting blank turns', () => {
@@ -152,4 +154,104 @@ it('rejects empty and malformed canonical transcripts', () => {
       JSON.stringify({ segments: [{ speaker: 'Me', text: 4 }] }),
     ),
   ).toThrow('invalid_notes_source');
+});
+
+it.each([
+  'I declined that invitation because I needed rest.',
+  'Those examples helped me understand the theorem.',
+  'This happened before the archive opened.',
+  'These were the paintings I remembered.',
+  'Such a change would need another discussion.',
+])(
+  'supplies exact prior context for a general backward reference: %s',
+  (text) => {
+    const source = createNotesSource(
+      JSON.stringify([
+        { speaker: 'Ari', text: 'The earlier discussion is unrelated.' },
+        { speaker: 'Bo', text: 'We moved to another subject.' },
+        { speaker: 'Ari', text: 'Here is the relevant earlier statement.' },
+        { speaker: 'Bo', text },
+      ]),
+    );
+    const current = source.segments[3]!;
+    const initial = [
+      { segment: current.index, start: 0, end: current.text.length },
+    ];
+    const window = sourceBoundReviewWindow(source, initial);
+    expect(window.map(({ segment }) => segment)).toEqual([0, 1, 2, 3]);
+    expect(resolveSourceSpan(source, window[2]!)).toBe(
+      'Here is the relevant earlier statement.',
+    );
+    expect(sourceBoundReviewWindow(source, window)).toEqual(window);
+  },
+);
+
+it('bounds generic references to complete prior speaker turns without replay growth', () => {
+  const source = createNotesSource(
+    JSON.stringify([
+      { speaker: 'Ari', text: 'An unrelated opening.' },
+      { speaker: 'Bo', text: 'This came from an older subject.' },
+      { speaker: 'Ari', text: 'The invitation was to exhibit a painting' },
+      { speaker: 'Ari', text: 'at the autumn show.' },
+      { speaker: 'Bo', text: 'I needed rest.' },
+      { speaker: 'Ari', text: 'We can discuss another date.' },
+      { speaker: 'Bo', text: 'I declined that invitation.' },
+    ]),
+  );
+  const window = sourceBoundReviewWindow(source, [
+    { segment: 6, start: 0, end: source.segments[6]!.text.length },
+  ]);
+  expect(window.map(({ segment }) => segment)).toEqual([2, 3, 4, 5, 6]);
+  expect(sourceBoundReviewWindow(source, window)).toEqual(window);
+  expect(source.segments[2]!.text).toBe(
+    'The invitation was to exhibit a painting',
+  );
+});
+
+it('does not fabricate preceding evidence for a first-turn demonstrative', () => {
+  const source = createNotesSource(
+    JSON.stringify([{ speaker: 'Ari', text: 'I declined that invitation.' }]),
+  );
+  const initial = [
+    { segment: 0, start: 0, end: source.segments[0]!.text.length },
+  ];
+  expect(sourceBoundReviewWindow(source, initial)).toEqual(initial);
+});
+
+it.each([
+  'I enjoyed that day.',
+  'I am studying this year.',
+  'I know that it happened.',
+])(
+  'extra context selection does not classify self-contained wording as unresolved: %s',
+  (text) => {
+    const source = createNotesSource(
+      JSON.stringify([
+        { speaker: 'Ari', text: 'An earlier source statement.' },
+        { speaker: 'Bo', text },
+      ]),
+    );
+    expect(
+      sourceBoundReviewWindow(source, [
+        { segment: 1, start: 0, end: text.length },
+      ]).map(({ segment }) => segment),
+    ).toEqual([0, 1]);
+    expect(hasBareNotesReferent(text)).toBe(false);
+  },
+);
+
+it('keeps the canonical projection revision stable while preserving explicit same-label trust', () => {
+  const raw = JSON.stringify([
+    { speaker: 'Remote Speaker 1', text: 'I am Ellis.' },
+  ]);
+  const original = createNotesSource(raw);
+  const confirmed = createNotesSource(raw, {
+    'Remote Speaker 1': 'Remote Speaker 1',
+  });
+  expect(confirmed.segments).toEqual(original.segments);
+  expect(confirmed.revision).toBe(original.revision);
+  expect(confirmed.protectedSpeakerLabels).toEqual(['Remote Speaker 1']);
+  expect(raw).toBe(
+    JSON.stringify([{ speaker: 'Remote Speaker 1', text: 'I am Ellis.' }]),
+  );
 });

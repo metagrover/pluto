@@ -160,12 +160,14 @@ export interface AnalysisGenerationMetadata {
     }>;
   };
   pipeline_version?:
+    | 'writer-only-v1'
     | 'writer-audit-v1'
     | 'writer-editor-v1'
     | 'writer-editor-bounded-v1';
   mode?: 'direct' | 'hierarchical';
   audit_status?: 'complete' | 'complete_with_warnings';
   audit_change_count?: number;
+  source_action_review_version?: 1;
   source_provenance?: {
     schema_version: 1;
     source_revision: string;

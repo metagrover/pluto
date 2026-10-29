@@ -30,6 +30,7 @@ async function renderSetup(
     models: ['custom:local'],
     missingModels: [],
   },
+  credentialConfigured = false,
 ) {
   const complete = vi.fn();
   let connected = connection;
@@ -40,6 +41,9 @@ async function renderSetup(
       return;
     }
     if (channel === 'OLLAMA_READINESS') return readiness;
+    if (channel === 'PROVIDER_CREDENTIAL_STATUS')
+      return { configured: credentialConfigured, maskedHint: 'qa-masked' };
+    if (channel === 'PROVIDER_CREDENTIAL_SET') return { configured: true };
     if (channel === 'CHATGPT_STATUS')
       return { connected, planEnabled: connected };
     if (channel === 'CHATGPT_SIGN_IN') {
@@ -78,6 +82,140 @@ async function renderSetup(
 }
 
 describe('First-run intelligence choice', () => {
+  it('offers OpenRouter and keeps its saved key out of the renderer', async () => {
+    const f = await renderSetup(
+      { llm_provider: 'openrouter', openrouter_model: 'example/model' },
+      false,
+      undefined,
+      true,
+    );
+    expect(f.container.textContent).toContain('OpenRouter');
+    expect(f.container.textContent).toContain('selected model provider');
+    expect(
+      f.container.querySelector<HTMLInputElement>('#openrouter-key')!.value,
+    ).toBe('');
+    expect(
+      f.container.querySelector<HTMLInputElement>('#openrouter-model')!.value,
+    ).toBe('example/model');
+    expect(f.container.textContent).not.toContain('qa-masked');
+    await f.submit();
+    expect(f.saved).toMatchObject({
+      llm_provider: 'openrouter',
+      cloud_consent_openrouter: '1',
+      intelligence_setup_complete: 'true',
+    });
+    expect(
+      f.invoke.mock.calls.some(
+        ([channel]) => channel === 'PROVIDER_CREDENTIAL_SET',
+      ),
+    ).toBe(false);
+    expect(f.complete).toHaveBeenCalledOnce();
+    act(() => f.root.unmount());
+  });
+
+  it('requires a fresh key when rechecking saved credentials fails', async () => {
+    const f = await renderSetup(
+      { llm_provider: 'openrouter' },
+      false,
+      undefined,
+      true,
+    );
+    await f.choose('ollama');
+    const originalInvoke = f.invoke.getMockImplementation()!;
+    f.invoke.mockImplementation(async (channel, value) => {
+      if (channel === 'PROVIDER_CREDENTIAL_STATUS')
+        throw Error('key status unavailable');
+      return originalInvoke(channel, value);
+    });
+    await f.choose('openrouter');
+    expect(f.container.textContent).toContain('Enter a key to continue');
+    expect(
+      f.container.querySelector<HTMLButtonElement>('#intelligence-continue')!
+        .disabled,
+    ).toBe(true);
+    await f.submit();
+    expect(f.complete).not.toHaveBeenCalled();
+    expect(
+      f.invoke.mock.calls.some(
+        ([channel, value]) =>
+          channel === 'SET_SETTING' &&
+          value.key === 'intelligence_setup_complete',
+      ),
+    ).toBe(false);
+    act(() => f.root.unmount());
+  });
+
+  it('stores a new OpenRouter key securely before consent and provider activation', async () => {
+    const f = await renderSetup();
+    await f.choose('openrouter');
+    const input =
+      f.container.querySelector<HTMLInputElement>('#openrouter-key')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )!.set!.call(input, 'fictional-qa-key');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await f.submit();
+    expect(f.invoke).toHaveBeenCalledWith('PROVIDER_CREDENTIAL_SET', {
+      provider: 'openrouter',
+      value: 'fictional-qa-key',
+    });
+    expect(Object.values(f.saved)).not.toContain('fictional-qa-key');
+    expect(f.saved).toMatchObject({
+      llm_provider: 'openrouter',
+      cloud_consent_openrouter: '1',
+      openrouter_model: 'openai/gpt-4o-mini',
+    });
+    const calls = f.invoke.mock.calls;
+    const stored = calls.findIndex(
+      ([channel]) => channel === 'PROVIDER_CREDENTIAL_SET',
+    );
+    const consent = calls.findIndex(
+      ([channel, value]) =>
+        channel === 'SET_SETTING' && value.key === 'cloud_consent_openrouter',
+    );
+    const activated = calls.findIndex(
+      ([channel, value]) =>
+        channel === 'SET_SETTING' && value.key === 'llm_provider',
+    );
+    expect(stored).toBeLessThan(consent);
+    expect(consent).toBeLessThan(activated);
+    expect(f.complete).toHaveBeenCalledOnce();
+    act(() => f.root.unmount());
+  });
+
+  it('requires an OpenRouter key and refuses activation when secure storage fails', async () => {
+    const f = await renderSetup();
+    await f.choose('openrouter');
+    expect(
+      f.container.querySelector<HTMLButtonElement>('#intelligence-continue')!
+        .disabled,
+    ).toBe(true);
+    const input =
+      f.container.querySelector<HTMLInputElement>('#openrouter-key')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )!.set!.call(input, 'fictional-qa-key');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const originalInvoke = f.invoke.getMockImplementation()!;
+    f.invoke.mockImplementation(async (channel, value) => {
+      if (channel === 'PROVIDER_CREDENTIAL_SET')
+        throw Error('secure storage unavailable');
+      return originalInvoke(channel, value);
+    });
+    await f.submit();
+    expect(f.container.textContent).toContain('Could not save');
+    expect(f.saved.cloud_consent_openrouter).toBeUndefined();
+    expect(f.saved.llm_provider).toBeUndefined();
+    expect(f.complete).not.toHaveBeenCalled();
+    act(() => f.root.unmount());
+  });
+
   it.each([
     null,
     {},

@@ -12,6 +12,13 @@ export type SuspectNotesProse = {
 const normalizeWhitespace = (value: string): string =>
   value.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
 
+// A trailing lowercase "the" exposes a fragment without rejecting names or letter labels.
+export const hasUnfinishedNotesText = (text: string): boolean =>
+  /\bthe\s*[.!?…]*$/.test(text.trim());
+
+export const hasDirectFirstPersonNotesText = (text: string): boolean =>
+  /^\s*(?:I|we|my|our)\b/i.test(text);
+
 /**
  * Precision-first publication check for prose that is still effectively a raw
  * transcript fragment. Exact cited-source copying is required, along with an

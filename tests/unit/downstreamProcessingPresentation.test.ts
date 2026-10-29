@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { getDownstreamProcessingPresentation } from '../../src/components/features/downstreamProcessingPresentation';
 
+it('does not claim analysis is preparing when recording finalization needs recovery', () => {
+  expect(
+    getDownstreamProcessingPresentation({
+      transcript_status: 'needs_attention',
+      finalization_status: 'recovery_required',
+      finalization_error_category: 'journal_seal_failed',
+    }),
+  ).toMatchObject({ state: 'failed', title: "Couldn't finish the transcript" });
+});
+
 it('retains published notes and a durable failed-regeneration status after navigation', () => {
   expect(
     getDownstreamProcessingPresentation({
@@ -256,4 +266,60 @@ describe('downstream processing presentation', () => {
       detail: 'Your transcript is ready.',
     });
   });
+});
+
+it('explains how to retry memory refusal without changing the selected model', () => {
+  expect(
+    getDownstreamProcessingPresentation({
+      analysis_run_json: JSON.stringify({
+        notes_status: 'failed',
+        error_code: 'notes_memory_capacity',
+      }),
+    }),
+  ).toEqual({
+    state: 'failed',
+    title: 'Local model needs more memory',
+    detail:
+      'Your transcript is safe. Close other apps and try again when more memory is available.',
+    failureCode: 'notes_memory_capacity',
+  });
+});
+
+it('shows final transcription before queued notes when no structured notes exist', () => {
+  expect(
+    getDownstreamProcessingPresentation({
+      transcript_status: 'validating',
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'processing',
+          stage: 'transcribing_mic',
+        },
+      }),
+      analysis_run_json: JSON.stringify({
+        notes_status: 'running',
+        stage: 'queued',
+        queue_position: 1,
+      }),
+    }),
+  ).toEqual({
+    state: 'loading',
+    title: 'Finalizing transcript',
+    detail:
+      'Checking recorded speech and speaker labels before preparing notes.',
+  });
+});
+
+it('preserves previous structured notes while a new transcript is finalizing', () => {
+  expect(
+    getDownstreamProcessingPresentation({
+      transcript_status: 'validating',
+      analysis_json: '{"analysis_schema_version":3}',
+      analysis_run_json: JSON.stringify({
+        notes_status: 'running',
+        stage: 'queued',
+        queue_position: 1,
+      }),
+    }),
+  ).toEqual({ state: 'ready', notesUpdateQueuePosition: 1 });
 });

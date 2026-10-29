@@ -7,6 +7,21 @@ import {
 import { calculateOllamaContextBudget } from '../../electron/llm/unifiedProvider';
 
 describe('getAskPlutoPrompt', () => {
+  it('preserves canonical lifecycle when answering task details', () => {
+    const prompt = getAskPlutoPrompt(
+      'Who is sending it, and under what condition?',
+      [],
+      'factual',
+    );
+    expect(prompt).toContain(
+      'report their recorded state instead of presenting them as pending, ongoing, or future work, regardless of how the question is phrased',
+    );
+    expect(prompt).toContain('Whenever mentioning a canonical task');
+    expect(prompt).toContain(
+      'quote the task text exactly and preserve its owner, state, and conditions',
+    );
+  });
+
   it('distinguishes a recorded speaker owner from an unknown real name', () => {
     const prompt = getAskPlutoPrompt('Who agreed to send it?', [], 'factual');
     expect(prompt).toContain(

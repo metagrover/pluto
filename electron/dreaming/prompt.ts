@@ -5,7 +5,7 @@ import type {
 } from './types';
 
 export const DREAMING_MODEL = 'gemma4:12b';
-export const DREAMING_PROMPT_VERSION = 'dreaming-proposals-v5';
+export const DREAMING_PROMPT_VERSION = 'dreaming-proposals-v6';
 
 type JsonSchema = Record<string, unknown>;
 
@@ -82,32 +82,15 @@ export const buildDreamingResponseSchema = (
   entityType: DreamingEntityType,
 ): JsonSchema => ({
   type: 'object',
-  oneOf: [
-    {
-      type: 'object',
-      additionalProperties: false,
-      required: ['status', 'proposals'],
-      properties: {
-        status: { type: 'string', const: 'no_change' },
-        proposals: { type: 'array', maxItems: 0 },
-      },
+  additionalProperties: false,
+  required: ['status', 'proposals'],
+  properties: {
+    status: { type: 'string', enum: ['no_change', 'proposed'] },
+    proposals: {
+      type: 'array',
+      items: { anyOf: kindsByEntity[entityType].map(proposalSchema) },
     },
-    {
-      type: 'object',
-      additionalProperties: false,
-      required: ['status', 'proposals'],
-      properties: {
-        status: { type: 'string', const: 'proposed' },
-        proposals: {
-          type: 'array',
-          minItems: 1,
-          items: {
-            oneOf: kindsByEntity[entityType].map(proposalSchema),
-          },
-        },
-      },
-    },
-  ],
+  },
 });
 
 export interface DreamingGenerationRequest {

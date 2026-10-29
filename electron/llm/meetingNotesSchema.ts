@@ -82,6 +82,15 @@ export const buildNotesResponseSchema = (
         title: paragraphs
           ? compactTitle
           : { anyOf: [compactTitle, { type: 'null' }] },
+        overview: {
+          anyOf: [
+            object({
+              text: { type: 'string', minLength: 1, maxLength: 12_000 },
+              sources: compactSources,
+            }),
+            { type: 'null' },
+          ],
+        },
         sections: {
           ...array(
             object({
@@ -95,7 +104,7 @@ export const buildNotesResponseSchema = (
           maxItems: 64,
         },
       },
-      ['title', 'sections'],
+      ['title', 'overview', 'sections'],
     );
   }
   const text = (requireId: boolean) =>

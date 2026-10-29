@@ -5,6 +5,7 @@ import {
 } from '../src/utils/personDossierRead';
 import {
   type PersonProfileClaim,
+  mergePersonProfiles,
   parsePersonProfile,
 } from '../src/utils/personProfile';
 
@@ -1471,7 +1472,7 @@ export const mergeKnowledgeV2Documents = (
     scope,
     ...(scope.type === 'person_context'
       ? {
-          person_profile: parsePersonProfile(
+          person_profile: mergePersonProfiles(
             documents.flatMap((doc) => doc.person_profile ?? []),
           ),
         }

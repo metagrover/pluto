@@ -10,12 +10,17 @@ export const ollamaHttpFetch = (
 ): Promise<Response> =>
   new Promise((resolve, reject) => {
     const url = new URL(input);
-    const headers = Object.fromEntries(new Headers(init.headers).entries());
+    const headers = new Headers(init.headers);
+    // Go starts disconnect detection at body EOF; explicit length makes JSON POST EOF observable before a response.
+    if (typeof init.body === 'string' || init.body instanceof Uint8Array) {
+      headers.set('content-length', String(Buffer.byteLength(init.body)));
+      headers.delete('transfer-encoding');
+    }
     const request = httpRequest(
       url,
       {
         method: init.method,
-        headers,
+        headers: Object.fromEntries(headers.entries()),
         signal: init.signal ?? undefined,
       },
       (response) => {
@@ -85,12 +90,17 @@ export const ollamaHttpStream = (
 }> =>
   new Promise((resolve, reject) => {
     const url = new URL(input);
-    const headers = Object.fromEntries(new Headers(init.headers).entries());
+    const headers = new Headers(init.headers);
+    // Go starts disconnect detection at body EOF; explicit length makes JSON POST EOF observable before a response.
+    if (typeof init.body === 'string' || init.body instanceof Uint8Array) {
+      headers.set('content-length', String(Buffer.byteLength(init.body)));
+      headers.delete('transfer-encoding');
+    }
     const request = httpRequest(
       url,
       {
         method: init.method,
-        headers,
+        headers: Object.fromEntries(headers.entries()),
         signal: init.signal ?? undefined,
       },
       (response) => {

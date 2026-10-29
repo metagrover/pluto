@@ -4,7 +4,7 @@ import {
   rebaseMeetingNotesEdits,
 } from '../../src/utils/meetingNotesEditRebase';
 
-it('removes a saved continuation edit when its value returns to the original', () => {
+it('retains an explicit empty continuation list so synchronization can remove its tasks', () => {
   const path = 'native_continuations:all_decisions:0';
   const result = applyMeetingNotesUserEdit(
     {
@@ -20,7 +20,8 @@ it('removes a saved continuation edit when its value returns to the original', (
     '2026-01-02T00:00:00Z',
   );
 
-  expect(result).toEqual({ edits: {}, changed: true });
+  expect(result.changed).toBe(true);
+  expect(result.edits[path]?.edited).toBe('[]');
   expect(applyMeetingNotesUserEdit({}, path, '[]', '[]', 'now').changed).toBe(
     false,
   );
@@ -230,4 +231,105 @@ it('treats changed source identity as a conflict even when generated text is unc
   expect(result.conflicts).toEqual([
     expect.objectContaining({ previousSourceKey: 'old-revision' }),
   ]);
+});
+
+const completionBlock = (
+  path: string,
+  text: string,
+  owner: string | null = 'me',
+  sourceKey: string | null = null,
+  revision = 'same-source',
+  start = 0,
+) => ({
+  path,
+  text: 'false',
+  sourceKey,
+  completionIdentity: {
+    text: text.toLowerCase(),
+    owner,
+    sourceRevision: revision,
+    sources: [{ segment: 0, start, end: 50 }],
+  },
+});
+const completedEdit = { original: 'false', edited: 'true', edited_at: 'now' };
+it('keeps completion with the same owner and task when source evidence narrows after rewrite', () => {
+  const result = rebaseMeetingNotesEdits({
+    edits: { 'completion:all_action_items:0': completedEdit },
+    previousBlocks: [
+      completionBlock(
+        'completion:all_action_items:0',
+        'Prepare checklist',
+        'me',
+        'wide',
+      ),
+    ],
+    nextBlocks: [
+      completionBlock(
+        'completion:all_action_items:2',
+        'prepare checklist',
+        'me',
+        'narrow',
+        'same-source',
+        10,
+      ),
+    ],
+  });
+  expect(result.edits['completion:all_action_items:2']?.edited).toBe('true');
+  expect(result.conflicts).toEqual([]);
+});
+it.each([
+  completionBlock('completion:all_action_items:0', 'Different task'),
+  completionBlock(
+    'completion:all_action_items:0',
+    'Prepare checklist',
+    'other',
+  ),
+  completionBlock(
+    'completion:all_action_items:0',
+    'Prepare checklist',
+    'me',
+    'other',
+    'other-source',
+  ),
+])(
+  'does not transfer a checkbox to a different task, owner or source',
+  (next) => {
+    const result = rebaseMeetingNotesEdits({
+      edits: { 'completion:all_action_items:0': completedEdit },
+      previousBlocks: [
+        completionBlock(
+          'completion:all_action_items:0',
+          'Prepare checklist',
+          'me',
+          'original',
+        ),
+      ],
+      nextBlocks: [next],
+    });
+    expect(result.edits).toEqual({});
+    expect(result.conflicts).toHaveLength(1);
+  },
+);
+it('does not guess completion when two legacy tasks share the same wording', () => {
+  const result = rebaseMeetingNotesEdits({
+    edits: { 'completion:all_action_items:0': completedEdit },
+    previousBlocks: [
+      completionBlock('completion:all_action_items:0', 'Checklist'),
+      completionBlock('completion:all_action_items:1', 'Checklist'),
+    ],
+    nextBlocks: [completionBlock('completion:all_action_items:0', 'Checklist')],
+  });
+  expect(result.edits).toEqual({});
+  expect(result.conflicts).toHaveLength(1);
+});
+it('persists explicit unchecking rather than confusing it with archived completion', () => {
+  const result = applyMeetingNotesUserEdit(
+    { 'completion:all_action_items:0': completedEdit },
+    'completion:all_action_items:0',
+    'false',
+    'false',
+    'later',
+  );
+  expect(result.edits['completion:all_action_items:0']?.edited).toBe('false');
+  expect(result.edits['completion:v2:action:0']?.edited).toBe('false');
 });

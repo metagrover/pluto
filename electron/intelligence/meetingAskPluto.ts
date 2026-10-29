@@ -18,7 +18,10 @@ import {
   stripMeetingAskPlutoTimestampNarration,
 } from './meetingAskPlutoStream';
 import {
+  CANONICAL_COMMITMENT_ANSWER_GUIDANCE,
+  type CanonicalCommitmentEvidence,
   buildMeetingNotesEvidenceDocument,
+  formatCanonicalCommitmentEvidence,
   resolveSavedMeetingEvidencePolicy,
 } from './meetingNotesEvidence';
 
@@ -54,6 +57,7 @@ export interface MeetingAskPlutoContext {
   statusNote: string;
   evidenceItems: MeetingAskPlutoEvidenceItem[];
   truncatedEvidenceKinds?: Array<'decision' | 'action_item'>;
+  canonicalCommitments?: readonly CanonicalCommitmentEvidence[];
 }
 
 export interface MeetingAskPlutoContextEntity {
@@ -319,12 +323,14 @@ export const buildMeetingAskPlutoContext = ({
   entities = [],
   attentionItems = [],
   speakerDisplayNames = {},
+  canonicalCommitments = [],
 }: {
   meeting: PersistedMeeting;
   query: string;
   entities?: MeetingAskPlutoContextEntity[];
   attentionItems?: MeetingAskPlutoAttentionItem[];
   speakerDisplayNames?: Readonly<Record<string, string>>;
+  canonicalCommitments?: readonly CanonicalCommitmentEvidence[];
 }): MeetingAskPlutoContext => {
   const scope = buildScope(meeting);
   const evidenceItems: MeetingAskPlutoEvidenceItem[] = [];
@@ -354,6 +360,19 @@ export const buildMeetingAskPlutoContext = ({
     text: segment.text,
     quote: segment.quote,
   }));
+
+  const meetingCommitments = canonicalCommitments.filter(
+    (record) => record.meetingId === scope.meetingId,
+  );
+  const canonicalState = formatCanonicalCommitmentEvidence(meetingCommitments);
+  if (canonicalState)
+    addEvidence(evidenceItems, {
+      id: 'canonical-commitments',
+      kind: 'note',
+      meetingId: scope.meetingId,
+      title: 'Current task state',
+      text: canonicalState,
+    });
 
   if (notesDocument.notesText) {
     addEvidence(evidenceItems, {
@@ -470,9 +489,10 @@ export const buildMeetingAskPlutoContext = ({
     scope,
     trustStatus,
     boundary:
-      'Only use evidence from this meeting supplied below. Saved meeting notes are authoritative unless the request explicitly asks for exact wording or the notes are unavailable. Do not use any other meeting, project, person, or global memory unless the user explicitly asks to broaden scope.',
+      'Only use evidence from this meeting supplied below. Canonical task records are authoritative for current task state. Meeting notes describe historical discussion and remain authoritative for other recorded facts unless the request explicitly asks for exact wording or the notes are unavailable. Do not use any other meeting, project, person, or global memory unless the user explicitly asks to broaden scope.',
     statusNote,
     evidenceItems: boundedEvidenceItems,
+    canonicalCommitments: meetingCommitments,
     ...(truncatedEvidenceKinds.size > 0
       ? { truncatedEvidenceKinds: [...truncatedEvidenceKinds] }
       : {}),
@@ -726,11 +746,24 @@ export const buildPreparedMeetingAskPlutoResponse = (
     : SIMPLE_ACTION_QUERY.test(query.trim())
       ? 'action_item'
       : null;
-  if (!kind || context.truncatedEvidenceKinds?.includes(kind)) return null;
-
-  const selected = context.evidenceItems
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => item.kind === kind);
+  if (
+    !kind ||
+    (context.truncatedEvidenceKinds?.includes(kind) &&
+      !(kind === 'action_item' && context.canonicalCommitments?.length))
+  )
+    return null;
+  const currentTasks =
+    kind === 'action_item' ? context.canonicalCommitments : undefined;
+  const selected = currentTasks?.length
+    ? currentTasks.map((record) => ({
+        item: {
+          meetingId: record.meetingId,
+          text: `${record.state}: ${JSON.stringify(record.task)} — ${record.owner || 'Owner unconfirmed'}`,
+        },
+      }))
+    : context.evidenceItems
+        .map((item) => ({ item }))
+        .filter(({ item }) => item.kind === kind);
   if (selected.length === 0) return null;
 
   const citations: MeetingAskPlutoCitation[] = selected.map(
@@ -744,7 +777,13 @@ export const buildPreparedMeetingAskPlutoResponse = (
       trust_status: context.trustStatus,
     }),
   );
-  const answer = selected.map(({ item }) => item.text).join('\n');
+  const answer = [
+    ...(currentTasks?.length &&
+    !currentTasks.some((record) => record.state === 'open')
+      ? ['No confirmed open responsibilities are recorded.']
+      : []),
+    ...selected.map(({ item }) => item.text),
+  ].join('\n');
 
   return {
     status: 'answered',
@@ -759,7 +798,9 @@ export const buildPreparedMeetingAskPlutoResponse = (
       },
     ],
     citations,
-    rationale: 'Returned existing structured meeting-note evidence directly.',
+    rationale: currentTasks?.length
+      ? 'Returned current canonical task state directly.'
+      : 'Returned existing structured meeting-note evidence directly.',
   };
 };
 
@@ -801,9 +842,16 @@ export const buildMeetingAskPlutoPrompt = ({
     });
   }
   const evidence = context.evidenceItems
+    .map((item, index) => ({ item, index }))
+    // Keep citation numbers stable while placing current state after history.
+    .sort(
+      (left, right) =>
+        Number(left.item.id === 'canonical-commitments') -
+        Number(right.item.id === 'canonical-commitments'),
+    )
     .map(
-      (item, index) =>
-        `[Evidence ${index + 1}] ${item.title} (${item.kind})\n${item.text}`,
+      ({ item, index }) =>
+        `${item.id === 'canonical-commitments' ? 'Current task state (overrides historical meeting discussion):\n' : ''}[Evidence ${index + 1}] ${item.title} (${item.kind})\n${item.text}`,
     )
     .join('\n\n');
   const recentTurns = normalizeMeetingAskPlutoTurns(turns)
@@ -864,6 +912,7 @@ ${assistancePolicy}
 ${conversationPolicy}
 
 Rules:
+- ${CANONICAL_COMMITMENT_ANSWER_GUIDANCE}
 - Ground meeting-specific factual claims only in Meeting evidence. Use explicit statements. Cite each factual sentence or bullet with [Evidence N]. If unsupported, say “The meeting didn't establish that.” Treat live evidence as partial.
 - Answer conversationally and directly, matching the requested depth. Synthesize across the relevant evidence. Do not merely repeat transcript lines. Meeting grounding is implicit. Never begin with “Based on the meeting evidence provided”.
 - Label inference “My interpretation is…”. Label outside general advice “This wasn't discussed, but generally…”. Never add unrelated issues as reasons or agreed actions.
@@ -877,7 +926,9 @@ ${conversation?.turnMode === 'challenge' ? 'Previous answer disputed; recheck th
 Question: ${query.trim()}
 
 Meeting evidence:
-${evidence || 'None'}`;
+${evidence || 'None'}
+
+${CANONICAL_COMMITMENT_ANSWER_GUIDANCE}`;
   }
 
   return `You are Pluto, answering inside a single meeting note.
@@ -887,6 +938,7 @@ Scope boundary: ${context.boundary}
 Trust note: ${context.statusNote}
 
 Rules:
+${CANONICAL_COMMITMENT_ANSWER_GUIDANCE}
 1. Ground every meeting-specific factual claim only in the meeting evidence below. Never invent meeting facts.
 2. For a meeting-fact question the evidence does not support, say: “The meeting didn't establish that.” State the specific missing detail only when useful.
 3. Cite factual claims with [Evidence N]. For authorship, distinguish the person who explicitly created, built, wrote, or prepared the work from someone who presented, discussed, owns, or was introduced near it. A name appearing near the topic is not proof of authorship.
@@ -923,7 +975,9 @@ Question:
 ${query.trim()}
 
 Meeting evidence:
-${evidence || 'None'}`;
+${evidence || 'None'}
+
+${CANONICAL_COMMITMENT_ANSWER_GUIDANCE}`;
 };
 
 const extractEvidenceReferences = (answer: string) => {

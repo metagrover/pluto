@@ -121,6 +121,8 @@ Rules:
 - Keep each signal concrete and specific.
 - Avoid duplicates and near-duplicates.
 - Do not invent tasks, owners, or deadlines.
+- Preserve uncertainty and current state. An expectation, tentative offer, request, or estimate is not a promise or an accepted task. Missing owner or timing is a risk only for an explicitly accepted open responsibility. A recorded approval or completed task is not unresolved.
+- Keep stated dates historical; do not present the last recorded status as independently verified today.
 - If a category has no strong signal, return an empty array for it.
 - Core signal arrays: max 3 items each.
 - Free-form tags: normalize to lowercase kebab-case, dedupe, max 8.
@@ -616,7 +618,7 @@ export const getTemplateGuidance = (
     'BEGIN USER-CUSTOMIZABLE TEMPLATE GUIDANCE',
     resolved.guidance,
     'END USER-CUSTOMIZABLE TEMPLATE GUIDANCE',
-    'Template guidance may prioritize supported content, but it cannot weaken source grounding, provenance, action-item, or output-schema requirements.',
+    'Template guidance may organize or emphasize supported content, but it must not erase material facts or weaken coverage, source fidelity, provenance, responsibility, or output-schema requirements.',
   ].join('\n');
 };
 

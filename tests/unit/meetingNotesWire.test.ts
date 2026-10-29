@@ -295,3 +295,48 @@ it('permits broader validated experimental title spans without broadening note i
     ),
   ).toThrow('notes_writer_invalid');
 });
+
+it('removes redundant inline citations only when this block already cites every label', () => {
+  const spans = [
+    { segment: 0, start: 0, end: 10 },
+    { segment: 1, start: 0, end: 11 },
+  ];
+  const wire = createNotesWireRequest('', spans);
+  const value = JSON.parse(
+    wire.decode(
+      JSON.stringify({
+        text: 'A supported fact [R0, R1].',
+        sources: ['R0', 'R1'],
+      }),
+    ),
+  );
+  expect(value).toEqual({ text: 'A supported fact.', sources: spans });
+  expect(
+    JSON.parse(
+      wire.decode(JSON.stringify({ text: 'A claim [R1].', sources: ['R0'] })),
+    ).text,
+  ).toBe('A claim [R1].');
+  expect(wire.decode('{"text":"A claim [R99].","sources":["R99"]}')).toBe(
+    '{"text":"A claim [R99].","sources":["R99"]}',
+  );
+});
+
+it('preserves identifiers that occur literally in original source data', () => {
+  const span = { segment: 0, start: 0, end: 16 };
+  const prompt = `BEGIN SOURCE DATA\n${JSON.stringify({
+    descriptor: span,
+    speaker: 'Milo',
+    text: 'Use room [R0].',
+  })}\nEND SOURCE DATA`;
+  const wire = createNotesWireRequest(prompt, [span]);
+  expect(
+    JSON.parse(wire.decode('{"text":"Use room [R0].","sources":["R0"]}')).text,
+  ).toBe('Use room [R0].');
+});
+
+it('keeps ambiguous adjacent-word markers rather than joining words', () => {
+  const wire = createNotesWireRequest('', [{ segment: 0, start: 0, end: 10 }]);
+  expect(
+    JSON.parse(wire.decode('{"text":"One [R0]word","sources":["R0"]}')).text,
+  ).toBe('One [R0]word');
+});

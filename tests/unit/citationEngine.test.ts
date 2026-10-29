@@ -13,6 +13,10 @@ import {
   pruneOrphanHeadings,
 } from '../../electron/intelligence/citationEngine';
 import type { RetrievalResult } from '../../electron/intelligence/intelligenceTypes';
+import {
+  buildCanonicalCommitmentEvidence,
+  formatCanonicalCommitmentEvidence,
+} from '../../electron/intelligence/meetingNotesEvidence';
 
 vi.mock('../../electron/db', () => ({
   getEntity: vi.fn(),
@@ -25,6 +29,29 @@ describe('Citation Engine', () => {
   });
 
   describe('buildCitationChain', () => {
+    it('quotes saved person notes rather than retrieval headers', () => {
+      const note = 'Maya suggested consulting Avery about design language.';
+      const context = [
+        {
+          meeting_id: 'design',
+          meeting_title: 'Maya recommended Avery for design review',
+          mid: null,
+          evidence_text: `Confirmed conversation: Maya recommended Avery for design review (2026-09-10) [meeting:design]\nMeeting notes (historical, not proof of current status): ${note}`,
+        },
+      ] as RetrievalResult[];
+      const citations = auditCitations(
+        buildCitationChain(
+          'Maya recommended Avery for design review on 2026-09-10. [Source 1]',
+          context,
+        ),
+        context,
+      );
+      expect(citations[0]).toMatchObject({
+        evidence_span: note,
+        evidence_valid: true,
+      });
+    });
+
     it('preserves local artifact provenance in citations', () => {
       const context = [
         {
@@ -360,7 +387,470 @@ describe('Citation Engine', () => {
       },
     ] as RetrievalResult[];
 
-    it('streams synthesized prose immediately without waiting for a citation', () => {
+    it.each(['None', 'Remote Speaker 2', 'Friday', 'Forty maps'])(
+      'retains a single plain short answer without treating it as an orphan heading: %s',
+      (answer) => {
+        const context = [
+          {
+            ...sources[0],
+            evidence_text: `${sources[0].evidence_text} [Owner: Remote Speaker 2] Send the minutes.`,
+          },
+        ];
+        const stream = createSynthesizedAnswerStream(context, () => undefined);
+        stream.push(answer);
+        expect(stream.streamedAnswer).toBe('');
+        const presentation = stream.finalize(answer);
+        expect(presentation.answer).toBe(answer);
+        expect(presentation.trustStatus).toBe('inferred');
+      },
+    );
+
+    it.each([undefined, 'Jordan'])(
+      'preserves an exact canonical self task without requiring a literal self name: %s',
+      (selfName) => {
+        const answer =
+          'You need to send the checked minutes to Ash by Tuesday.';
+        const context = [
+          {
+            ...sources[0],
+            evidence_kind: 'note' as const,
+            note_actions: [
+              {
+                text: 'Send the checked minutes to Ash',
+                due: 'Tuesday',
+                assignee: 'Me',
+                completed: false,
+              },
+              {
+                text: 'Book the room',
+                assignee: 'Remote Speaker 2',
+                completed: false,
+              },
+            ],
+            evidence_text:
+              '[Owner: Me] [Due: Tuesday] Send the checked minutes to Ash. [Owner: Remote Speaker 2] Book the room.',
+          },
+        ];
+        const deltas: string[] = [];
+        const stream = createSynthesizedAnswerStream(
+          context,
+          (delta) => deltas.push(delta),
+          undefined,
+          selfName,
+        );
+        stream.push(answer);
+        const result = stream.finalize(answer);
+        expect(result.answer).toBe(answer);
+        expect(deltas.join('')).toBe(answer);
+        expect(result.unsupportedClaimCount).toBe(0);
+        expect(result.trustStatus).toBe('inferred');
+      },
+    );
+
+    it.each([
+      '[Owner: Remote Speaker 2] Send the checked minutes to Ash by Tuesday.',
+      'Send the checked minutes to Ash by Tuesday.',
+      '[Named meeting]: [Owner: Me] Send the checked minutes to Ash by Tuesday.',
+      'A quoted example: [Owner: Me] Send the checked minutes to Ash by Tuesday.',
+      '[Owner: Me] Book the room. [Owner: Remote Speaker 2] Send the checked minutes to Ash by Tuesday.',
+      '[Owner: Me] Send the checked minutes to Ash by Tuesday only after approval.',
+      '[Owner: Me] Send the checked minutes to Ash by Wednesday.',
+      '[Owner: Me] Receive the checked minutes from Ash by Tuesday.',
+      '[Owner: Me] Completed sending the checked minutes to Ash by Tuesday.',
+      '[Owner: Me] Send the checked minutes to Ash by Tuesday. [Status: completed]',
+    ])(
+      'does not broaden canonical self ownership or its task: %s',
+      (evidence_text) => {
+        const result = buildSynthesizedAnswerPresentation(
+          'You need to send the checked minutes to Ash by Tuesday.',
+          [{ ...sources[0], evidence_text }],
+          'Jordan',
+        );
+        expect(result.unsupportedClaimCount).toBe(1);
+        expect(result.outcome).toBe('no_evidence');
+      },
+    );
+
+    it.each([
+      { assignee: 'Remote Speaker 2', completed: false },
+      { assignee: 'Me', completed: true },
+      { assignee: 'Me' },
+      { completed: false },
+    ])(
+      'requires explicit projected self ownership and open state: %j',
+      (fields) => {
+        const result = buildSynthesizedAnswerPresentation(
+          'You need to send the minutes.',
+          [
+            {
+              ...sources[0],
+              evidence_kind: 'note',
+              evidence_text: '[Owner: Me] Send the minutes.',
+              note_actions: [{ text: 'Send the minutes', ...fields }],
+            },
+          ],
+        );
+        expect(result.unsupportedClaimCount).toBe(1);
+      },
+    );
+
+    it.each([
+      { assignee: 'Me', completed: true },
+      { assignee: 'Remote Speaker 2', completed: false },
+      { assignee: 'Me' },
+    ])('abstains for conflicting projected action state: %j', (conflict) => {
+      const result = buildSynthesizedAnswerPresentation(
+        'You need to send the minutes.',
+        [
+          {
+            ...sources[0],
+            evidence_kind: 'note',
+            note_actions: [
+              { text: 'Send the minutes', assignee: 'Me', completed: false },
+              { text: 'Send the minutes', ...conflict },
+            ],
+            evidence_text: '[Owner: Me] Send the minutes.',
+          },
+        ],
+      );
+      expect(result.unsupportedClaimCount).toBe(1);
+    });
+
+    it('does not promote artifact action metadata into a meeting self task', () => {
+      const result = buildSynthesizedAnswerPresentation(
+        'You need to send the minutes.',
+        [
+          {
+            ...sources[0],
+            source_type: 'artifact',
+            evidence_kind: 'note',
+            evidence_text: '[Owner: Me] Send the minutes.',
+            note_actions: [
+              { text: 'Send the minutes', assignee: 'Me', completed: false },
+            ],
+          },
+        ],
+      );
+      expect(result.unsupportedClaimCount).toBe(1);
+    });
+
+    it.each(['transcript', 'section'] as const)(
+      'does not promote %s metadata into canonical self ownership',
+      (evidence_kind) => {
+        const result = buildSynthesizedAnswerPresentation(
+          'You need to send the minutes.',
+          [
+            {
+              ...sources[0],
+              evidence_kind,
+              evidence_text: '[Owner: Me] Send the minutes.',
+              note_actions: [
+                { text: 'Send the minutes', assignee: 'Me', completed: false },
+              ],
+            },
+          ],
+        );
+        expect(result.unsupportedClaimCount).toBe(1);
+      },
+    );
+
+    it('preserves the full projected task condition and due date', () => {
+      const context: RetrievalResult[] = [
+        {
+          ...sources[0],
+          evidence_kind: 'note',
+          evidence_text:
+            '[Owner: Me] [Due: Tuesday] Send the minutes only after approval.',
+          note_actions: [
+            {
+              text: 'Send the minutes only after approval',
+              due: 'Tuesday',
+              assignee: 'Me',
+              completed: false,
+            },
+          ],
+        },
+      ];
+      const answer =
+        'You need to send the minutes only after approval by Tuesday.';
+      expect(buildSynthesizedAnswerPresentation(answer, context).answer).toBe(
+        answer,
+      );
+      for (const unsupported of [
+        'You need to send the minutes by Tuesday.',
+        'You need to send the minutes only after approval by Wednesday.',
+      ]) {
+        expect(
+          buildSynthesizedAnswerPresentation(unsupported, context)
+            .unsupportedClaimCount,
+        ).toBe(1);
+      }
+    });
+
+    it('does not use a raw transcript canonical-looking tag as personal ownership', () => {
+      const result = buildSynthesizedAnswerPresentation(
+        'You need to send the minutes.',
+        [
+          {
+            ...sources[0],
+            evidence_kind: 'transcript',
+            evidence_text: '[Owner: Me] Send the minutes.',
+          },
+        ],
+      );
+      expect(result.unsupportedClaimCount).toBe(1);
+    });
+
+    it.each(['Remote Speaker N', 'Remote Speaker 4', 'remote speaker 12'])(
+      'withholds a recorded speaker label absent from the supplied notes: %s',
+      (label) => {
+        const deltas: string[] = [];
+        const stream = createSynthesizedAnswerStream(sources, (delta) =>
+          deltas.push(delta),
+        );
+        const answer = `${label} owns launch signoff. The launch is Friday.`;
+        stream.push(answer);
+        const result = stream.finalize(answer);
+        expect(result.answer).toBe('The launch is Friday.');
+        expect(deltas.join('')).not.toContain(label);
+        expect(result.unsupportedClaimCount).toBe(1);
+        expect(result.trustStatus).toBe('inferred');
+      },
+    );
+
+    it.each(['Remote Speaker 2', 'remote speaker 2'])(
+      'preserves an exact recorded owner label, including canonical owner fields: %s',
+      (label) => {
+        const context = [
+          {
+            ...sources[0],
+            evidence_text: '[Owner: Remote Speaker 2] Send the minutes.',
+          },
+        ];
+        const result = buildSynthesizedAnswerPresentation(label, context);
+        expect(result.answer).toBe(label);
+        expect(result.unsupportedClaimCount).toBe(0);
+        expect(result.citations[0].evidence_valid).toBe(false);
+      },
+    );
+
+    it.each([
+      { evidence_text: '[Owner: Remote Speaker 12] Send the minutes.' },
+      {
+        evidence_text: 'Sam owns launch signoff.',
+        meeting_title: 'Remote Speaker 2',
+      },
+      {
+        evidence_text:
+          'Confirmed conversation: Remote Speaker 2 (2026-10-24) [meeting:m1]\nMeeting notes (historical, not proof of current status): Sam owns launch signoff.',
+      },
+      {
+        evidence_text: 'Remote Speaker 2 said yes.',
+        evidence_kind: 'transcript' as const,
+      },
+    ])(
+      'does not authorize a label using another number, metadata or raw transcript: %j',
+      (source) => {
+        const result = buildSynthesizedAnswerPresentation('Remote Speaker 2', [
+          { ...sources[0], ...source },
+        ]);
+        expect(result.answer).not.toContain('Remote Speaker 2');
+        expect(result.outcome).toBe('no_evidence');
+        expect(result.unsupportedClaimCount).toBe(1);
+      },
+    );
+
+    it.each([
+      [
+        'Pottery evening',
+        'Dev completed the vase.',
+        'Dev completed the vase for the "Pottery evening" project.',
+      ],
+      [
+        'Field review (east)',
+        'Kai measured the path.',
+        'Kai measured the path for project Field review (east).',
+      ],
+      [
+        'Festival & access',
+        'Uma checked the ramp.',
+        'Uma checked the ramp for the **Festival & access** project.',
+      ],
+    ])(
+      'does not turn a meeting title into a project fact: %s',
+      (title, evidence, answer) => {
+        const context = [
+          { ...sources[0], meeting_title: title, evidence_text: evidence },
+        ];
+        const deltas: string[] = [];
+        const stream = createSynthesizedAnswerStream(context, (delta) =>
+          deltas.push(delta),
+        );
+        stream.push(answer);
+        const result = stream.finalize(answer);
+        expect(result.outcome).toBe('no_evidence');
+        expect(result.unsupportedClaimCount).toBe(1);
+        expect(deltas.join('')).toBe('');
+      },
+    );
+
+    it.each([
+      {
+        meeting_title: 'Canopy',
+        evidence_text: 'The Canopy project includes the final ramp check.',
+      },
+      {
+        meeting_title: 'Canopy',
+        evidence_text: 'Ramp check complete.',
+        source_type: 'artifact' as const,
+      },
+    ])(
+      'leaves recorded project names and artifact presentation unchanged: %j',
+      (source) => {
+        const answer = 'The Canopy project includes the ramp check.';
+        const result = buildSynthesizedAnswerPresentation(answer, [
+          { ...sources[0], ...source },
+        ]);
+        expect(result.answer).toBe(answer);
+        expect(result.unsupportedClaimCount).toBe(0);
+        expect(result.trustStatus).toBe('inferred');
+      },
+    );
+
+    it.each(['', '***', '**Canopy**'])(
+      'does not treat empty or marked-up metadata as a different project name: %s',
+      (title) => {
+        const result = buildSynthesizedAnswerPresentation(
+          'The Canopy project includes the ramp check.',
+          [
+            {
+              ...sources[0],
+              meeting_title: title,
+              evidence_text: 'The Canopy project includes the ramp check.',
+            },
+          ],
+        );
+        expect(result.unsupportedClaimCount).toBe(0);
+      },
+    );
+
+    it.each([
+      'Morgan has checked the tools.',
+      'Morgan did the tool inspection.',
+      'Morgan will check the tools again after repairs.',
+      'Morgan never completed the tool inspection.',
+    ])('leaves lifecycle interpretation to synthesis: %s', (evidence) => {
+      const answer = 'Morgan still needs to check the tools.';
+      const result = buildSynthesizedAnswerPresentation(answer, [
+        { ...sources[0], evidence_text: evidence },
+      ]);
+      expect(result.answer).toBe(answer);
+      expect(result.unsupportedClaimCount).toBe(0);
+      expect(result.trustStatus).toBe('inferred');
+      expect(
+        result.citations.every((citation) => !citation.evidence_valid),
+      ).toBe(true);
+    });
+
+    it.each(['## Owner', '**Owner**', 'Owner:', 'Owner\n\n## Timing'])(
+      'still removes explicit or multi-paragraph orphan headings: %s',
+      (answer) => {
+        expect(buildSynthesizedAnswerPresentation(answer, sources).answer).toBe(
+          '',
+        );
+      },
+    );
+
+    it.each([
+      [
+        'The archive may hold forty maps.',
+        'The archive can definitely hold forty maps.',
+      ],
+      [
+        'The observatory dome might open on Friday.',
+        'The observatory dome will certainly open on Friday.',
+      ],
+      [
+        'The sensor reading could reach 18 volts.',
+        'The sensor reading is guaranteed to reach 18 volts.',
+      ],
+    ])(
+      'does not publish certainty over an otherwise matching possibility: %s',
+      (source, answer) => {
+        const context = [{ ...sources[0], evidence_text: source }];
+        const deltas: string[] = [];
+        const stream = createSynthesizedAnswerStream(context, (delta) =>
+          deltas.push(delta),
+        );
+        stream.push(answer.slice(0, -1));
+        stream.push('.');
+        const presentation = stream.finalize(answer);
+        expect(presentation.outcome).toBe('no_evidence');
+        expect(presentation.unsupportedClaims).toEqual([answer]);
+        expect(deltas.join('')).toBe('');
+      },
+    );
+
+    it.each([
+      ['The archive may hold forty maps.', 'The archive may hold forty maps.'],
+      [
+        'The archive may hold forty maps.',
+        'The archive is not guaranteed to hold forty maps.',
+      ],
+      [
+        'The archive may hold forty maps.',
+        'The archive could definitely hold forty maps.',
+      ],
+      [
+        'The archive may hold forty maps. The archive will hold forty maps.',
+        'The archive will definitely hold forty maps.',
+      ],
+      [
+        'The archive may hold forty maps. The gallery will hold forty maps.',
+        'The gallery will definitely hold forty maps.',
+      ],
+      [
+        'The annual event opens in May.',
+        'The annual event definitely opens in May.',
+      ],
+      [
+        'The annual event opens in may.',
+        'The annual event definitely opens in may.',
+      ],
+      [
+        'May will book the large room.',
+        'May will definitely book the large room.',
+      ],
+      ['May will book the large room.', 'Definitely book the large room.'],
+    ])(
+      'preserves qualified or independently supported wording: %s / %s',
+      (source, answer) => {
+        const presentation = buildSynthesizedAnswerPresentation(answer, [
+          { ...sources[0], evidence_text: source },
+        ]);
+        expect(presentation.outcome).toBe('answered');
+        expect(presentation.answer).toBe(answer);
+        expect(presentation.trustStatus).toBe('inferred');
+      },
+    );
+
+    it('keeps a separate supported fact when a certainty claim is removed', () => {
+      const presentation = buildSynthesizedAnswerPresentation(
+        'The archive can definitely hold forty maps. The gallery opens on Monday.',
+        [
+          {
+            ...sources[0],
+            evidence_text:
+              'The archive may hold forty maps. The gallery opens on Monday.',
+          },
+        ],
+      );
+      expect(presentation.answer).toBe('The gallery opens on Monday.');
+      expect(presentation.outcome).toBe('partial');
+      expect(presentation.unsupportedClaimCount).toBe(1);
+    });
+
+    it('waits for a complete sentence before streaming synthesized prose', () => {
       const deltas: string[] = [];
       const stream = createSynthesizedAnswerStream(sources, (delta) =>
         deltas.push(delta),
@@ -368,8 +858,109 @@ describe('Citation Engine', () => {
 
       stream.push('The launch plan has a clear owner');
 
-      expect(deltas.join('')).toBe('The launch plan has a clear owner');
-      expect(stream.streamedAnswer).toBe('The launch plan has a clear owner');
+      expect(deltas.join('')).toBe('');
+      stream.push('.');
+      expect(stream.streamedAnswer).toBe('The launch plan has a clear owner.');
+    });
+
+    it('withholds invented personal agreement and elapsed time, including streamed prefixes', () => {
+      const context = [
+        {
+          ...sources[0],
+          evidence_text:
+            'The dashboard navigation will use a persistent left sidebar. The previous layout decision was reversed. Use a compact top bar instead.',
+        },
+      ];
+      const deltas: string[] = [];
+      const stream = createSynthesizedAnswerStream(
+        context,
+        (delta) => deltas.push(delta),
+        undefined,
+        'Alex',
+      );
+      stream.push('You previously agreed on a persistent left sidebar');
+      stream.push('. The decision was reversed within one week. ');
+      stream.push('Use a compact top bar instead.');
+      const result = stream.finalize(
+        'You previously agreed on a persistent left sidebar. The decision was reversed within one week. Use a compact top bar instead.',
+      );
+      expect(deltas.join('')).toBe('Use a compact top bar instead.');
+      expect(result.answer).toBe('Use a compact top bar instead.');
+      expect(result.outcome).toBe('partial');
+      expect(result.unsupportedClaimCount).toBe(2);
+    });
+
+    it('retains explicit personal agreement and source-stated durations', () => {
+      const result = buildSynthesizedAnswerPresentation(
+        'You agreed to use a compact top bar for two weeks.',
+        [
+          {
+            ...sources[0],
+            evidence_text:
+              'Alex agreed to use a compact top bar for two weeks.',
+          },
+        ],
+        'Alex',
+      );
+      expect(result.outcome).toBe('answered');
+      expect(result.answer).toBe(
+        'You agreed to use a compact top bar for two weeks.',
+      );
+    });
+
+    it('does not turn a named discussion into agreement', () => {
+      const result = buildSynthesizedAnswerPresentation(
+        'You previously agreed on a persistent left sidebar.',
+        [
+          {
+            ...sources[0],
+            evidence_text: 'Alex discussed a persistent left sidebar.',
+          },
+        ],
+        'Alex',
+      );
+      expect(result.outcome).toBe('no_evidence');
+      expect(result.citations).toEqual([]);
+    });
+
+    it('does not turn an older note into a status update for today', () => {
+      const context = [
+        {
+          ...sources[0],
+          evidence_text:
+            '[Occurred]: 2026-10-16T12:00:00Z\nA headcount freeze remains in effect.',
+        },
+      ];
+      expect(
+        buildSynthesizedAnswerPresentation(
+          'A headcount freeze remains in effect as of October 19, 2026.',
+          context,
+        ).outcome,
+      ).toBe('no_evidence');
+      expect(
+        buildSynthesizedAnswerPresentation(
+          'As of October 16, 2026, the notes record a headcount freeze.',
+          context,
+        ).outcome,
+      ).toBe('answered');
+    });
+
+    it('does not turn a decision into proof of implementation', () => {
+      const context = [
+        { ...sources[0], evidence_text: 'Use a compact top bar instead.' },
+      ];
+      expect(
+        buildSynthesizedAnswerPresentation(
+          'A compact top bar is now being used instead.',
+          context,
+        ).outcome,
+      ).toBe('no_evidence');
+      expect(
+        buildSynthesizedAnswerPresentation(
+          'The notes record a decision to use a compact top bar instead.',
+          context,
+        ).outcome,
+      ).toBe('answered');
     });
 
     it('keeps the full answer while stripping source markers for display', () => {
@@ -414,6 +1005,50 @@ describe('Citation Engine', () => {
       expect(presentation.outcome).toBe('answered');
       expect(presentation.unsupportedClaimCount).toBe(0);
     });
+
+    it.each([false, true])(
+      'shows the relevant source section and passage (long section: %s)',
+      (long) => {
+        const decision =
+          'Keep the existing room names because visitors know them.';
+        const action =
+          'Sam will send the floor plan to Lee once the access review passes.';
+        const prefix = long
+          ? `${'The room inventory has already been inspected. '.repeat(10)}\n`
+          : '';
+        const summary = `${prefix}${action}`;
+        const presentation = buildSynthesizedAnswerPresentation(action, [
+          {
+            ...sources[0],
+            evidence_text: `${decision}\n${summary}`,
+            retrieved_sections: [
+              {
+                section_id: 'decisions',
+                heading: 'Decisions',
+                kind: 'outcomes',
+                summary: decision,
+                trust_status: 'grounded',
+                source_revision: 'r1',
+              },
+              {
+                section_id: 'actions',
+                heading: 'Actions',
+                kind: 'outcomes',
+                summary,
+                trust_status: 'grounded',
+                source_revision: 'r1',
+              },
+            ],
+          },
+        ]);
+        expect(presentation.citations[0]).toMatchObject({
+          section_id: 'actions',
+          evidence_span: action,
+          evidence_valid: false,
+          trust_status: 'inferred',
+        });
+      },
+    );
 
     it('attaches response-level provenance without requiring inline markers', () => {
       const presentation = buildSynthesizedAnswerPresentation(
@@ -1796,5 +2431,396 @@ describe('citation wording and assignment roles', () => {
       audit('Avery repaired 15 login defects.', 'Avery fixed 2 login bugs.')
         .evidence_valid,
     ).toBe(false);
+  });
+});
+
+describe('personal recall undertaking fidelity', () => {
+  it.each([
+    [
+      'Blair will review the onboarding flow.',
+      'Avery plans to coordinate with Blair to review the onboarding flow.',
+    ],
+    [
+      'Blair is confirmed for design consultation.',
+      'Avery should consult Blair for design consultation.',
+    ],
+    [
+      'Blair will review the onboarding flow.',
+      'Blair will review the onboarding flow if the prototype is ready.',
+    ],
+    [
+      'Blair will review the onboarding flow.',
+      'Blair will be consulted to review the onboarding flow.',
+    ],
+  ])('rejects stronger or reassigned undertaking: %s', (claim, evidence) => {
+    expect(claimIsSupportedByEvidence(claim, evidence)).toBe(false);
+  });
+  it.each([
+    [
+      'Blair will review the onboarding flow.',
+      'Blair agreed to review the onboarding flow.',
+    ],
+    [
+      'Blair will review the onboarding flow if the prototype is ready.',
+      'Blair will review the onboarding flow if the prototype is ready.',
+    ],
+    [
+      'Blair can help with design consultation.',
+      'Avery should consult Blair for design consultation.',
+    ],
+  ])('retains the evidenced actor and conditions: %s', (claim, evidence) => {
+    expect(claimIsSupportedByEvidence(claim, evidence)).toBe(true);
+  });
+});
+
+it('removes an invented promise before personal recall is displayed or cited', () => {
+  const sources = [
+    {
+      meeting_id: 'design-sync',
+      meeting_title: 'Design sync',
+      mid: null,
+      evidence_text:
+        'Avery should consult Jordan for design language. Avery plans to coordinate with Blair to review the onboarding flow.',
+      score: 1,
+      score_breakdown: {
+        fts_rank: 0,
+        graph_proximity: 0,
+        recency_decay: 0,
+        mention_weight: 0,
+      },
+    },
+  ] satisfies RetrievalResult[];
+  const answer =
+    'Jordan can help with design language. Blair will review the onboarding flow.';
+  const presentation = buildSafeAnswerPresentation(
+    answer,
+    auditCitations(buildCitationChain(answer, sources), sources),
+  );
+  expect(presentation.answer).toContain('Jordan');
+  expect(presentation.answer).not.toContain('Blair will');
+  expect(presentation.unsupportedClaimCount).toBe(1);
+  expect(
+    presentation.citations.every((citation) => citation.evidence_valid),
+  ).toBe(true);
+});
+
+describe('contrast recorded within one source', () => {
+  const source = {
+    meeting_id: 'team-scope',
+    meeting_title: 'Team scope',
+    mid: null,
+    evidence_text:
+      'Maya suggests that the engineers focus on product logic and user experience while delegating infrastructure work to other team members.',
+    score: 1,
+    score_breakdown: {
+      fts_rank: 0,
+      graph_proximity: 0,
+      recency_decay: 0,
+      mention_weight: 0,
+    },
+  } satisfies RetrievalResult;
+  it('retains a closely supported contrast from a single meeting', () => {
+    const answer =
+      'Maya suggested engineers focus on product logic and user experience while delegating infrastructure work to others.';
+    const presentation = buildSafeAnswerPresentation(
+      answer,
+      auditCitations(buildCitationChain(answer, [source]), [source]),
+    );
+    expect(presentation.answer).toBe(answer);
+    expect(presentation.unsupportedClaimCount).toBe(0);
+    expect(presentation.citations[0].evidence_valid).toBe(true);
+  });
+  it('still requires multiple sources for an unsupported contrast or cross-meeting synthesis', () => {
+    for (const answer of [
+      'Maya focuses on product logic while Jordan owns infrastructure.',
+      'Maya focused on product logic in the earlier meeting while Jordan owned infrastructure later.',
+    ]) {
+      const citation = {
+        claim: answer,
+        meeting_id: source.meeting_id,
+        meeting_title: source.meeting_title,
+        evidence_span: 'Maya focuses on product logic.',
+        evidence_valid: true,
+        trust_status: 'inferred' as const,
+      };
+      expect(
+        auditAnswerGrounding(answer, [citation]).unsupportedClaimCount,
+      ).toBe(1);
+      expect(buildSafeAnswerPresentation(answer, [citation]).outcome).toBe(
+        'no_evidence',
+      );
+    }
+  });
+});
+
+describe('punctuation-scoped negation', () => {
+  it.each([
+    'No, Ari completed the inventory.',
+    'No; Ari completed the inventory.',
+    'No. Ari completed the inventory.',
+  ])('does not negate a separate affirmative clause: %s', (claim) => {
+    expect(
+      claimIsSupportedByEvidence(claim, 'Ari completed the inventory.'),
+    ).toBe(true);
+  });
+  it.each([
+    'Ari did not complete the inventory.',
+    'No inventory was completed by Ari.',
+    'Ari completed the inventory without approval.',
+  ])('still rejects unsupported negation inside the claim: %s', (claim) => {
+    expect(
+      claimIsSupportedByEvidence(
+        claim,
+        'Ari completed the inventory with approval.',
+      ),
+    ).toBe(false);
+  });
+  it('keeps a negated evidence clause separate from the neighboring positive task', () => {
+    expect(
+      claimIsSupportedByEvidence(
+        'Ari completed the inventory.',
+        'Ari did not complete the inventory, Noor completed the invitations.',
+      ),
+    ).toBe(false);
+  });
+});
+
+it.each([
+  ['completed', 'completed'],
+  ['finished', 'completed'],
+  ['repaired', 'fixed'],
+])(
+  'uses the same token normalization for personal %s claims and %s evidence',
+  (verb, recorded) => {
+    const source = {
+      meeting_id: 'workshop',
+      meeting_title: 'Workshop',
+      mid: null,
+      evidence_kind: 'note',
+      evidence_text: `Ari ${recorded} the equipment inventory.`,
+      score: 1,
+      score_breakdown: {
+        fts_rank: 0,
+        graph_proximity: 0,
+        recency_decay: 1,
+        mention_weight: 0,
+      },
+    } as RetrievalResult;
+    const presentation = buildSynthesizedAnswerPresentation(
+      `You ${verb} the equipment inventory.`,
+      [source],
+      'Ari',
+    );
+    expect(presentation.unsupportedClaimCount).toBe(0);
+    expect(presentation.answer).toContain(`You ${verb}`);
+  },
+);
+
+describe('canonical lifecycle proof at answer presentation', () => {
+  const task = 'Send the equipment inventory to the venue coordinator';
+  const claim =
+    'No, you have already completed the task of sending the equipment inventory to the venue coordinator.';
+  const records = buildCanonicalCommitmentEvidence(
+    'workshop',
+    {
+      open: [],
+      candidates: [],
+      delivered: [],
+      excluded: [
+        {
+          text: task,
+          status: 'completed',
+          sourceMeetingId: 'workshop',
+          ownershipVerified: true,
+        },
+      ],
+    },
+    'Ari',
+  );
+  const source: RetrievalResult = {
+    meeting_id: 'workshop',
+    meeting_title: 'Workshop',
+    mid: null,
+    evidence_kind: 'note',
+    evidence_text: formatCanonicalCommitmentEvidence(records),
+    canonical_commitments: records,
+    score: 1,
+    score_breakdown: {
+      fts_rank: 0,
+      graph_proximity: 0,
+      recency_decay: 1,
+      mention_weight: 0,
+    },
+  };
+  it('accepts a completed task from app records without an exact prose phrase', () => {
+    const result = buildSynthesizedAnswerPresentation(claim, [source], 'Ari');
+    expect(result.unsupportedClaimCount).toBe(0);
+    expect(result.answer).toBe(claim);
+    expect(source.evidence_text).not.toContain('already completed');
+  });
+  it.each([
+    'Book the courier pickup',
+    'Tag the archive folders',
+    'Renew the exhibition permit',
+  ])('preserves short quoted task identity: %s', (task) => {
+    const canonical_commitments = records.map((record) => ({
+      ...record,
+      task,
+    }));
+    const answer = `No, you have already completed the task "${task}".`;
+    expect(
+      buildSynthesizedAnswerPresentation(
+        answer,
+        [
+          {
+            ...source,
+            canonical_commitments,
+            evidence_text: formatCanonicalCommitmentEvidence(
+              canonical_commitments,
+            ),
+          },
+        ],
+        'Ari',
+      ),
+    ).toMatchObject({ answer, unsupportedClaimCount: 0, outcome: 'answered' });
+  });
+  it.each([
+    'No, you do not need to send the equipment inventory to the venue coordinator, as you have already completed the task "Send the equipment inventory to the venue coordinator".',
+    'You do not need to repeat the task "Send the equipment inventory to the venue coordinator"; it is completed.',
+  ])(
+    'does not confuse a closed obligation with a negated completion: %s',
+    (answer) => {
+      expect(
+        buildSynthesizedAnswerPresentation(answer, [source], 'Ari'),
+      ).toMatchObject({
+        answer,
+        unsupportedClaimCount: 0,
+        outcome: 'answered',
+      });
+    },
+  );
+  it('accepts completion for another person using that person’s canonical record', () => {
+    const canonical_commitments = records.map((record) => ({
+      ...record,
+      owner: 'Noor',
+    }));
+    const answer =
+      'Noor has already completed the task of sending the equipment inventory to the venue coordinator.';
+    expect(
+      buildSynthesizedAnswerPresentation(
+        answer,
+        [
+          {
+            ...source,
+            canonical_commitments,
+            evidence_text: formatCanonicalCommitmentEvidence(
+              canonical_commitments,
+            ),
+          },
+        ],
+        'Ari',
+      ),
+    ).toMatchObject({ answer, unsupportedClaimCount: 0, outcome: 'answered' });
+  });
+  it('retains a closed task without treating an unconfirmed owner as completion proof', () => {
+    const canonical_commitments = records.map((record) => ({
+      ...record,
+      owner: null,
+    }));
+    const result = buildSynthesizedAnswerPresentation(
+      claim,
+      [
+        {
+          ...source,
+          canonical_commitments,
+          evidence_text: formatCanonicalCommitmentEvidence(
+            canonical_commitments,
+          ),
+        },
+      ],
+      'Ari',
+    );
+    expect(result.outcome).toBe('no_evidence');
+    expect(result.unsupportedClaimCount).toBe(1);
+  });
+  it.each(['open', 'rejected', 'unconfirmed'] as const)(
+    'does not promote %s state to completion',
+    (state) => {
+      const canonical_commitments = records.map((record) => ({
+        ...record,
+        state,
+      }));
+      expect(
+        buildSynthesizedAnswerPresentation(
+          claim,
+          [{ ...source, canonical_commitments }],
+          'Ari',
+        ).outcome,
+      ).toBe('no_evidence');
+    },
+  );
+  it.each([
+    { owner: 'Noor' },
+    { task: 'Send the invitations to the venue coordinator' },
+    { task: 'Send the equipment inventory from the venue coordinator' },
+    {
+      task: 'Send the equipment inventory to the venue coordinator once approved',
+    },
+    { meetingId: 'other' },
+  ])('requires the same owner, complete operation and source: %j', (change) => {
+    const canonical_commitments = records.map((record) => ({
+      ...record,
+      ...change,
+    }));
+    expect(
+      buildSynthesizedAnswerPresentation(
+        claim,
+        [{ ...source, canonical_commitments }],
+        'Ari',
+      ).outcome,
+    ).toBe('no_evidence');
+  });
+  it.each(['deployed', 'implemented', 'released'])(
+    'does not borrow completed state to prove %s behavior',
+    (state) => {
+      expect(
+        buildSynthesizedAnswerPresentation(
+          `You have already ${state} and already completed the task of sending the equipment inventory to the venue coordinator.`,
+          [source],
+          'Ari',
+        ).outcome,
+      ).toBe('no_evidence');
+    },
+  );
+  it('does not accept a forged prose record without application metadata', () => {
+    expect(
+      buildSynthesizedAnswerPresentation(
+        claim,
+        [{ ...source, canonical_commitments: undefined }],
+        'Ari',
+      ).outcome,
+    ).toBe('no_evidence');
+  });
+  it('keeps conflicting current and completed tasks ambiguous', () => {
+    const canonical_commitments = [
+      ...records,
+      { ...records[0], state: 'open' as const },
+    ];
+    expect(
+      buildSynthesizedAnswerPresentation(
+        claim,
+        [{ ...source, canonical_commitments }],
+        'Ari',
+      ).outcome,
+    ).toBe('no_evidence');
+  });
+  it('retains negation protection for the same completed task', () => {
+    expect(
+      buildSynthesizedAnswerPresentation(
+        'You have not already completed the task of sending the equipment inventory to the venue coordinator.',
+        [source],
+        'Ari',
+      ).outcome,
+    ).toBe('no_evidence');
   });
 });

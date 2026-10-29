@@ -120,6 +120,7 @@ export interface NotesProseReview {
 
 export interface NotesPipelineMetadata {
   pipeline_version:
+    | 'writer-only-v1'
     | 'writer-audit-v1'
     | 'writer-editor-v1'
     | 'writer-editor-bounded-v1';
@@ -139,6 +140,7 @@ export interface AnalysisGenerationMetadata {
   generation_options?: {
     structured_thinking?: boolean;
     seed?: number;
+    speaker_identity_revision?: string;
   };
   notes_template?: ResolvedMeetingNotesTemplate;
   terminology?: MeetingTerminologyArtifactV1;
@@ -146,6 +148,7 @@ export interface AnalysisGenerationMetadata {
   mode?: NotesPipelineMetadata['mode'];
   audit_status?: NotesPipelineMetadata['audit_status'];
   audit_change_count?: number;
+  source_action_review_version?: 1;
   source_provenance?: NotesPipelineMetadata['source_provenance'];
   prose_review?: NotesProseReview;
   speaker_references?: MeetingNotesSpeakerReferences;

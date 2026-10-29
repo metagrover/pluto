@@ -553,7 +553,7 @@ describe('durable semantic commitment identity', () => {
     ).resolves.toMatchObject({ created: 1, linked: 1 });
     expect(synthesizeKnowledgeDocument).not.toHaveBeenCalled();
   });
-  it('replaces reviewed same-meeting history instead of semantically reconciling it', async () => {
+  it('preserves reviewed same-meeting history without automatically adopting a rephrased extraction', async () => {
     db.saveMeeting({
       id: 'semantic-source',
       title: 'Synthetic release review',
@@ -586,39 +586,12 @@ describe('durable semantic commitment identity', () => {
         assignee_name: 'Alex',
       },
     });
-    const generate = vi.fn(async (prompt: string) => {
-      if (
-        !JSON.parse(prompt.slice(prompt.lastIndexOf('\nINPUT\n') + 7))
-          .candidates
-      )
-        return JSON.stringify({
-          status: 'resolved',
-          personId: null,
-          speaker: 'Alex',
-          ownershipKind: 'first_person',
-          evidence: [
-            { turnId: 't0', quote: 'I will publish the launch checklist.' },
-          ],
-          identityEvidence: [],
-          reason: 'The bound individual speaker commits.',
-        });
-      // Boundary double supplies a semantic decision; production parsing,
-      // database identity, queue filtering and retry behavior remain real.
-      const payload = JSON.parse(
-        prompt.slice(prompt.lastIndexOf('\nINPUT\n') + 7),
+    const generate = vi.fn(async () => {
+      throw new Error(
+        'Regeneration must not semantically reconcile reviewed history',
       );
-      const target = payload.prior.find(
-        (item: { text: string }) => item.text === canonical.name,
-      );
-      return JSON.stringify({
-        decisions: payload.candidates.map((item: { id: string }) => ({
-          candidateId: item.id,
-          decision: target ? 'same' : 'distinct',
-          matchId: target?.id ?? null,
-          reason: 'Same release checklist and owner',
-        })),
-      });
     });
+
     const provider = {
       extractEntities: async () => ({
         people: [],
@@ -643,15 +616,22 @@ describe('durable semantic commitment identity', () => {
     expect(
       first.entities.filter((e) => e.type === 'action_item').map((e) => e.id),
     ).not.toContain(canonical.id);
-    expect(
-      JSON.parse(db.getEntity(canonical.id)?.metadata ?? '{}'),
-    ).toMatchObject({ meeting_regeneration_retired_at: expect.any(String) });
+    expect(db.getEntity(canonical.id)).toEqual(canonical);
+    expect(db.isRetiredCommitment(canonical.id)).toBe(false);
+    const replacement = first.entities.find(
+      (entity) => entity.type === 'action_item',
+    );
+    expect(JSON.parse(replacement?.metadata ?? '{}')).toMatchObject({
+      commitment_state: 'possible',
+      source_regeneration_review_required: true,
+    });
     await extractAndProcessEntities(
       provider,
       'Alex: I will publish the launch checklist.',
       'semantic-source',
     );
     expect(generate).not.toHaveBeenCalled();
+    expect(db.getEntity(canonical.id)).toEqual(canonical);
     expect(
       db
         .getMeetingEntities('semantic-source')

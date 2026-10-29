@@ -1,4 +1,8 @@
-import { normalizeEvidenceText } from '../../src/utils/evidenceText';
+import {
+  containsEvidencePhrase,
+  evidencePhrase,
+  normalizeEvidenceText,
+} from '../../src/utils/evidenceText';
 import { deriveCitationTrustStatus } from '../../src/utils/trustStatus';
 import { getEntity, getMeetingMid } from '../db';
 import type { CitationChain, RetrievalResult } from './intelligenceTypes';
@@ -145,7 +149,7 @@ const certaintyPolarity = (
 
 const negationSignatures = (text: string): string[][] =>
   normalizeNegativeAvailability(text)
-    .split(/[.;!?]/)
+    .split(/[.,;!?]/)
     .flatMap((clause) => {
       const tokens = clause.match(/[\p{L}\p{N}'-]+/gu) || [];
       return tokens.flatMap((token, negationIndex) => {
@@ -184,10 +188,7 @@ const negationConflicts = (claim: string, evidence: string): boolean => {
   const supportsSignature = (text: string, signature: string[]): boolean => {
     const tokens = new Set(contentTokens(text));
     return (
-      signature.length > 0 &&
-      signature.filter((token) => tokens.has(token)).length /
-        signature.length >=
-        0.75
+      signature.length > 0 && signature.every((token) => tokens.has(token))
     );
   };
   if (claimSignatures.length === 0) {
@@ -739,6 +740,43 @@ const assignmentRolesConflict = (claim: string, evidence: string): boolean => {
   );
 };
 
+// A proposed contact or recipient is not an undertaking by that person.
+const undertakingConflicts = (claim: string, evidence: string): boolean => {
+  const cleanClaim = claim.replace(/\*+/g, '');
+  const cleanEvidence = evidence.replace(/\*+/g, '');
+  for (const name of namedTerms(cleanClaim)) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const confirmation = new RegExp(
+      `\\b${escaped}\\s+(?:is|was|has been)\\s+confirmed\\b`,
+      'i',
+    );
+    if (confirmation.test(cleanClaim) && !confirmation.test(cleanEvidence))
+      return true;
+    const future = new RegExp(
+      `\\b${escaped}\\s+(?:will|agreed to|committed to|promised to)\\s+((?:be\\s+)?[a-z]+)`,
+      'i',
+    );
+    const action = cleanClaim.match(future)?.[1];
+    if (!action) continue;
+    const sourceAction = new RegExp(
+      `\\b${escaped}\\s+(?:will|agreed to|committed to|promised to)\\s+${action}\\b`,
+      'i',
+    );
+    const clauses = cleanEvidence
+      .split(/(?<=[.!?])\s+|\n/)
+      .filter((clause) => sourceAction.test(clause));
+    if (!clauses.length) return true;
+    const condition =
+      /\b(?:if|unless|provided|pending|once|only after|subject to)\b/i;
+    if (
+      !condition.test(cleanClaim) &&
+      clauses.every((clause) => condition.test(clause))
+    )
+      return true;
+  }
+  return false;
+};
+
 export const claimIsSupportedByEvidence = (
   claim: string,
   evidence: string | undefined,
@@ -748,7 +786,8 @@ export const claimIsSupportedByEvidence = (
   const evidenceClaim = resolveSecondPersonClaim(claim, selfName);
   if (
     negationConflicts(evidenceClaim, evidence) ||
-    assignmentRolesConflict(evidenceClaim, evidence)
+    assignmentRolesConflict(evidenceClaim, evidence) ||
+    undertakingConflicts(evidenceClaim, evidence)
   )
     return false;
 
@@ -777,7 +816,19 @@ const getSourceEvidenceCandidates = (source: RetrievalResult): string[] => {
   const evidenceUnits = (source.evidence_text || '')
     .split('\n')
     .flatMap((line) => {
-      const cleanLine = line.replace(/^\[[^\]]+\]:?\s*/, '').trim();
+      if (
+        /^(?:Confirmed conversation|Scheduled\/invited; attendance is not confirmed|Mention only; participation is not confirmed):/.test(
+          line,
+        )
+      )
+        return [];
+      const cleanLine = line
+        .replace(
+          /^Meeting notes \(historical, not proof of current status\):\s*/,
+          '',
+        )
+        .replace(/^\[(?!Owner:)[^\]]+\]:?\s*/, '')
+        .trim();
       if (!cleanLine) return [];
       const sentences = cleanLine
         .split(/(?<=[.!?])\s+/)
@@ -1158,7 +1209,21 @@ export const auditCitations = (
 };
 
 const COMPARATIVE_CLAIM_PATTERN =
-  /\b(compare|compared|difference|different|changed?|moved|more|most|less|earlier|later|whereas|while|unlike|versus|vs|primary|main concern|biggest|recurring|pattern|consistently|across meetings)\b/i;
+  /\b(compare|compared|difference|different|changed?|moved|more|most|less|earlier|later|whereas|unlike|versus|vs|primary|main concern|biggest|recurring|pattern|consistently|across meetings)\b/i;
+
+// A contrast quoted from one meeting is not a synthesis across meetings.
+const comparisonNeedsTwoSources = (
+  claim: string,
+  citations: CitationChain[],
+): boolean =>
+  COMPARATIVE_CLAIM_PATTERN.test(claim) ||
+  (/\bwhile\b/i.test(claim) &&
+    !citations.some(
+      (citation) =>
+        citation.evidence_valid &&
+        /\bwhile\b/i.test(citation.evidence_span || '') &&
+        evidenceSupportScore(claim, citation.evidence_span || '') >= 0.9,
+    ));
 
 type AnswerValidationMode = 'grounded' | 'analysis' | 'draft';
 
@@ -1363,13 +1428,15 @@ export const auditAnswerGrounding = (
     const citedMeetings = new Set(
       matching.map((citation) => citation.meeting_id),
     );
-    const comparisonNeedsTwoSources =
-      COMPARATIVE_CLAIM_PATTERN.test(cleanSentence);
+    const comparisonNeedsMultipleSources = comparisonNeedsTwoSources(
+      cleanSentence,
+      matching,
+    );
     const supported =
       matching.length > 0 &&
       isContextfulClaim(cleanSentence) &&
       matching.every((citation) => citation.evidence_valid) &&
-      (!comparisonNeedsTwoSources || citedMeetings.size >= 2);
+      (!comparisonNeedsMultipleSources || citedMeetings.size >= 2);
     if (!supported) {
       unsupportedClaimCount += 1;
       unsupportedClaims.push(sentence.replace(/\[Source\s+\d+\]/gi, '').trim());
@@ -1447,7 +1514,7 @@ export const buildSafeAnswerPresentation = (
     return (
       isContextfulClaim(group[0].claim) &&
       group.every((citation) => citation.evidence_valid) &&
-      (!COMPARATIVE_CLAIM_PATTERN.test(group[0].claim) || meetings.size >= 2)
+      (!comparisonNeedsTwoSources(group[0].claim, group) || meetings.size >= 2)
     );
   });
   const supportedCitations = supportedGroups.flat();
@@ -1570,6 +1637,43 @@ const trimDanglingTrailingSentence = (answer: string): string => {
     : answer;
 };
 
+const contradictsRecordedUncertainty = (
+  claim: string,
+  evidence: string[],
+): boolean => {
+  const strong = /\b(?:definitely|certainly|guaranteed)\b/i;
+  // Capitalized names and calendar terms are not modal words.
+  const possible = /\b(?:may|might|could|possibly|perhaps|maybe)\b/;
+  if (
+    !strong.test(claim) ||
+    possible.test(claim) ||
+    /\b(?:not|never)\b/i.test(claim) ||
+    claim.trim().endsWith('?')
+  )
+    return false;
+  const factTokens = (text: string) =>
+    contentTokens(
+      text
+        .replace(/\b(?:definitely|certainly|guaranteed)\b/gi, '')
+        .replace(/\b(?:can|may|might|could|possibly|perhaps|maybe)\b/g, ''),
+    );
+  const tokens = factTokens(claim);
+  if (tokens.length < 3) return false;
+  // shortcut: Compare otherwise equal fact tokens; widen only with scoped paraphrase controls.
+  const matching = evidence
+    .flatMap((passage) => passage.split(/(?<=[.!?;])\s+|\n+/u))
+    .filter((passage) => factTokens(passage).join(' ') === tokens.join(' '));
+  return (
+    matching.length > 0 &&
+    matching.every((passage) => possible.test(passage) && !strong.test(passage))
+  );
+};
+
+const recordedSpeakerLabels = (text: string): string[] =>
+  (text.match(/\bRemote\s+Speaker\s+(?:\d+|N)\b/gi) || []).map((label) =>
+    label.toLocaleLowerCase().replace(/\s+/g, ' '),
+  );
+
 /**
  * Treats synthesized notes, project profiles, and people profiles as the trust
  * boundary. Input sources establish provenance, not claim verification.
@@ -1578,7 +1682,7 @@ const trimDanglingTrailingSentence = (answer: string): string => {
 export const buildSynthesizedAnswerPresentation = (
   answer: string,
   sources: RetrievalResult[],
-  _selfName?: string,
+  selfName?: string,
   preserveIncomplete = false,
 ): SafeAnswerPresentation => {
   let strippedAnswer = answer
@@ -1595,52 +1699,298 @@ export const buildSynthesizedAnswerPresentation = (
       .slice(0, strippedAnswer.lastIndexOf('['))
       .trimEnd();
   }
-  const cleanAnswer = preserveIncomplete
-    ? strippedAnswer
-    : pruneOrphanHeadings(trimDanglingTrailingSentence(strippedAnswer));
+  // A token prefix can acquire an unsupported actor or duration later in the sentence.
+  if (preserveIncomplete && !/[.!?]\s*$/.test(strippedAnswer)) {
+    const boundary = [...strippedAnswer.matchAll(/[.!?](?=\s|$)/g)].at(-1);
+    strippedAnswer = boundary
+      ? strippedAnswer.slice(0, boundary.index! + 1)
+      : '';
+  }
+  const unsupportedClaims: string[] = [];
+  const evidence = sources
+    .filter((source) => source.evidence_kind !== 'transcript')
+    .flatMap(getSourceEvidenceCandidates)
+    .flatMap((passage) => passage.split(/\n+|(?<=[.!?])\s+/));
+  // Owner fields are evidence; retrieval titles and raw dialogue are not identity proof.
+  const recordedSpeakers = new Set(evidence.flatMap(recordedSpeakerLabels));
+  // A meeting title locates evidence; it does not establish a project.
+  const titleOnlyProjects = sources
+    .filter(
+      (source) =>
+        source.source_type !== 'artifact' &&
+        source.evidence_kind !== 'transcript',
+    )
+    .map((source) =>
+      (source.meeting_title || source.mid?.title || '')
+        .replace(/["“”*`]/g, '')
+        .trim(),
+    )
+    .filter(
+      (title) =>
+        title &&
+        !evidence.some((passage) =>
+          passage
+            .replace(/["“”*`]/g, '')
+            .toLocaleLowerCase()
+            .includes(title.toLocaleLowerCase()),
+        ),
+    )
+    .map((title) => title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .map((title) => {
+      const name = `(?<![\\p{L}\\p{N}])${title}(?![\\p{L}\\p{N}])`;
+      return new RegExp(
+        `(?:${name}\\s+project\\b|\\bproject\\s+(?:called\\s+)?${name})`,
+        'iu',
+      );
+    });
+  // Projected ownership/state authorizes an exact task; owner-looking prose does not.
+  const canonicalSelfTasks = new Map<string, boolean>();
+  for (const source of sources) {
+    if (source.evidence_kind !== 'note' || source.source_type === 'artifact')
+      continue;
+    for (const action of source.note_actions || []) {
+      const text = action.text.trim().replace(/[.!]$/, '');
+      const due = action.due?.trim();
+      const task = (
+        due && !text.toLocaleLowerCase().includes(due.toLocaleLowerCase())
+          ? `${text} by ${due}`
+          : text
+      )
+        .toLocaleLowerCase()
+        .replace(/\s+/g, ' ');
+      // Conflicting projected ownership/completion cannot establish a personal duty.
+      canonicalSelfTasks.set(
+        task,
+        canonicalSelfTasks.get(task) !== false &&
+          action.assignee?.trim().toLocaleLowerCase() === 'me' &&
+          action.completed === false,
+      );
+    }
+  }
+  const canonicalTasks = sources
+    .filter(
+      (source) =>
+        source.source_type !== 'artifact' &&
+        source.evidence_kind !== 'transcript',
+    )
+    .flatMap((source) =>
+      (source.canonical_commitments ?? []).filter(
+        (record) => record.meetingId === source.meeting_id,
+      ),
+    );
+  const completedTasks = canonicalTasks.filter(
+    (record) =>
+      record.state === 'completed' &&
+      record.owner !== null &&
+      !canonicalTasks.some(
+        (other) =>
+          normalizeEvidenceText(other.owner ?? '') ===
+            normalizeEvidenceText(record.owner ?? '') &&
+          evidencePhrase(other.task) === evidencePhrase(record.task) &&
+          other.state !== 'completed',
+      ),
+  );
+  const sourceDays = new Set(
+    sources
+      .flatMap((source) => [
+        source.mid?.occurred_at?.slice(0, 10),
+        ...(source.evidence_text.match(/\d{4}-\d{2}-\d{2}/g) || []),
+      ])
+      .filter(Boolean),
+  );
+  const completeAnswer = trimDanglingTrailingSentence(strippedAnswer);
+  const cleanAnswer = (
+    completeAnswer.includes('\n') ||
+    /^(?:#{1,6}\s|\*\*|__)|:\s*$/.test(completeAnswer)
+      ? pruneOrphanHeadings(completeAnswer)
+      : completeAnswer
+  )
+    .split('\n')
+    .map((paragraph) =>
+      paragraph
+        .split(/(?<=[.!?])\s+/)
+        .filter((sentence) => {
+          const personal = /\b(?:you|your|you're|you've|you'd)\b/i.test(
+            sentence,
+          );
+          const personalVerb = sentence.match(
+            /\byou\s+(?:(?:previously|already|had|have|also|explicitly)\s+)*([a-z]+)\b/i,
+          )?.[1];
+          const canonicalSelfTask = sentence.match(
+            /^You need to ([^.!?]+)\.$/i,
+          )?.[1];
+          const recordedSelfTask = Boolean(
+            canonicalSelfTask &&
+              canonicalSelfTasks.get(
+                canonicalSelfTask
+                  .trim()
+                  .toLocaleLowerCase()
+                  .replace(/\s+/g, ' '),
+              ) === true,
+          );
+          const unsupportedPerson =
+            personal &&
+            !recordedSelfTask &&
+            (!selfName ||
+              !evidence.some(
+                (passage) =>
+                  passage
+                    .toLocaleLowerCase()
+                    .includes(selfName.toLocaleLowerCase()) &&
+                  (!personalVerb ||
+                    contentTokens(personalVerb).every((token) =>
+                      contentTokens(passage).includes(token),
+                    )) &&
+                  claimIsSupportedByEvidence(sentence, passage, selfName),
+              ));
+          const durations =
+            sentence.match(
+              /\b(?:within|after|before|over|in|for)\s+(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:business\s+)?(?:hours?|days?|weeks?|months?|years?)\b/gi,
+            ) || [];
+          const unsupportedDuration = durations.some(
+            (duration) =>
+              !evidence.some((passage) =>
+                passage
+                  .toLocaleLowerCase()
+                  .includes(duration.toLocaleLowerCase()),
+              ),
+          );
+          const implementation =
+            sentence.match(
+              /\b(?:being used|in use|(?:already|now) (?:implemented|deployed|released|completed))\b/gi,
+            ) || [];
+          const supportedCanonicalCompletion = completedTasks.some(
+            (record) =>
+              containsEvidencePhrase(sentence, record.task) &&
+              claimIsSupportedByEvidence(
+                sentence,
+                `${record.owner} has already completed the task "${record.task}"`,
+                selfName,
+              ),
+          );
+          const unsupportedImplementation = implementation.some(
+            (phrase) =>
+              !(
+                supportedCanonicalCompletion &&
+                phrase.toLowerCase().endsWith('completed')
+              ) &&
+              !evidence.some((passage) =>
+                passage
+                  .toLocaleLowerCase()
+                  .includes(phrase.toLocaleLowerCase()),
+              ),
+          );
+          const asOfDates = [
+            ...sentence.matchAll(
+              /\bas of\s+(\d{4}-\d{2}-\d{2}|[A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/gi,
+            ),
+          ];
+          const unsupportedDate =
+            asOfDates.some((match) => {
+              const timestamp = Date.parse(
+                match[1].replace(/(\d)(st|nd|rd|th)\b/g, '$1'),
+              );
+              return (
+                !Number.isFinite(timestamp) ||
+                !sourceDays.has(new Date(timestamp).toISOString().slice(0, 10))
+              );
+            }) ||
+            (/\btoday\b/i.test(sentence) &&
+              !sourceDays.has(new Date().toISOString().slice(0, 10)));
+          const unsupportedMetadataProject = titleOnlyProjects.some((pattern) =>
+            pattern.test(sentence.replace(/["“”*`]/g, '')),
+          );
+          const unsupportedRecordedSpeaker = recordedSpeakerLabels(
+            sentence,
+          ).some((label) => !recordedSpeakers.has(label));
+          const unsupportedCertainty = contradictsRecordedUncertainty(
+            sentence,
+            evidence,
+          );
+          if (
+            unsupportedPerson ||
+            unsupportedDuration ||
+            unsupportedDate ||
+            unsupportedImplementation ||
+            unsupportedCertainty ||
+            unsupportedRecordedSpeaker ||
+            unsupportedMetadataProject
+          )
+            unsupportedClaims.push(sentence);
+          return (
+            !unsupportedPerson &&
+            !unsupportedDuration &&
+            !unsupportedDate &&
+            !unsupportedImplementation &&
+            !unsupportedCertainty &&
+            !unsupportedRecordedSpeaker &&
+            !unsupportedMetadataProject
+          );
+        })
+        .join(' '),
+    )
+    .join('\n');
   const noEvidence = /^I couldn't (?:find|verify)/i.test(cleanAnswer);
   const seenSources = new Set<string>();
-  const citations = noEvidence
-    ? []
-    : sources.flatMap((source): CitationChain[] => {
-        if (source.evidence_kind === 'transcript') return [];
-        const sourceType = source.source_type || 'meeting';
-        const sourceId = source.source_id || source.meeting_id;
-        const sourceKey = `${sourceType}:${sourceId}`;
-        if (seenSources.has(sourceKey)) return [];
-        seenSources.add(sourceKey);
+  const citations =
+    noEvidence || !cleanAnswer
+      ? []
+      : sources.flatMap((source): CitationChain[] => {
+          if (source.evidence_kind === 'transcript') return [];
+          const sourceType = source.source_type || 'meeting';
+          const sourceId = source.source_id || source.meeting_id;
+          const sourceKey = `${sourceType}:${sourceId}`;
+          if (seenSources.has(sourceKey)) return [];
+          seenSources.add(sourceKey);
 
-        const section = source.retrieved_sections?.[0];
-        const evidenceSpan = (section?.summary || source.evidence_text)
-          .trim()
-          .slice(0, 320);
-        return [
-          {
-            claim:
-              source.meeting_title || source.mid?.title || 'Response context',
-            meeting_id: source.meeting_id,
-            meeting_title:
-              source.meeting_title || source.mid?.title || 'Unknown source',
-            source_type: sourceType,
-            source_id: sourceId,
-            evidence_span: evidenceSpan || undefined,
-            evidence_valid: false,
-            trust_status: 'inferred',
-            evidence_kind: section ? 'section' : source.evidence_kind,
-            section_id: section?.section_id,
-            section_heading: section?.heading,
-            source_revision: section?.source_revision || source.source_revision,
-          },
-        ];
-      });
+          const matchingSpan =
+            getBestEvidenceSpan(source, cleanAnswer, selfName) ||
+            source.evidence_text.trim().slice(0, 320);
+          const section = source.retrieved_sections?.find(
+            (candidate) =>
+              matchingSpan && candidate.summary.includes(matchingSpan),
+          );
+          const evidenceSpan =
+            section && section.summary.trim().length <= 320
+              ? section.summary.trim()
+              : matchingSpan;
+          return [
+            {
+              claim:
+                source.meeting_title || source.mid?.title || 'Response context',
+              meeting_id: source.meeting_id,
+              meeting_title:
+                source.meeting_title || source.mid?.title || 'Unknown source',
+              source_type: sourceType,
+              source_id: sourceId,
+              evidence_span: evidenceSpan || undefined,
+              evidence_valid: false,
+              trust_status: 'inferred',
+              evidence_kind: section ? 'section' : source.evidence_kind,
+              section_id: section?.section_id,
+              section_heading: section?.heading,
+              source_revision:
+                section?.source_revision || source.source_revision,
+            },
+          ];
+        });
 
   return {
-    answer: cleanAnswer,
+    answer:
+      cleanAnswer ||
+      (unsupportedClaims.length
+        ? "I couldn't verify a clear answer from what I retrieved. Try asking about a specific meeting or topic."
+        : ''),
     citations,
-    outcome: noEvidence || !cleanAnswer ? 'no_evidence' : 'answered',
+    outcome:
+      noEvidence || !cleanAnswer
+        ? 'no_evidence'
+        : unsupportedClaims.length
+          ? 'partial'
+          : 'answered',
     trustStatus: noEvidence ? undefined : 'inferred',
-    unsupportedClaimCount: 0,
-    unsupportedClaims: [],
+    unsupportedClaimCount: unsupportedClaims.length,
+    unsupportedClaims,
   };
 };
 
@@ -1666,6 +2016,7 @@ export const createSynthesizedAnswerStream = (
     );
     onPresentation?.(presentation);
     if (
+      presentation.outcome !== 'no_evidence' &&
       presentation.answer.startsWith(streamedAnswer) &&
       presentation.answer.length > streamedAnswer.length
     ) {

@@ -9,6 +9,7 @@ import {
   isRegularCollaborator,
   sortPeopleRows,
 } from '../../src/components/KnowledgeGraph/PeopleTab';
+import { PERSON_CONTEXT_SYNTHESIS_VERSION } from '../../src/utils/personDossierRead';
 
 const rows: PersonBriefingRow[] = [
   {
@@ -647,7 +648,9 @@ describe('PersonDossier', () => {
           ...briefingDetail,
           knowledgeDoc: {
             ...briefingDetail.knowledgeDoc!,
-            config: JSON.stringify({ synthesis_version: 15 }),
+            config: JSON.stringify({
+              synthesis_version: PERSON_CONTEXT_SYNTHESIS_VERSION,
+            }),
             structured_json: JSON.stringify(doc),
           },
           sharedCommitments: {

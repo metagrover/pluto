@@ -139,6 +139,9 @@ describe('packaged runtime resources', () => {
     'intel',
     'missing-microphone',
     'missing-notifications',
+    'missing-kernel-export',
+    'invalid-kernel-sample',
+    'stale-kernel-sample',
   ])(
     'checks executable media tools with an explicit app path (tools: %s)',
     async (mediaToolState) => {
@@ -178,11 +181,54 @@ describe('packaged runtime resources', () => {
         await chmod(executable, 0o755);
       }
       if (mediaToolState !== 'missing-notifications') {
-        // The verifier checks signed Mach-O presence; it does not load native addons.
-        await copyFile(
-          '/usr/bin/true',
-          path.join(binPath, 'notification-bridge.node'),
+        // Build a tiny real N-API fixture. These stable ABI declarations avoid
+        // depending on downloaded Electron headers or a prebuilt local addon.
+        const fixtureSource = path.join(temporaryRoot, 'memory-fixture.c');
+        await writeFile(
+          fixtureSource,
+          `#include <stdint.h>
+#include <stddef.h>
+#include <time.h>
+typedef struct napi_env__ *napi_env;
+typedef struct napi_value__ *napi_value;
+typedef struct napi_callback_info__ *napi_callback_info;
+typedef napi_value (*napi_callback)(napi_env, napi_callback_info);
+extern int napi_create_object(napi_env, napi_value *);
+extern int napi_create_int64(napi_env, int64_t, napi_value *);
+extern int napi_create_int32(napi_env, int32_t, napi_value *);
+extern int napi_create_function(napi_env, const char *, size_t, napi_callback, void *, napi_value *);
+extern int napi_set_named_property(napi_env, napi_value, const char *, napi_value);
+static napi_value sample(napi_env env, napi_callback_info info) {
+  struct timespec now; clock_gettime(CLOCK_REALTIME, &now);
+  napi_value result, time, percent;
+  napi_create_object(env, &result);
+  napi_create_int64(env, (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000 ${mediaToolState === 'stale-kernel-sample' ? '- 101' : ''}, &time);
+  napi_create_int32(env, ${mediaToolState === 'invalid-kernel-sample' ? '101' : '50'}, &percent);
+  napi_set_named_property(env, result, "wallTimeMs", time);
+  napi_set_named_property(env, result, "memoryPressureFreePercent", percent);
+  return result;
+}
+__attribute__((visibility("default"))) napi_value napi_register_module_v1(napi_env env, napi_value exports) {
+  napi_value read;
+  ${mediaToolState === 'missing-kernel-export' ? '' : 'napi_create_function(env, "memoryPressureSample", 20, sample, NULL, &read); napi_set_named_property(env, exports, "memoryPressureSample", read);'}
+  return exports;
+}
+`,
         );
+        await execFileAsync('/usr/bin/clang', [
+          '-bundle',
+          '-undefined',
+          'dynamic_lookup',
+          fixtureSource,
+          '-o',
+          path.join(binPath, 'notification-bridge.node'),
+        ]);
+        await execFileAsync('codesign', [
+          '--force',
+          '--sign',
+          '-',
+          path.join(binPath, 'notification-bridge.node'),
+        ]);
       }
       const helperInfoPath = path.join(
         binPath,
@@ -221,7 +267,10 @@ describe('packaged runtime resources', () => {
           if (
             mediaToolState === 'valid' ||
             mediaToolState === 'missing-microphone' ||
-            mediaToolState === 'missing-notifications'
+            mediaToolState === 'missing-notifications' ||
+            mediaToolState === 'missing-kernel-export' ||
+            mediaToolState === 'invalid-kernel-sample' ||
+            mediaToolState === 'stale-kernel-sample'
           )
             await copyFile(installed, destination);
           else {
@@ -263,11 +312,15 @@ describe('packaged runtime resources', () => {
         appPath,
       ]);
       try {
-        const verification = execFileAsync(process.execPath, [
-          path.join(projectRoot, 'scripts/verify_packaged_runtime.mjs'),
-          '--',
-          appPath,
-        ]);
+        const verification = execFileAsync(
+          process.execPath,
+          [
+            path.join(projectRoot, 'scripts/verify_packaged_runtime.mjs'),
+            '--',
+            appPath,
+          ],
+          { env: { ...process.env, ELECTRON_RUN_AS_NODE: '0' } },
+        );
         if (mediaToolState === 'valid')
           await expect(verification).resolves.toMatchObject({
             stdout: 'Verified Pluto icon and 7 packaged runtimes.\n',
@@ -279,6 +332,17 @@ describe('packaged runtime resources', () => {
         else if (mediaToolState === 'missing-notifications')
           await expect(verification).rejects.toThrow(
             'notification-bridge.node',
+          );
+        else if (mediaToolState === 'missing-kernel-export')
+          await expect(verification).rejects.toThrow(
+            'Packaged kernel memory export missing',
+          );
+        else if (
+          mediaToolState === 'invalid-kernel-sample' ||
+          mediaToolState === 'stale-kernel-sample'
+        )
+          await expect(verification).rejects.toThrow(
+            'Packaged kernel memory export returned an invalid sample',
           );
         else if (mediaToolState === 'intel')
           await expect(verification).rejects.toThrow('architecture mismatch');

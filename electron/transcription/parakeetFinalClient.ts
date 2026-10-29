@@ -197,6 +197,7 @@ type PreparationProgressListener = (
 export class ParakeetFinalClient {
   private readonly runtimeHost: ParakeetRuntimeHost;
   private preparePromise: Promise<TranscriptionRuntimeHealth> | null = null;
+  private prepareIncludesLiveModels = false;
   private preparedCapability: TranscriptionRuntimeHealth | null = null;
   private activePrepare: {
     id: string;
@@ -226,9 +227,9 @@ export class ParakeetFinalClient {
         idleTimeoutMs: options.idleTimeoutMs,
         diagnostic: options.diagnostic,
       });
-    this.runtimeHost.transport.onFailure(() => {
+    this.runtimeHost.transport.onFailure((code) => {
       this.preparePromise = null;
-      this.preparedCapability = null;
+      if (code !== 'parakeet_process_unloaded') this.preparedCapability = null;
     });
     this.runtimeHost.transport.onEvent((event) => {
       if (event.event !== 'prepare_progress') return;
@@ -265,7 +266,7 @@ export class ParakeetFinalClient {
     if (lease.kind !== 'live') {
       return Promise.reject(new Error('parakeet_runtime_lease_invalid'));
     }
-    return this.prepareWithLease(onProgress);
+    return this.prepareWithLease(onProgress, true);
   }
 
   private async prepareInLease(
@@ -288,14 +289,19 @@ export class ParakeetFinalClient {
 
   private prepareWithLease(
     onProgress?: PreparationProgressListener,
+    warmLiveModels = false,
   ): Promise<TranscriptionRuntimeHealth> {
+    if (warmLiveModels && !this.prepareIncludesLiveModels)
+      this.preparePromise = null;
     if (!this.preparePromise) {
+      this.prepareIncludesLiveModels = warmLiveModels;
       const id = this.requestID('prepare');
       const nativeRequest = this.runtimeHost.transport.request({
         schemaVersion: 1,
         id,
         method: 'prepare',
         modelRoot: this.options.paths.modelRoot,
+        warmLiveModels,
       });
       const activePrepare = {
         id,

@@ -4,6 +4,13 @@ import { describe, expect, it } from 'vitest';
 describe('AudioManager Parakeet EOU wiring', () => {
   const source = readFileSync('src/components/AudioManager.tsx', 'utf8');
 
+  it('makes durable audio available within the two-second live input budget', () => {
+    const seconds = Number(source.match(/const CHUNK_SECONDS = (\d+);/)?.[1]);
+    expect(seconds).toBeGreaterThan(0);
+    expect(seconds).toBeLessThanOrEqual(2);
+    expect(source).toContain('micRecorder.start(CHUNK_SECONDS * 1000)');
+  });
+
   it('creates and launches the EOU session without blocking microphone acquisition', () => {
     const createIndex = source.indexOf('createDurableEouSession({');
     const startIndex = source.indexOf('eouSession.start()');

@@ -3,12 +3,21 @@ import { ChatGPTError, chatGPTErrorMessage } from '../chatgpt/auth';
 export type AskPlutoFailureReason =
   | 'timeout'
   | 'provider_unavailable'
+  | 'memory_pressure'
   | 'invalid_response'
+  | 'memory_pressure'
   | 'generation_failed';
 
 export const classifyAskPlutoFailure = (
   error: unknown,
 ): { reason: AskPlutoFailureReason; answer: string } => {
+  if (error instanceof Error && error.name === 'LocalModelMemoryError') {
+    return {
+      reason: 'memory_pressure',
+      answer:
+        'Pluto stopped this answer to protect system memory. Close other apps or choose a smaller local model in Settings, then retry. Your question and saved notes are preserved.',
+    };
+  }
   if (error instanceof ChatGPTError) {
     return {
       reason: 'provider_unavailable',
@@ -17,6 +26,14 @@ export const classifyAskPlutoFailure = (
   }
   const name = error instanceof Error ? error.name : '';
   const message = error instanceof Error ? error.message : String(error ?? '');
+
+  if (name === 'LocalModelMemoryError') {
+    return {
+      reason: 'memory_pressure',
+      answer:
+        'Pluto stopped this answer to protect system memory. Close other apps or choose a smaller local model in Settings, then retry. Your question and saved notes are preserved.',
+    };
+  }
 
   if (
     name === 'TimeoutError' ||

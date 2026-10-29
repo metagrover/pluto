@@ -1,8 +1,269 @@
+## 2026-10-26 - Preserve trusted notes policy during bounded repair (notes-v99)
+
+- **Supersedes:** Only the prompt/cache identity in “Preserve source coverage and equivalent negative grammar in notes-v98.”
+- **Decision:** Keep the existing content, prose and source rules as active instructions during the existing bounded repair. Remove their duplicate from prior-prompt data; the original source and rejected response remain data. The existing required-overview check also runs inside that repair boundary, so a missing overview can use the already available repair; an unsupported overview still refuses publication without a fallback summary. No additional model call, reviewer, output allowance or memory-policy change is introduced.
+- **Validation:** The repair regression checks that all three shared policies occur before prior-prompt data and are not duplicated inside it. Model fidelity and packaged acceptance remain separate gates.
+
+## 2026-10-26 - Separate task lifecycle evidence from confirmed ownership
+
+- **Refines:** “Supply canonical task state through ordinary answer evidence.”
+- **Decision:** Preserve a source-scoped closed task even when its person ownership is unconfirmed, using a null owner. Such a record cannot prove that a particular person completed the task. Confirmed-owner proof, private/deleted-source exclusion, full task identity and conflicting-state checks remain required. Missing owner proof must not erase a known task state or imply unfinished work.
+- **Validation:** Regressions retain neutral closed state while withholding personal completion proof. Existing verified-owner, source, privacy and lifecycle controls remain.
+
+## 2026-10-26 - Preserve source coverage and equivalent negative grammar in notes-v98
+
+- **Refines:** The notes-v87 minimal writer and notes-v89 strict-repair policy. Keep the single writer and existing bounded repair, source validation and memory admission.
+- **Decision:** Restore the compact writer's final source-coverage instruction. Require every settled choice to appear as a decision, and cite all claims in each block, including the overview. These are conversation-wide rules without meeting-specific examples or detection patterns. Compare equivalent leading negative grammatical forms in the existing exact-copy normalizer while preserving all predicate words, negation, permission and prerequisites; do not rewrite generated notes.
+- **Validation:** Regression controls reject changed polarity, permission and missing prerequisites in unrelated fictional domains. Full tests pass. Source-grounded live model and packaged acceptance remain separate release gates; mechanical counts alone do not qualify this candidate. Advance the shared prompt/cache identity to notes-v98.
+
+## 2026-10-26 - Supply canonical task state through ordinary answer evidence
+
+- **Refines:** “2026-10-25 - Separate local question routing from factual synthesis.” Removes the candidate's conversational commitment-status shortcut.
+- **Decision:** Delete English question-pattern matching, verb stemming and handcrafted task-status answers. Pass scoped canonical ownership and lifecycle records into the existing workspace and person-chat evidence paths regardless of question phrasing. The configured factual model interprets the complete question; classification models do not infer task identity or state. Completed and rejected records override historical notes, unconfirmed candidates remain distinct, and absence never proves completion.
+- **Presentation:** Carry these application-owned records structurally alongside prompt evidence. Prove completion against the same owner, full task and source using the existing evidence normalizer; do not require model prose to repeat a lifecycle phrase verbatim. Conflicting records remain unresolved. Completion cannot prove deployment or implementation.
+- **Boundaries:** Keep source meeting scope, confirmed self identity, verified closed ownership, confidential-source exclusion and original notes. Canonical task records can survive missing regenerated notes, while the missing conversation evidence remains explicit. No production meeting strings or model/memory-policy changes are included.
+- **Validation:** Focused regressions cover lifecycle distinctions, both owners, source scope, missing/deleted/private sources, unverified ownership and immutable source text. Live model fidelity and safe local allocation remain separate release gates.
+
+## 2026-10-25 - Size reclaimed local allocations for the current request
+
+- **Supersedes:** The retained-context behavior of “2026-10-20 - Reuse bounded resident Ollama contexts between stages” and “2026-10-20 - Keep Gemma allocations bounded across downstream tasks,” only after memory pressure requires a confirmed unload.
+- **Decision:** Keep a compatible larger resident context while it passes admission. Once that allocation has been unloaded and confirmed absent, cold-load only the context required by the current complete request. Reusing the old size after discarding its cache can cause an unnecessary refusal. Preserve the cold-load reserve, reclaim deadline, cancellation, artifact proof and independent native watchdog.
+- **Validation:** The reclaim regression recovers at a memory level that admits the required 2,048-token context but rejects the discarded 7,168-token context. Insufficient memory, cancellation and a reappearing resident still refuse admission.
+
+## 2026-10-25 - Separate local question routing from factual synthesis
+
+- **Supersedes:** “2026-10-20 - Route saved Fast chat through the configured fast model” and the fast-model selection clause of “2026-09-30 - Ground live chat in checked transcript wording on the fast model.”
+- **Evidence:** Both tested Phi precisions can reopen completed work or change ownership in synthetic factual answers. Increasing precision and adding synthesis stages did not reliably resolve those errors.
+- **Decision:** Phi remains the default for query classification and meeting scope. All factual Ask Pluto synthesis, including saved Fast, Deep, and live answers, uses the configured general model, defaulting to Gemma. Preserve each mode's evidence boundaries, budgets, citations, canonical state, and independent memory admission. A failed general model must not silently fall back to Phi. Settings retain both existing model keys and describe their roles.
+- **Validation:** Routing regression covers all three answer modes and both classification tasks; failure tests retain explicit model selection. Model quality and hardware acceptance remain separate gates.
+
+## 2026-10-26 — Normalize duplicate request-local wire citations
+
+- **Context:** Local models can repeat an internal source marker in prose while already supplying the same citation in the structured sources field, causing avoidable bounded repairs and publication refusal.
+- **Decision:** Supersede only the no-normalization rule for that redundant wire annotation in the notes-v87 minimal writer policy. Remove a bracketed marker only when every label resolves in the current request, appears in that same block's sources array, is not a literal identifier in original source data, and has an unambiguous following boundary. Preserve all exact source spans and factual wording. Unknown, uncited and ambiguous markers retain the existing validation path. This is output-format handling; LLM synthesis still determines meeting meaning and lifecycle state.
+- **Evidence:** Decoder regressions cover exact span preservation, unknown references, cross-block citations, literal room identifiers and adjacent words. Model quality and memory profiles require separate acceptance. See [PR #884](https://github.com/metagrover/pluto/pull/884).
+
+## 2026-10-26 — Retain grounded decisions with unproved optional author metadata
+
+- **Context:** Strict local writer acceptance could reject a source-supported decision solely because its optional author field could not be validated, including a reporter misidentified as the deciding person.
+- **Decision:** Supersede only that author-field refusal in “Minimal local writer candidate without automatic model review (notes-v87)” and its notes-v89 strict-repair extension. For unreviewed local writer output, retain the decision wording and exact citations after existing source acceptance, and clear an unproved optional author. Source reconciliation and reviewed attribution retain strict refusal. LLM synthesis still supplies the decision. Action ownership, deadlines, source spans, polarity, conditions, quantities, identity confirmation and memory protection retain their existing checks.
+- **Evidence:** A regression preserves a reported third-party decision while removing the incorrect reporter attribution; existing action and decision attribution checks remain green. Live model quality and package acceptance remain separate gates. See [PR #884](https://github.com/metagrover/pluto/pull/884).
+
+## 2026-10-25 — Bound long-token scanning in request budgeting
+
+- **Refines:** The shared conservative notes token estimate; no numeric policy changes.
+- **Evidence:** A macOS package CI run timed out in real incremental planning while the separate full suite passed. A local CPU profile attributes substantial repeated work to the long-token density scan; the isolated planning suite takes about 13 seconds before and 8 seconds after this change in separate local runs.
+- **Decision:** Check the existing 65-character letter/number/underscore/dollar run only at word boundaries, avoiding overlapping attempts inside each word. Preserve whitespace counting, ASCII density, Unicode code-point behavior and every estimated token value. This is request-size accounting, not an interpretation of meeting language or completed work. Planning, source coverage, model review, cache invalidation, timeout and memory protections stay unchanged.
+- **Validation:** Existing real bounded-planning assertions remain; boundary controls include 64/65/66-character runs, punctuation, combining marks and astral Unicode letters. A private comparison retains identical estimates on 540 boundary and frozen-request cases. No native cold-load speedup or semantic improvement is inferred.
+
+## 2026-10-25 — Keep manifest selectors separate from resident engine names
+
+- **Supersedes:** The backend equality and targeted-cleanup portions of “Bind warm admission and cleanup to the selected runtime artifact.”
+- **Evidence:** Installed Ollama reports the catalog selector `ggml` and resident engine `llamacpp` for the same digest. Generation accepts the catalog selector; sending the engine label as a selector fails cleanup. They are different API fields, not interchangeable backend identities.
+- **Decision:** Select the resident catalog row by exact artifact digest and pin new generation to that row's declared selector. Missing or changed resident digests require confirmed unloading and unchanged cold admission. Retain the shared name-based unload path: Ollama resolves its retained loaded model, and Pluto still requires absence from the complete resident list before proceeding. Do not infer or translate selector/engine equivalence.
+- **Preservation:** Exact digest/context proof, freshness, memory estimates/reserves, watchdog, limits, cancellation and workload exclusion remain. Tests cover catalog ordering, distinct selector/engine labels, missing/changed digests, proof invalidation and failed cleanup retry before native work. No synthesis, model artifact or configuration change is included.
+
+## 2026-10-25 — Bind warm admission and cleanup to the selected runtime artifact
+
+- **Refines:** “Match Gemma accounting to the runtime context floor” and “Record local load ownership only when allocation can begin.”
+- **Decision:** Prefer the catalog variant whose digest/backend matches an existing resident allocation; otherwise retain the first catalog selection and explicitly request its declared backend. A resident name/context alone cannot authorize warm admission: a missing or changed digest, or a changed declared backend, requires confirmed unloading and unchanged cold admission. Fresh watchdog proof also checks the selected backend when known.
+- **Cleanup:** Track the owned backend before transport so cancellation, failed cleanup retries, idle release and native handoff unload the same variant that may have allocated memory. External-residency cleanup uses its discovered backend. Confirmation still requires the model name to disappear from the complete resident list. Legacy catalogs without backend metadata retain compatibility.
+- **Preservation:** No memory estimate or reserve is reduced. Context/output limits, exact digest/context proof and freshness, independent watchdog, cancellation and workload exclusion remain. Model selection settings and artifacts are unchanged; no semantic correction rule or model-quality claim is introduced. Tests cover catalog ordering, changed/missing digests, backend changes, proof invalidation and backend-targeted cleanup retry before native work.
+
+## 2026-10-25 — Record local load ownership only when allocation can begin
+
+- **Refines:** “Share bounded memory reclaim accounting across owned unloads” (2026-10-25).
+- **Decision:** A reconciled resident model is tracked immediately; a cold model becomes active only immediately before the generation transport starts. Admission, missing native monitoring, or budget failure before any load must not create a model-cleanup request or a reclaim interval for nonexistent allocations. Confirmed provider unloads clear ownership at the shared provider boundary, including context-resize cleanup.
+- **Preservation:** A request that may have reached the runtime retains conservative ownership through cancellation and failure until confirmed unloading. Real unloads retain the same bounded reclaim wait. All memory estimates, reserves, freshness, watchdog, context/output limits, model artifacts and unload confirmation remain unchanged. This removes spurious cleanup/waiting; it does not resolve insufficient physical headroom, native weight repacking or semantic quality.
+
+## 2026-10-25 — Let synthesis interpret completion instead of verb rules
+
+- **Supersedes:** “Withhold direct contradictions of recorded completed work” (2026-10-24), and the completion-recognition extension in notes guardrails.
+- **Decision:** Remove the hand-written past-tense verb recognizer and the chat actor/predicate completion matcher. The LLM interprets recorded lifecycle state from the supplied synthesis and canonical task fields, including completed work, cancellation, proposals, prerequisites and explicit reopening. Existing source-grounded synthesis instructions remain the contract. No replacement grammar, classifier, extra reviewer, retry or prompt expansion is introduced.
+- **Preservation:** Source references, explicit user completion/adoption state, inferred answer trust, model routing, bounded calls, memory admission/watchdog and source data protection remain. Removing a wording filter does not establish semantic correctness: the original source-reviewed acceptance controls remain the quality gate.
+
 # Pluto Decision Log
 
 This is the default home for durable product, design, process, and architecture decisions.
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
+
+## 2026-10-24 - Preserve explicit self ownership from projected note actions
+
+- **Refines:** “Require recorded anonymous speaker labels in saved-answer evidence” and “Preserve uncertainty and short answers at saved-answer publication” (2026-10-24). A canonical `Me` owner is independent of the user's literal name; owner-looking prose alone cannot authorize a personal duty.
+- **Decision:** Retain explicit false completion state when projecting saved-note action blocks, alongside the existing owner and due fields. The shared synthesized presentation can preserve an exact “You need to …” task from a non-artifact note's typed `note_actions` when it records `Me` and explicit open state. Preserve the complete task predicate, condition and deadline; conflicting matching owner/completion records abstain. Completed or unknown state, other owners, raw transcript/section metadata and text-only labels cannot use this path. Existing source checks, single retry, inferred trust and every memory protection remain.
+- **Boundary:** This fixes loss of a recorded personal task; it does not prove general paraphrase entailment, current status beyond the saved projection, or relevance of other sentences. Broader Phi ownership/state and Gemma semantic/loading acceptance remain open in [PR #884](https://github.com/metagrover/pluto/pull/884). No model, prompt, source record, notes/cache version or allocation changes accompany it.
+- **Evidence:** Focused regressions cover the real saved-note projection through presentation, reversible completion edits, unknown or conflicting state, other owners, conditions, deadlines, metadata spoofing and streamed output. A text-tag-only prototype was discarded in favor of the existing typed projection.
+
+## 2026-10-24 - Withhold direct contradictions of recorded completed work
+
+- **Refines:** “Preserve uncertainty and short answers at saved-answer publication” (2026-10-24). A factual saved answer must not say an actor still needs to do the same task that the retrieved notes explicitly record as completed.
+- **Decision:** Withhold that sentence before streaming when the exact actor and ordered task predicate match an unqualified completed/finished or present-perfect statement with matching predicate stems. Normalize articles and inflection only; preserve direction, conjunctions and task scope. Any other or ambiguous same-actor context suspends the check, including explicit reopening. Keep the existing single retry, inferred trust, source preservation and every memory protection.
+- **Boundary:** This is a conservative direct-contradiction check, not a lifecycle or general entailment proof. Other grammar, irregular verbs, paraphrases and new duties can remain unresolved. It never rewrites a source, invents an action, or marks an answer grounded.
+- **Evidence:** The packaged app retrieved a completed task but answered that it still needed doing. Regression controls cover independent tasks, exact actor boundaries, ongoing and negated work, conditional completion, explicit reopening, direction, conjunctions and different task scopes. A fresh 23-case Phi run retains all previously passing final answers; the reopened-task sentences are withheld, but an unrequested readiness caveat remains, so full semantic acceptance conservatively stays 20/23.
+
+## 2026-10-24 - Keep meeting titles separate from project facts in saved answers
+
+- **Refines:** “Preserve uncertainty and short answers at saved-answer publication” (2026-10-24). A meeting title identifies a source; it does not establish a project with that name.
+- **Decision:** Withhold a synthesized sentence that directly calls a meeting-title-only name a project, when that name is absent from the supplied non-transcript evidence. Match complete literal titles in either project-name order, allowing presentation markup. Preserve recorded names and the existing artifact path. The existing single retry, inferred trust and publication buffering remain.
+- **Boundary:** This catches direct title-role promotion, not arbitrary invented names, paraphrased project identities, rationales or general entailment. A name appearing in evidence does not prove every claim about it. Broader source fidelity remains a release gate; no model, prompt, sampling, memory or retry-budget change accompanies this check.
+- **Evidence:** Three independent-domain regressions first reproduced title-to-project invention. The presentation suite now passes 121 tests. A fresh 23-control Phi run plus exact final presentation replay retains all previously passing answers and corrects the title-based project/rationale answer through the existing retry: 20/23 final source-reviewed controls pass, versus 17/23 raw model answers. This does not qualify live retrieval or release readiness.
+
+## 2026-10-24 - Require recorded anonymous speaker labels in saved-answer evidence
+
+- **Refines:** “Preserve uncertainty and short answers at saved-answer publication” (2026-10-24). Preserving a short answer does not authorize an invented recorded identity.
+- **Decision:** Withhold a synthesized sentence that introduces a `Remote Speaker` label absent from the supplied non-transcript evidence, before streaming or final publication. Compare complete labels, including their numbers. Retain canonical owner fields when preparing evidence, instead of stripping them as retrieval headings; retrieval headers, meeting titles and raw dialogue cannot authorize a label. Keep the existing single saved-answer retry and inferred trust.
+- **Boundary:** Label presence is necessary, not proof that the claimed task belongs to that speaker. Broader owner, state, scope and coverage checks remain release gates. Models, generation settings, source records and every memory protection remain unchanged.
+- **Evidence:** All 113 citation/presentation regressions pass. In 23 fresh standard Phi requests, initial answers match the prior baseline exactly; the existing retry corrects one fabricated-actor/state answer after withholding its invented label, improving final source-reviewed fidelity from 18/23 to 19/23. All previously passing final answers remain unchanged. This is provider/presentation acceptance, not live retrieval or release qualification.
+
+## 2026-10-24 - Preserve uncertainty and short answers at saved-answer publication
+
+- **Refines:** “Quote only validated evidence in Ask Pluto source disclosures” (2026-10-17). Synthesized answers still disclose context and remain inferred; these checks do not establish semantic verification.
+- **Decision:** Before displaying a complete synthesized sentence, reject explicit certainty when the otherwise equal fact tokens occur only in source clauses marked as possibilities. An independently matching unqualified source statement prevents this narrow contradiction check from firing. Keep the existing single provider retry, publication buffering, provenance and trust labels. Paraphrase entailment and broader state/ownership fidelity remain separate acceptance gates.
+- **Formatting:** A single plain answer without heading markup is content, even without terminal punctuation. Preserve it at finalization; continue buffering incomplete stream prefixes and pruning explicit or multi-paragraph orphan headings. The separately audited answer path keeps its existing heading rules.
+- **Evidence:** A fresh Phi answer turned a recorded possibility into a definite capacity. The shared presentation check withheld it, and the existing retry retained the possibility and unmeasured status. The same run exposed short owner/absence answers being erased by heading cleanup. Regression cases cover independent domains, matching unqualified evidence, unrelated subjects, qualified/negated wording and streaming behavior. Gemma/Phi models, inference settings and every memory check remain unchanged. Remaining semantic and loading failures continue to block release in [PR #884](https://github.com/metagrover/pluto/pull/884).
+
+## 2026-10-24 - Preserve unaffected notes during scoped validation repair
+
+- **Status:** Candidate; original-source and packaged acceptance remain required in [PR #884](https://github.com/metagrover/pluto/pull/884).
+- **Decision:** In the existing single compact-writer repair, application-owned validation diagnostics identify the blocks to replace. When both documents retain the same section/item layout and each failed item has one exact citation-identity match in both documents, replace that item and retain every other original block and its citations. Item order is not identity. Validate the complete merged document through the same source, schema and publication checks. Structural, ambiguous or unlocalized repairs retain the existing full-document path; no model call or repair allowance is added. Notes/cache identity advances to notes-v96.
+- **Polarity:** For an exact copied decision predicate with an explicit settlement cue, compare every matching source clause, including later contradictions. An unrelated negative decision cannot negate a separate affirmative choice; an earlier affirmative choice cannot hide a later contradiction. Other acceptance, ownership, quantity, condition and evidence checks remain in force.
+- **Evidence:** The original validator both rejected a supported choice because a neighboring choice was negative and admitted a choice contradicted later in the same evidence. A captured repair also removed a valid alternative while fixing a different block. Focused regressions cover these boundaries, unchanged source records and refusal of an invalid targeted repair. These checks do not establish complete model fidelity.
+
+## 2026-10-22 - Bound durable live-transcription input delay to two seconds
+
+- **Status:** Packaged short-recording check passed; sustained recording qualification remains open.
+- **Extends:** “2026-09-29 - Recover live transcription from the durable capture journal.” Its checksum verification, replay, bounded PCM queue, generation fencing and final transcription remain unchanged.
+- **Decision:** Seal microphone and system-audio capture intervals every two seconds rather than five. Live inference still consumes saved chunks; it does not bypass source durability to show text sooner.
+- **Evidence:** With the same fictional speech in the packaged app, first visible text followed system-audio speech onset by about 2.6 seconds versus 8.7 seconds with five-second intervals. The prior 14-second telemetry started from earlier microphone activity. This is a short-run observation, not a sustained latency guarantee. Shorter intervals increase journal metadata operations; capture/recovery regression checks remain required.
+
+## 2026-10-20 - Bound established Gemma GPU placement on smaller Macs
+
+- **Status:** Candidate; packaged transcription-to-notes, review, downstream updates and fidelity qualification remain required.
+- **Supersedes:** Only automatic GPU placement and memory mapping in “Restore released Gemma execution options.” Retain eight CPU threads, first-use cold unload, allocation tracking and every admission, reserve, reaction, freshness, cancellation and unload check.
+- **Decision:** For the exact established Gemma artifact on Darwin with finite positive physical memory at or below 16 GiB, request 16 GPU layers and explicit memory mapping. Preserve complete context and output budgets. Other artifacts, providers, platforms and larger Macs retain their existing options; no new setting or model is introduced.
+- **Evidence:** An isolated cold writer with these options and eight threads completed under the unchanged guard, with minimum primary available memory of 26 percent. Automatic placement and a mapping-only control both stopped safely during startup. The successful writer is bounded memory evidence, not final-note quality, deadline, or packaged workflow qualification.
+
+## 2026-10-20 - Restore released Gemma execution options
+
+- **Status:** Candidate; notes fidelity and full packaged workflow qualification remain required.
+- **Supersedes:** Only the 16 GPU layer, four CPU thread, explicit memory-mapping hardware candidate in “Read memory pressure continuously during local inference.” The direct native memory reader, admission estimates, reserve, reaction margins, freshness, cancellation and confirmed unload remain unchanged.
+- **Decision:** Retain the released eight-thread request default and let the existing Ollama runtime choose GPU placement and mapping. Remove the candidate-specific Gemma placement helper. Keep the same Gemma artifact, batch and complete input/output budgets. An external matching resident cannot prove compatible execution options: unload and cold-admit on first use, then reuse only successful same-provider allocations with matching context.
+- **Evidence:** One matched cold writer control completed in 71 seconds versus 158 seconds with candidate placement, under unchanged memory protection. It used the same 3,490 input tokens and full output allowance, with minimum observed free memory of 28 percent. A subsequent source-reconciliation writer also completed within protection. These are bounded execution observations, not general performance or semantic-quality qualification; both writer protocols still failed fidelity or source validation.
+
+## 2026-10-20 - Read kernel memory pressure at the inference decision
+
+- **Status:** Candidate; model-free native checks and sustained packaged workflow qualification remain required.
+- **Supersedes:** The FIFO transport in “Keep safety telemetry off regular-file I/O” and background local-inference sampler in “Read memory pressure continuously during local inference.” Retain the independent Swift resource probe for transcription and diagnostics.
+- **Decision:** Add a synchronous sample export to the existing signed native addon. Read the same `kern.memorystatus_level` on the guard's decision thread, timestamp before the kernel call, and require a valid integer percentage with consumer age from zero through 100 ms. Missing exports, native errors, invalid samples or stale readings refuse local inference; no subprocess, queued telemetry or fallback sample is used. Use the same validated native reading for cold admission; on macOS a missing reading refuses admission rather than substituting raw free pages. Keep admission calculations, reserve, reaction margins, guard cadence, cancellation and unload unchanged.
+- **Evidence:** A sustained FIFO run still refused a 146 ms-old sample. Its primary producer/read boundary was not instrumented, so the exact cause remains unresolved. Direct measurement removes the external producer and transport freshness dependency without inferring an OS cause or accepting stale readings. Main-thread preemption and kernel-call delay remain subject to the same freshness refusal; this is not a hard real-time guarantee.
+- **Compatibility:** Reuse the notification addon's existing build, signing and packaging path without requesting notification permission. Older addons lacking the optional memory export leave local inference unavailable until rebuilt; notification APIs retain their existing behavior.
+
+## 2026-10-20 - Keep safety telemetry off regular-file I/O
+
+- **Status:** Candidate; hardware and full packaged workflow qualification remain required.
+- **Supersedes:** The regular-file transport used by “Read memory pressure continuously during local inference.” Its native sampler, reserve, admission, reaction margins and 100 ms freshness limit remain unchanged.
+- **Decision:** Use a request-owned private FIFO, unlink it after opening separate nonblocking parent-read and child-write descriptors, and synchronously drain available records. Separate open file descriptions prevent child-process setup from changing the parent's nonblocking mode. Treat an empty nonblocking read as drained; retain protocol validation, cumulative output bounds, startup cancellation and confirmed helper cleanup. Never wait for a fresh sample or accept stale telemetry.
+- **Rationale:** A real Gemma run recorded a 237 ms sampler write and a simultaneous 204 ms parent metadata read on the same regular file, while kernel reads and an independent sampler remained fast. The guard correctly refused the resulting stale sample. A FIFO removes that measured filesystem boundary; it does not establish the precise underlying OS locking or scheduling cause.
+
+## 2026-10-20 - Review factual notes in bounded source batches
+
+- **Status:** Candidate; original-source, held-out and packaged acceptance remain required.
+- **Supersedes:** The selected-item, single-batch review policy and ordinary-discussion exemption in “Replace pattern-based commitment recovery with source-bound semantic review.” Preserve its provenance, usage admission and cancellation requirements.
+- **Decision:** Review every section item and overview, plus optional win and impact claims. Plan sequential requests within the existing 16-case, 12,000/48,000-character local/ChatGPT source bounds, existing 8k/32k request contexts, 1,536-token output allowance and token reserve. Limit each invocation to eight requests and retain the existing one repair, for at most sixteen requests under the unchanged absolute app deadline. Unreviewable evidence, invalid results or incomplete coverage prevent publication; never silently skip them. A protocol failure after partial review requires a complete-document retry rather than narrowing to earlier held items.
+- **Optional claims:** Review win and impact against their separate exact citations and apply them atomically. Require an explicit source-backed ownership verdict. A role-restricted unsupported verdict removes the optional pair without inventing a negative outcome. Invalid pairs remain internal and prevent publication. A narrated named actor can own a win without having a recorded speaking turn.
+- **Merge contract:** Offer duplicate-merge responses only for original actions with the same recorded nonnull owner, matching the unchanged runtime guard. A point promoted during review receives a normal resolution rather than an ineligible merge response.
+- **Timing:** Mandatory local source review receives the smaller of the existing 300-second allowance and remaining publication time. Keep the 15-second publication reserve, 12-minute app deadline and caller cancellation. ChatGPT retains its 90-second policy; optional whole-source editing retains its existing start allowance.
+- **Rationale:** Real-provider drafts contained unsupported ordinary outcomes and optional impacts outside the former selection filter. Source review still cannot recover entirely absent topics. These controls and regression tests do not qualify a writer, hardware configuration or provider without live acceptance.
+
+## 2026-10-20 - Preserve antecedents and use the local audit task deadline
+
+- **Status:** Candidate notes-v61 contract; live source-grounded acceptance remains required.
+- **Supersedes:** The local 90-second review deadline and citation-window restriction in “Replace pattern-based commitment recovery with source-bound semantic review.” Other provider, admission and publication limits remain in force.
+- **Decision:** Local source review uses the existing `notesAudit` 300-second request deadline; ChatGPT retains 90 seconds. Keep caller cancellation, the publication reserve and the app's absolute deadline. For an explicit bare task/condition reference, allow at most three preceding canonical speaker turns, anchored to that reference; persist precisely the same permitted window and never expand it again on retry. Hold unresolved references and unsupported quantity-scope modifiers for the existing bounded model repair, without rewriting speech or facts in code.
+- **Rationale:** Measured local review exceeded 90 seconds within the memory budget. An isolated reference could not support a standalone statement without its antecedent; duplicate validation also incorrectly required preserving an invented writer year. Source-qualified validation must preserve actual deadlines and conditions rather than draft errors.
+
+## 2026-10-20 - Use the existing no-prefix path for final v3 transcription
+
+- **Status:** Candidate; final packaged capture and diarization acceptance remain required.
+- **Decision:** Set `melChunkContext: false` at the existing FluidAudio v3 engine boundary. Keep the same model, int8 precision, CPU/Neural Engine selection and serial chunk concurrency. Use the vendor's existing bounded silence-aligned chunk path; preserve saved transcripts until an explicit retry or a new recording.
+- **Rationale:** Exact-window replay reproduced a missing approval statement before merging. Removing only the acoustic prefix recovered it while retaining every baseline word. The release native binary then retained all material reference facts in two full fictional captures. This does not establish word-perfect transcription or unseen-case accuracy.
+
+## 2026-10-20 - Read memory pressure continuously during local inference
+
+- **Status:** Candidate; full cold and packaged workflow qualification remains required.
+- **Extends:** “Retain the existing memory admission policy for Gemma qualification” and “Distinguish Gemma loading from verified residency.” Their reserve, admission estimates and reaction margins remain unchanged.
+- **Decision:** Reuse the bundled resource probe in a model-free mode to read the kernel memory level every 25 ms. Use a strict native timer on a dedicated user-initiated serial queue; sleeping between samples produced gaps longer than the consumer freshness limit under load. Require a valid sample no older than 100 ms before generation and at each guard check; stop on missing, stale or invalid readings. Run reserve checks independently of bounded residency lookup. Read request-owned metadata through an unlinked private descriptor and synchronously drain queued records before testing freshness. If scheduling pauses after the drain, re-drain once immediately and accept only a genuinely new sample meeting the same 100 ms limit; never wait or grant stale-sample grace. Await probe exit and unload after failed generation or cleanup. Resolve this probe from the current app bundle independently of downloaded transcription runtimes.
+- **Rationale:** Launching a shell query under inference load could time out and substitute raw free RAM for the macOS available-memory measure, falsely aborting otherwise safe runs. The persistent probe reads the same kernel measure without repeated process startup.
+- **Hardware candidate:** Only the established Gemma artifact on 16 GiB Macs uses 16 GPU layers, four CPU threads and memory mapping. The model is unchanged; this placement still requires full workflow qualification. Other artifacts and hardware retain their existing options.
+
+## 2026-10-20 - Route saved Fast chat through the configured fast model
+
+- **Status:** Accepted by direct owner request.
+- **Supersedes:** The saved-chat model selection in “2026-08-31 - Make saved Ask Pluto notes-first and inference-coordinated.” Its evidence and inference coordination policy remains in force.
+- **Decision:** Saved, workspace and person Fast chat use the configured Fast Chat Model, defaulting to Phi 4 Mini. Deep chat and notes analysis retain the configured general model, defaulting to Gemma 4 12B. Live chat retains its existing fast-model route. Never substitute the other role's model when a selected model fails.
+- **Rationale:** The Fast model setting must control Fast answers consistently across chat surfaces.
+
+## 2026-10-20 - Keep Gemma allocations bounded across downstream tasks
+
+- **Status:** Candidate; full packaged workflow qualification remains required.
+- **Decision:** For the existing exact Gemma artifact, size non-notes context from the complete prompt, unchanged output allowance and safety margin; reuse sufficient residency within the task cap. Keep batch128 across local tasks. Start pressure monitoring after admission and before generation. Following confirmed explicit unload, allow at most two seconds for memory reclamation, requiring empty residency before each cold-capacity retry. Preserve the admission estimates and reserve.
+- **Rationale:** Title generation forced an 8K/default-batch reload after 7168/batch128 notes and repeatedly hit memory protection. Runner removal can precede macOS reclaiming its pages. Neither issue warrants changing models or reducing the output budget.
+
+## 2026-10-20 - Reject unfinished notes and require prose repair of held evidence
+
+- **Status:** Accepted publication safeguard; live fidelity qualification remains required.
+- **Extends:** The provider-written notes publication contract.
+- **Decision:** Use the shared source-quotation formatter for held guardrail evidence, so the existing publication check cannot be bypassed by alternate formatting. Hold provider text ending in a lowercase article for the existing bounded model repair; never complete it deterministically. Prompt v57 also clarifies that explicitly owned ongoing work remains an action without an invented deadline.
+- **Rationale:** A fresh captured meeting published an unfinished conditional commitment, and a focused regression exposed an alternate raw-transcript formatter that bypassed the quote check.
+
+## 2026-10-20 - Distinguish Gemma loading from verified residency
+
+- **Status:** Candidate; packaged sustained-workload qualification remains required.
+- **Supersedes:** The constant pressure-cancellation reaction margin in “2026-10-20 - Retain the existing memory admission policy for Gemma qualification.”
+- **Decision:** Keep 2 GiB reaction headroom while loading. Use 1 GiB only while Ollama confirms the existing exact Gemma artifact and requested context are resident. Unknown, failed or timed-out checks retain 2 GiB. Admission estimates and the shared memory reserve remain unchanged.
+- **Rationale:** Loading and steady-state checkpoint allocation have different observed peaks. Residency must be verified before reducing reaction headroom.
+
+## 2026-10-20 - Frame local JSON requests for cancellation before the first token
+
+- **Status:** Accepted for transport correctness; live cold-load cancellation and model qualification remain required.
+- **Extends:** “2026-10-20 - Confirm model exit before transferring local inference admission.”
+- **Decision:** Send the exact UTF-8 byte length for string and byte-array bodies through both local Node HTTP transports, without a conflicting transfer-encoding header. Keep existing abort signals, streaming, bounded responses and error handling.
+- **Rationale:** A Go HTTP server cannot start its disconnect reader until the request body reaches EOF. A large JSON value sent with chunked framing can leave that EOF unread while the handler loads a model or prefills. Explicit length makes the body boundary unambiguous. Cancellation qualification must cover the interval before response headers and confirm that a cancelled cold load cannot later become resident; an empty process-status response during loading alone is insufficient.
+
+## 2026-10-20 - Retain the existing memory admission policy for Gemma qualification
+
+- **Status:** Compatibility correction; live cold peak, sustained workload and reaction margin require qualification.
+- **Supersedes:** The 25-percent / 2-GiB reserve introduced in “2026-10-20 - Confirm model exit before transferring local inference admission.”
+- **Decision:** Apply the existing shared final-transcription admission policy to remaining memory after the local model estimate, rather than inventing a separate reserve. Keep 2 GiB reaction headroom for confirmed warm requests and pressure cancellation, with 100 ms polling and query deadlines. Model/native admission remains serialized and unloading remains confirmed.
+- **Rationale:** The released memory policy reserves at least 1 GiB or 8 percent. The stricter unqualified policy categorically blocked previously supported Gemma usage and the early-stop probes did not measure complete loading or establish a hardware failure. Compare the same Gemma artifact, runtime and workload before claiming support or incompatibility.
+
+## 2026-10-20 - Bound Gemma admission using its observed runtime allocation
+
+- **Status:** Candidate correction; cold peak, sustained workload and packaged qualification remain required.
+- **Supersedes:** The blanket cold-load estimate used with “2026-10-20 - Confirm model exit before transferring local inference admission.” The reserve is defined by the compatibility correction above.
+- **Decision:** Recognize the existing Gemma 4 12B artifact by its exact installed digest. Its observed model, fixed sliding-window cache, projector and compute buffers support weights plus 2 GiB runtime headroom plus the context allowance as a conservative starting estimate. Keep the larger generic estimate for unknown artifacts. Confirmed same-context warm reuse charges incremental headroom instead of already allocated weights and context. Poll pressure every 250 ms and cancel with 1 GiB headroom above the reserve.
+- **Rationale:** Applying an unrelated model's 2.5-times-file estimate to Gemma demanded more than 18 GiB before reserve and categorically disabled the released model on supported 16 GiB hardware. Buffer logs inform admission; they do not establish peak-memory or note-quality acceptance.
+
+## 2026-10-20 - Reuse bounded resident Ollama contexts between stages
+
+- **Status:** Accepted for correctness; model and hardware qualification remain required.
+- **Supersedes:** Per-request shrinking in the capacity clause of “2026-10-20 - Confirm model exit before transferring local inference admission.”
+- **Decision:** Reuse Ollama's reported resident context when it covers the complete estimated input, full output allowance and safety margin without exceeding the request's context cap. A required resize must unload the previous allocation and pass cold-load admission. Unknown context metadata cannot qualify a request for the warm-load memory estimate. This avoids repeated weight reloads between writing and review without reducing evidence, output budgets or the memory reserve.
+
+## 2026-10-20 - Confirm model exit before transferring local inference admission
+
+- **Status:** Accepted; hardware and provider acceptance remain required.
+- **Supersedes:** The warm native-worker retention behavior of the shared Parakeet runtime when it participates in application inference admission, and the unconfirmed unload behavior of “2026-10-05 - Retain local models for up to two hours with idle memory release.” Standalone native tooling retains its idle policy.
+- **Decision:** Recording, final transcription, voice work and local text inference share admission. Cancel and settle text generation, confirm its Ollama model is absent, then admit native work. Before local text inference starts, stop the idle native worker and await exit under shared admission; force termination after two seconds if graceful shutdown stalls. Retain warm native readiness while idle so an immediate recording need not prepare twice. Preserve verified model readiness across intentional unloading, while every replacement worker prepares its models again. Native failure still invalidates readiness.
+- **Capacity:** Protect the larger of 2 GiB and 25 percent of physical memory. Refuse oversized local requests without replacing saved data. Bound ordinary notes allocation to the actual estimated input, full output allowance and safety margin within its existing context limit; experimental writer continuation retains its fixed context contract.
+
+## 2026-10-20 - Require readable source review before notes publication
+
+- **Status:** Accepted
+- **Supersedes:** The quotation-as-finished-notes behavior in “2026-10-19 - Preserve source clauses when reviewed points collapse” and “2026-10-19 - Hold disputed commitments for bounded source review.”
+- **Decision:** Keep exact source evidence internal to review and provenance. Preserve readable conditional prose while reviewing its complete cited window. Collapse exact duplicate points without replacing their prose with transcript text. Allow one bounded repair of unresolved semantic cases under the existing request admission, usage and deadline controls. If source review remains incomplete or would publish an attributed transcript dump, fail regeneration and preserve saved notes rather than label the dump complete.
+- **Consequences:** Grounding, ownership, conditions and cancellation checks remain required. New output uses notes-v56. Passing this gate does not establish semantic completeness; original-source and held-out acceptance remain release requirements.
 
 ## 2026-10-19 - Preserve source clauses when reviewed points collapse
 
@@ -2285,6 +2546,249 @@ evaluation is explicit and never runs or spends model usage in the unit suite.
 - **Privacy:** Recheck the active provider and consent before admission and immediately before network egress. Switching away or revoking consent cancels active and queued ChatGPT inference without disconnecting the account or resetting usage.
 - **Scope:** This rollout excludes unfinished MTP runtime/default changes. Existing Ollama model defaults and custom model settings remain in place.
 
+
+## 2026-10-21 — Use audience-neutral, source-faithful notes guidance
+
+Supersedes the action-first instruction order and scenario-specific wording in
+“2026-10-17 — Prioritize accepted commitments before discussion in compact writing.”
+Retain its ownership, acceptance, timing, condition and evidence guarantees.
+
+Use one general content policy across writing, editing, auditing, merging and
+reconciliation. Preserve material discussion, requirements, risks and deferred
+work across personal, professional, educational, interview and brainstorming
+conversations. Keep completed and cancelled work as history, proposals distinct
+from commitments, and questions open only when unresolved. Preserve certainty,
+scope and source-backed attribution in every claim. Templates may organize the
+notes without erasing material facts. Do not invent missing antecedents or equate
+the person reporting a decision with its owner.
+
+Preserve material transitions with their actor, prior and final states, and
+reason, plus distinct ongoing operations before a later deliverable. Preserve
+the full accepted responsibility in action text itself; mentioning work only in
+commentary does not supply the canonical action record. Give
+source review bounded original dialogue context for backward references and
+question responses, and retain that same evidence in provenance. Review original
+cited speech as the primary subject; use generated draft wording only to select
+the actor or topic, never to limit its supported scope. Anchor held repairs to
+original cited speech and omit rejected verdict prose. Keep an untrusted original
+action selector through retries so shared evidence does not combine distinct
+responsibilities; held factual prose remains absent. The selector identifies the
+responsibility, while source evidence supplies all its supported operations and
+conditions. Preserve distinct
+original review subjects when conservative admission replaces their wording with
+the same source quotation; identical fallback text does not establish duplicate
+responsibilities. Keep initial admission and final source validation intact.
+Check omitted prerequisites against the exact original task subject and attributed
+source statements, without assigning another task or actor’s condition to it.
+Leave later changed or ambiguous scope to source review rather than reinstating
+an older prerequisite.
+Report all applicable existing validation failures with controlled corrective
+messages to the same bounded repair, never provider error text. Review classifies
+from source; retain original action metadata only for duplicate-merge eligibility.
+Source and draft values remain untrusted data; application validation feedback
+constrains review without supplying meeting facts.
+
+Remove scenario examples and conflicting output-bookkeeping instructions;
+retain the existing schemas, evidence validation, model configuration, memory
+protection and generation budgets. Version the prompt contract as notes-v71.
+This decision does not establish model quality or release readiness: qualify
+the complete Gemma notes path against varied fictional conversations and private
+reference meetings before sign-off.
+
+
+## 2026-10-21 — Check local notes for omissions before final source review
+
+Supersedes the local deterministic-only publication strategy and the exclusion of
+a final semantic review from the older two-stage Ollama path in the source-bound
+review decision above. Retains the audience-neutral content policy and its trust
+guarantees. ChatGPT routing is unchanged.
+
+Use the existing whole-source audit for standard local notes, including each
+source leaf when a meeting requires partitioning. An item-only review cannot
+discover responsibilities absent from the draft. The source audit can insert or
+correct missing material before the existing final source-bound semantic review.
+Merged notes retain the audited commitments and their dispositions. Preserve
+immutable corrected and inserted audit subjects so later conservative holds do
+not erase their operation identity or question context. An incomplete final
+source review cannot publish the document.
+
+Keep Gemma, Phi, request contexts, output limits, cancellation, admission, memory
+reserves and the application deadline unchanged. Reusing the existing audit adds
+its bounded request and repair before final review; it does not expand those
+resource limits. Invalidate cached notes with notes-v73. Unit checks establish
+routing and provenance, not model fidelity: varied source-grounded live cases
+and the packaged application remain required before release readiness.
+
+
+## 2026-10-21 — Finish eligible local knowledge updates with post-meeting processing
+
+Supersedes the idle-only cross-meeting refresh requirement in
+“2026-08-31 - Make People an evidence-backed relationship briefing” for the
+current local meeting's post-notes processing. Unrelated background refresh,
+identity work and project-theme scheduling retain their existing idle policies.
+ChatGPT scheduling and usage limits are unchanged.
+
+After local notes, entity extraction and MID persistence, await the existing
+meeting-scoped knowledge refresh under the same inference admission, memory,
+pause, cancellation, evidence and eligibility controls. Keep notes published
+while this secondary work runs. Secondary completion means the requested
+knowledge documents finished; enqueueing them does not establish completion.
+If the refresh is paused or fails, preserve the saved notes and enqueue the
+existing guarded secondary recovery path. Superseded work cannot commit or
+queue a stale retry. Sparse profiles retain their truthful insufficient-evidence
+state rather than manufacturing history or lowering synthesis eligibility.
+
+
+## 2026-10-21 — Scope action validation to one responsibility
+
+Retain the evidence guarantees in “2026-10-21 — Check local notes for omissions before final source review.”
+
+For source-reviewed actions, apply polarity and prerequisite checks to exact,
+source-backed clauses for that same owner and task. Separate work cannot donate
+its negation or approval requirement. Preserve the conservative whole-evidence
+check when task scope cannot be proven, and retain explicit same-task
+prerequisites and ownership checks. Version this grounding correction as
+notes-v74; wording and model configurations are unchanged.
+
+
+## 2026-10-21 — Review local notes from complete source windows before publication
+
+Supersedes **2026-10-21 — Check local notes for omissions before final source review** for the standard Ollama production path. The former whole-draft approval followed by surviving-item review could omit source topics and reject a valid combined historical/current statement before the mandatory meaning review could correct it. Repeated repair instructions did not establish reliable correction.
+
+The standard local writer now remains an untrusted draft until one mandatory source-led author/review stage accounts for every exact source window, including when the writer emitted no items. Shared canonical-fragment source aliases avoid repeated evidence text without merging different states into an opaque passage. Each source unit can produce multiple independent provider-written facts or responsibilities; explicit nonmaterial and unresolved dispositions cannot silently skip windows. Later source windows can revise only supplied prior internal records with both original and new evidence. Separately reviewed global metadata never inherits a section title automatically. Publication requires a genuine nonempty provider-reviewed global overview under the existing V3 contract; an ungroundable overview refuses rather than synthesizing a follow-up count or generic prose.
+
+The complete result is applied atomically and must pass the existing strict action/decision grounding, attribution, deadline, quantity, conditions, lifecycle, prose and provenance checks before receiving the existing projection brand. Partial or malformed responses, unresolved meaning, exceeded context/output/call/deadline bounds, cancellation or memory failures do not publish notes. No transcript-to-prose fallback or application-authored facts are introduced. The maximum remains eight sequential review requests per invocation and two bounded attempts under the existing absolute deadline; context closure that cannot fit refuses rather than dropping work or forcing tasks together.
+
+This preserves the intent of **2026-10-17 — Replace pattern-based commitment recovery with source-bound semantic review** and **2026-10-21 — Scope action validation to one responsibility**. Existing template, user-note and term context retains its authority boundaries: templates shape presentation, annotations are not source facts, and entity hints do not establish identity. Terminology proposals use the existing schema, source validation and confirmed-term artifact path; model signals are not approval. Raw source remains immutable. ChatGPT and explicit compact/editor, deterministic-only and final-only diagnostic paths keep their current behavior; their passing legacy tests are not source-led semantic qualification. Internal `notes-v78` invalidates old generated/cache identities; app/package version is unchanged. This is an implementation candidate, not a semantic, packaged-app or release qualification: source accounting and unit tests do not prove factual completeness, and real Gemma acceptance remains required.
+
+
+## 2026-10-21 — Reauthor ordinary local notes from complete source
+
+Supersedes the unqualified “Review local notes from complete source windows before publication” candidate. Its first actual run refused a structurally valid but semantically invalid window response; the single bounded retry then exhausted the 1536-token output limit. Window accounting was not proof that every material clause was retained, and the generated writer hints repeated unsupported metadata.
+
+Ordinary Ollama notes retain their initial writer, then use one mandatory whole-source authoring contract with the existing ordinary notes schema, exact request-local source aliases, ordinary parser, terminology validation and strict source-led publication factory. The final request includes the complete canonical speech once, without generated draft/metadata hints or window/nonmaterial/replacement ledgers. It requires a genuinely supported global overview; title and optional win retain their existing evidence rules. Complete source input and a genuine review marker do not prove output completeness: source-fidelity acceptance remains a release gate.
+
+This request uses the existing normal local-notes context ceiling (16384), rather than the old per-item review role ceiling (8192). Pure preflight and the actual provider share the capped request budget; the existing provider selects context for actual demand and retains memory admission, protected reserve, resizing/unload and cancellation. Output remains 1536 tokens, estimate safety 512 tokens, with the existing absolute workflow deadline and at most two final attempts. Oversized, truncated, malformed or ungrounded output refuses publication atomically; no hierarchy substitutes a partial-source approval. ChatGPT and explicit legacy/editor diagnostics retain their prior behavior. Internal notes-v79 invalidates cached notes; application version is unchanged. This contract remains unqualified until actual local-model and packaged-flow acceptance pass.
+
+
+## 2026-10-21 — Align source-literal deadlines and local narrative metadata
+
+Refines the unqualified “Reauthor ordinary local notes from complete source” contract, without changing its stages or admission rules. Its actual v79 run completed both bounded reviews but failed publication: responses invented deadline years and leaked source labels into prose; the ordinary narrative schema also allowed owner metadata that strict admission rejects. Exact offline replay located prerequisite/provenance failures before these later violations. The second raw response did retain ordered prerequisites; valid enumeration was not rejected as an invented quantity.
+
+Only the local final-review wire uses dueSourceText for the literal spoken calendar phrase, copied verbatim into canonical due before the existing ordinary parser and strict checks. No model date inference or application rewrite is introduced; old/simultaneous due metadata refuses. Point/question owner and deadline fields are null-only in this local schema, matching strict admission. Concise shared guidance keeps source labels exclusively in sources arrays and retains complete meaning, identity evidence, causal reasons, conditions and final states. Existing prerequisite token canonicalization treats completion/completing as one lexical family; targets, actors, quantities, negation and operators retain their checks. Unsupported years and genuinely missing citations still fail.
+
+Canonical persistence separately interprets supported source-literal calendar phrases against the trusted meeting calendar; it does not repair invented explicit years. Internal notes-v80 invalidates earlier notes caches. The existing context ceiling/demand selection, output cap, safety estimate, protected memory reserve, deadlines and two final attempts remain unchanged. This remains a candidate requiring actual model and packaged-flow acceptance, not a quality pass from schema or unit tests.
+
+
+## 2026-10-21 — Repair rejected source-led notes with controlled evidence feedback
+
+Refines the unqualified “Align source-literal deadlines and local narrative metadata” contract. Actual v80 responses fixed date-field and inline-label errors but still failed strict checks; the generic second authoring pass lost supported history and did not know its actual validation failures. Source-led authoring remains unqualified.
+
+The existing second attempt now receives the exact failed review as JSON-encoded untrusted candidate data, complete original source/context and application-owned per-block validation reasons. Existing predicate checks report all applicable failures before refusal; existing semantic retry instructions provide the controlled corrections. Strict legacy commitment acceptance is unchanged. The retry must preserve supported material content, check every source turn independently for omissions, and correct provenance, final states and prerequisites; candidate text is never evidence or instructions. This enables repair, not a formal proof of output completeness.
+
+Rejected text and immutable diagnostics live only in module WeakMaps keyed by the actual validation error. An authenticated retry token is bound to its source object and revision; forged or stale tokens refuse. Candidate text is absent from enumerable errors and parser causes, logs and IPC. The full repair prompt is capacity-checked without truncation. Internal notes-v81 invalidates cache identity. Model, memory admission/reserve, context ceiling, output limit, absolute deadline and the maximum two source-review attempts remain unchanged. No additional stage, fallback or release authorization is introduced.
+
+
+## 2026-10-21 — Cited within-meeting speaker names (notes-v82)
+
+The notes-v81 source-review ownership contract encouraged introduced names while strict grounding required canonical speaker labels, even with both introduction and responsibility cited. Notes-v82 permits a narrowly supported within-meeting alias: a complete literal self-introduction and the same stable voice's first-person responsibility must both be cited, and conflicting introductions anywhere in the source veto the alias. Unsupported introduction forms retain the recorded label. Confirmed projected names and Me cannot be renamed; explicitly named reported responsibilities retain their independent existing ownership checks.
+
+The shared proof is ephemeral, never a Voice ID/person enrollment or transcript mutation. Action grounding, ongoing-responsibility coverage and existing condition/lifecycle matching share the proof. Introduction-only citations may accompany the exact task without making it appear to be a different responsibility; unrelated task evidence cannot donate coverage. Existing source text, projection and source revision are unchanged. Local generation identity binds a stably ordered hash of confirmed speaker mappings, including same-label confirmations; the writer-only stage cache still requires final source review, and trust changes during generation prevent publication. No model, memory reserve, context cap, deadline or attempt count changes.
+
+This fixes an ownership contract contradiction, not model-quality qualification. Source-reviewed claim predicates deliberately rely on genuine model review for semantic operation equivalence; a canonical-owner control also accepts an unrelated operation under those predicates. That known limitation is retained in private diagnostic evidence, not masked by an alias-only lexical rule. No release readiness follows from these focused controls.
+
+
+## 2026-10-21 — Compact writer followed by genuine full-source review (notes-v83)
+
+Supersedes the unqualified notes-v79–81 independent source reauthoring policy. The normal local route now uses the current shared compact writer as an untrusted candidate, then independently compares that genuine draft with the complete original conversation in the existing source-review request. This is not an exact restoration of rc.20: the shared current compact prompt and schema differ, including required overview. Cloud and explicit legacy diagnostic routes retain their behavior.
+
+The first reviewer request encodes the decoded writer draft through the same exact source aliases and supplies it only as untrusted data; source speech remains factual authority. The existing single repair uses the latest failed review candidate without repeating the original writer draft. The ordinary response schema, strict admission, runtime proof branding and atomic publication stay in place. Review includes omissions, unsupported operations, causal/order/prerequisite relationships and final states; merely authoring from source does not independently establish that a candidate claim was reviewed. Confirmed canonical identities and Me retain metadata authority, unconfirmed aliases require their own introduction and responsibility citations, and named reported third-party owners remain independent.
+
+The bounded compact path preserves up to six writer callbacks, then up to two whole-source review requests; it does not add the old editor or item-review cascade. Writer and complete reviewer-plus-candidate prompts must fit their existing bounds, with 2048 writer output, 1536 review output, the normal 16K context cap, unchanged memory protection and absolute app deadline. Partial-row candidate citations that the existing whole-row aliases cannot represent refuse before inference; no offsets are silently widened, source text truncated or new serializer introduced. Oversized writer plans also refuse instead of starting an unbounded alternative. These are explicit supported-input limits requiring real-reference planning and model qualification. Focused mocks establish routing and guards, not fidelity or release readiness.
+
+
+## 2026-10-21 — EXPERIMENT REJECTED: Pure source-last review ordering (notes-v84)
+
+The unqualified notes-v83 genuine review copied all twelve writer item texts in its first actual review and eleven of those in repair. Its first request ended with the writer candidate; repair placed the candidate and correction instructions after the original source. This shows copying and payload order, not a proven attention or recency cause.
+
+Notes-v84 changes only ordering: the same genuine untrusted writer candidate, or the exact latest failed review candidate and existing controlled correction wording, precedes the unchanged complete canonical source. The source data block is last. Guidance, static retry wording, schema, alias encoding, strict acceptance, two attempts, context/output limits, models and memory protection are unchanged. The internal version invalidates cached generation identity. Exact candidate round-trip and source/alias equivalence are regression controls; actual fidelity remains unqualified until measured against the frozen reference.
+
+
+Notes-v84 was rejected after its controlled actual review failed the same material fidelity requirements, including missing request nonacceptance and explicit dependency order, while retaining unsupported metadata citations. Notes-v85 restores the exact prior notes-v83 prompt ordering and retains all other v83 behavior. The new internal version invalidates v84 cache identity; it is not a claim that v83 is qualified. No further model/settings/guard changes accompany this rollback.
+
+
+## 2026-10-21 — Shared writer contract clarity (notes-v86)
+
+The current compact writer lacked the reviewer's explicit ordered-step versus independent-condition distinction and its citation-bound introduced-owner contract. Notes-v86 adds those generic requirements to the existing guidance and compact field descriptions. It preserves accepted first-person promises, confirmed ongoing work and conditional responsibilities as actions; unaccepted requests/offers, tentative intentions and capabilities remain correctly qualified discussion. All-audience coverage, feelings, history, negation, reasons and source authority remain.
+
+The compact field descriptions prefer canonical first-person ownership and allow an unconfirmed introduced name only with its own introduction and same-voice responsibility evidence; Me/confirmed labels remain protected, while explicitly named reported third-party owners remain valid. The arbitrary five-to-seven-word title requirement is removed while concise whole-conversation grounding/null remains. Only duplicated compact action/citation sentences are consolidated, with their requirements retained in shared guidance and field definitions. Schemas, source/reviewer ordering, Auto template guidance, routing, gates, output/context budgets, models and memory protection are unchanged. This repairs explicit contract gaps; it does not claim that prompt size or duplication caused observed omissions, or that fidelity has passed.
+
+
+## 2026-10-21 — Minimal local writer candidate without automatic model review (notes-v87)
+
+Supersedes the normal-local-route policy in “Compact writer followed by genuine full-source review (notes-v83)” and its notes-v85 ordering restoration. Ordinary Ollama notes use the bounded compact writer and existing static source/schema/prose checks. The provider no longer attaches the whole-source review/repair callback or the source-bound item reviewer for local notes. Explicit legacy pipeline diagnostics remain separate; ChatGPT integration and its existing review policy are unchanged. Gemma, Phi, memory admission, fresh sampling, workload exclusion, unloading, context/output budgets and the app deadline are unchanged. The internal notes version invalidates prior run/cache identity; app release metadata is untouched.
+
+Local writer output is accepted strictly, without conservative transcript-quote replacements, silent removal of disputed actions or synthesized overview fallback. Invalid content refuses publication. The existing single JSON-format repair and bounded writer cache remain; they do not create a semantic-review proof. Local writer-only metadata omits completed-audit claims and never adds source_action_review_version. Existing user adoption, reviewed canonical state, saved-source preservation and downstream ownership gates are retained. Consequently, newly extracted local actions remain unreviewed for personal-action qualification until existing explicit confirmation requirements are met.
+
+Oversized local compact plans refuse rather than invoking an alternate audit/merge cascade; supported leaf writing retains the existing call bound. The current writer prompt content is unchanged by this routing patch and is not live-qualified. This is a reviewable minimal candidate, not a claim of semantic fidelity, packaged acceptance or release readiness. No model experiments or publication are authorized by this decision.
+
+
+## 2026-10-22 — Preserve decoder order and prepare streaming models before readiness
+
+Parakeet's token sequence determines recognized text. Overlapping chunk timestamp estimates must not reorder subword tokens: both standard and dual-decode paths retain decoder order and clamp backward timestamps before producing words. This changes neither source audio nor vocabulary and requires no phrase-specific correction. Synthetic token-order regressions and replay of the same recorded boundary reproduce the previous corruption and verify its correction.
+
+Native preparation now loads the verified streaming engine and releases it before publishing readiness. Previously, preparation verified model files while the first recording stream paid the cold CoreML load cost. The existing shared runtime lease and native inference coordinator still admit preparation; memory protection, workload exclusion, compute units, streaming configuration, capture journaling and recovery are unchanged. A failed or cancelled warmup does not activate the model. This moves cold work into readiness and primes CoreML's cache; it does not remove cold initialization cost or claim full recording acceptance. No warmed engine is retained across preparation, recording or final transcription.
+
+
+## 2026-10-22 — Warm streaming inference only for live preparation
+
+Supersedes only the unconditional streaming warmup in “Preserve decoder order and prepare streaming models before readiness.” Final-only preparation still installs and verifies the complete model bundle, but skips loading the unrelated live-caption engine. Live preparation explicitly requests the existing warmup; upgrading a final-prepared worker to live preparation performs it before reporting ready. Older callers that omit the flag retain the previous warmup behavior. Failed live warmup still refuses readiness. Shared leases, artifact verification, compute units, memory protection, source audio and decoder behavior are unchanged. This removes unnecessary cold work from file transcription; it does not qualify an alternative compute backend or claim release acceptance.
+
+
+## 2026-10-23 — Preserve configured overlap during adaptive ASR chunk placement
+
+Extends “Preserve decoder order and prepare streaming models before readiness.” Adaptive silence alignment must retain the same two-second acoustic overlap as the regular chunk grid. Its prior fixed 480 ms floor could leave too little shared speech for the existing token matcher, duplicating a phrase at a window seam. Use the configured overlap calculation for the boundary limit; retain silence alignment within that limit, decoder order, token matching and genuine repeated speech. Source audio, model weights, compute backends, live capture and memory protection are unchanged. Synthetic long-source, independent-domain and deliberate-repetition checks are acceptance evidence; alternate CPU encoding and confidence arbitration remain unpromoted experiments. This does not qualify the unresolved notes or saved-answer semantic gates.
+
+
+## 2026-10-23 — Avoid cold ANE compilation in final and live ASR workers
+
+Supersedes the unpromoted CPU experiment status in “Preserve configured overlap during adaptive ASR chunk placement” for the final encoder and the live EOU engine. Stateless file workers and installation validation use the existing CPU final encoder; live EOU preparation and inference use the existing CPU configuration. Both avoid cold CoreML ANE compilation. The final decoder keeps its prior compute configuration. Model weights and precision, acoustic overlap, streaming protocol and warmup requirements, vocabulary, source files and memory admission/watchdog remain unchanged. This uses existing compute backends, not an alternate recognizer or phrase correction.
+
+Acceptance compares the same generated sources, including long continuous speech, independent short domains and deliberate repetitions; every expected word and bounded timestamp must pass. Native tests and a rebuilt package are required in addition to diagnostic timing. A synthetic three-domain live comparison must preserve the baseline token sequences, including disclosed pre-existing recognition errors; a silent generated mic track must remain empty. The CPU live backend uses roughly 200 MiB more worker RSS in the measured comparison, with the same memory guard. This does not qualify physical capture, all hardware, or the unresolved Gemma/Phi semantic gates.
+
+
+## 2026-10-23 — Include strict local source validation in the bounded writer repair (notes-v89)
+
+Supersedes only the JSON-format-only repair policy in “Minimal local writer candidate without automatic model review (notes-v87).” A local compact draft must pass the existing strict source, commitment, guardrail and prose checks inside the same writer repair boundary as its JSON parser. Previously these checks ran after that boundary, so a rejected responsibility could not use the already available single repair. Valid drafts still use one writer call. A repaired draft must pass the same checks; an unchanged or still invalid result refuses publication. Memory or transport failures do not enter parser repair.
+
+There is no additional reviewer, retry cascade, source fallback or semantic-review proof. The existing absolute deadline, call/context/output limits, model routing, source preservation and memory protection remain. The writer cache identity changes to avoid bypassing the new boundary with an older rejected draft. This permits bounded correction; it does not establish missing-topic detection or qualify the remaining Gemma/Phi semantic acceptance gates.
+
+## 2026-10-23 — Match Gemma accounting to the runtime context floor
+
+Extends the allocation accounting of “Minimal local writer candidate without automatic model review (notes-v87).” For the established Gemma artifact, Ollama allocates at least 2048 context tokens because the model supports vision, including text-only requests. A requested 1024-token job therefore cannot establish a matching allocation or fresh residency proof. Account for and request the actual 2048-token minimum before memory admission; a caller budget below that floor refuses rather than silently exceeding its cap. Subsequent small requests can reuse the same verified allocation without another cold load.
+
+Exact model/digest/context matching, externally resident model eviction, memory reserves and sampling freshness, output limits, task caps, workload exclusion and unloading remain unchanged. This corrects unnecessary repeated loading; it does not remove the first cold-load cost or qualify Gemma/Phi semantic acceptance. No prewarming or additional residency is introduced.
+
+
+## 2026-10-25 — Keep speculative draft models outside local admission
+
+Extends “Match Gemma accounting to the runtime context floor.” Every local generation explicitly requests `draft_num_predict: 0`. Ollama can otherwise enable a model's speculative draft artifact by default. Pluto's admission and exact-residency proof cover the selected model and context, not an additional inference model, so a model refresh must not implicitly expand that allocation. Ollama 0.40.6 omits speculative runner arguments when this value is zero.
+
+Both Gemma and Phi, the selected-model allocation, context/output caps, reserves, freshness checks, watchdog, cancellation and confirmed unloading remain unchanged. No speculative acceleration is qualified or enabled by this change. Existing models without draft artifacts retain their inference path; an updated artifact still requires its own memory and semantic qualification. This closes an unbudgeted-allocation path; it does not resolve the remaining semantic failures or native first-load cost.
+
+
+## 2026-10-25 — Share bounded memory reclaim accounting across owned unloads
+
+Extends “Match Gemma accounting to the runtime context floor.” The existing two-second cold-admission reclaim window now belongs to the shared confirmed-unload path, including idle cleanup, rather than a provider instance. Ask Pluto and person chat cleanup can remove a runner before macOS reports its pages available; an immediately following provider must receive the same bounded opportunity to recheck memory. Record the window when an owned unload starts and refresh it when runner removal is confirmed, so transport cancellation does not erase an unload already in progress.
+
+Every retry still requires a fresh memory sample and an empty runner list. Persistent pressure refuses, cancellation stops the wait, and pending unload confirmation remains mandatory. Reserves, exact digest/context residency proof, watchdog, context/output limits, task deadlines, workload exclusion, and the existing cleanup policy are unchanged. This corrects premature refusal after cleanup; it does not retain models, eliminate physical cold loading, or qualify unresolved semantic gates.
+
+
+## 2026-10-25 - Include the accepted OpenRouter provider in first-run intelligence setup
+
+- **Supersedes:** The two-choice onboarding clause in “2026-10-15 - Choose intelligence once during first-run setup” (the 2026-10-07 provider restriction remains unchanged).
+- **Decision:** First-run intelligence setup offers Ollama, ChatGPT, and OpenRouter, matching the providers available in Settings. OpenRouter uses the existing protected credential IPC, stores its model choice, and records versioned text-sharing consent before provider activation. The renderer receives only credential status, never a saved key.
+- **Validation:** DOM regressions cover saved-key reuse, new-key storage before consent and activation, and storage failure without activation; existing Ollama and ChatGPT setup checks remain in place.
 
 ## 2026-10-24 — Independent ChatGPT and Claude Desktop note connections
 

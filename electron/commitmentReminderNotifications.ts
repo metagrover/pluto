@@ -6,6 +6,11 @@ import { commitmentReminderBody } from './commitmentReminderPolicy';
 import type { ReminderAdapter } from './commitmentReminderScheduler';
 
 export interface CommitmentNotificationBridge {
+  /** Absent in older addons; local inference must refuse without this export. */
+  memoryPressureSample?(): {
+    wallTimeMs: number;
+    memoryPressureFreePercent: number;
+  };
   status(): Promise<string>;
   request(): Promise<string>;
   submit(

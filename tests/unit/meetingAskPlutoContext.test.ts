@@ -1022,3 +1022,98 @@ describe('meeting-scoped Ask Pluto context', () => {
     expect(response.answer).toContain('Also an IPO is planned.');
   });
 });
+
+it('preserves current task state ahead of historical saved-meeting actions', () => {
+  const context = buildMeetingAskPlutoContext({
+    meeting: makeMeeting(),
+    query: 'Who owns the checklist?',
+    canonicalCommitments: [
+      {
+        owner: 'Riley',
+        state: 'completed',
+        task: 'Send the migration checklist',
+        meetingId: 'meeting-1',
+      },
+      {
+        owner: 'Riley',
+        state: 'unconfirmed',
+        task: 'Send the revised migration checklist',
+        meetingId: 'meeting-1',
+      },
+      {
+        owner: 'Avery',
+        state: 'open',
+        task: 'Review the API schema',
+        meetingId: 'meeting-1',
+      },
+      {
+        owner: null,
+        state: 'completed',
+        task: 'Renew the permit',
+        meetingId: 'other',
+      },
+    ],
+  });
+  const state = context.evidenceItems[0];
+  expect(state.id).toBe('canonical-commitments');
+  expect(context.boundary).toContain(
+    'Canonical task records are authoritative for current task state',
+  );
+  expect(state.text).toContain('"state":"completed"');
+  expect(state.text).toContain('"state":"open"');
+  expect(state.text).not.toContain('Renew the permit');
+  expect(
+    context.evidenceItems.some((item) => item.kind === 'action_item'),
+  ).toBe(true);
+  const actionList = buildPreparedMeetingAskPlutoResponse(
+    'What are the next steps?',
+    context,
+  );
+  expect(actionList?.answer).toContain(
+    'completed: "Send the migration checklist" — Riley',
+  );
+  expect(actionList?.answer).toContain(
+    'unconfirmed: "Send the revised migration checklist" — Riley',
+  );
+  expect(actionList?.answer).toContain('open: "Review the API schema" — Avery');
+  expect(
+    actionList?.citations.every((citation) => citation.evidence_valid),
+  ).toBe(true);
+  const closedOnly = buildPreparedMeetingAskPlutoResponse(
+    'What are the next steps?',
+    {
+      ...context,
+      canonicalCommitments: context.canonicalCommitments?.filter(
+        (record) => record.state !== 'open',
+      ),
+    },
+  );
+  expect(closedOnly?.answer).toContain(
+    'No confirmed open responsibilities are recorded.',
+  );
+  expect(
+    buildPreparedMeetingAskPlutoResponse('What did we decide?', context),
+  ).not.toBeNull();
+  for (const assistanceRoute of [
+    { mode: 'general' },
+    { mode: 'recall', recallKind: 'fact' },
+  ] as const) {
+    const prompt = buildMeetingAskPlutoPrompt({
+      query: 'Who owns the checklist?',
+      context,
+      assistanceRoute,
+    });
+    expect(prompt).toContain('Whenever mentioning a canonical task');
+    expect(prompt).toContain('"state":"completed"');
+    expect(prompt).toContain('"state":"unconfirmed"');
+    expect(prompt).toContain(
+      'Only open responsibilities may be presented as next steps',
+    );
+    expect(prompt.indexOf('[Evidence 1] Current task state')).toBeGreaterThan(
+      prompt.indexOf('[Evidence 2]'),
+    );
+    expect(
+      prompt.lastIndexOf('Canonical commitment state overrides older notes'),
+    ).toBeGreaterThan(prompt.indexOf('[Evidence 1] Current task state'));
+  }
+});

@@ -210,6 +210,7 @@ export interface AskPlutoQueryResponse<Citation = unknown> {
     | 'timeout'
     | 'provider_unavailable'
     | 'invalid_response'
+    | 'memory_pressure'
     | 'generation_failed';
   trustStatus?: 'grounded' | 'inferred' | 'needs_review';
   unsupportedClaimCount?: number;

@@ -1,4 +1,9 @@
+import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('electron', () => ({
+  powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn() },
+}));
 
 const geminiGetGenerativeModelMock = vi.fn();
 const geminiGenerateContentMock = vi.fn();
@@ -25,7 +30,10 @@ import {
   getProvider,
   invalidateProviderCache,
 } from '../../electron/llm/factory';
+import * as modelMemory from '../../electron/llm/localModelMemory';
+import { setLocalModelMemoryProbeReader } from '../../electron/llm/localModelMemoryProbe';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
+import * as ollamaTransport from '../../electron/llm/ollamaHttpTransport';
 import type { LLMSettings } from '../../electron/llm/provider';
 import {
   executeOpenAICompatible,
@@ -38,6 +46,9 @@ import {
   deduplicateExtractedItems,
   getOllamaActiveGenerationTimeoutMs,
   getOllamaTimeoutMs,
+  releaseIdleOllamaModel,
+  runWithLocalTranscription,
+  setLocalTranscriptionModelUnloader,
   sliceTranscriptWindows,
 } from '../../electron/llm/unifiedProvider';
 
@@ -131,6 +142,169 @@ const installFetchMock = (
 };
 
 describe('UnifiedLLMProvider', () => {
+  it('repartitions the full source after an initial cold memory refusal without reducing output', async () => {
+    const source = createNotesSource(
+      JSON.stringify({
+        segments: Array.from({ length: 16 }, (_, index) => ({
+          speaker: 'Observer',
+          text: `Specimen group ${index} has a recorded mass of ${index + 20} grams. The observation was recorded under controlled lighting at the laboratory bench. `.repeat(
+            3,
+          ),
+        })),
+      }),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+      ollama_fast_model: 'phi4-mini:3.8b',
+    });
+    const requests: Array<{ context: number; output: number }> = [];
+    const generate = vi
+      .spyOn(provider, 'generateText')
+      .mockRejectedValueOnce(
+        new modelMemory.LocalModelMemoryError('Cold capacity', 6144),
+      )
+      .mockImplementation(async (request) => {
+        requests.push({
+          context: request.notesBudget!.contextTokens,
+          output: request.notesBudget!.outputTokens,
+        });
+        const packet = request.prompt
+          .split('BEGIN SOURCE DATA')[1]!
+          .split('END SOURCE DATA')[0]!;
+        const rows = packet
+          .trim()
+          .split('\n')
+          .map((row) => JSON.parse(row) as string[]);
+        return JSON.stringify({
+          title: { text: 'Laboratory observations', sources: [rows[0]![0]] },
+          overview: {
+            text: 'The observer reviewed recorded specimen measurements.',
+            sources: [rows[0]![0]],
+          },
+          sections: [
+            {
+              title: 'Recorded measurements',
+              items: rows.map((row) => ({
+                kind: 'point',
+                text: 'The observer recorded the measurements described for this specimen group.',
+                owner: null,
+                due: null,
+                sources: [row[0]],
+              })),
+            },
+          ],
+        });
+      });
+    try {
+      const analysis = await provider.generateStructuredAnalysis(
+        '',
+        '',
+        'auto',
+        { source },
+      );
+      expect(requests.length).toBeGreaterThan(1);
+      expect(
+        requests.every(
+          (request) => request.context === 6144 && request.output === 2048,
+        ),
+      ).toBe(true);
+      const spans = Object.values(
+        analysis.generation_metadata!.source_provenance!.blocks,
+      ).flatMap((block) => block.sources);
+      for (const segment of source.segments) {
+        const covered = spans
+          .filter((span) => span.segment === segment.index)
+          .sort((a, b) => a.start - b.start);
+        let end = 0;
+        for (const span of covered) {
+          expect(span.start).toBeLessThanOrEqual(end);
+          end = Math.max(end, span.end);
+        }
+        expect(end).toBe(segment.text.length);
+      }
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it.each([undefined, 16384, 32768])(
+    'does not retry a refusal without a smaller context (%s)',
+    async (maxContextTokens) => {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'gemma4:12b',
+      });
+      const refusal = new modelMemory.LocalModelMemoryError(
+        'Capacity',
+        maxContextTokens,
+      );
+      const generate = vi
+        .spyOn(provider, 'generateText')
+        .mockRejectedValue(refusal);
+      try {
+        await expect(
+          provider.generateStructuredAnalysis(
+            'Observer: The specimen is blue.',
+            '',
+            'auto',
+          ),
+        ).rejects.toBe(refusal);
+        expect(generate).toHaveBeenCalledTimes(1);
+      } finally {
+        generate.mockRestore();
+      }
+    },
+  );
+
+  it('does not restart notes after a model response has already consumed the call budget', async () => {
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    });
+    const refusal = new modelMemory.LocalModelMemoryError('Capacity', 6144);
+    const generate = vi
+      .spyOn(provider, 'generateText')
+      .mockResolvedValueOnce('not JSON')
+      .mockRejectedValue(refusal);
+    try {
+      await expect(
+        provider.generateStructuredAnalysis(
+          'Observer: The specimen is blue.',
+          '',
+          'auto',
+        ),
+      ).rejects.toBe(refusal);
+      expect(generate).toHaveBeenCalledTimes(2);
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it('honors cancellation before memory repartitioning', async () => {
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    });
+    const controller = new AbortController();
+    const cancelled = new Error('Stopped by user');
+    const generate = vi
+      .spyOn(provider, 'generateText')
+      .mockImplementation(async () => {
+        controller.abort(cancelled);
+        throw new modelMemory.LocalModelMemoryError('Capacity', 6144);
+      });
+    try {
+      await expect(
+        provider.generateStructuredAnalysis(
+          'Observer: The specimen is blue.',
+          '',
+          'auto',
+          { signal: controller.signal },
+        ),
+      ).rejects.toBe(cancelled);
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
   it('routes an indexed source through exactly one writer and one audit with the configured model', async () => {
     const sourceText = 'I will send the outline.';
     const source = createNotesSource(
@@ -209,8 +383,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
   });
 
-  it('versions compact writer-editor notes as notes-v55', () => {
-    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v55');
+  it('versions notes and source review cache identity as notes-v99', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v99');
   });
 
   beforeEach(() => {
@@ -220,6 +394,7 @@ describe('UnifiedLLMProvider', () => {
   });
 
   afterEach(() => {
+    setLocalTranscriptionModelUnloader();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -228,6 +403,31 @@ describe('UnifiedLLMProvider', () => {
     expect(
       calculateOllamaContextBudget('', 'terminologyReconciliation').num_predict,
     ).toBe(2048);
+  });
+
+  it('waits for native model unloading before sending a local generation request', async () => {
+    let finishUnload!: () => void;
+    const unload = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishUnload = resolve;
+        }),
+    );
+    setLocalTranscriptionModelUnloader(unload);
+    const request = installFetchMock(() =>
+      jsonResponse({ response: '{}', done: true, done_reason: 'stop' }),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'fixture-model',
+    });
+    const generating = provider.synthesizeKnowledgeDocument(
+      'Fictional source notes',
+    );
+    await vi.waitFor(() => expect(unload).toHaveBeenCalledOnce());
+    expect(request).not.toHaveBeenCalled();
+    finishUnload();
+    await expect(generating).resolves.toBe('{}');
+    expect(request).toHaveBeenCalledOnce();
   });
 
   it('uses configured ollama model directly', async () => {
@@ -257,11 +457,13 @@ describe('UnifiedLLMProvider', () => {
 
   it('unloads deduplicated non-target Ollama residency before generation after restart', async () => {
     const events: string[] = [];
+    let unloaded = false;
     installFetchMock(
       (_url, init) => {
         const body = parseRequestBody(init);
         if (body.keep_alive === 0) {
           events.push(`unload:${String(body.model)}`);
+          unloaded = true;
           return jsonResponse({ done: true });
         }
         events.push(`generate:${String(body.model)}`);
@@ -274,7 +476,9 @@ describe('UnifiedLLMProvider', () => {
       () => {
         events.push('discover');
         return jsonResponse({
-          models: [{ name: ' gemma4:12b ' }, { model: 'GEMMA4:12B' }],
+          models: unloaded
+            ? []
+            : [{ name: ' gemma4:12b ' }, { model: 'GEMMA4:12B' }],
         });
       },
     );
@@ -289,8 +493,72 @@ describe('UnifiedLLMProvider', () => {
     expect(events).toEqual([
       'discover',
       'unload:gemma4:12b',
+      'discover',
       'generate:phi4-mini:3.8b',
     ]);
+  });
+
+  it('waits for observed unload before starting the next model', async () => {
+    let unloaded = false;
+    let confirmUnload!: () => void;
+    const confirmed = new Promise<void>((resolve) => {
+      confirmUnload = resolve;
+    });
+    const events: string[] = [];
+    installFetchMock(
+      (_url, init) => {
+        const body = parseRequestBody(init);
+        if (body.keep_alive === 0) {
+          unloaded = true;
+          events.push('unload:accepted');
+          return jsonResponse({ done: true });
+        }
+        events.push('generate');
+        return jsonResponse({ response: 'Ready', done: true });
+      },
+      async () => {
+        if (!unloaded)
+          return jsonResponse({ models: [{ name: 'gemma4:12b' }] });
+        events.push('unload:checking');
+        await confirmed;
+        events.push('unload:confirmed');
+        return jsonResponse({ models: [] });
+      },
+    );
+    const answer = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    }).generateUserAnalysisMarkdown('Maya: Ready.');
+    await vi.waitFor(() => expect(events).toContain('unload:checking'));
+    expect(events).not.toContain('generate');
+    confirmUnload();
+    await expect(answer).resolves.toBe('Ready');
+    expect(events).toEqual([
+      'unload:accepted',
+      'unload:checking',
+      'unload:confirmed',
+      'generate',
+    ]);
+  });
+
+  it('refuses generation when an accepted unload cannot be verified', async () => {
+    let unloaded = false;
+    const fetchMock = installFetchMock(
+      (_url, init) => {
+        expect(parseRequestBody(init).keep_alive).toBe(0);
+        unloaded = true;
+        return jsonResponse({ done: true });
+      },
+      () =>
+        unloaded
+          ? jsonResponse({ models: 'invalid' })
+          : jsonResponse({ models: [{ name: 'gemma4:12b' }] }),
+    );
+    await expect(
+      new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
+      }).generateUserAnalysisMarkdown('Maya: Ready.'),
+    ).rejects.toThrow('ollama_residency_cleanup_failed');
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('retains matching Ollama residency before generation', async () => {
@@ -406,6 +674,7 @@ describe('UnifiedLLMProvider', () => {
     vi.useFakeTimers();
     const controller = new AbortController();
     let unloadCalls = 0;
+    let firstUnloaded = false;
     let generationStarted = false;
     const fetchMock = installFetchMock(
       (_url, init) => {
@@ -421,10 +690,10 @@ describe('UnifiedLLMProvider', () => {
         unloadCalls += 1;
         if (unloadCalls === 1) {
           return new Promise<Response>((resolve, reject) => {
-            const timeoutId = setTimeout(
-              () => resolve(jsonResponse({ done: true })),
-              25_000,
-            );
+            const timeoutId = setTimeout(() => {
+              firstUnloaded = true;
+              resolve(jsonResponse({ done: true }));
+            }, 25_000);
             init?.signal?.addEventListener(
               'abort',
               () => {
@@ -445,7 +714,10 @@ describe('UnifiedLLMProvider', () => {
       },
       () =>
         jsonResponse({
-          models: [{ name: 'gemma4:12b' }, { name: 'qwen3.5:9b' }],
+          models: [
+            ...(firstUnloaded ? [] : [{ name: 'gemma4:12b' }]),
+            { name: 'qwen3.5:9b' },
+          ],
         }),
     );
     let settled = false;
@@ -583,13 +855,20 @@ describe('UnifiedLLMProvider', () => {
       budget: { contextTokens: 32768, outputTokens: 8192 },
     });
     expect(bodies[0]).toMatchObject({
-      options: { num_ctx: 32768, num_predict: 8192 },
+      options: { num_ctx: 9216, num_predict: 8192 },
       think: false,
     });
     await provider.synthesizeKnowledgeDocument('Ordinary scope review', {
       purpose: 'projectScope',
     });
     expect(bodies[1]).toMatchObject({ options: { num_predict: 2500 } });
+    await expect(
+      provider.synthesizeKnowledgeDocument('X'.repeat(40000), {
+        purpose: 'projectScope',
+        budget: { contextTokens: 32768, outputTokens: 8192 },
+      }),
+    ).rejects.toThrow('notes_context_exhausted');
+    expect(bodies).toHaveLength(2);
   });
 
   it.each(['ollama', 'openai'] as const)(
@@ -721,7 +1000,7 @@ describe('UnifiedLLMProvider', () => {
     }
   });
 
-  it('keeps saved Ask Pluto on one model while preserving mode budgets', async () => {
+  it('uses the configured analysis model while preserving Fast and Deep budgets', async () => {
     const requestBodies: Array<Record<string, unknown>> = [];
     installFetchMock((_url, init) => {
       requestBodies.push(parseRequestBody(init));
@@ -732,28 +1011,30 @@ describe('UnifiedLLMProvider', () => {
       });
     });
     const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
-      ollama_fast_model: 'phi4-mini:3.8b',
+      ollama_model: 'configured-analysis-model',
+      ollama_fast_model: 'configured-fast-model',
     });
 
     await provider.answerAskPluto('Who owns this?', { mode: 'fast' });
     await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
 
     expect(requestBodies[0]).toMatchObject({
-      model: 'qwen3.5:9b',
+      model: 'configured-analysis-model',
       think: false,
     });
     expect(requestBodies[0].options).toMatchObject({
       num_ctx: 4096,
       num_predict: 768,
+      draft_num_predict: 0,
     });
     expect(requestBodies[1]).toMatchObject({
-      model: 'qwen3.5:9b',
+      model: 'configured-analysis-model',
       think: false,
     });
     expect(requestBodies[1].options).toMatchObject({
       num_ctx: 4096,
       num_predict: 1024,
+      draft_num_predict: 0,
       top_k: 40,
       top_p: 1,
     });
@@ -1103,7 +1384,7 @@ describe('UnifiedLLMProvider', () => {
     const second = secondProvider.generateUserAnalysisMarkdown('analysis');
     await firstOutcome;
     await expect(second).resolves.toBe(validAnalysisMarkdown);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('preempts active dreaming for foreground meeting analysis', async () => {
@@ -1142,7 +1423,7 @@ describe('UnifiedLLMProvider', () => {
       message: 'foreground_preempted',
     });
     await expect(foreground).resolves.toBe(validAnalysisMarkdown);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('lets foreground inference preempt serialized dreaming cleanup', async () => {
@@ -1268,8 +1549,28 @@ describe('UnifiedLLMProvider', () => {
     expect(selectedModels).toEqual(['gemma4:12b', 'gemma4:12b', 'gemma4:12b']);
   });
 
-  it('uses Gemma for saved chat and Phi for active meeting chat', async () => {
+  it.each(['fast', 'deep'] as const)(
+    'does not substitute another role after a configured %s model fails',
+    async (mode) => {
+      const requested: string[] = [];
+      installFetchMock((_url, init) => {
+        requested.push(String(parseRequestBody(init).model));
+        return jsonResponse({}, false, 'Unavailable');
+      });
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'configured-analysis-model',
+        ollama_fast_model: 'configured-fast-model',
+      });
+      await expect(
+        provider.answerAskPluto('Fictional question', { mode }),
+      ).rejects.toThrow('Unavailable');
+      expect(requested).toEqual(['configured-analysis-model']);
+    },
+  );
+
+  it('uses the analysis model for factual answers and Phi only for routing', async () => {
     const selectedModels: string[] = [];
+    let resident = true;
     installFetchMock(
       (url, init) => {
         if (url.endsWith('/api/tags')) {
@@ -1284,6 +1585,7 @@ describe('UnifiedLLMProvider', () => {
         if (url.endsWith('/api/generate') || url.endsWith('/api/chat')) {
           const body = parseRequestBody(init);
           selectedModels.push(String(body.model));
+          if (body.keep_alive === 0) resident = false;
           return jsonResponse({
             response: 'Grounded answer',
             done: true,
@@ -1293,7 +1595,7 @@ describe('UnifiedLLMProvider', () => {
         }
         throw new Error(`Unexpected URL: ${url}`);
       },
-      () => jsonResponse({ models: [{ name: 'gemma4:12b' }] }),
+      () => jsonResponse({ models: resident ? [{ name: 'gemma4:12b' }] : [] }),
     );
 
     const provider = new UnifiedLLMProvider('ollama', {});
@@ -1301,10 +1603,17 @@ describe('UnifiedLLMProvider', () => {
     await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
     await provider.answerAskPluto('What are we discussing?', { live: true });
 
+    await provider.classifyQueryIntent('Classify this query.');
+    await provider.classifyQueryIntent('Scope this query.', {
+      purpose: 'meetingScope',
+    });
+
     expect(selectedModels).toEqual([
       'gemma4:12b',
       'gemma4:12b',
       'gemma4:12b',
+      'gemma4:12b',
+      'phi4-mini:3.8b',
       'phi4-mini:3.8b',
     ]);
   });
@@ -1912,3 +2221,1323 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
     );
   });
 });
+
+it.each([
+  'matching',
+  'changed-digest',
+  'catalog-runtime-labels',
+  'missing-digest',
+] as const)(
+  'binds warm allocation to the selected catalog artifact and backend: %s',
+  async (state) => {
+    const electron = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    let resident: Record<string, unknown> | null = {
+      name: 'phi4-mini:3.8b',
+      digest:
+        state === 'missing-digest'
+          ? undefined
+          : state === 'changed-digest'
+            ? 'old-artifact'
+            : 'selected-artifact',
+      context_length: 4096,
+      runner: 'llamacpp',
+    };
+    let proof: (() => Promise<boolean>) | undefined;
+    const events: string[] = [];
+    let request: Record<string, any> | undefined;
+    vi.spyOn(modelMemory, 'readLocalModelMemory').mockResolvedValue({
+      available: 14 * 1024 ** 3,
+      total: 16 * 1024 ** 3,
+    });
+    const capacity = vi.spyOn(modelMemory, 'assertLocalModelMemoryCapacity');
+    vi.spyOn(modelMemory, 'watchLocalModelMemory').mockReturnValue({
+      signal: new AbortController().signal,
+      start: vi.fn(async () => {}),
+      dispose: vi.fn(async () => {}),
+      setResidentCheck: vi.fn((_digest, check) => {
+        proof = check;
+      }),
+    });
+    vi.spyOn(ollamaTransport, 'ollamaHttpFetch').mockImplementation(
+      async (url, init) => {
+        if (url.endsWith('/api/ps'))
+          return jsonResponse({ models: resident ? [resident] : [] });
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [
+              ...(state === 'matching' || state === 'catalog-runtime-labels'
+                ? [
+                    {
+                      name: 'phi4-mini:3.8b',
+                      digest: 'another-backend',
+                      size: 12 * 1024 ** 3,
+                      details: { runner: 'mlx' },
+                    },
+                  ]
+                : []),
+              {
+                name: 'phi4-mini:3.8b',
+                digest: 'selected-artifact',
+                size: 3 * 1024 ** 3,
+                details: {
+                  runner:
+                    state === 'catalog-runtime-labels' ? 'ggml' : 'llamacpp',
+                },
+              },
+            ],
+          });
+        expect(parseRequestBody(init).keep_alive).toBe(0);
+        expect(parseRequestBody(init).runner).toBeUndefined();
+        events.push('unload');
+        resident = null;
+        return jsonResponse({ done: true });
+      },
+    );
+    vi.spyOn(ollamaTransport, 'ollamaHttpStream').mockImplementation(
+      async (_url, init, onChunk) => {
+        request = parseRequestBody(init);
+        events.push('generate');
+        resident = {
+          name: 'phi4-mini:3.8b',
+          digest: 'selected-artifact',
+          context_length: 4096,
+          runner: 'llamacpp',
+        };
+        onChunk(
+          `${JSON.stringify({ response: 'Fictional answer.', done: true, done_reason: 'stop' })}\n`,
+        );
+        return { ok: true, status: 200, statusText: 'OK' };
+      },
+    );
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
+        ollama_fast_model: 'phi4-mini:3.8b',
+      });
+      await expect(
+        provider.answerAskPluto('A fictional question.', { mode: 'fast' }),
+      ).resolves.toBe('Fictional answer.');
+      expect(events).toEqual(
+        state === 'matching' || state === 'catalog-runtime-labels'
+          ? ['generate']
+          : ['unload', 'generate'],
+      );
+      expect(request?.runner).toBe(
+        state === 'catalog-runtime-labels' ? 'ggml' : 'llamacpp',
+      );
+      expect(capacity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelDigest: 'selected-artifact',
+          resident: state === 'matching' || state === 'catalog-runtime-labels',
+        }),
+      );
+      expect(await proof?.()).toBe(true);
+      resident!.digest = 'different-artifact';
+      expect(await proof?.()).toBe(false);
+      resident!.digest = 'selected-artifact';
+    } finally {
+      await releaseIdleOllamaModel(0);
+      vi.restoreAllMocks();
+      if (electron)
+        Object.defineProperty(process.versions, 'electron', electron);
+      else Reflect.deleteProperty(process.versions, 'electron');
+    }
+  },
+);
+
+it.each(['recovered', 'pressure', 'cancelled'] as const)(
+  'shares the bounded page-reclaim wait after idle cleanup across providers: %s',
+  async (outcome) => {
+    const electron = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    const watcher = vi
+      .spyOn(modelMemory, 'watchLocalModelMemory')
+      .mockReturnValue({
+        signal: new AbortController().signal,
+        start: vi.fn(async () => {}),
+        dispose: vi.fn(async () => {}),
+        setResidentCheck: vi.fn(),
+      });
+    let resident = false;
+    let unloaded = false;
+    let lowReads = 0;
+    let generations = 0;
+    const controller = new AbortController();
+    const memory = vi
+      .spyOn(modelMemory, 'readLocalModelMemory')
+      .mockImplementation(async () => {
+        const low = unloaded && (outcome !== 'recovered' || lowReads === 0);
+        if (low) {
+          lowReads++;
+          if (outcome === 'cancelled') controller.abort();
+        }
+        return { available: (low ? 7 : 14) * 1024 ** 3, total: 16 * 1024 ** 3 };
+      });
+    const http = vi
+      .spyOn(ollamaTransport, 'ollamaHttpFetch')
+      .mockImplementation(async (url, init) => {
+        if (url.endsWith('/api/ps'))
+          return jsonResponse({
+            models: resident
+              ? [
+                  {
+                    name: 'phi4-mini:3.8b',
+                    digest: 'phi-test',
+                    context_length: 4096,
+                  },
+                ]
+              : [],
+          });
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [
+              {
+                name: 'phi4-mini:3.8b',
+                digest: 'phi-test',
+                size: 3 * 1024 ** 3,
+              },
+            ],
+          });
+        if (parseRequestBody(init).keep_alive === 0) {
+          resident = false;
+          unloaded = true;
+          return jsonResponse({ done: true });
+        }
+        resident = true;
+        generations++;
+        return jsonResponse({
+          response: 'Fictional answer.',
+          done: true,
+          done_reason: 'stop',
+        });
+      });
+    const stream = vi
+      .spyOn(ollamaTransport, 'ollamaHttpStream')
+      .mockImplementation(async (_url, _init, onChunk) => {
+        resident = true;
+        generations++;
+        onChunk(
+          `${JSON.stringify({ response: 'Fictional answer.', done: true, done_reason: 'stop' })}\n`,
+        );
+        return { ok: true, status: 200, statusText: 'OK' };
+      });
+    try {
+      const first = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
+        ollama_fast_model: 'phi4-mini:3.8b',
+      });
+      await first.answerAskPluto('A fictional question.', { mode: 'fast' });
+      await releaseIdleOllamaModel(0);
+      expect(resident).toBe(false);
+      const second = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
+        ollama_fast_model: 'phi4-mini:3.8b',
+      });
+      const answer = second.answerAskPluto('A fictional follow-up.', {
+        mode: 'fast',
+        signal: controller.signal,
+      });
+      if (outcome === 'recovered')
+        await expect(answer).resolves.toBe('Fictional answer.');
+      else if (outcome === 'pressure')
+        await expect(answer).rejects.toThrow('Not enough memory');
+      else await expect(answer).rejects.toThrow();
+      expect(lowReads).toBeGreaterThan(0);
+      expect(generations).toBe(outcome === 'recovered' ? 2 : 1);
+    } finally {
+      await releaseIdleOllamaModel(0);
+      memory.mockRestore();
+      watcher.mockRestore();
+      http.mockRestore();
+      stream.mockRestore();
+      if (electron)
+        Object.defineProperty(process.versions, 'electron', electron);
+      else Reflect.deleteProperty(process.versions, 'electron');
+    }
+  },
+);
+
+it.each([
+  { residentContext: 8192, expectedContext: 8192, unload: false },
+  { residentContext: 16384, expectedContext: 2048, unload: true },
+  { residentContext: 1024, expectedContext: 2048, unload: true },
+  { residentContext: undefined, expectedContext: 2048, unload: false },
+])(
+  'reuses only a resident context within the request cap: $residentContext',
+  async ({ residentContext, expectedContext, unload }) => {
+    let resident = residentContext !== undefined;
+    const events: string[] = [];
+    const fetchMock = installFetchMock(
+      (_url, init) => {
+        const body = parseRequestBody(init);
+        if (body.keep_alive === 0) {
+          events.push('unload');
+          resident = false;
+          return jsonResponse({ done: true });
+        }
+        events.push('generate');
+        return new Response(
+          `${JSON.stringify({ done: true, done_reason: 'stop', message: { content: '{}' } })}\n`,
+        );
+      },
+      () =>
+        jsonResponse({
+          models: resident
+            ? [{ name: 'phi4-mini:3.8b', context_length: residentContext }]
+            : [],
+        }),
+    );
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
+      });
+      await provider.generateText({
+        prompt: 'Milo discussed access.',
+        task: 'notesWriter',
+        notesModel: 'phi4-mini:3.8b',
+        notesBudget: { contextTokens: 8192, outputTokens: 1024 },
+      });
+      const generated = fetchMock.mock.calls
+        .map(([, init]) => parseRequestBody(init))
+        .find((body) => body.keep_alive !== 0)!;
+      expect(generated.options).toMatchObject({
+        num_ctx: expectedContext,
+        num_predict: 1024,
+      });
+      expect(events).toEqual(unload ? ['unload', 'generate'] : ['generate']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  },
+);
+
+it('requires cold-load capacity after unloading an undersized resident context', async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(
+    process.versions,
+    'electron',
+  );
+  Object.defineProperty(process.versions, 'electron', {
+    value: 'test',
+    configurable: true,
+  });
+  const transport = vi
+    .spyOn(ollamaTransport, 'ollamaHttpFetch')
+    .mockImplementation((input, init) => fetch(input, init));
+  const memory = vi
+    .spyOn(modelMemory, 'readLocalModelMemory')
+    .mockResolvedValue({ available: 6 * 1024 ** 3, total: 16 * 1024 ** 3 });
+  const capacity = vi.spyOn(modelMemory, 'assertLocalModelMemoryCapacity');
+  let resident = true;
+  const events: string[] = [];
+  installFetchMock(
+    (url, init) => {
+      if (url.endsWith('/api/tags'))
+        return jsonResponse({
+          models: [{ name: 'phi4-mini:3.8b', size: 2 * 1024 ** 3 }],
+        });
+      expect(parseRequestBody(init).keep_alive).toBe(0);
+      events.push('unload');
+      resident = false;
+      return jsonResponse({ done: true });
+    },
+    () =>
+      jsonResponse({
+        models: resident
+          ? [{ name: 'phi4-mini:3.8b', context_length: 1024 }]
+          : [],
+      }),
+  );
+  try {
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+    await expect(
+      provider.generateText({
+        prompt: 'Milo discussed access.',
+        task: 'notesWriter',
+        notesModel: 'phi4-mini:3.8b',
+        notesBudget: { contextTokens: 8192, outputTokens: 1024 },
+      }),
+    ).rejects.toThrow('Not enough memory');
+    expect(capacity).toHaveBeenCalledWith(
+      expect.objectContaining({ resident: false, contextTokens: 2048 }),
+    );
+    expect(events).toEqual(['unload']);
+  } finally {
+    memory.mockRestore();
+    capacity.mockRestore();
+    transport.mockRestore();
+    vi.unstubAllGlobals();
+    if (descriptor)
+      Object.defineProperty(process.versions, 'electron', descriptor);
+    else Reflect.deleteProperty(process.versions, 'electron');
+  }
+});
+
+it.each([
+  { coldFreeGiB: 14, allowed: true, cleanupFails: false },
+  { coldFreeGiB: 14, allowed: true, cleanupFails: true },
+  { coldFreeGiB: 7, allowed: false, cleanupFails: false },
+])(
+  'rechecks cold-load admission after reclaiming a resident model: $allowed',
+  async ({ coldFreeGiB, allowed, cleanupFails }) => {
+    const nativeWatcher = vi
+      .spyOn(modelMemory, 'watchLocalModelMemory')
+      .mockReturnValue({
+        signal: new AbortController().signal,
+        start: vi.fn(async () => {}),
+        dispose: vi.fn(async () => {
+          if (cleanupFails) throw new Error('monitor cleanup failed');
+        }),
+        setResidentCheck: vi.fn(),
+      });
+    const originalElectron = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    const transport = vi
+      .spyOn(ollamaTransport, 'ollamaHttpFetch')
+      .mockImplementation((input, init) => fetch(input, init));
+    let resident = true;
+    const events: string[] = [];
+    const memory = vi
+      .spyOn(modelMemory, 'readLocalModelMemory')
+      .mockResolvedValueOnce({
+        available: 4.01 * 1024 ** 3,
+        total: 16 * 1024 ** 3,
+      })
+      .mockResolvedValue({
+        available: coldFreeGiB * 1024 ** 3,
+        total: 16 * 1024 ** 3,
+      });
+    installFetchMock(
+      (url, init) => {
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [{ name: 'phi4-mini:3.8b', size: 3 * 1024 ** 3 }],
+          });
+        const body = parseRequestBody(init);
+        if (body.keep_alive === 0) {
+          events.push('unload');
+          resident = false;
+          return jsonResponse({ done: true });
+        }
+        events.push('generate');
+        return jsonResponse({
+          response: 'Saved context.',
+          done: true,
+          done_reason: 'stop',
+        });
+      },
+      () =>
+        jsonResponse({ models: resident ? [{ name: 'phi4-mini:3.8b' }] : [] }),
+    );
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
+      });
+      const generation = provider.generateUserAnalysisMarkdown(
+        'Maya: Saved context.',
+      );
+      if (cleanupFails)
+        await expect(generation).rejects.toThrow('monitor cleanup failed');
+      else if (allowed) await generation;
+      else await expect(generation).rejects.toThrow('Not enough memory');
+      expect(events[0]).toBe('unload');
+      if (cleanupFails) expect(events.at(-1)).toBe('unload');
+      expect(events.filter((event) => event === 'generate')).toHaveLength(
+        allowed ? 1 : 0,
+      );
+      if (allowed) expect(memory).toHaveBeenCalledTimes(2);
+      else expect(memory.mock.calls.length).toBeGreaterThan(2);
+    } finally {
+      nativeWatcher.mockRestore();
+      memory.mockRestore();
+      transport.mockRestore();
+      vi.unstubAllGlobals();
+      if (originalElectron)
+        Object.defineProperty(process.versions, 'electron', originalElectron);
+      else Reflect.deleteProperty(process.versions, 'electron');
+    }
+  },
+);
+
+it.each([
+  {
+    context: 2048,
+    digestMatches: true,
+    nameMatches: true,
+    statusOk: true,
+    verified: true,
+  },
+  {
+    context: 1024,
+    digestMatches: true,
+    nameMatches: true,
+    statusOk: true,
+    verified: false,
+  },
+  {
+    context: 8192,
+    digestMatches: true,
+    nameMatches: true,
+    statusOk: true,
+    verified: false,
+  },
+  {
+    context: 2048,
+    digestMatches: false,
+    nameMatches: true,
+    statusOk: true,
+    verified: false,
+  },
+  {
+    context: 2048,
+    digestMatches: true,
+    nameMatches: false,
+    statusOk: true,
+    verified: false,
+  },
+  {
+    context: 2048,
+    digestMatches: true,
+    nameMatches: true,
+    statusOk: false,
+    verified: false,
+  },
+])(
+  'qualifies watchdog steady state only for exact model artifact and active context ($context, $digestMatches, $nameMatches, $statusOk)',
+  async ({ context, digestMatches, nameMatches, statusOk, verified }) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    const digest =
+      '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c';
+    let probe: (() => Promise<boolean>) | undefined;
+    let generating = false;
+    const watcher = vi
+      .spyOn(modelMemory, 'watchLocalModelMemory')
+      .mockReturnValue({
+        signal: new AbortController().signal,
+        dispose: vi.fn(async () => {}),
+        start: vi.fn(async () => {}),
+        setResidentCheck: vi.fn((modelDigest, check) => {
+          expect(modelDigest).toBe(digest);
+          probe = check;
+        }),
+      });
+    const transport = vi
+      .spyOn(ollamaTransport, 'ollamaHttpFetch')
+      .mockImplementation((input, init) => fetch(input, init));
+    const memory = vi
+      .spyOn(modelMemory, 'readLocalModelMemory')
+      .mockResolvedValue({ available: 14 * 1024 ** 3, total: 16 * 1024 ** 3 });
+    const stream = vi
+      .spyOn(ollamaTransport, 'ollamaHttpStream')
+      .mockImplementation(async (_url, _init, onChunk) => {
+        generating = true;
+        expect(probe).toBeDefined();
+        await expect(probe!()).resolves.toBe(verified);
+        onChunk(
+          `${JSON.stringify({
+            response: 'Done.',
+            message: { content: 'Done.' },
+            done: true,
+          })}\n`,
+        );
+        return { ok: true, status: 200, statusText: 'OK' };
+      });
+    installFetchMock(
+      (url) => {
+        expect(url.endsWith('/api/tags')).toBe(true);
+        return jsonResponse({
+          models: [{ name: 'gemma4:12b', size: 7_556_508_396, digest }],
+        });
+      },
+      () =>
+        generating
+          ? jsonResponse(
+              {
+                models: [
+                  {
+                    name: nameMatches ? 'gemma4:12b' : 'other-model',
+                    digest: digestMatches ? digest : 'other-digest',
+                    context_length: context,
+                  },
+                ],
+              },
+              statusOk,
+            )
+          : jsonResponse({ models: [] }),
+    );
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'gemma4:12b',
+      });
+      await expect(
+        provider.generateText({
+          prompt: 'A short meeting.',
+          task: 'notesWriter',
+          notesModel: 'gemma4:12b',
+          notesBudget: { contextTokens: 8192, outputTokens: 1024 },
+        }),
+      ).resolves.toBe('Done.');
+    } finally {
+      watcher.mockRestore();
+      transport.mockRestore();
+      memory.mockRestore();
+      stream.mockRestore();
+      vi.unstubAllGlobals();
+      if (descriptor)
+        Object.defineProperty(process.versions, 'electron', descriptor);
+      else Reflect.deleteProperty(process.versions, 'electron');
+    }
+  },
+);
+
+it.each([
+  {
+    task: 'title' as const,
+    residentContext: null,
+    repeat: true,
+    expectedContext: 2048,
+    output: 64,
+    unload: false,
+  },
+  {
+    task: 'title' as const,
+    residentContext: 7168,
+    expectedContext: 7168,
+    output: 64,
+    unload: false,
+  },
+  {
+    task: 'valueSignals' as const,
+    residentContext: null,
+    expectedContext: 3072,
+    output: 2500,
+    unload: false,
+  },
+  {
+    task: 'valueSignals' as const,
+    residentContext: 7168,
+    expectedContext: 7168,
+    output: 2500,
+    unload: false,
+  },
+  {
+    task: 'title' as const,
+    residentContext: 512,
+    expectedContext: 2048,
+    output: 64,
+    unload: true,
+  },
+  {
+    task: 'title' as const,
+    residentContext: 20000,
+    expectedContext: 2048,
+    output: 64,
+    unload: true,
+  },
+])(
+  'keeps Gemma secondary allocation bounded and starts its watcher only after admission ($task, $residentContext)',
+  async (row) => {
+    const { task, residentContext, expectedContext, output, unload } = row;
+    const descriptor = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    const start = vi.fn(async () => {});
+    const digest =
+      '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c';
+    const watcher = vi
+      .spyOn(modelMemory, 'watchLocalModelMemory')
+      .mockReturnValue({
+        signal: new AbortController().signal,
+        dispose: vi.fn(async () => {}),
+        setResidentCheck: vi.fn(),
+        start,
+      });
+    const originalCapacity = modelMemory.assertLocalModelMemoryCapacity;
+    const capacity = vi
+      .spyOn(modelMemory, 'assertLocalModelMemoryCapacity')
+      .mockImplementation((input) => {
+        expect(start).not.toHaveBeenCalled();
+        originalCapacity(input);
+      });
+    const memory = vi
+      .spyOn(modelMemory, 'readLocalModelMemory')
+      .mockResolvedValue({ available: 14 * 1024 ** 3, total: 16 * 1024 ** 3 });
+    let context: number | null = residentContext;
+    let unloaded = false;
+    let options: unknown;
+    const transport = vi
+      .spyOn(ollamaTransport, 'ollamaHttpFetch')
+      .mockImplementation(async (url, init) => {
+        if (url.endsWith('/api/ps'))
+          return jsonResponse({
+            models:
+              context === null
+                ? []
+                : [{ name: 'gemma4:12b', context_length: context, digest }],
+          });
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [{ name: 'gemma4:12b', size: 7_556_508_396, digest }],
+          });
+        const body = parseRequestBody(init);
+        if (body.keep_alive === 0) {
+          context = null;
+          unloaded = true;
+          return jsonResponse({ done: true });
+        }
+        expect(start).toHaveBeenCalledOnce();
+        options = body.options;
+        context = Math.max(
+          2048,
+          Number((options as { num_ctx: number }).num_ctx),
+        );
+        return jsonResponse({ response: 'Done.' });
+      });
+    const stream = vi
+      .spyOn(ollamaTransport, 'ollamaHttpStream')
+      .mockImplementation(async (_url, init, onChunk) => {
+        expect(start).toHaveBeenCalledOnce();
+        options = parseRequestBody(init).options;
+        context = Math.max(
+          2048,
+          Number((options as { num_ctx: number }).num_ctx),
+        );
+        onChunk(
+          `${JSON.stringify({
+            response: 'Done.',
+            message: { content: 'Done.' },
+            done: true,
+          })}\n`,
+        );
+        return { ok: true, status: 200, statusText: 'OK' };
+      });
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'gemma4:12b',
+      });
+      // Prior successful same-provider residency; external first use is tested below.
+      if (residentContext !== null)
+        (
+          provider as unknown as {
+            establishedGemmaAllocation: {
+              model: string;
+              contextTokens: number;
+            };
+          }
+        ).establishedGemmaAllocation = {
+          model: 'gemma4:12b',
+          contextTokens: residentContext,
+        };
+      await expect(
+        provider.generateText({ prompt: 'A short meeting.', task }),
+      ).resolves.toBe('Done.');
+      expect(options).toMatchObject({
+        num_ctx: expectedContext,
+        num_predict: output,
+        num_batch: 128,
+        draft_num_predict: 0,
+      });
+      expect(unloaded).toBe(unload);
+      expect(capacity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resident: residentContext !== null && !unload,
+          contextTokens: expectedContext,
+        }),
+      );
+      if ('repeat' in row && row.repeat) {
+        start.mockClear();
+        capacity.mockClear();
+        await expect(
+          provider.generateText({ prompt: 'Another short meeting.', task }),
+        ).resolves.toBe('Done.');
+        expect(unloaded).toBe(false);
+        expect(options).toMatchObject({ num_ctx: 2048, num_predict: output });
+        expect(capacity).toHaveBeenCalledWith(
+          expect.objectContaining({ resident: true, contextTokens: 2048 }),
+        );
+        start.mockClear();
+        capacity.mockClear();
+        await expect(
+          provider.generateText({
+            prompt: 'Small.',
+            task: 'notesWriter',
+            notesModel: 'gemma4:12b',
+            notesBudget: { contextTokens: 1024, outputTokens: 64 },
+          }),
+        ).rejects.toThrow('notes_input_overflow');
+        expect(start).not.toHaveBeenCalled();
+        expect(capacity).not.toHaveBeenCalled();
+        expect(unloaded).toBe(true);
+      }
+    } finally {
+      watcher.mockRestore();
+      capacity.mockRestore();
+      memory.mockRestore();
+      transport.mockRestore();
+      stream.mockRestore();
+      if (descriptor)
+        Object.defineProperty(process.versions, 'electron', descriptor);
+      else Reflect.deleteProperty(process.versions, 'electron');
+    }
+  },
+);
+
+it.each([
+  { outcome: 'recovered' },
+  { outcome: 'timeout' },
+  { outcome: 'aborted' },
+  { outcome: 'resident-again' },
+])(
+  'reclaims a pressured allocation at the required context only after confirmed unload ($outcome)',
+  async ({ outcome }) => {
+    const nativeWatcher = vi
+      .spyOn(modelMemory, 'watchLocalModelMemory')
+      .mockReturnValue({
+        signal: new AbortController().signal,
+        start: vi.fn(async () => {}),
+        dispose: vi.fn(async () => {}),
+        setResidentCheck: vi.fn(),
+      });
+    vi.useFakeTimers();
+    const descriptor = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    const controller = new AbortController();
+    const digest =
+      '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c';
+    let resident = true;
+    let reads = 0;
+    let generates = 0;
+    const generatedContexts: number[] = [];
+    let emptyChecks = 0;
+    let reappeared = false;
+    const memory = vi
+      .spyOn(modelMemory, 'readLocalModelMemory')
+      .mockImplementation(async () => ({
+        available:
+          (++reads === 1
+            ? 3
+            : outcome === 'recovered' && reads >= 3
+              ? 10.6
+              : 8) *
+          1024 ** 3,
+        total: 16 * 1024 ** 3,
+      }));
+    const transport = vi
+      .spyOn(ollamaTransport, 'ollamaHttpFetch')
+      .mockImplementation(async (url, init) => {
+        if (url.endsWith('/api/ps')) {
+          if (
+            !resident &&
+            ++emptyChecks >= 3 &&
+            outcome === 'resident-again' &&
+            !reappeared
+          ) {
+            resident = true;
+            reappeared = true;
+          }
+          return jsonResponse({
+            models: resident
+              ? [{ name: 'gemma4:12b', context_length: 7168, digest }]
+              : [],
+          });
+        }
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [{ name: 'gemma4:12b', size: 7_556_508_396, digest }],
+          });
+        if (parseRequestBody(init).keep_alive === 0) {
+          resident = false;
+          return jsonResponse({ done: true });
+        }
+        generates++;
+        generatedContexts.push(
+          Number(
+            (parseRequestBody(init).options as Record<string, unknown>).num_ctx,
+          ),
+        );
+        return jsonResponse({ response: 'Done.', done: true });
+      });
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'gemma4:12b',
+      });
+      // Exercise reclamation from a previously confirmed same-provider allocation.
+      (
+        provider as unknown as {
+          establishedGemmaAllocation: { model: string; contextTokens: number };
+        }
+      ).establishedGemmaAllocation = {
+        model: 'gemma4:12b',
+        contextTokens: 7168,
+      };
+      const result = provider
+        .generateText({
+          prompt: 'Short meeting.',
+          task: 'title',
+          signal: controller.signal,
+        })
+        .then(
+          () => 'generated',
+          (error: Error) => error.name,
+        );
+      if (outcome === 'aborted')
+        setTimeout(
+          () => controller.abort(new DOMException('cancelled', 'AbortError')),
+          50,
+        );
+      await vi.advanceTimersByTimeAsync(2_200);
+      expect(await result).toBe(
+        outcome === 'recovered'
+          ? 'generated'
+          : outcome === 'aborted'
+            ? 'AbortError'
+            : 'LocalModelMemoryError',
+      );
+      expect(generates).toBe(outcome === 'recovered' ? 1 : 0);
+      if (outcome === 'recovered') {
+        expect(reads).toBe(3);
+        expect(generatedContexts).toEqual([2048]);
+      }
+      if (outcome === 'timeout') expect(reads).toBeLessThanOrEqual(23);
+    } finally {
+      nativeWatcher.mockRestore();
+      memory.mockRestore();
+      transport.mockRestore();
+      vi.useRealTimers();
+      if (descriptor)
+        Object.defineProperty(process.versions, 'electron', descriptor);
+      else Reflect.deleteProperty(process.versions, 'electron');
+    }
+  },
+);
+
+it('unloads externally resident Gemma before POST then reuses bounded placement across writer audit and secondary tasks', async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  const totalMemory = vi.spyOn(os, 'totalmem').mockReturnValue(16 * 1024 ** 3);
+  const descriptor = Object.getOwnPropertyDescriptor(
+    process.versions,
+    'electron',
+  );
+  Object.defineProperty(process.versions, 'electron', {
+    value: 'test',
+    configurable: true,
+  });
+  const digest =
+    '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c';
+  const memory = vi
+    .spyOn(modelMemory, 'readLocalModelMemory')
+    .mockResolvedValue({ available: 14 * 1024 ** 3, total: 16 * 1024 ** 3 });
+  const capacity = vi.spyOn(modelMemory, 'assertLocalModelMemoryCapacity');
+  let releaseMonitor!: () => void;
+  const monitorReady = new Promise<void>((resolve) => {
+    releaseMonitor = resolve;
+  });
+  const startMonitor = vi.fn(async () => {
+    await monitorReady;
+  });
+  const watcher = vi
+    .spyOn(modelMemory, 'watchLocalModelMemory')
+    .mockImplementation(() => ({
+      signal: new AbortController().signal,
+      start: startMonitor,
+      dispose: vi.fn(async () => {}),
+      setResidentCheck: vi.fn(),
+    }));
+  let context: number | null = 7168;
+  let unloads = 0;
+  const options: Record<string, unknown>[] = [];
+  const accept = (init?: RequestInit) => {
+    const body = parseRequestBody(init);
+    const requestOptions = body.options as Record<string, unknown>;
+    options.push(requestOptions);
+    context = Number(requestOptions.num_ctx);
+  };
+  const transport = vi
+    .spyOn(ollamaTransport, 'ollamaHttpFetch')
+    .mockImplementation(async (url, init) => {
+      if (url.endsWith('/api/ps'))
+        return jsonResponse({
+          models:
+            context === null
+              ? []
+              : [{ name: 'gemma4:12b', digest, context_length: context }],
+        });
+      if (url.endsWith('/api/tags'))
+        return jsonResponse({
+          models: [{ name: 'gemma4:12b', digest, size: 7_556_508_396 }],
+        });
+      if (parseRequestBody(init).keep_alive === 0) {
+        unloads++;
+        context = null;
+        return jsonResponse({ done: true });
+      }
+      accept(init);
+      return jsonResponse({ response: 'Done.', done: true });
+    });
+  const stream = vi
+    .spyOn(ollamaTransport, 'ollamaHttpStream')
+    .mockImplementation(async (_url, init, onChunk) => {
+      accept(init);
+      onChunk(
+        `${JSON.stringify({
+          response: 'Done.',
+          message: { content: 'Done.' },
+          done: true,
+        })}\n`,
+      );
+      return { ok: true, status: 200, statusText: 'OK' };
+    });
+  try {
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    });
+    for (const task of ['notesWriter', 'notesAudit'] as const) {
+      const generated = provider.generateText({
+        prompt: 'Fictional meeting. '.repeat(550),
+        task,
+        notesModel: 'gemma4:12b',
+        notesBudget: { contextTokens: 8192, outputTokens: 2048 },
+      });
+      if (task === 'notesWriter') {
+        await vi.waitFor(() => expect(startMonitor).toHaveBeenCalledOnce());
+        expect(options).toHaveLength(0);
+        expect(unloads).toBe(1);
+        expect(capacity).toHaveBeenCalledWith(
+          expect.objectContaining({ resident: false, contextTokens: 7168 }),
+        );
+        releaseMonitor();
+      }
+      await expect(generated).resolves.toBe('Done.');
+    }
+    for (const task of ['title', 'valueSignals'] as const)
+      await expect(
+        provider.generateText({ prompt: 'A short meeting.', task }),
+      ).resolves.toBe('Done.');
+    expect(unloads).toBe(1);
+    expect(options).toHaveLength(4);
+    for (const item of options)
+      expect(item).toMatchObject({
+        num_ctx: 7168,
+        num_thread: 8,
+        num_batch: 128,
+        num_gpu: 16,
+        use_mmap: true,
+        draft_num_predict: 0,
+      });
+    expect(options.map((o) => o.num_predict)).toEqual([2048, 2048, 64, 2500]);
+    expect(capacity.mock.calls.map(([input]) => input.resident)).toEqual([
+      false,
+      true,
+      true,
+      true,
+    ]);
+  } finally {
+    Object.defineProperty(process, 'platform', platform);
+    totalMemory.mockRestore();
+    memory.mockRestore();
+    capacity.mockRestore();
+    watcher.mockRestore();
+    transport.mockRestore();
+    stream.mockRestore();
+    if (descriptor)
+      Object.defineProperty(process.versions, 'electron', descriptor);
+    else Reflect.deleteProperty(process.versions, 'electron');
+  }
+});
+
+it('blocks native admission when first-use reconciliation leaves an unconfirmed external resident', async () => {
+  const electron = Object.getOwnPropertyDescriptor(
+    process.versions,
+    'electron',
+  );
+  Object.defineProperty(process.versions, 'electron', {
+    value: 'test',
+    configurable: true,
+  });
+  let resident = true;
+  let allowUnload = false;
+  const nativeRun = vi.fn(async () => {});
+  const http = vi
+    .spyOn(ollamaTransport, 'ollamaHttpFetch')
+    .mockImplementation(async (url, init) => {
+      if (url.endsWith('/api/ps'))
+        return jsonResponse({
+          models: resident ? [{ name: 'gemma4:12b' }] : [],
+        });
+      expect(parseRequestBody(init).keep_alive).toBe(0);
+      if (allowUnload) resident = false;
+      return jsonResponse({ done: true }, allowUnload);
+    });
+  try {
+    await expect(
+      new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
+        ollama_fast_model: 'phi4-mini:3.8b',
+      }).generateText({
+        prompt: 'A fictional question.',
+        task: 'askPlutoLive',
+      }),
+    ).rejects.toThrow('ollama_residency_cleanup_failed');
+    await expect(
+      runWithLocalTranscription(nativeRun, new AbortController().signal),
+    ).rejects.toThrow('ollama_residency_cleanup_failed');
+    expect(nativeRun).not.toHaveBeenCalled();
+    expect(resident).toBe(true);
+    allowUnload = true;
+    await runWithLocalTranscription(nativeRun, new AbortController().signal);
+    expect(resident).toBe(false);
+    expect(nativeRun).toHaveBeenCalledOnce();
+  } finally {
+    allowUnload = true;
+    await runWithLocalTranscription(
+      async () => {},
+      new AbortController().signal,
+    );
+    http.mockRestore();
+    if (electron) Object.defineProperty(process.versions, 'electron', electron);
+    else Reflect.deleteProperty(process.versions, 'electron');
+  }
+});
+
+it('blocks native admission after a watchdog abort until failed Ollama cleanup is retried and confirmed empty', async () => {
+  const electron = Object.getOwnPropertyDescriptor(
+    process.versions,
+    'electron',
+  );
+  Object.defineProperty(process.versions, 'electron', {
+    value: 'test',
+    configurable: true,
+  });
+  const watchdog = new AbortController();
+  const events: string[] = [];
+  vi.spyOn(modelMemory, 'watchLocalModelMemory').mockReturnValue({
+    signal: watchdog.signal,
+    start: vi.fn(async () => {}),
+    setResidentCheck: vi.fn(),
+    dispose: vi.fn(async () => {
+      events.push('monitor-disposed');
+    }),
+  });
+  vi.spyOn(modelMemory, 'readLocalModelMemory').mockResolvedValue({
+    available: 14 * 1024 ** 3,
+    total: 16 * 1024 ** 3,
+  });
+  const digest =
+    '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c';
+  let resident = false;
+  let unloads = 0;
+  let confirmEmpty!: () => void;
+  const empty = new Promise<void>((resolve) => {
+    confirmEmpty = resolve;
+  });
+  vi.spyOn(ollamaTransport, 'ollamaHttpFetch').mockImplementation(
+    async (url, init) => {
+      if (url.endsWith('/api/tags'))
+        return jsonResponse({
+          models: [
+            {
+              name: 'gemma4:12b',
+              digest,
+              size: 7_556_508_396,
+              details: { runner: 'llamacpp' },
+            },
+          ],
+        });
+      if (url.endsWith('/api/ps')) {
+        if (unloads === 2) {
+          events.push('unload-confirmation-pending');
+          await empty;
+          resident = false;
+          events.push('residency-empty');
+        }
+        return jsonResponse({
+          models: resident
+            ? [
+                {
+                  name: 'gemma4:12b',
+                  digest,
+                  context_length: 7168,
+                  runner: 'llamacpp',
+                },
+              ]
+            : [],
+        });
+      }
+      expect(parseRequestBody(init).keep_alive).toBe(0);
+      expect(parseRequestBody(init).runner).toBeUndefined();
+      unloads++;
+      events.push(unloads === 1 ? 'unload-failed' : 'unload-retried');
+      return jsonResponse({ done: true }, unloads !== 1);
+    },
+  );
+  vi.spyOn(ollamaTransport, 'ollamaHttpStream').mockImplementation(
+    async (_url, init) => {
+      expect(parseRequestBody(init).runner).toBe('llamacpp');
+      resident = true;
+      events.push('generation-active');
+      return await new Promise((_, reject) => {
+        init.signal?.addEventListener(
+          'abort',
+          () => {
+            events.push('transport-aborted');
+            reject(init.signal?.reason);
+          },
+          { once: true },
+        );
+      });
+    },
+  );
+  const nativeRun = vi.fn(async () => {
+    events.push('native-started');
+  });
+  const controller = new AbortController();
+  let native: Promise<void> | undefined;
+  try {
+    const generation = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    }).generateText({ prompt: 'A fictional meeting.', task: 'notesWriter' });
+    const stopped = expect(generation).rejects.toThrow(
+      'watchdog memory refusal',
+    );
+    await vi.waitFor(() => expect(events).toContain('generation-active'));
+    watchdog.abort(
+      new modelMemory.LocalModelMemoryError('watchdog memory refusal'),
+    );
+    await stopped;
+    expect(resident).toBe(true);
+    expect(events).toEqual([
+      'generation-active',
+      'transport-aborted',
+      'monitor-disposed',
+      'unload-failed',
+    ]);
+    native = runWithLocalTranscription(nativeRun, controller.signal);
+    await vi.waitFor(() =>
+      expect(events).toContain('unload-confirmation-pending'),
+    );
+    expect(nativeRun).not.toHaveBeenCalled();
+    expect(resident).toBe(true);
+    confirmEmpty();
+    await native;
+    expect(nativeRun).toHaveBeenCalledOnce();
+    expect(events.slice(-4)).toEqual([
+      'unload-retried',
+      'unload-confirmation-pending',
+      'residency-empty',
+      'native-started',
+    ]);
+    expect(resident).toBe(false);
+  } finally {
+    confirmEmpty();
+    watchdog.abort();
+    controller.abort();
+    await native?.catch(() => {});
+    vi.restoreAllMocks();
+    if (electron) Object.defineProperty(process.versions, 'electron', electron);
+    else Reflect.deleteProperty(process.versions, 'electron');
+  }
+});
+
+it.each(['unavailable', 'pressure'] as const)(
+  'refuses cold admission without an unload for a load that never started: %s',
+  async (outcome) => {
+    const electron = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    setLocalModelMemoryProbeReader(
+      outcome === 'pressure'
+        ? () => ({ wallTimeMs: Date.now(), memoryPressureFreePercent: 20 })
+        : undefined,
+    );
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stream = vi
+      .spyOn(ollamaTransport, 'ollamaHttpStream')
+      .mockRejectedValue(Error('Generation must not start'));
+    const transport = vi
+      .spyOn(ollamaTransport, 'ollamaHttpFetch')
+      .mockImplementation(async (url) => {
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [
+              {
+                name: 'gemma4:12b',
+                digest:
+                  '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c',
+                size: 7556508396,
+              },
+            ],
+          });
+        if (url.endsWith('/api/ps')) return jsonResponse({ models: [] });
+        return jsonResponse({ done: true });
+      });
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'gemma4:12b',
+      });
+      await expect(
+        provider.generateText({
+          prompt: 'The fictional team discussed a schedule.',
+          task: 'notesWriter',
+          jsonMode: true,
+          notesBudget: { contextTokens: 8192, outputTokens: 2048 },
+          notesModel: 'gemma4:12b',
+        }),
+      ).rejects.toMatchObject({ name: 'LocalModelMemoryError' });
+      expect(stream).not.toHaveBeenCalled();
+      await releaseIdleOllamaModel(0);
+      expect(
+        transport.mock.calls.filter(([, init]) => init?.method === 'POST'),
+      ).toEqual([]);
+    } finally {
+      vi.restoreAllMocks();
+      setLocalModelMemoryProbeReader();
+      if (electron)
+        Object.defineProperty(process.versions, 'electron', electron);
+      else Reflect.deleteProperty(process.versions, 'electron');
+    }
+  },
+);

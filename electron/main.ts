@@ -39,6 +39,7 @@ import type {
   WorkspaceChatMemory,
   WorkspaceChatMessagePayload,
 } from '../src/types/workspaceChat';
+import { analysisDocumentV3ToMarkdown } from '../src/utils/analysisDocument';
 import {
   LIVE_MEETING_SHORTCUT_HELP,
   parseLiveMeetingCommand,
@@ -75,6 +76,7 @@ import {
   markCaptureJournalSourceFailed,
   persistCaptureJournalRawChunk,
   promoteCaptureTranscriptCheckpoint,
+  readCaptureJournalChunk,
   readCaptureJournalManifest,
   sealCaptureJournal,
   setCaptureJournalAudioKeyProvider,
@@ -96,9 +98,11 @@ import { createReminderPersistence } from './commitmentReminderPersistence';
 import { createCommitmentReminderScheduler } from './commitmentReminderScheduler';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
 import { getAudioKeyStore } from './crypto/audioKeyStore';
+import { parseCanonicalPcm16Wav } from './crypto/encryptedAudioBundle';
 import {
   mixEncryptedAudioArtifacts,
   probeEncryptedAudioDuration,
+  repairEncryptedJournalRawChunk,
   sliceEncryptedAudio,
 } from './crypto/encryptedAudioPipeline';
 import {
@@ -723,6 +727,9 @@ import {
 import { syncActionTrackerAttentionQueue } from './intelligence/attentionSync';
 import {
   type SafeAnswerPresentation,
+  auditCitations,
+  buildCitationChain,
+  buildSafeAnswerPresentation,
   createSynthesizedAnswerStream,
   createValidatedAnswerStream,
 } from './intelligence/citationEngine';
@@ -769,6 +776,7 @@ import {
   buildPersonChatContext,
   buildPersonChatPrompt,
   getPersonChatQuickReply,
+  resolvePersonChatRecallQuery,
 } from './intelligence/personChat';
 import {
   clearAlertsForMeeting,
@@ -777,7 +785,7 @@ import {
   updateAlertStatus,
 } from './intelligence/proactiveEngine';
 import {
-  applyAssigneeCommitmentState,
+  applyCanonicalCommitmentState,
   buildAssigneeActionRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
@@ -825,9 +833,10 @@ import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import {
   getAllSettings,
   getProvider,
-  invalidateProviderCache,
+  invalidateSettingsCache,
 } from './llm/factory';
 import type { ApiKeyProviderId } from './llm/inferenceTypes';
+import { notesWriterPolicy } from './llm/meetingNotesBudget';
 import { createNotesSource } from './llm/meetingNotesSource';
 import {
   MEETING_NOTES_DEFAULT_TEMPLATE_SETTING,
@@ -846,6 +855,8 @@ import { inferenceTransportErrorRationale } from './llm/transports/openAICompati
 import {
   UnifiedLLMProvider,
   releaseIdleOllamaModel,
+  runWithLocalTranscription,
+  setLocalTranscriptionModelUnloader,
 } from './llm/unifiedProvider';
 import {
   type MeetingAnalysisRunCoordinatorDb,
@@ -952,9 +963,10 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
     ) {
       throw new Error('value_signals_failed');
     }
+    const reviewedNotes = analysisDocumentV3ToMarkdown(input.analysis);
     const signals = await input.provider.extractValueSignals(
-      input.transcript,
-      input.analysis.overview,
+      reviewedNotes,
+      undefined,
       { signal: input.signal, workClass: 'meeting_secondary' },
     );
     if (!input.canCommit()) return;
@@ -986,7 +998,7 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
     const auditedEntities = await input.provider.extractEntities(
       input.transcript,
       {
-        summary: input.analysis.overview,
+        summary: reviewedNotes,
         valueSignals: signals,
       },
       { signal: input.signal, workClass: 'meeting_secondary' },
@@ -1013,7 +1025,7 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
       input.transcript,
       input.meetingId,
       {
-        summary: input.analysis.overview,
+        summary: reviewedNotes,
         valueSignals: signals,
       },
       { canCommit: input.canCommit, signal: input.signal },
@@ -1060,8 +1072,43 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
     ) {
       return;
     }
-    if (input.canCommit()) {
+    if (!input.canCommit()) return;
+    input.signal.throwIfAborted();
+    const configuredProvider = db.getSetting('llm_provider') || 'ollama';
+    if (
+      configuredProvider !== 'ollama' ||
+      input.provider.name !== 'Ollama (Local)'
+    ) {
       backgroundKnowledgeRefresh?.enqueue(`meeting:${input.meetingId}`);
+      return;
+    }
+    db.updateMeetingAnalysisRunStatusIfCurrent({
+      meetingId: input.meetingId,
+      runId: input.runId,
+      inputRevision: input.inputRevision,
+      sourceRevision: input.sourceRevision,
+      eligibilityRevision: input.eligibilityRevision,
+      userNotesHash: input.userNotesHash,
+      notesStatus: 'published',
+      secondaryStatus: 'running',
+      stage: 'knowledge',
+    });
+    try {
+      const refreshed = await refreshKnowledgeDocsForMeetingNow(
+        input.meetingId,
+        {
+          signal: input.signal,
+          canCommit: input.canCommit,
+        },
+      );
+      input.signal.throwIfAborted();
+      if (!input.canCommit()) return;
+      if (refreshed.requested !== refreshed.completed)
+        throw new Error('knowledge_document_refresh_deferred');
+    } catch (error) {
+      if (!input.signal.aborted && input.canCommit())
+        backgroundKnowledgeRefresh?.enqueue(`secondary:${input.meetingId}`);
+      throw error;
     }
   },
 });
@@ -1281,6 +1328,15 @@ const shutdownMainProcessConsumers = async () => {
   stopVoiceCandidateBackfill = undefined;
   voiceWorkQueue?.close();
   voiceWorkQueue = null;
+  plutoLog.info('Shutdown phase: native runtime');
+  parakeetFinalClient?.close();
+  parakeetFinalClient = null;
+  await parakeetEouCoordinator?.fail('parakeet_app_quit');
+  parakeetEouCoordinator = null;
+  parakeetEouOwner = null;
+  parakeetEouGeneration = null;
+  parakeetRuntimeHost?.shutdown();
+  parakeetRuntimeHost = null;
   plutoLog.info('Shutdown phase: dreaming');
   const dreamingClose = idleDreamingCoordinator?.close();
   plutoLog.info('Shutdown phase: model cleanup');
@@ -1296,14 +1352,6 @@ const shutdownMainProcessConsumers = async () => {
     }),
   ]);
   plutoLog.info('Shutting down...');
-  parakeetFinalClient?.close();
-  parakeetFinalClient = null;
-  await parakeetEouCoordinator?.fail('parakeet_app_quit');
-  parakeetEouCoordinator = null;
-  parakeetEouOwner = null;
-  parakeetEouGeneration = null;
-  parakeetRuntimeHost?.shutdown();
-  parakeetRuntimeHost = null;
 };
 
 app.on(
@@ -2308,10 +2356,14 @@ app.whenReady().then(async () => {
   };
   parakeetRuntimeHost = makeRuntimeHost({
     paths: parakeetPaths,
+    runExclusive: runWithLocalTranscription,
     diagnostic: (code) => console.warn(`[Pluto] ${code}`),
     persistInterruptedFinalization: async () => {
       db.expireInterruptedFinalTranscription();
     },
+  });
+  setLocalTranscriptionModelUnloader(async () => {
+    await parakeetRuntimeHost?.unloadIdleModels();
   });
   parakeetFinalClient = new ParakeetFinalClient({
     paths: parakeetPaths,
@@ -3233,14 +3285,88 @@ app.whenReady().then(async () => {
         ReturnType<typeof completeCaptureJournalCapturedChunk>
       >;
       try {
+        const meetingId = String(request.meetingId || '');
+        captureSessionLease.requireRecordingOwner(meetingId, event.sender.id);
+        let repairData = request.repairData
+          ? Buffer.from(request.repairData)
+          : undefined;
+        if (!repairData) {
+          const rootDir = getMeetingArtifactsRootDir();
+          const manifest = await readCaptureJournalManifest(rootDir, meetingId);
+          if (manifest.schemaVersion !== 3 && manifest.schemaVersion !== 4)
+            throw new Error('capture_journal_raw_repair_invalid');
+          const raw = manifest.intervals.find(
+            (interval) => interval.sequence === request.sequence,
+          )?.sources[request.source as 'mic' | 'system'];
+          if (
+            manifest.lifecycleState !== 'recording' ||
+            manifest.generation !== request.generation ||
+            manifest.revision !== request.expectedRevision ||
+            raw?.disposition !== 'raw_durable' ||
+            raw.rawChecksumSha256 !== request.rawChecksumSha256
+          )
+            throw new Error('capture_journal_raw_repair_conflict');
+          if (manifest.schemaVersion === 4) {
+            const key = getAudioKeyStore()?.getMeetingAudioKey(meetingId);
+            if (!key || key.keyId !== manifest.keyId)
+              throw new Error('audio_key_unavailable');
+            repairData = await repairEncryptedJournalRawChunk({
+              filePath: path.join(rootDir, raw.rawRelativePath),
+              manifest,
+              source: request.source,
+              sequence: request.sequence,
+              expectedPlaintextSha256: raw.rawChecksumSha256,
+              meetingKey: key.meetingKey,
+              signal: getAbortSignalForMeeting(meetingId),
+            });
+          } else {
+            // Verify the preserved raw tuple before asking the existing decoder
+            // to normalize a MediaRecorder tail lacking a parallel PCM frame.
+            await readCaptureJournalChunk(
+              rootDir,
+              meetingId,
+              raw.rawRelativePath,
+            );
+            const outputPath = path.join(
+              app.getPath('temp'),
+              `capture-repair-${randomUUID()}.wav`,
+            );
+            try {
+              if (
+                !(await convertAudioToMonoWav({
+                  inputPath: path.join(rootDir, raw.rawRelativePath),
+                  outputPath,
+                }))
+              )
+                throw new Error('capture_journal_raw_decode_failed');
+              const duration = await probeAudioDuration(outputPath);
+              if (!duration || !Number.isFinite(duration) || duration <= 0)
+                throw new Error('capture_journal_raw_decode_empty');
+              repairData = await fs.promises.readFile(outputPath);
+            } finally {
+              await fs.promises.rm(outputPath, { force: true });
+            }
+          }
+          if (
+            repairData.length <= 44 ||
+            repairData.toString('ascii', 0, 4) !== 'RIFF' ||
+            repairData.toString('ascii', 8, 12) !== 'WAVE'
+          )
+            throw new Error('capture_journal_raw_decode_invalid');
+          if (
+            manifest.schemaVersion === 4 &&
+            !parseCanonicalPcm16Wav(repairData).length
+          )
+            throw new Error('capture_journal_raw_decode_empty');
+          getAbortSignalForMeeting(meetingId)?.throwIfAborted();
+          captureSessionLease.requireRecordingOwner(meetingId, event.sender.id);
+        }
         completed = await completeCaptureJournalCapturedChunk(
           getMeetingArtifactsRootDir(),
           {
             ...request,
             meetingId: String(request.meetingId || ''),
-            ...(request.repairData
-              ? { repairData: Buffer.from(request.repairData) }
-              : {}),
+            ...(repairData ? { repairData } : {}),
           },
         );
         if (request.source === 'mic' || request.source === 'system')
@@ -5574,7 +5700,8 @@ app.whenReady().then(async () => {
   const personChatEnabled = process.env.PERSON_CHAT_V1 !== 'false';
   const readPersonChatMeeting = getApplicationDatabase().prepare(`
     SELECT id, title, started_at, created_at, user_notes,
-           enhanced_notes, transcript_status, transcript_validated_at
+           enhanced_notes, analysis_json, user_edits_json, mid_json, analysis_format_pass,
+           transcript_status, transcript_validated_at
     FROM meetings WHERE id = ?
   `);
 
@@ -5769,6 +5896,7 @@ app.whenReady().then(async () => {
         }
       };
       let streamedAnswer = '';
+      let bufferFactualRecall = false;
       let firstTokenAt: number | null = null;
       try {
         const priorPersonMessages = personChatStore.listMessages(
@@ -5800,23 +5928,69 @@ app.whenReady().then(async () => {
         sendStatus('reading_person');
         const detail = db.getPersonBriefing(personId);
         if (!detail) throw new Error('Person not found');
+        const recall = resolvePersonChatRecallQuery(query, priorPersonMessages);
+        const meetingScope =
+          resolveExplicitMeetingScope(query, detail.meetings) ??
+          (recall.scopeQuery !== query
+            ? resolveExplicitMeetingScope(recall.scopeQuery, detail.meetings)
+            : null);
+        const scopedMeetingIds = meetingScope
+          ? new Set(meetingScope.meetings.map((meeting) => String(meeting.id)))
+          : null;
+        const canonicalSelfId = db.identityStore.getSelfPersonId();
         const context = buildPersonChatContext({
-          detail,
-          query,
-          getMeeting: (meetingId) =>
-            readPersonChatMeeting.get(meetingId) as
+          selfName: canonicalSelfId
+            ? db.identityStore.getProfile().preferredName
+            : undefined,
+          canonicalSelfCommitments: canonicalSelfId
+            ? db.getCanonicalPersonCommitments(canonicalSelfId)
+            : undefined,
+          canonicalPersonCommitments:
+            db.getCanonicalPersonCommitments(personId),
+          detail: scopedMeetingIds
+            ? {
+                ...detail,
+                meetings: detail.meetings.filter((meeting) =>
+                  scopedMeetingIds.has(meeting.id),
+                ),
+              }
+            : detail,
+          query: recall.query,
+          getMeeting: (meetingId) => {
+            const meeting = readPersonChatMeeting.get(meetingId) as
               | db.PersistedMeeting
-              | undefined,
+              | undefined;
+            return meeting
+              ? {
+                  ...meeting,
+                  speakerDisplayNames:
+                    db.getMeetingNotesIdentityProjection(meetingId)
+                      .speakerDisplayNames,
+                }
+              : undefined;
+          },
         });
+        bufferFactualRecall = context.intent === 'personal_recall';
+        if (bufferFactualRecall && !context.citations.length) {
+          const message = personChatStore.appendMessage({
+            threadId,
+            personId,
+            role: 'assistant',
+            content:
+              'I don’t have saved meeting notes that answer that yet. Regenerate the meeting notes and try again.',
+            citations: [],
+          });
+          return { status: 'answered', message } satisfies PersonChatResponse;
+        }
         const settings = await getAllSettings(db);
         const provider = await getProvider(settings);
         const messages = personChatStore
           .listMessages(threadId, personId)
           .slice(0, -1);
         const prompt = buildPersonChatPrompt({
-          query,
+          query: recall.query,
           context,
-          messages,
+          messages: recall.query !== query ? [] : messages,
         });
         sendStatus('answering');
         const returnedAnswer = await provider.answerAskPluto(prompt, {
@@ -5825,7 +5999,7 @@ app.whenReady().then(async () => {
           onToken: (delta) => {
             if (delta && firstTokenAt === null) firstTokenAt = Date.now();
             streamedAnswer += delta;
-            if (!event.sender.isDestroyed() && delta) {
+            if (!bufferFactualRecall && !event.sender.isDestroyed() && delta) {
               event.sender.send('intelligence:person-chat:delta', {
                 requestId,
                 delta,
@@ -5833,9 +6007,52 @@ app.whenReady().then(async () => {
             }
           },
         });
-        const content = (returnedAnswer || streamedAnswer).trim();
+        let content = (returnedAnswer || streamedAnswer).trim();
         if (!content)
           throw new Error('Person Chat provider returned no answer');
+        let citations = context.citations;
+        if (bufferFactualRecall) {
+          const selfName = db.identityStore.getSelfPersonId()
+            ? db.identityStore.getProfile()?.preferredName.trim() || undefined
+            : undefined;
+          const validate = (answer: string) =>
+            buildSafeAnswerPresentation(
+              answer,
+              auditCitations(
+                buildCitationChain(answer, context.retrievalResults, selfName),
+                context.retrievalResults,
+                selfName,
+              ),
+            );
+          let presentation = validate(content);
+          if (presentation.unsupportedClaimCount > 0) {
+            const repaired = await provider.answerAskPluto(
+              `${buildPersonChatPrompt({ query: recall.query, context, messages: [] })}
+
+Rewrite the answer using only direct saved evidence, in at most 60 words. Preserve who requested, proposed, or promised each action and any conditions. A request to coordinate with someone is not that person's promise. Do not claim confirmation or availability unless explicitly recorded. Omit unsupported claims and all roles unrelated to the current question. For a contact question, return only the matching contact and relevant role, describing proposed contacts as recommendations.`,
+              {
+                signal: controller.signal,
+                mode: 'fast',
+              },
+            );
+            if (repaired?.trim()) presentation = validate(repaired.trim());
+          }
+          content = presentation.answer;
+          citations = context.citations.flatMap((citation) => {
+            const support = presentation.citations.find(
+              (item) =>
+                item.evidence_valid && item.meeting_id === citation.meetingId,
+            );
+            return support
+              ? [
+                  {
+                    ...citation,
+                    excerpt: support.evidence_span || citation.excerpt,
+                  },
+                ]
+              : [];
+          });
+        }
         console.info('[Pluto][Person Chat] provider-response', {
           requestId,
           firstTokenMs: firstTokenAt ? firstTokenAt - startedAt : null,
@@ -5849,7 +6066,7 @@ app.whenReady().then(async () => {
           personId,
           role: 'assistant',
           content,
-          citations: context.citations,
+          citations,
         });
         return {
           status: 'answered',
@@ -5857,7 +6074,7 @@ app.whenReady().then(async () => {
         } satisfies PersonChatResponse;
       } catch (error) {
         if (controller.signal.aborted) {
-          const partial = streamedAnswer.trim();
+          const partial = bufferFactualRecall ? '' : streamedAnswer.trim();
           const message = partial
             ? personChatStore.appendMessage({
                 threadId,
@@ -5882,6 +6099,9 @@ app.whenReady().then(async () => {
               : inferenceTransportErrorRationale(error),
         } satisfies PersonChatResponse;
       } finally {
+        void releaseIdleOllamaModel(0).catch(() => {
+          console.warn('[Pluto] Person chat model cleanup failed');
+        });
         settle();
         if (activePersonChatQueries.get(activeKey)?.controller === controller) {
           activePersonChatQueries.delete(activeKey);
@@ -6564,7 +6784,7 @@ app.whenReady().then(async () => {
             : 'chatgpt_cloud_consent_required',
         ),
       );
-    invalidateProviderCache();
+    invalidateSettingsCache();
     if (
       key === 'automaticCommitmentReminders' ||
       key === 'commitmentReminderPreviews' ||
@@ -6618,14 +6838,14 @@ app.whenReady().then(async () => {
         throw new Error('invalid_provider_credential');
       }
       db.setCredential(provider, input.value.trim());
-      invalidateProviderCache();
+      invalidateSettingsCache();
       return db.getCredentialStatus(provider);
     },
   );
   ipcMain.handle('PROVIDER_CREDENTIAL_DELETE', (_event, provider) => {
     const parsed = parseCloudProvider(provider);
     db.deleteCredential(parsed);
-    invalidateProviderCache();
+    invalidateSettingsCache();
     return db.getCredentialStatus(parsed);
   });
   ipcMain.handle('AUDIO_RETENTION_GET_STATUS', () => audioRetention.inspect());
@@ -6855,7 +7075,7 @@ app.whenReady().then(async () => {
           template,
           {
             signal: controller.signal,
-            compactWriterContract: true,
+            ...notesWriterPolicy(settings.llm_provider),
             knownTerms: db
               .getAllEntities()
               .filter(
@@ -8038,6 +8258,7 @@ app.whenReady().then(async () => {
             task: conversationResolution.task,
             relation: conversationResolution.relation,
           });
+          configuredModel = resolveConfiguredProviderModel(settings);
           recallCompletedAt = Date.now();
           retrievalStartedAt = recallCompletedAt;
 
@@ -8505,6 +8726,8 @@ app.whenReady().then(async () => {
                   pinnedResults: explicitlyScopedPinnedResults,
                   query: retrievalOptionsQuery,
                   meetingIds: explicitResolvedScope.meetingIds,
+                  expandQuery: true,
+                  signal: controller.signal,
                 })
               : temporalResolvedScope
                 ? await retrieveContext(parsed, {
@@ -8514,6 +8737,8 @@ app.whenReady().then(async () => {
                     ),
                     query: retrievalOptionsQuery,
                     meetingIds: temporalResolvedScope.meetingIds,
+                    expandQuery: true,
+                    signal: controller.signal,
                   })
                 : restrictToCurrentMeeting && currentPinnedResult
                   ? [currentPinnedResult]
@@ -8534,6 +8759,8 @@ app.whenReady().then(async () => {
                             ? await retrieveContext(parsed, {
                                 query: retrievalOptionsQuery,
                                 meetingIds: expansionMeetingIds,
+                                expandQuery: true,
+                                signal: controller.signal,
                               })
                             : restrictToPinnedCurrentComparison
                               ? pinnedResults
@@ -8544,6 +8771,8 @@ app.whenReady().then(async () => {
                                   : await retrieveContext(parsed, {
                                       pinnedResults,
                                       query: retrievalOptionsQuery,
+                                      expandQuery: true,
+                                      signal: controller.signal,
                                     })
             : [];
           const projectFacetKeywords =
@@ -8655,7 +8884,7 @@ app.whenReady().then(async () => {
                   unguardedContext,
                 )
               : unguardedContext;
-          const context = applyAssigneeCommitmentState(
+          const context = applyCanonicalCommitmentState(
             enforceSynthesizedOnlyContext(
               restrictEvidenceToMeetingIds(
                 effectiveProjectRecall ||
@@ -8672,7 +8901,7 @@ app.whenReady().then(async () => {
                 boundedMeetingIds,
               ),
             ),
-            assigneeRecall || personWorkAssignmentRecall,
+            confirmedSelfName,
           );
           contextCount = context.length;
           if (removedTranscriptPassageCount > 0) {
@@ -8907,6 +9136,7 @@ app.whenReady().then(async () => {
                   ? assigneeRecall.answer
                   : buildExtractiveTemporalSummary(effectiveQueryText, context);
           let answerRaw: string;
+          let answerPrompt: string | undefined;
           if (
             extractiveAnswer &&
             (usePreparedAssigneeRecall ||
@@ -8979,6 +9209,7 @@ app.whenReady().then(async () => {
               },
             );
             promptCompletedAt = Date.now();
+            answerPrompt = prompt;
             promptCharacters = prompt.length;
             console.log(
               `[Pluto] Generating answer via provider: ${provider.name} ...`,
@@ -9009,6 +9240,25 @@ app.whenReady().then(async () => {
 
           finalizationStartedAt = Date.now();
           let presentation = answerStream.finalize(answerRaw);
+          if (
+            answerPrompt &&
+            conversationResolution.relation !== 'omission_follow_up' &&
+            conversationResolution.task !== 'draft' &&
+            presentation.unsupportedClaimCount > 0
+          ) {
+            const provider = await getProvider(settings);
+            const repaired = await provider.answerAskPluto(
+              `${answerPrompt}\n\nRewrite using only facts stated in the supplied notes. Use neutral wording such as "The notes record" unless a passage explicitly names the actor. Do not use you/your or calculate elapsed time from meeting dates. Describe status as last recorded on the source date, never as current today. A decision to use something does not establish that it was implemented or is being used. Do not expand the scope of a note or infer an approval outcome. Preserve conditions and uncertainty.`,
+              { signal: controller.signal, mode: reasoningMode },
+            );
+            controller.signal.throwIfAborted();
+            presentation = createSynthesizedAnswerStream(
+              context,
+              () => undefined,
+              undefined,
+              confirmedSelfName,
+            ).finalize(repaired);
+          }
           if (
             presentation.outcome !== 'no_evidence' &&
             conversationResolution.task !== 'draft'
@@ -9278,6 +9528,9 @@ app.whenReady().then(async () => {
           failureReason: failure.reason,
         };
       } finally {
+        void releaseIdleOllamaModel(0).catch(() => {
+          console.warn('[Pluto] Ask Pluto model cleanup failed');
+        });
         event.sender.removeListener('destroyed', abortForDestroyedOwner);
         if (activeAskPlutoQueries.get(requestId)?.controller === controller)
           activeAskPlutoQueries.delete(requestId);
@@ -9518,6 +9771,9 @@ app.whenReady().then(async () => {
                   speakerDisplayNames:
                     db.getMeetingNotesIdentityProjection(meetingId)
                       .speakerDisplayNames,
+                  canonicalCommitments: applyCanonicalCommitmentState([
+                    buildMeetingRetrievalResult(meeting),
+                  ])[0].canonical_commitments,
                 });
               })();
 

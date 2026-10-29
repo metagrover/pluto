@@ -3,6 +3,15 @@
 export const notesContextTokens = (provider: unknown): number =>
   provider === 'chatgpt' ? 131_072 : 16_384;
 
+/** Keep local writing bounded without automatic model review; preserve cloud contracts. */
+export const notesWriterPolicy = (provider: unknown) =>
+  !provider || provider === 'ollama'
+    ? {
+        compactWriterContract: true,
+        hierarchyAuditStrategy: 'deterministic_only' as const,
+      }
+    : { compactWriterContract: true };
+
 import {
   MeetingNotesError,
   type NotesSource,
@@ -30,7 +39,8 @@ const isTokenDense = (text: string): boolean => {
   if (!nonWhitespace) return false;
   const asciiLetters = (nonWhitespace.match(/[A-Za-z]/g) ?? []).length;
   return (
-    asciiLetters < nonWhitespace.length / 2 || /[\p{L}\p{N}_$]{65,}/u.test(text)
+    asciiLetters < nonWhitespace.length / 2 ||
+    /(?:^|[^\p{L}\p{N}_$])[\p{L}\p{N}_$]{65}/u.test(text)
   );
 };
 

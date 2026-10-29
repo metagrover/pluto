@@ -21,7 +21,10 @@ class FakeChild extends EventEmitter implements NativeChildProcess {
     }),
     end: vi.fn(),
   };
-  readonly kill = vi.fn(() => true);
+  readonly kill = vi.fn(() => {
+    queueMicrotask(() => this.emit('exit', 0));
+    return true;
+  });
 
   respond(response: Record<string, unknown>): void {
     this.stdout.write(`${JSON.stringify(response)}\n`);
@@ -80,6 +83,39 @@ const speakerEvidenceSuccess = (id: string) => ({
 });
 
 describe('ParakeetFinalClient', () => {
+  it('keeps readiness warm until explicit unloading and prepares each replacement worker again', async () => {
+    const children: FakeChild[] = [];
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => {
+        const child = new FakeChild();
+        child.kill.mockImplementation(() => {
+          queueMicrotask(() => child.emit('exit', 0));
+          return true;
+        });
+        children.push(child);
+        return child;
+      },
+      runExclusive: async (run) => run(),
+    });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    for (let index = 0; index < 2; index++) {
+      const preparing = client.prepare();
+      await vi.waitFor(() =>
+        expect(children[index]?.writes[0]).toMatchObject({ method: 'prepare' }),
+      );
+      children[index]!.respond(
+        prepared(String(children[index]!.writes[0]!.id)),
+      );
+      await expect(preparing).resolves.toMatchObject({ ready: true });
+      expect(children[index]!.kill).not.toHaveBeenCalled();
+      await host.unloadIdleModels();
+      expect(children[index]!.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(client.getPreparedCapability()).toMatchObject({ ready: true });
+    }
+    host.shutdown();
+  });
+
   it('prepares a verified cached model through the real IPC validator', async () => {
     const child = new FakeChild();
     const client = new ParakeetFinalClient({ paths, spawn: () => child });
@@ -183,6 +219,7 @@ describe('ParakeetFinalClient', () => {
     expect(child.writes[0]).toMatchObject({
       method: 'prepare',
       modelRoot: paths.modelRoot,
+      warmLiveModels: false,
     });
     child.respond(prepared(String(child.writes[0].id)));
 
@@ -212,11 +249,34 @@ describe('ParakeetFinalClient', () => {
     expect(child.writes[0]).toMatchObject({
       method: 'prepare',
       modelRoot: paths.modelRoot,
+      warmLiveModels: true,
     });
     child.respond(prepared(String(child.writes[0].id)));
 
     await expect(ready).resolves.toMatchObject({ ready: true });
     expect(host.diagnostics().state).toBe('live');
+    await lease.release();
+    host.shutdown();
+  });
+
+  it('warms live models after final-only preparation and reuses the warm result', async () => {
+    const child = new FakeChild();
+    const host = makeRuntimeHost({ paths, spawn: () => child });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    const finalReady = client.prepare();
+    child.respond(prepared(String(child.writes[0].id)));
+    await finalReady;
+    const lease = await host.startRecordingLive();
+    const liveReady = client.prepareForLive(lease);
+    expect(child.writes).toHaveLength(2);
+    expect(child.writes[1]).toMatchObject({
+      method: 'prepare',
+      warmLiveModels: true,
+    });
+    child.respond(prepared(String(child.writes[1].id)));
+    await liveReady;
+    await client.prepareForLive(lease);
+    expect(child.writes).toHaveLength(2);
     await lease.release();
     host.shutdown();
   });

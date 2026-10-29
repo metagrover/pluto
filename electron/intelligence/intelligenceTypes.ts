@@ -1,4 +1,5 @@
 import type { TrustStatus } from '../../src/utils/trustStatus';
+import type { CanonicalCommitmentEvidence } from './meetingNotesEvidence';
 
 /**
  * Intelligence Types
@@ -131,6 +132,8 @@ export interface RetrievalResult {
   source_id?: string;
   mid: MidFrontmatter | null;
   evidence_text: string;
+  /** Verified app-owned records, never parsed from note prose or model output. */
+  canonical_commitments?: CanonicalCommitmentEvidence[];
   note_actions?: Array<{
     text: string;
     assignee?: string;

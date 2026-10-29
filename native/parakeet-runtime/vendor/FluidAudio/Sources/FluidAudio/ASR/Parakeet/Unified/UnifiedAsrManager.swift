@@ -198,7 +198,7 @@ public actor UnifiedAsrManager {
                 )
         }
 
-        merged.sort { $0.timestamp < $1.timestamp }
+        ChunkProcessor.clampTokenTimestamps(&merged)
         merged = merger.collapseSeamWordDuplicates(merged, vocabulary: tokenizer.vocabulary)
         return tokenizer.decode(ids: merged.map(\.token))
     }

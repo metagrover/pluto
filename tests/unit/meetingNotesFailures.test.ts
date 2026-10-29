@@ -29,3 +29,10 @@ it('never includes an error message in its stable classification', () => {
     'meeting_notes_latency_run_failed',
   );
 });
+
+it('preserves memory admission as a stable non-transient failure', () => {
+  const error = new Error('private runtime details');
+  error.name = 'LocalModelMemoryError';
+  expect(classifyMeetingNotesFailure(error)).toBe('notes_memory_capacity');
+  expect(isTransientMeetingNotesLeafFailure(error)).toBe(false);
+});

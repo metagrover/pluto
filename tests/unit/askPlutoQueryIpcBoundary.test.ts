@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
+import { resolveConfiguredProviderModel } from '../../electron/llm/providerCatalog';
 
 const main = readFileSync('electron/main.ts', 'utf8');
 const handlerStart = main.indexOf("'intelligence:query',");
@@ -297,6 +298,75 @@ describe('Ask Pluto query IPC boundary', () => {
       queryHandler.indexOf("sendStatus('retrieving')"),
     );
   });
+
+  it.each([
+    ['fast', 'gemma4:12b'],
+    ['deep', 'gemma4:12b'],
+  ])(
+    'reports the actual %s model in answer performance diagnostics',
+    (reasoningMode, expectedModel) => {
+      const modeStart = queryHandler.indexOf(
+        'reasoningMode = resolveAskPlutoReasoningMode(',
+      );
+      const assignmentStart = queryHandler.indexOf(
+        'configuredModel = resolveConfiguredProviderModel(',
+        modeStart,
+      );
+      const assignmentEnd = queryHandler.indexOf(';', assignmentStart);
+      const providerRequest = queryHandler.indexOf(
+        'answerRaw = await provider.answerAskPluto(',
+        assignmentEnd,
+      );
+      expect(assignmentStart).toBeGreaterThan(modeStart);
+      expect(assignmentEnd).toBeLessThan(providerRequest);
+      const modelDiagnostic = queryHandler.match(
+        /model: providerRequestedAt \? configuredModel : 'not_used'/,
+      )?.[0];
+      expect(modelDiagnostic).toBeDefined();
+      const diagnostics = new Function(
+        'settings',
+        'reasoningMode',
+        'providerRequestedAt',
+        'resolveConfiguredProviderModel',
+        `let configuredModel; ${queryHandler.slice(assignmentStart, assignmentEnd + 1)} return { ${modelDiagnostic} };`,
+      );
+      const settings = {
+        llm_provider: 'ollama',
+        ollama_model: 'gemma4:12b',
+        ollama_fast_model: 'phi4-mini:3.8b',
+      };
+      expect(
+        diagnostics(
+          settings,
+          reasoningMode,
+          100,
+          resolveConfiguredProviderModel,
+        ),
+      ).toEqual({ model: expectedModel });
+      expect(
+        diagnostics(
+          settings,
+          reasoningMode,
+          undefined,
+          resolveConfiguredProviderModel,
+        ),
+      ).toEqual({ model: 'not_used' });
+      expect(
+        diagnostics(
+          { llm_provider: 'chatgpt', chatgpt_model: 'gpt-5.6-terra' },
+          reasoningMode,
+          100,
+          resolveConfiguredProviderModel,
+        ),
+      ).toEqual({ model: 'gpt-5.6-terra' });
+      expect(queryHandler).toContain(
+        'performance: buildPerformanceDiagnostics()',
+      );
+      expect(queryHandler).toContain(
+        'const performance = buildPerformanceDiagnostics(finishedAt)',
+      );
+    },
+  );
 
   it('returns end-to-end performance diagnostics for real IPC benchmarks', () => {
     expect(queryHandler).toContain('buildPerformanceDiagnostics');
