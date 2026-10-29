@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PERSON_CONTEXT_SYNTHESIS_VERSION,
   buildPersonDossierRead,
   isCurrentPersonDossier,
 } from '../../src/utils/personDossierRead';
@@ -16,7 +17,10 @@ describe('person dossier read', () => {
     expect(isCurrentPersonDossier('up_to_date', 13)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 14)).toBe(false);
     expect(isCurrentPersonDossier('up_to_date', 15)).toBe(false);
-    expect(isCurrentPersonDossier('up_to_date', 16)).toBe(true);
+    expect(isCurrentPersonDossier('up_to_date', 16)).toBe(false);
+    expect(
+      isCurrentPersonDossier('up_to_date', PERSON_CONTEXT_SYNTHESIS_VERSION),
+    ).toBe(true);
   });
 
   it('leads with recurring work and shows an attributable example', () => {

@@ -1,3 +1,4 @@
+import { PERSON_CONTEXT_SYNTHESIS_VERSION } from '../../src/utils/personDossierRead';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { PersonBriefingDetail } from '../../src/api/knowledgeGraph';
@@ -647,7 +648,9 @@ describe('PersonDossier', () => {
           ...briefingDetail,
           knowledgeDoc: {
             ...briefingDetail.knowledgeDoc!,
-            config: JSON.stringify({ synthesis_version: 16 }),
+            config: JSON.stringify({
+              synthesis_version: PERSON_CONTEXT_SYNTHESIS_VERSION,
+            }),
             structured_json: JSON.stringify(doc),
           },
           sharedCommitments: {

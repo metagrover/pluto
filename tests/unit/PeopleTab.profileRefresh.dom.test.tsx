@@ -1,3 +1,4 @@
+import { PERSON_CONTEXT_SYNTHESIS_VERSION } from '../../src/utils/personDossierRead';
 // @vitest-environment happy-dom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -65,7 +66,9 @@ it('keeps a deferred refresh queued and displays the completed profile when poll
     knowledgeDoc: {
       ...detail.knowledgeDoc,
       status: 'up_to_date',
-      config: JSON.stringify({ synthesis_version: 16 }),
+      config: JSON.stringify({
+        synthesis_version: PERSON_CONTEXT_SYNTHESIS_VERSION,
+      }),
       updated_at: '2026-09-21T12:00:00.000Z',
       structured_json: JSON.stringify({
         person_profile: [

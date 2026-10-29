@@ -1,5 +1,8 @@
 import { containsPersonReference } from '../src/utils/evidenceText';
-import { parsePersonProfile } from '../src/utils/personProfile';
+import {
+  PERSON_PROFILE_SECTIONS,
+  parsePersonProfile,
+} from '../src/utils/personProfile';
 import type { PersonProfileClaim } from '../src/utils/personProfile';
 import type { KnowledgeChunkSourceMeeting } from './knowledgeChunking';
 import {
@@ -30,17 +33,63 @@ export const personProfilePreservesEvidence = (
     ),
   );
 
+/** Restrict references to supplied sources; exact quotes and meaning still need validation. */
+export const getPersonKnowledgeChunkResponseSchema = (
+  sources: readonly KnowledgeChunkSourceMeeting[],
+): Record<string, unknown> => {
+  const object = (properties: Record<string, unknown>) => ({
+    type: 'object',
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  });
+  const text = { type: 'string' };
+  const ids = [...new Set(sources.map((source) => source.id))];
+  const citation = object({
+    meeting_id: ids.length ? { type: 'string', enum: ids } : { not: {} },
+    quote: { type: 'string', minLength: 12 },
+  });
+  const citations = (maximum: number) => ({
+    type: 'array',
+    items: citation,
+    minItems: 1,
+    maxItems: maximum,
+  });
+  return object({
+    topics: {
+      type: 'array',
+      maxItems: 4,
+      items: object({
+        title: { ...text, minLength: 1, maxLength: 100 },
+        read: { ...text, minLength: 1 },
+        citations: citations(2),
+      }),
+    },
+    profile: {
+      type: 'array',
+      maxItems: 16,
+      items: object({
+        section: { type: 'string', enum: Object.keys(PERSON_PROFILE_SECTIONS) },
+        title: text,
+        summary: { ...text, minLength: 1, maxLength: 1400 },
+        citations: citations(4),
+      }),
+    },
+  });
+};
+
 export const getPersonKnowledgeChunkPrompt = (
   name: string,
   sources: KnowledgeChunkSourceMeeting[],
   corrections: Array<{ originalClaim: string; correctedText: string }> = [],
-): string => `Write a comprehensive, carefully synthesized dossier about ${name} from these dated conversations. Return only valid JSON in this shape:
-{"topics":[{"title":"specific area of work","read":"factual account of their contribution","citations":[{"meeting_id":"exact id","quote":"exact substring from evidence"}]}],"profile":[{"section":"overview","title":"","summary":"a coherent account of this person in the available context","citations":[{"meeting_id":"exact id","quote":"exact substring from evidence"}]}]}
+): string => `Extract and summarize only explicit facts about ${name} from these dated sources. Sparse evidence warrants a short account and empty topics, not inferred contributions or responsibilities. Return only valid JSON in this shape:
+{"topics":[{"title":"specific supported topic","read":"source-supported observation about this person","citations":[{"meeting_id":"exact id","quote":"exact substring from evidence"}]}],"profile":[{"section":"overview","title":"","summary":"only explicitly supported facts about this person","citations":[{"meeting_id":"exact id","quote":"exact substring from evidence"}]}]}
 
 Rules:
 - Use only the evidence below. A quote must support the whole claim, not merely contain the same topic. Do not infer a formal title, ownership, leadership, attendance, personality, or relationship closeness.
-- Profile sections: overview, responsibilities, shared_context, priorities, collaboration, evolution, next_conversation, unknowns. Omit sections without supporting evidence. Keep up to 16 profile claims; one overview of 2–4 sentences and up to three focused claims per other section. Do not repeat the same information across sections.
+- Profile sections: overview, responsibilities, shared_context, priorities, collaboration, evolution, next_conversation, unknowns. Omit sections without supporting evidence. Keep up to 16 profile claims; one overview as short as the evidence warrants and up to three focused claims per other section. Do not repeat the same information across sections.
 - Synthesize connected observations into readable prose, rather than copying excerpts or listing meeting summaries. Distinguish completed contributions, plans, requests, and unresolved questions. An intention is not completed work.
+- A person being mentioned does not prove participation or involvement. State the supported facts directly, without inventing how the person became involved.
 - shared_context describes explicitly evidenced collaboration and decisions involving this person. Mentioned people are not automatically collaborators. Do not invent the user's relationship to them.
 - collaboration uses explicitly stated preferences or repeated observed behavior; name observed patterns as observations. Do not turn one request into a permanent trait.
 - evolution explains dated changes, preserving historical decisions and naming a replacement only when stated. Do not resolve contradictions silently.
@@ -68,13 +117,17 @@ ${
     : '(none)'
 }
 
-Evidence (newest first):
-${sources
-  .map(
-    (source) =>
-      `- id: ${source.id}${source.occurred_at ? ` (${source.occurred_at})` : ''}\n  title: ${source.title}\n  evidence: ${source.evidence}`,
-  )
-  .join('\n')}`;
+Evidence (newest first; meeting_id is the exact citation id):
+${JSON.stringify(
+  sources.map((source) => ({
+    meeting_id: source.id,
+    occurred_at: source.occurred_at,
+    title: source.title,
+    evidence: source.evidence,
+  })),
+)}
+
+Before returning: Preserve explicit actors, state changes, final states and reasons; unknown prior events stay unknown. Completed, declined, withdrawn, cancelled and replaced work remains explicit history, never future actions. Retain unaccepted offers and requests as discussion. Missing acceptance proves neither refusal nor a preceding offer, request or response.`;
 
 export const compilePersonKnowledgeChunk = (
   name: string,

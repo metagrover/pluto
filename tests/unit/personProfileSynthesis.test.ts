@@ -17,6 +17,7 @@ vi.mock('../../electron/llm/factory', () => ({
 
 import * as db from '../../electron/db';
 import { refreshKnowledgeDocNow } from '../../electron/knowledgeSynthesis';
+import { PERSON_CONTEXT_SYNTHESIS_VERSION } from '../../src/utils/personDossierRead';
 import { readPersonProfile } from '../../src/utils/personProfile';
 
 afterAll(() => fs.rmSync(fixture.directory, { recursive: true, force: true }));
@@ -57,27 +58,29 @@ describe('comprehensive person profile publication', () => {
       scope_key: person.id,
       title: 'Conversations with Avery Chen',
     });
-    fixture.synthesize.mockImplementation(async (prompt: string) => {
-      const ids = [...prompt.matchAll(/- id: (meeting-\d)/g)].map(
-        (match) => match[1],
-      );
-      const consolidated = fixture.synthesize.mock.calls.length === 3;
-      return JSON.stringify({
-        profile: [
-          {
-            section: 'overview',
-            summary:
-              'Avery requested written recommendations in the available reviews.',
-            citations: ids.map((id) => ({
-              meeting_id: id,
-              quote: consolidated
-                ? 'Avery Chen requested a written recommendation'
-                : `Avery Chen requested a written recommendation for review ${id.at(-1)}.`,
-            })),
-          },
-        ],
-      });
-    });
+    fixture.synthesize.mockImplementation(
+      async (_prompt: string, options: any) => {
+        const ids: string[] =
+          options.responseSchema.properties.profile.items.properties.citations
+            .items.properties.meeting_id.enum;
+        const consolidated = fixture.synthesize.mock.calls.length === 3;
+        return JSON.stringify({
+          profile: [
+            {
+              section: 'overview',
+              summary:
+                'Avery requested written recommendations in the available reviews.',
+              citations: ids.map((id) => ({
+                meeting_id: id,
+                quote: consolidated
+                  ? 'Avery Chen requested a written recommendation'
+                  : `Avery Chen requested a written recommendation for review ${id.at(-1)}.`,
+              })),
+            },
+          ],
+        });
+      },
+    );
     const saved = await refreshKnowledgeDocNow(doc.id);
     expect(saved?.status).toBe('up_to_date');
     expect(fixture.synthesize).toHaveBeenCalledTimes(3);
@@ -88,7 +91,9 @@ describe('comprehensive person profile publication', () => {
       'Avery Chen requested a written recommendation for review 3.',
     );
     expect(saved?.rendered_content).toContain(profile[0].summary);
-    expect(JSON.parse(saved!.config!).synthesis_version).toBe(16);
+    expect(JSON.parse(saved!.config!).synthesis_version).toBe(
+      PERSON_CONTEXT_SYNTHESIS_VERSION,
+    );
     const versions = db.getKnowledgeDocVersions(doc.id).length;
 
     fixture.synthesize.mockResolvedValue('{}');
@@ -100,24 +105,26 @@ describe('comprehensive person profile publication', () => {
   it('synthesizes all cloud profile sources once and does not split a failed paid request', async () => {
     fixture.providerName = 'ChatGPT';
     fixture.synthesize.mockClear();
-    fixture.synthesize.mockImplementation(async (prompt: string) => {
-      const ids = [...prompt.matchAll(/- id: (meeting-\d)/g)].map(
-        (match) => match[1],
-      );
-      expect(new Set(ids).size).toBe(3);
-      return JSON.stringify({
-        profile: [
-          {
-            section: 'overview',
-            summary: 'Avery requested written recommendations.',
-            citations: ids.map((id) => ({
-              meeting_id: id,
-              quote: `Avery Chen requested a written recommendation for review ${id.at(-1)}.`,
-            })),
-          },
-        ],
-      });
-    });
+    fixture.synthesize.mockImplementation(
+      async (_prompt: string, options: any) => {
+        const ids: string[] =
+          options.responseSchema.properties.profile.items.properties.citations
+            .items.properties.meeting_id.enum;
+        expect(new Set(ids).size).toBe(3);
+        return JSON.stringify({
+          profile: [
+            {
+              section: 'overview',
+              summary: 'Avery requested written recommendations.',
+              citations: ids.map((id) => ({
+                meeting_id: id,
+                quote: `Avery Chen requested a written recommendation for review ${id.at(-1)}.`,
+              })),
+            },
+          ],
+        });
+      },
+    );
     const doc = db.getKnowledgeDocByScope('person_context', 'profile-person')!;
     const saved = await refreshKnowledgeDocNow(doc.id, { userRequested: true });
     expect(saved?.status).toBe('up_to_date');
