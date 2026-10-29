@@ -42,7 +42,7 @@ describe('Ask Pluto product help', () => {
 
   it('does not invent a cause for missing meetings', () => {
     const answer = buildPlutoHelpReply('Why aren’t my meetings showing up?');
-    expect(answer).toContain('Pluto’s meeting list or ChatGPT');
+    expect(answer).toContain('Pluto’s meeting list, ChatGPT, or Claude');
     expect(answer).toContain('can’t determine the cause');
   });
 

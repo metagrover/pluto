@@ -18,7 +18,11 @@ function readRegular(filename: string): string | undefined {
     );
     try {
       const stat = fs.fstatSync(fd);
-      if (!stat.isFile() || stat.size > 2 * 1024 * 1024)
+      if (
+        !stat.isFile() ||
+        stat.size > 2 * 1024 * 1024 ||
+        (process.getuid && stat.uid !== process.getuid())
+      )
         throw new Error('invalid_claude_config');
       return fs.readFileSync(fd, 'utf8');
     } finally {
@@ -65,7 +69,11 @@ export function installInClaudeDesktop({
     current = path.join(current, segment);
     if (!fs.existsSync(current)) fs.mkdirSync(current, { mode: 0o700 });
     const stat = fs.lstatSync(current);
-    if (!stat.isDirectory() || stat.isSymbolicLink())
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      (process.getuid && stat.uid !== process.getuid())
+    )
       throw new Error('claude_setup_requires_regular_directories');
   }
   const configFile = path.join(directory, 'claude_desktop_config.json');

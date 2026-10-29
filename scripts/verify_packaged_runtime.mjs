@@ -79,6 +79,10 @@ const requiredExecutables = [
   'parakeet-resource-probe',
   'PlutoCalendarHelper.app/Contents/MacOS/PlutoCalendarHelper',
 ];
+const mcpBridge = path.join(resourcesRoot, 'mcp', 'pluto-mcp-bridge.mjs');
+if (!existsSync(mcpBridge) || !statSync(mcpBridge).isFile()) {
+  throw new Error('Packaged MCP bridge is missing.');
+}
 
 for (const retiredPath of [
   path.join(resourcesPath, 'recorder'),

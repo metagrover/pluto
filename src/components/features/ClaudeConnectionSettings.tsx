@@ -8,8 +8,10 @@ import {
 } from '../../api/claudeConnection';
 import claudeLogo from '../../assets/brand/claude.svg';
 
-const actionClass =
-  'rounded-lg border border-pro-border bg-pro-surface px-3 py-2 text-[13px] font-medium text-pro-text-main hover:bg-pro-bg disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent';
+const buttonClass =
+  'rounded-lg border px-3 py-2 text-[13px] font-medium disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent';
+const actionClass = `${buttonClass} border-pro-border bg-pro-surface text-pro-text-main hover:bg-pro-bg`;
+const primaryActionClass = `${buttonClass} border-transparent bg-pro-text-main text-pro-bg hover:opacity-90`;
 
 export const ClaudeConnectionSettings = () => {
   const [status, setStatus] = useState<PlutoMcpSnapshot | null>(null);
@@ -132,16 +134,17 @@ export const ClaudeConnectionSettings = () => {
           </p>
         </div>
         {development ? (
-          <p className="text-xs leading-relaxed text-pro-text-main/75">
-            Development connection. Choose {label}; the installed release uses
-            pluto-notes. Each reads notes from its own running app.
+          <p className="text-xs leading-relaxed text-pro-text-main">
+            <strong className="font-medium">Development connection.</strong>{' '}
+            Choose {label}; the installed release uses pluto-notes. Each reads
+            notes from its own running app.
           </p>
         ) : null}
         {ready ? (
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className={actionClass}
+              className={primaryActionClass}
               disabled={busy}
               onClick={() => {
                 setError(null);
@@ -201,7 +204,7 @@ export const ClaudeConnectionSettings = () => {
           {!ready ? (
             <button
               type="button"
-              className={actionClass}
+              className={status?.enabled ? actionClass : primaryActionClass}
               disabled={
                 loading || !status || busy || (!status.enabled && !consent)
               }
@@ -217,7 +220,7 @@ export const ClaudeConnectionSettings = () => {
             </button>
           ) : null}
           <details className="text-xs leading-relaxed text-pro-text-main/75">
-            <summary className="cursor-pointer font-medium text-pro-text-main">
+            <summary className="cursor-pointer rounded font-medium text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent">
               Troubleshooting
             </summary>
             <div className="mt-3 space-y-3">

@@ -127,6 +127,7 @@ describe('packaged runtime resources', () => {
       'PlutoCalendarHelper.app/Contents/MacOS/PlutoCalendarHelper',
       'NSCalendarsFullAccessUsageDescription',
       'notification-bridge.node',
+      'pluto-mcp-bridge.mjs',
     ]) {
       expect(verifier).toContain(runtime);
     }
@@ -150,8 +151,12 @@ describe('packaged runtime resources', () => {
       const binPath = path.join(appPath, 'Contents', 'Resources', 'bin');
       const contents = path.join(appPath, 'Contents');
       await mkdir(path.join(contents, 'MacOS'), { recursive: true });
-      await mkdir(path.join(contents, 'Resources'), { recursive: true });
+      await mkdir(path.join(contents, 'Resources', 'mcp'), { recursive: true });
       await copyFile('/usr/bin/true', path.join(contents, 'MacOS', 'Pluto'));
+      await copyFile(
+        path.join(projectRoot, 'resources/mcp/pluto-mcp-bridge.mjs'),
+        path.join(contents, 'Resources/mcp/pluto-mcp-bridge.mjs'),
+      );
       await copyFile(
         path.join(projectRoot, 'build/pluto.icns'),
         path.join(contents, 'Resources/icon.icns'),

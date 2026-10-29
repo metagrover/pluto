@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installInClaudeDesktop } from '../../electron/mcp/claudeDesktop';
 
 const directories: string[] = [];
@@ -32,6 +32,7 @@ function fixture() {
   return { directory, configFile, options, read };
 }
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const directory of directories.splice(0))
     fs.rmSync(directory, { recursive: true, force: true });
 });
@@ -189,5 +190,25 @@ describe('Claude Desktop note connection setup', () => {
     expect(f.read().preferences).toEqual({ theme: 'dark' });
     expect(f.read().mcpServers['pluto-notes']).toBeTruthy();
     expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it('refuses directories or configuration files owned by another user', () => {
+    const f = fixture();
+    fs.writeFileSync(f.configFile, '{}');
+    if (!process.getuid) return;
+    vi.spyOn(process, 'getuid').mockReturnValue(process.getuid() + 1);
+    expect(() => installInClaudeDesktop(f.options)).toThrow(
+      'regular_directories',
+    );
+    vi.restoreAllMocks();
+    const originalFstat = fs.fstatSync;
+    vi.spyOn(fs, 'fstatSync').mockImplementation((fd, options) => {
+      const stat = originalFstat(fd, options as never);
+      stat.uid = (process.getuid?.() ?? 0) + 1;
+      return stat;
+    });
+    expect(() => installInClaudeDesktop(f.options)).toThrow(
+      'invalid_claude_config',
+    );
   });
 });

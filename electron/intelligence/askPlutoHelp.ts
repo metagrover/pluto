@@ -39,7 +39,7 @@ export const buildPlutoHelpReply = (query: string): string | null => {
     /\b(?:missing|showing|show up|appear|see|find)\b/i.test(text) &&
     /\b(?:not|aren't|isn't|can't|missing|don't)\b/i.test(text)
   ) {
-    return 'Where are the meetings missing: Pluto’s meeting list or ChatGPT?\n\nIn Pluto, check the meeting list and any active search or filters. In ChatGPT, keep the Pluto installation containing your meetings running with note access enabled, then start a new Work chat and select its Pluto plugin with **@**. Development and release builds have separate plugins.\n\nI can’t determine the cause from this question alone. Tell me which screen is empty and any connection error shown.\n\n[Open ChatGPT connection settings](/settings/advanced)';
+    return 'Where are the meetings missing: Pluto’s meeting list, ChatGPT, or Claude?\n\nIn Pluto, check the meeting list and any active search or filters. In ChatGPT or Claude, keep the Pluto installation containing your meetings running with note access enabled for that app, then start a new Work chat in ChatGPT and select its Pluto plugin with **@**, or enable Pluto in **+ → Connectors** in Claude. Development and release builds have separate connectors.\n\nI can’t determine the cause from this question alone. Tell me which screen is empty and any connection error shown.\n\n[Open connection settings](/settings/advanced)';
   }
   if (
     /\b(?:settings?|permissions?)\b/i.test(text) ||
