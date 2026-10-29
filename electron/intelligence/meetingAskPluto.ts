@@ -57,6 +57,7 @@ export interface MeetingAskPlutoContext {
   statusNote: string;
   evidenceItems: MeetingAskPlutoEvidenceItem[];
   truncatedEvidenceKinds?: Array<'decision' | 'action_item'>;
+  canonicalCommitments?: readonly CanonicalCommitmentEvidence[];
 }
 
 export interface MeetingAskPlutoContextEntity {
@@ -360,11 +361,10 @@ export const buildMeetingAskPlutoContext = ({
     quote: segment.quote,
   }));
 
-  const canonicalState = formatCanonicalCommitmentEvidence(
-    canonicalCommitments.filter(
-      (record) => record.meetingId === scope.meetingId,
-    ),
+  const meetingCommitments = canonicalCommitments.filter(
+    (record) => record.meetingId === scope.meetingId,
   );
+  const canonicalState = formatCanonicalCommitmentEvidence(meetingCommitments);
   if (canonicalState)
     addEvidence(evidenceItems, {
       id: 'canonical-commitments',
@@ -492,6 +492,7 @@ export const buildMeetingAskPlutoContext = ({
       'Only use evidence from this meeting supplied below. Canonical task records are authoritative for current task state. Meeting notes describe historical discussion and remain authoritative for other recorded facts unless the request explicitly asks for exact wording or the notes are unavailable. Do not use any other meeting, project, person, or global memory unless the user explicitly asks to broaden scope.',
     statusNote,
     evidenceItems: boundedEvidenceItems,
+    canonicalCommitments: meetingCommitments,
     ...(truncatedEvidenceKinds.size > 0
       ? { truncatedEvidenceKinds: [...truncatedEvidenceKinds] }
       : {}),
@@ -745,17 +746,24 @@ export const buildPreparedMeetingAskPlutoResponse = (
     : SIMPLE_ACTION_QUERY.test(query.trim())
       ? 'action_item'
       : null;
-  if (!kind || context.truncatedEvidenceKinds?.includes(kind)) return null;
-  // Historical action lists cannot override current lifecycle state.
   if (
-    kind === 'action_item' &&
-    context.evidenceItems.some((item) => item.id === 'canonical-commitments')
+    !kind ||
+    (context.truncatedEvidenceKinds?.includes(kind) &&
+      !(kind === 'action_item' && context.canonicalCommitments?.length))
   )
     return null;
-
-  const selected = context.evidenceItems
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => item.kind === kind);
+  const currentTasks =
+    kind === 'action_item' ? context.canonicalCommitments : undefined;
+  const selected = currentTasks?.length
+    ? currentTasks.map((record) => ({
+        item: {
+          meetingId: record.meetingId,
+          text: `${record.state}: ${JSON.stringify(record.task)} — ${record.owner || 'Owner unconfirmed'}`,
+        },
+      }))
+    : context.evidenceItems
+        .map((item) => ({ item }))
+        .filter(({ item }) => item.kind === kind);
   if (selected.length === 0) return null;
 
   const citations: MeetingAskPlutoCitation[] = selected.map(
@@ -769,7 +777,13 @@ export const buildPreparedMeetingAskPlutoResponse = (
       trust_status: context.trustStatus,
     }),
   );
-  const answer = selected.map(({ item }) => item.text).join('\n');
+  const answer = [
+    ...(currentTasks?.length &&
+    !currentTasks.some((record) => record.state === 'open')
+      ? ['No confirmed open responsibilities are recorded.']
+      : []),
+    ...selected.map(({ item }) => item.text),
+  ].join('\n');
 
   return {
     status: 'answered',
@@ -784,7 +798,9 @@ export const buildPreparedMeetingAskPlutoResponse = (
       },
     ],
     citations,
-    rationale: 'Returned existing structured meeting-note evidence directly.',
+    rationale: currentTasks?.length
+      ? 'Returned current canonical task state directly.'
+      : 'Returned existing structured meeting-note evidence directly.',
   };
 };
 
@@ -826,9 +842,16 @@ export const buildMeetingAskPlutoPrompt = ({
     });
   }
   const evidence = context.evidenceItems
+    .map((item, index) => ({ item, index }))
+    // Keep citation numbers stable while placing current state after history.
+    .sort(
+      (left, right) =>
+        Number(left.item.id === 'canonical-commitments') -
+        Number(right.item.id === 'canonical-commitments'),
+    )
     .map(
-      (item, index) =>
-        `[Evidence ${index + 1}] ${item.title} (${item.kind})\n${item.text}`,
+      ({ item, index }) =>
+        `${item.id === 'canonical-commitments' ? 'Current task state (overrides historical meeting discussion):\n' : ''}[Evidence ${index + 1}] ${item.title} (${item.kind})\n${item.text}`,
     )
     .join('\n\n');
   const recentTurns = normalizeMeetingAskPlutoTurns(turns)
@@ -903,7 +926,9 @@ ${conversation?.turnMode === 'challenge' ? 'Previous answer disputed; recheck th
 Question: ${query.trim()}
 
 Meeting evidence:
-${evidence || 'None'}`;
+${evidence || 'None'}
+
+${CANONICAL_COMMITMENT_ANSWER_GUIDANCE}`;
   }
 
   return `You are Pluto, answering inside a single meeting note.
@@ -950,7 +975,9 @@ Question:
 ${query.trim()}
 
 Meeting evidence:
-${evidence || 'None'}`;
+${evidence || 'None'}
+
+${CANONICAL_COMMITMENT_ANSWER_GUIDANCE}`;
 };
 
 const extractEvidenceReferences = (answer: string) => {
