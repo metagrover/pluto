@@ -1,4 +1,3 @@
-import { PERSON_CONTEXT_SYNTHESIS_VERSION } from '../../src/utils/personDossierRead';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { PersonBriefingDetail } from '../../src/api/knowledgeGraph';
@@ -10,6 +9,7 @@ import {
   isRegularCollaborator,
   sortPeopleRows,
 } from '../../src/components/KnowledgeGraph/PeopleTab';
+import { PERSON_CONTEXT_SYNTHESIS_VERSION } from '../../src/utils/personDossierRead';
 
 const rows: PersonBriefingRow[] = [
   {

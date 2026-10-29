@@ -1,9 +1,9 @@
-import { PERSON_CONTEXT_SYNTHESIS_VERSION } from '../../src/utils/personDossierRead';
 // @vitest-environment happy-dom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import type { PersonBriefingDetail } from '../../src/api/knowledgeGraph';
+import { PERSON_CONTEXT_SYNTHESIS_VERSION } from '../../src/utils/personDossierRead';
 
 const api = vi.hoisted(() => ({
   getPersonBriefing: vi.fn(),
