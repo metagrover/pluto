@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { lockSync } from 'proper-lockfile';
 
 export const CLAUDE_NOTES_ENABLED_SETTING = 'claude_notes_connection_enabled';
 export const CLAUDE_SETUP_URL =
@@ -68,8 +69,10 @@ export function installInClaudeDesktop({
       throw new Error('claude_setup_requires_regular_directories');
   }
   const configFile = path.join(directory, 'claude_desktop_config.json');
-  const lockFile = path.join(directory, '.pluto-setup.lock');
-  const lock = fs.openSync(lockFile, 'wx', 0o600);
+  const releaseLock = lockSync(configFile, {
+    realpath: false,
+    lockfilePath: path.join(directory, '.pluto-setup.lock'),
+  });
   const temporary = path.join(directory, `.pluto-${randomUUID()}.tmp`);
   try {
     const original = readRegular(configFile);
@@ -121,8 +124,10 @@ export function installInClaudeDesktop({
     }
     return { pluginName, marketplaceName: 'claude-desktop' };
   } finally {
-    fs.rmSync(temporary, { force: true });
-    fs.closeSync(lock);
-    fs.rmSync(lockFile, { force: true });
+    try {
+      fs.rmSync(temporary, { force: true });
+    } finally {
+      releaseLock();
+    }
   }
 }

@@ -169,9 +169,25 @@ describe('Claude Desktop note connection setup', () => {
   it('does not overwrite a concurrent setup lock', () => {
     const f = fixture();
     const lock = path.join(f.directory, '.pluto-setup.lock');
-    fs.writeFileSync(lock, 'other setup');
+    fs.mkdirSync(lock);
     expect(() => installInClaudeDesktop(f.options)).toThrow();
-    expect(fs.readFileSync(lock, 'utf8')).toBe('other setup');
+    expect(fs.statSync(lock).isDirectory()).toBe(true);
     expect(fs.existsSync(f.configFile)).toBe(false);
+  });
+
+  it('recovers an abandoned setup lock without losing other configuration', () => {
+    const f = fixture();
+    fs.writeFileSync(
+      f.configFile,
+      JSON.stringify({ preferences: { theme: 'dark' } }),
+    );
+    const lock = path.join(f.directory, '.pluto-setup.lock');
+    fs.mkdirSync(lock);
+    const stale = new Date(Date.now() - 30_000);
+    fs.utimesSync(lock, stale, stale);
+    installInClaudeDesktop(f.options);
+    expect(f.read().preferences).toEqual({ theme: 'dark' });
+    expect(f.read().mcpServers['pluto-notes']).toBeTruthy();
+    expect(fs.existsSync(lock)).toBe(false);
   });
 });
