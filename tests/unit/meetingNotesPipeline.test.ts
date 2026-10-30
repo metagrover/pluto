@@ -4316,3 +4316,76 @@ it('collects bounded compact writer leaves before one genuine whole-source revie
     [1, 2, 3, 4].map((index) => `The lamp number ${index} is blue.`),
   );
 });
+
+it('refuses a stale future action after later cancellation across compact leaves', async () => {
+  const source = makeSyntheticNotesSource([
+    {
+      speaker: 'Milo',
+      text: `I will send the outline. ${'Background. '.repeat(2000)}`,
+    },
+    {
+      speaker: 'Milo',
+      text: `I will not send the outline because the launch was cancelled. ${'Background. '.repeat(2000)}`,
+    },
+  ]);
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(
+    source.segments.map((segment) => {
+      const span = {
+        segment: segment.index,
+        start: 0,
+        end: segment.text.length,
+      };
+      return {
+        primarySpans: [span],
+        overlapSpans: [],
+        primaryText: segment.text,
+        sourceText: segment.text,
+        sourceRevision: source.revision,
+      };
+    }),
+  );
+  const generate = vi.fn(async (request: NotesRequest) => {
+    const { descriptor: span } = sourceDescriptors(request.prompt)[0]!;
+    return JSON.stringify({
+      title: null,
+      overview: {
+        text: `${source.segments[span.segment]!.text.split('.')[0]!.replace(/^I /, 'Milo ')}.`,
+        sources: [span],
+      },
+      sections: [
+        {
+          title: 'Outline',
+          items: [
+            {
+              kind: span.segment === 0 ? 'action' : 'point',
+              text:
+                span.segment === 0
+                  ? 'Send the outline.'
+                  : 'Milo will not send the outline because the launch was cancelled.',
+              owner: span.segment === 0 ? 'Milo' : null,
+              due: null,
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    });
+  });
+  try {
+    await expect(
+      generateMeetingNotes({
+        source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'gemma4:12b',
+        contextTokens: 16384,
+        compactWriterContract: true,
+        hierarchyAuditStrategy: 'deterministic_only',
+      }),
+    ).rejects.toThrow(/notes_guardrail:.*conflicting_action/);
+    expect(generate).toHaveBeenCalledTimes(2);
+  } finally {
+    plan.mockRestore();
+  }
+});

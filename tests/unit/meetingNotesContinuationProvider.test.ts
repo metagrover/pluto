@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { runWithLocalInferenceCoordinator } from '../../electron/llm/inferenceCoordinator';
+import {
+  LocalModelMemoryError,
+  readLocalModelMemory,
+  watchLocalModelMemory,
+} from '../../electron/llm/localModelMemory';
 import type { CompletedWriter } from '../../electron/llm/meetingNotesContinuation';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import * as transport from '../../electron/llm/ollamaHttpTransport';
@@ -363,4 +368,42 @@ it('bounds shutdown cleanup while it is still waiting behind local inference', a
   finish();
   await blocker;
   expect(bodies.filter((body) => body.keep_alive === 0)).toHaveLength(0);
+});
+
+it('refuses insufficient capacity before sending source data to generation', async () => {
+  const provider = electronProvider();
+  const reader = vi.mocked(readLocalModelMemory);
+  const original = reader.getMockImplementation()!;
+  reader.mockResolvedValue({ available: 0, total: 32 * 1024 ** 3 });
+  vi.mocked(transport.ollamaHttpStream).mockClear();
+  try {
+    await expect(
+      generate(provider, 'notesWriter', writer, {}),
+    ).rejects.toBeInstanceOf(LocalModelMemoryError);
+    expect(transport.ollamaHttpStream).not.toHaveBeenCalled();
+    expect(bodies.every((body) => !body.messages && !body.prompt)).toBe(true);
+  } finally {
+    reader.mockImplementation(original);
+  }
+});
+it('keeps the memory stop reason and unloads after a transport abort', async () => {
+  const provider = electronProvider();
+  const controller = new AbortController();
+  const dispose = vi.fn(async () => {});
+  vi.mocked(watchLocalModelMemory).mockReturnValueOnce({
+    signal: controller.signal,
+    setResidentCheck: vi.fn(),
+    start: vi.fn(async () => {}),
+    dispose,
+  });
+  const reason = new LocalModelMemoryError('protect system memory');
+  vi.mocked(transport.ollamaHttpStream).mockImplementationOnce(async () => {
+    controller.abort(reason);
+    throw new Error('Ollama response aborted before completion');
+  });
+  await expect(generate(provider, 'notesWriter', writer, {})).rejects.toBe(
+    reason,
+  );
+  expect(dispose).toHaveBeenCalledOnce();
+  expect(bodies.at(-1)).toMatchObject({ model: 'gemma4:12b', keep_alive: 0 });
 });

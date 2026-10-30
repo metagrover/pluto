@@ -796,7 +796,6 @@ import {
 import {
   applyCanonicalCommitmentState,
   buildAssigneeActionRecall,
-  buildCommitmentStatusRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
   buildMeetingRetrievalResult,
@@ -7818,51 +7817,6 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               citations: [],
               currentMeeting: currentMeetingStatus,
               outcome: 'answered' as const,
-            };
-          }
-          const previousScope = latestAssistantTurn(priorTurns)?.resolvedScope;
-          const commitmentStatus = buildCommitmentStatusRecall(
-            queryText,
-            meetingHeaders,
-            /\b(?:this|current) meeting\b/i.test(queryText)
-              ? currentMeeting.meetingId
-                ? [currentMeeting.meetingId]
-                : []
-              : resolveExplicitMeetingScope(queryText, meetingHeaders)
-                ? undefined
-                : previousScope && previousScope.kind !== 'global'
-                  ? previousScope.meetingIds
-                  : undefined,
-          );
-          if (commitmentStatus) {
-            turnMode = 'lookup';
-            retrievalPolicy = 'fresh';
-            contextCount = commitmentStatus.citations.length;
-            return {
-              status: 'answered' as const,
-              ...commitmentStatus,
-              trustStatus: commitmentStatus.citations.length
-                ? ('grounded' as const)
-                : ('needs_review' as const),
-              unsupportedClaimCount: 0,
-              currentMeeting: currentMeetingStatus,
-              retrievalSummary: {
-                matchedMeetingCount: new Set(
-                  commitmentStatus.citations.map(
-                    (citation) => citation.meeting_id,
-                  ),
-                ).size,
-                includedMeetingCount: new Set(
-                  commitmentStatus.citations.map(
-                    (citation) => citation.meeting_id,
-                  ),
-                ).size,
-                preparedEvidenceCount: commitmentStatus.citations.length,
-                transcriptOnlyCount: 0,
-                omittedMeetingCount: 0,
-                commitmentCount: commitmentStatus.citations.length,
-                retrievalLevel: 'commitment' as const,
-              },
             };
           }
           conversationResolutionStartedAt = Date.now();

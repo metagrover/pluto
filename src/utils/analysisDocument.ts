@@ -345,6 +345,8 @@ const rendererEditPaths = (doc: AnalysisDocumentV3): string[] => [
 
 const isSourceGrounded = (doc: AnalysisDocumentV3): boolean =>
   doc.generation_metadata?.pipeline_version === 'writer-only-v1' ||
+  doc.generation_metadata?.pipeline_version ===
+    'writer-source-action-review-v1' ||
   doc.generation_metadata?.pipeline_version === 'writer-editor-v1' ||
   doc.generation_metadata?.pipeline_version === 'writer-editor-bounded-v1' ||
   doc.generation_metadata?.prompt_version === 'notes-v11' ||

@@ -12,9 +12,9 @@ All 172 original changed or untracked files are accounted for:
 | Original files | Disposition |
 | --- | --- |
 | 56 | Already byte-identical to current upstream; do not duplicate their patches. |
-| 34 | Integrated with current upstream, including Tasks, saved commitment-status recall, explicit response preferences, associated tests, and the historical MTP evaluation plan. |
-| 80 | Retain newer upstream implementations and regression coverage for the same areas; original versions remain recoverable locally. |
-| 2 | Earlier independent action-review implementation and its parser tests; superseded by the accepted notes-v87/v89 policy and retained in the local snapshot. |
+| 40 | Integrated with current upstream, including Tasks, explicit response preferences, source-note action sync and legacy provenance guards, associated unit/acceptance coverage, and the historical MTP evaluation plan. |
+| 74 | Retain newer upstream implementations and regression coverage for the same areas; original versions remain recoverable locally. |
+| 2 | Earlier independent action-review implementation and its parser tests; superseded by the accepted notes-v87/v89/v100 policy and retained in the local snapshot. |
 
 The complete file-by-file inventory is retained with the local backup. None of
 the previously untracked standalone enhancements are dropped: every one is
@@ -29,14 +29,24 @@ upstream, integrated here, or the explicitly superseded action reviewer above.
 - Typed chat proposals confirm one exact task change through the shared service.
   Plain task creation, listing, and clear status commands work without a model;
   contextual planning uses bounded task context and the configured provider.
-- Saved personal commitment-status questions read canonical open, candidate,
-  completed, and rejected state before generation, with ownership, confidentiality,
-  source survival, and meeting-scope checks. Unfamiliar wording can require
-  clarification. This lookup concerns meeting commitments; the Tasks list and
-  explicit task commands cover manually captured work.
+  Factual commitment-status questions continue to use the accepted `2026-10-26`
+  canonical task evidence path rather than a separate lexical status shortcut.
+- Source-note action synchronization preserves explicit completion across legacy
+  string action arrays and case-only rewrites, requires matching structured
+  owners when present so identical titles cannot transfer another owner's
+  completion to a confirmed task, and allows unreviewed extracted suggestions to
+  follow expanded source citations without moving explicit user ownership,
+  review, or completion state.
+- Legacy saved v3 notes carrying `writer-source-action-review-v1` remain
+  recognized as source-grounded documents so missing provenance stays a conflict
+  boundary during edit rebasing without re-enabling that historical pipeline.
 - Explicit length preferences for chat and preparation briefs are saved separately
   from facts, validated, replaceable, and removable. They guide wording without
   silently cutting off evidence or conditions.
+- Recovered unit and manual benchmark coverage includes pre-send local memory
+  refusal and watchdog abort-reason propagation, cross-leaf notes cancellation
+  and conflicting-action refusal checks, and the `commitment_state` fixture slice
+  on the production-path acceptance harness.
 - The failed native MTP evaluation plan keeps its measurements, quality criteria,
   and no-promotion boundary available for future research.
 
@@ -63,10 +73,17 @@ come from upstream. The original local checkout is not reset or cleaned.
 
 ## Fresh validation
 
-- Full unit suite: 564 files, 8,128 tests passed.
+- Full unit suite: 564 files, 8,120 tests passed.
 - TypeScript: `pnpm exec tsc --noEmit` passed.
 - Production bundles: `pnpm exec vite build` passed for renderer, main, and preload.
-- Changed-code Biome checks and `git diff --check` passed.
+- Repository checks: `pnpm run lint`, `pnpm exec biome check`, `pnpm run db:verify`,
+  `pnpm run test:installer`, `pnpm run test:release-workflow`, and `git diff --check`
+  passed.
+- Disposable database & live acceptance harness check: `resolveMeetingAnalysis`,
+  `getAnalysisEditBlocks`, and `syncMeetingActionEntitiesFromUserEdits` verified on
+  a disposable copy of 78 persisted meetings (3,398 edit blocks, 149 action items)
+  without mutating user data; `commitment_state` production-path harness verified
+  against local Ollama `gemma4:12b` (`notes-v100`, `writer-only-v1`).
 - Fictional renderer workspace: Tasks list, source details, and shared project
   dropdown checked visually, including the compact layout. Shared dropdown
   selection, keyboard behavior, and draft preservation have DOM regressions.

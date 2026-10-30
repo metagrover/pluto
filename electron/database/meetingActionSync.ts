@@ -7,6 +7,9 @@ import {
 import { isContinuationEditPath } from '../../src/utils/meetingNotesEditRebase';
 import { parseDueDate } from '../actionDueDate';
 
+const normalizeSourceIdentity = (value: unknown): string =>
+  typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
+
 const truncateAtWordBoundary = (text: string, maxLength = 100): string => {
   if (text.length <= maxLength) return text;
   const truncated = text.substring(0, maxLength);
@@ -111,6 +114,7 @@ export const syncActionCompletionToMeetingNotes = (
     const match = path.match(/^(?:all_action_items|v2:action):(\d+)$/);
     if (!match) return;
     const analysis = JSON.parse(meeting.analysis_json || '{}');
+    const typedOwners = Array.isArray(analysis.all_action_items);
     const actions = Array.isArray(analysis.all_action_items)
       ? analysis.all_action_items
       : Array.isArray(analysis.action_items)
@@ -123,13 +127,22 @@ export const syncActionCompletionToMeetingNotes = (
           ? meta.full_description
           : entity.name;
     let matches: number[] = actions.flatMap(
-      (action: { text?: unknown }, index: number) =>
+      (
+        action: string | { text?: unknown; assignee?: unknown },
+        index: number,
+      ) =>
+        (!typedOwners ||
+          normalizeSourceIdentity(
+            typeof action === 'string' ? null : action.assignee,
+          ) === normalizeSourceIdentity(meta.assignee_name)) &&
         [
-          action?.text,
+          typeof action === 'string' ? action : action?.text,
           edits[`all_action_items:${index}`]?.original,
           edits[`v2:action:${index}`]?.original,
         ].some(
-          (text) => typeof text === 'string' && text.trim() === original.trim(),
+          (text) =>
+            typeof text === 'string' &&
+            normalizeSourceIdentity(text) === normalizeSourceIdentity(original),
         )
           ? [index]
           : [],
@@ -303,13 +316,29 @@ export const syncMeetingActionEntitiesFromUserEdits = (
           : typeof metadata.full_description === 'string'
             ? metadata.full_description
             : entity.name;
-      if (originals.some((original) => text.trim() === original.trim()))
-        return true;
+      const sameOwner =
+        !Array.isArray(analysisData.all_action_items) ||
+        normalizeSourceIdentity(item?.assignee) ===
+          normalizeSourceIdentity(metadata.assignee_name);
+      const sameText = originals.some(
+        (original) =>
+          normalizeSourceIdentity(text) === normalizeSourceIdentity(original),
+      );
+      const expandedEvidence =
+        sameText &&
+        typeof metadata.source_evidence === 'string' &&
+        metadata.source_evidence.trim() &&
+        evidence.includes(metadata.source_evidence.trim()) &&
+        actionItems.filter(
+          (candidate) => candidate.text?.trim() === item?.text?.trim(),
+        ).length === 1;
+      if (sameText && sameOwner) return true;
       // Only an unreviewed suggestion may follow a wording correction. Saved
       // evidence and its slot must both match; explicit task state never moves.
       return (
-        uniqueEvidence &&
+        (uniqueEvidence || expandedEvidence) &&
         metadata.origin === 'extraction' &&
+        metadata.owner_source !== 'user' &&
         metadata.commitment_state === 'possible' &&
         !metadata.reviewed_at &&
         !metadata.user_edited &&
@@ -319,7 +348,7 @@ export const syncMeetingActionEntitiesFromUserEdits = (
         !editsMap[`completion:${v2Path}`] &&
         (metadata.source_path === v3Path || metadata.source_path === v2Path) &&
         typeof metadata.source_evidence === 'string' &&
-        metadata.source_evidence.trim() === evidence
+        (metadata.source_evidence.trim() === evidence || expandedEvidence)
       );
     });
     if (

@@ -11,6 +11,7 @@ import {
 import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
 import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
+import { meetingNotesCommitmentStateCases } from './fixtures/meetingNotesCommitmentStateCases';
 import { meetingNotesFidelityHoldoutCases } from './fixtures/meetingNotesFidelityHoldoutCases';
 import { meetingNotesGemmaReliabilityCases } from './fixtures/meetingNotesGemmaReliabilityCases';
 import type { MeetingNotesLocalGuardrailsCase } from './fixtures/meetingNotesLocalGuardrailsCases';
@@ -25,9 +26,9 @@ const reviewProtocol = process.env.MEETING_NOTES_REVIEW_PROTOCOL || 'audit';
 const caseSet = process.env.MEETING_NOTES_ACCEPTANCE_CASE_SET || 'fixed';
 const productionPath =
   process.env.MEETING_NOTES_ACCEPTANCE_PATH === 'production';
-if (!['fixed', 'heldout', 'private'].includes(caseSet))
+if (!['fixed', 'heldout', 'commitment_state', 'private'].includes(caseSet))
   throw new Error(
-    'MEETING_NOTES_ACCEPTANCE_CASE_SET must be fixed, heldout or private',
+    'MEETING_NOTES_ACCEPTANCE_CASE_SET must be fixed, heldout, commitment_state or private',
   );
 // Private source stays outside the repository; redirect this suite's logs to
 // an untracked local path too. Never use production generation/publication IPC.
@@ -39,9 +40,11 @@ const cases: MeetingNotesLocalGuardrailsCase[] =
           'utf8',
         ),
       )
-    : caseSet === 'heldout'
-      ? meetingNotesFidelityHoldoutCases
-      : meetingNotesGemmaReliabilityCases;
+    : caseSet === 'commitment_state'
+      ? meetingNotesCommitmentStateCases
+      : caseSet === 'heldout'
+        ? meetingNotesFidelityHoldoutCases
+        : meetingNotesGemmaReliabilityCases;
 
 suite(
   'local guardrails mechanical acceptance (source fidelity reviewed separately)',
@@ -52,9 +55,9 @@ suite(
       it(
         `${fixture.id} (${reviewProtocol}, seed ${seed})`,
         async () => {
-          if (reviewProtocol !== 'audit' && reviewProtocol !== 'editor')
+          if (!['audit', 'editor', 'compact'].includes(reviewProtocol))
             throw new Error(
-              'MEETING_NOTES_REVIEW_PROTOCOL must be audit or editor',
+              'MEETING_NOTES_REVIEW_PROTOCOL must be audit, editor or compact',
             );
           if (!Number.isInteger(seed))
             throw new Error('MEETING_NOTES_ACCEPTANCE_SEED must be an integer');
@@ -147,6 +150,12 @@ suite(
               signal: controller.signal,
               reviewProtocol:
                 reviewProtocol === 'editor' ? 'editor' : undefined,
+              ...(reviewProtocol === 'compact'
+                ? {
+                    compactWriterContract: true,
+                    hierarchyAuditStrategy: 'deterministic_only' as const,
+                  }
+                : {}),
               generate: async (request) => {
                 stages.push(request.task);
                 const attempt = stages.length;
