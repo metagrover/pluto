@@ -10,6 +10,7 @@ import {
 } from './crypto/encryptedAudioBundle';
 
 const GIB = 1024 ** 3;
+export const DEFAULT_ORPHAN_AUDIO_GRACE_PERIOD_MS = 60 * 60 * 1000;
 export const AUDIO_STORAGE_BUDGET_SETTING = 'audio_storage_budget_gb';
 export const DEFAULT_AUDIO_STORAGE_BUDGET_GB = 10;
 export const AUDIO_STORAGE_BUDGET_OPTIONS = [2, 10, 20] as const;
@@ -118,8 +119,11 @@ export const createAudioRetentionManager = (options: {
   isMeetingActive?: (meetingId: string) => boolean;
   isHistoricalMigrationBlocked?: (meetingId: string) => boolean;
   acquireDeletionLease?: (meetingId: string) => (() => void) | null;
+  orphanGracePeriodMs?: number;
 }) => {
   const rootDir = path.resolve(options.rootDir);
+  const orphanGracePeriodMs =
+    options.orphanGracePeriodMs ?? DEFAULT_ORPHAN_AUDIO_GRACE_PERIOD_MS;
   const writeStatus = (
     meetingId: string,
     status: 'retained' | 'blocked' | 'deleting' | 'deleted' | 'failed',
@@ -152,8 +156,14 @@ export const createAudioRetentionManager = (options: {
     const meetingId = String(meeting.id);
     const paths = new Set<string>();
     const captureRoot = path.join(rootDir, meetingId);
+    const captureRoots = [
+      captureRoot,
+      path.join(captureRoot, 'capture-journal'),
+    ];
     const captureAudioRoots = ['chunks', 'repair']
-      .map((directory) => path.join(captureRoot, directory))
+      .flatMap((directory) =>
+        captureRoots.map((base) => path.join(base, directory)),
+      )
       .filter(
         (candidate) =>
           insideRoot(rootDir, candidate) && fs.existsSync(candidate),
@@ -288,6 +298,66 @@ export const createAudioRetentionManager = (options: {
     }
   };
 
+  const scanOrphanArtifacts = async (enforce: boolean) => {
+    let retainedBytes = 0;
+    let deletedBytes = 0;
+    try {
+      const referencedPaths = new Set<string>();
+      for (const meeting of options.listMeetings()) {
+        for (const raw of [
+          meeting.audio_path,
+          meeting.system_audio_path,
+          meeting.mixed_audio_path,
+        ]) {
+          if (raw) referencedPaths.add(path.resolve(raw));
+        }
+      }
+      const entries = await fs.promises.readdir(rootDir, {
+        withFileTypes: true,
+      });
+      const now = Date.now();
+      for (const entry of entries) {
+        const fullPath = path.join(rootDir, entry.name);
+        if (!insideRoot(rootDir, fullPath)) continue;
+        if (entry.isFile()) {
+          if (!entry.name.endsWith('.wav') && !entry.name.endsWith('.enc')) {
+            continue;
+          }
+          if (referencedPaths.has(path.resolve(fullPath))) continue;
+          try {
+            const stat = await fs.promises.stat(fullPath);
+            if (stat.isSymbolicLink()) continue;
+            if (now - stat.mtimeMs < orphanGracePeriodMs) continue;
+            retainedBytes += stat.size;
+            if (enforce) {
+              await fs.promises.unlink(fullPath);
+              deletedBytes += stat.size;
+            }
+          } catch {
+            // Skip file that disappeared or could not be stat-ed/unlinked
+          }
+        } else if (
+          entry.isDirectory() &&
+          entry.name.startsWith('.speaker-profile-')
+        ) {
+          try {
+            const stat = await fs.promises.stat(fullPath);
+            if (stat.isSymbolicLink()) continue;
+            if (now - stat.mtimeMs < orphanGracePeriodMs) continue;
+            if (enforce) {
+              await fs.promises.rm(fullPath, { recursive: true, force: true });
+            }
+          } catch {
+            // Skip directory that could not be stat-ed/removed
+          }
+        }
+      }
+    } catch {
+      // Root directory may not exist or be accessible yet
+    }
+    return { retainedBytes, deletedBytes };
+  };
+
   const runSweep = async (
     enforceBudget: boolean,
   ): Promise<AudioRetentionSnapshot> => {
@@ -337,9 +407,15 @@ export const createAudioRetentionManager = (options: {
         );
       }
     }
-    let deletedBytes = 0;
+    const orphanSweep = await scanOrphanArtifacts(enforceBudget);
+    retainedBytes += orphanSweep.retainedBytes;
+    let deletedBytes = orphanSweep.deletedBytes;
     let deletedMeetings = 0;
-    if (enforceBudget && budgetBytes !== null && retainedBytes > budgetBytes) {
+    if (
+      enforceBudget &&
+      budgetBytes !== null &&
+      retainedBytes - deletedBytes > budgetBytes
+    ) {
       candidates.sort((left, right) => {
         const timestamp = (meeting: AudioRetentionMeeting) =>
           Date.parse(meeting.started_at || meeting.created_at || '') || 0;

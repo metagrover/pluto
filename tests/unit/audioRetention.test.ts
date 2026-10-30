@@ -421,4 +421,125 @@ describe('audio retention', () => {
     expect(release).toHaveBeenCalledOnce();
     sqlite.close();
   });
+
+  it('removes capture journal audio chunks when nested under capture-journal/ while preserving transcript sidecars', async () => {
+    const root = makeRoot();
+    const sqlite = makeDatabase();
+    const meetingRoot = path.join(root, 'journal-nested');
+    const journalRoot = path.join(meetingRoot, 'capture-journal');
+    const chunksRoot = path.join(journalRoot, 'chunks');
+    const repairRoot = path.join(journalRoot, 'repair');
+    const transcriptRoot = path.join(journalRoot, 'transcript-checkpoints');
+    const acceptanceRoot = path.join(journalRoot, 'acceptance-frames');
+    fs.mkdirSync(chunksRoot, { recursive: true });
+    fs.mkdirSync(repairRoot, { recursive: true });
+    fs.mkdirSync(transcriptRoot, { recursive: true });
+    fs.mkdirSync(acceptanceRoot, { recursive: true });
+    fs.writeFileSync(path.join(chunksRoot, 'chunk-000.enc'), 'chunk audio');
+    fs.writeFileSync(path.join(repairRoot, 'repair-000.enc'), 'repair audio');
+    const manifestPath = path.join(journalRoot, 'manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify({ schemaVersion: 4 }));
+    const transcriptPath = path.join(transcriptRoot, 'transcript-000.enc');
+    fs.writeFileSync(transcriptPath, 'transcript sidecar data');
+    const framePath = path.join(acceptanceRoot, 'frame-000.enc');
+    fs.writeFileSync(framePath, 'acceptance frame sidecar');
+
+    sqlite
+      .prepare('INSERT INTO meetings (id) VALUES (?)')
+      .run('journal-nested');
+    const deleteMeetingAudioKey = vi.fn(() => true);
+    const meeting = eligibleMeeting('journal-nested');
+    const manager = createAudioRetentionManager({
+      rootDir: root,
+      sqlite,
+      listMeetings: () => [meeting],
+      getSetting: () => '10',
+      audioKeyStore: {
+        getMeetingAudioKey: vi.fn(() => null),
+        deleteMeetingAudioKey,
+      },
+    });
+
+    const inspection = await manager.inspect();
+    expect(inspection.retainedBytes).toBe(
+      'chunk audio'.length + 'repair audio'.length,
+    );
+
+    await expect(manager.deleteMeetingAudio(meeting)).resolves.toMatchObject({
+      status: 'deleted',
+      deletedBytes: 'chunk audio'.length + 'repair audio'.length,
+    });
+
+    expect(fs.existsSync(chunksRoot)).toBe(false);
+    expect(fs.existsSync(repairRoot)).toBe(false);
+    expect(fs.existsSync(manifestPath)).toBe(true);
+    expect(fs.readFileSync(transcriptPath, 'utf8')).toBe(
+      'transcript sidecar data',
+    );
+    expect(fs.readFileSync(framePath, 'utf8')).toBe('acceptance frame sidecar');
+    expect(deleteMeetingAudioKey).not.toHaveBeenCalled();
+    sqlite.close();
+  });
+
+  it('prunes unreferenced loose wav files older than grace period and preserves recent or referenced ones', async () => {
+    const root = makeRoot();
+    const sqlite = makeDatabase();
+    const oldOrphanPath = path.join(
+      root,
+      'meeting-1_1700000000_old_orphan.wav',
+    );
+    const recentOrphanPath = path.join(
+      root,
+      'meeting-2_1700000000_recent_orphan.wav',
+    );
+    const referencedPath = path.join(root, 'meeting-3_referenced.wav');
+
+    fs.writeFileSync(oldOrphanPath, 'old orphan audio data');
+    fs.writeFileSync(recentOrphanPath, 'recent orphan audio data');
+    fs.writeFileSync(referencedPath, 'referenced audio data');
+
+    // Backdate mtime for old orphan by 2 hours
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(oldOrphanPath, twoHoursAgo, twoHoursAgo);
+
+    // Old speaker profile temp dir
+    const oldSpeakerDir = path.join(root, '.speaker-profile-oldtest');
+    fs.mkdirSync(oldSpeakerDir, { recursive: true });
+    fs.writeFileSync(path.join(oldSpeakerDir, 'scratch.wav'), 'scratch');
+    fs.utimesSync(oldSpeakerDir, twoHoursAgo, twoHoursAgo);
+
+    const meeting = eligibleMeeting('meeting-3', referencedPath);
+    sqlite
+      .prepare('INSERT INTO meetings (id, audio_path) VALUES (?, ?)')
+      .run(String(meeting.id), referencedPath);
+
+    const manager = createAudioRetentionManager({
+      rootDir: root,
+      sqlite,
+      listMeetings: () => [meeting],
+      getSetting: () => '10',
+      audioKeyStore: {
+        getMeetingAudioKey: vi.fn(() => null),
+        deleteMeetingAudioKey: vi.fn(() => true),
+      },
+      orphanGracePeriodMs: 60 * 60 * 1000, // 1 hour grace
+    });
+
+    const inspection = await manager.inspect();
+    // inspect() measures referenced meeting + unreferenced files older than grace
+    expect(inspection.retainedBytes).toBeGreaterThanOrEqual(
+      'old orphan audio data'.length + 'referenced audio data'.length,
+    );
+
+    const result = await manager.sweep();
+
+    expect(fs.existsSync(oldOrphanPath)).toBe(false);
+    expect(fs.existsSync(oldSpeakerDir)).toBe(false);
+    expect(fs.existsSync(recentOrphanPath)).toBe(true);
+    expect(fs.existsSync(referencedPath)).toBe(true);
+    expect(result.deletedBytes).toBeGreaterThanOrEqual(
+      'old orphan audio data'.length,
+    );
+    sqlite.close();
+  });
 });
