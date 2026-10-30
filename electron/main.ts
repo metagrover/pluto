@@ -140,6 +140,14 @@ import {
 } from './intelligence/askPlutoSemanticScope';
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
+import {
+  readResponsePreferences,
+  updateResponsePreference,
+} from './intelligence/responsePreferences';
+import {
+  isTaskChatRequest,
+  prepareTaskChatReply,
+} from './intelligence/taskChatTools';
 import { checkOllamaReadiness } from './llm/ollamaReadiness';
 import { resolveConfiguredProviderModel } from './llm/providerCatalog';
 import {
@@ -209,6 +217,7 @@ import {
   getSpeakerSampleAvailability,
   loadSpeakerSample,
 } from './speakerSample';
+import * as personalTasks from './taskService';
 import { stitchTimedWavSegments } from './timedWavStitch';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { readLiveJournalAudio } from './transcription/liveJournalAudio';
@@ -743,7 +752,6 @@ import {
   buildNoEvidenceDraftReply,
   buildSocialReply,
   isExplicitInformationRequest,
-  parseConversationActionProposal,
 } from './intelligence/conversationController';
 import {
   queryReferencesCurrentMeeting,
@@ -2174,6 +2182,7 @@ app.whenReady().then(async () => {
             mode: 'deep',
             jsonMode: true,
           }),
+        readResponsePreferences(db).preparation,
       );
       if (
         generated.synthesisStatus === 'ready' &&
@@ -2261,12 +2270,15 @@ app.whenReady().then(async () => {
       const brief = prepareBrief(value);
       const settings = await getAllSettings(db);
       const provider = await getProvider(settings);
-      return synthesizePreMeetingBrief(brief, (prompt, signal) =>
-        provider.answerAskPluto(prompt, {
-          signal,
-          mode: 'deep',
-          jsonMode: true,
-        }),
+      return synthesizePreMeetingBrief(
+        brief,
+        (prompt, signal) =>
+          provider.answerAskPluto(prompt, {
+            signal,
+            mode: 'deep',
+            jsonMode: true,
+          }),
+        readResponsePreferences(db).preparation,
       );
     },
   );
@@ -5065,6 +5077,27 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.handle('TASKS_LIST', () => personalTasks.listPersonalTasks());
+  const taskMutations = {
+    TASKS_SAVE: personalTasks.savePersonalTask,
+    TASKS_STATUS: personalTasks.setPersonalTaskStatus,
+    TASKS_REVIEW: personalTasks.reviewPersonalTask,
+    TASKS_FOCUS: personalTasks.setPersonalTaskFocus,
+    TASKS_TAG_SAVE: personalTasks.savePersonalTaskTag,
+    TASKS_TAG_REMOVE: personalTasks.removePersonalTaskTag,
+    TASKS_CHAT_APPLY: personalTasks.applyPersonalTaskChatAction,
+  };
+  for (const [channel, mutate] of Object.entries(taskMutations)) {
+    ipcMain.handle(channel, (_event, payload) => {
+      const result = mutate(payload);
+      queueAllKnowledgeDocsRefresh();
+      invalidateDreamingCatalog();
+      for (const window of BrowserWindow.getAllWindows())
+        window.webContents.send('TASKS_CHANGED');
+      return result;
+    });
+  }
+
   ipcMain.handle('GET_ENTITY', (_event, id) => db.getEntity(id));
   ipcMain.handle('GET_ENTITIES_BY_TYPE', (_event, type) =>
     db.getEntitiesByType(type),
@@ -7758,6 +7791,18 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           console.log(
             `[Pluto] intelligence:query start [request_id=${requestId}, query_length=${queryText.trim().length}]`,
           );
+          const preferenceReply = updateResponsePreference(queryText, db);
+          if (preferenceReply) {
+            turnMode = 'act';
+            retrievalPolicy = 'none';
+            return {
+              status: 'answered' as const,
+              answer: preferenceReply,
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'answered' as const,
+            };
+          }
           const helpReply = buildPlutoHelpReply(queryText);
           if (helpReply) {
             turnMode = 'lookup';
@@ -7910,24 +7955,45 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               conversationContext: previousConversationContext,
             };
           }
-          if (conversationResolution.turnMode === 'act') {
-            const actionProposal = parseConversationActionProposal(queryText);
-            const answer = actionProposal
-              ? `I can add “${actionProposal.text}” as an open commitment. Confirm it below and I’ll save it locally.`
-              : 'I haven’t made that change. Chat can currently prepare a commitment for your confirmation, but this action is not available yet.';
-            outputCharacters = answer.length;
+          if (
+            conversationResolution.turnMode === 'act' ||
+            isTaskChatRequest(queryText)
+          ) {
+            const taskReply = await prepareTaskChatReply({
+              query: queryText,
+              previousAnswer: previousAssistantTurn?.content,
+              snapshot: personalTasks.listPersonalTasks(),
+              canShareSource: (meetingId) => {
+                const meeting = db.getAskPlutoMeeting(meetingId);
+                return Boolean(
+                  meeting &&
+                    !containsConfidentialAside(
+                      `${meeting.title}\n${buildMeetingNotesEvidenceDocument(meeting).notesText}`,
+                    ),
+                );
+              },
+              generate: async (prompt) => {
+                const provider = await getProvider(settings);
+                return provider.answerAskPluto(prompt, {
+                  signal: controller.signal,
+                  mode: 'fast',
+                  jsonMode: true,
+                });
+              },
+            });
+            outputCharacters = taskReply.answer.length;
             generationCompletedAt = Date.now();
             finalizationStartedAt = generationCompletedAt;
             finalizationCompletedAt = generationCompletedAt;
             return {
               status: 'answered' as const,
-              answer,
+              ...taskReply,
               citations: [],
               currentMeeting: currentMeetingStatus,
               outcome: 'answered' as const,
               resolvedScope: previousAssistantTurn?.resolvedScope,
               conversationContext: previousConversationContext,
-              ...(actionProposal ? { actionProposal } : {}),
+              turnMode: 'act' as const,
             };
           }
           if (
@@ -9142,6 +9208,11 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                   : buildExtractiveTemporalSummary(effectiveQueryText, context);
           let answerRaw: string;
           let answerPrompt: string | undefined;
+          const preferences = readResponsePreferences(db);
+          const responseWordLimit =
+            /\b(?:brief|briefing|prepare|preparation)\b/i.test(queryText)
+              ? (preferences.preparation ?? preferences.chat)
+              : preferences.chat;
           if (
             extractiveAnswer &&
             (usePreparedAssigneeRecall ||
@@ -9191,6 +9262,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                 : undefined,
               confirmedSelfName,
               {
+                responseWordLimit,
                 userProfile: confirmedSelfName
                   ? {
                       name: confirmedSelfName,

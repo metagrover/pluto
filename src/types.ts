@@ -163,7 +163,8 @@ export interface AnalysisGenerationMetadata {
     | 'writer-only-v1'
     | 'writer-audit-v1'
     | 'writer-editor-v1'
-    | 'writer-editor-bounded-v1';
+    | 'writer-editor-bounded-v1'
+    | 'writer-source-action-review-v1'; // Legacy saved documents; not a generation route.
   mode?: 'direct' | 'hierarchical';
   audit_status?: 'complete' | 'complete_with_warnings';
   audit_change_count?: number;

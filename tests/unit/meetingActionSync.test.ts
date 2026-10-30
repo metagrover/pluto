@@ -853,6 +853,7 @@ describe('corrected saved evidence for pending dashboard suggestions', () => {
     ['rejected', { commitment_state: 'rejected' }],
     ['edited', { user_edited: true }],
     ['reviewed', { reviewed_at: '2026-10-16T10:00:00Z' }],
+    ['user-owned', { owner_source: 'user' }],
   ])(
     'preserves %s state when an unchanged task gains wider source context',
     (suffix, metadata) => {
@@ -969,4 +970,326 @@ describe('corrected saved evidence for pending dashboard suggestions', () => {
     );
     expect(getEntity(entity.id)?.due_date).toBeNull();
   });
+});
+
+// Recovered behavior cases from the preserved local snapshot.
+it('preserves completed source tasks when rewrite archives their checkbox overlay', () => {
+  const meetingId = 'archived-completion';
+  saveMeeting({
+    id: meetingId,
+    title: 'Checklist',
+    analysis_json: JSON.stringify({
+      all_action_items: [{ text: 'Send checklist' }],
+    }),
+    user_edits_json: '{}',
+  });
+  upsertEntity({
+    id: 'archived-completion-task',
+    dedupe_by_name: false,
+    type: 'action_item',
+    name: 'Send checklist',
+    status: 'completed',
+    metadata: {
+      origin: 'extraction',
+      source_meeting_id: meetingId,
+      original_description: 'Send checklist',
+      user_completed_edited: true,
+    },
+  });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  expect(getEntity('archived-completion-task')?.status).toBe('completed');
+});
+it('preserves native tasks through archived or malformed overlays, moves their host, and honors explicit removal', () => {
+  const meetingId = 'native-overlay-continuity';
+  const oldPath = 'native_continuations:all_action_items:0';
+  const newPath = 'native_continuations:all_action_items:2';
+  const rows = [
+    { id: 'own', text: 'Review checklist', kind: 'action', assignee: 'Me' },
+  ];
+  const saveEdits = (edits: unknown) =>
+    saveMeeting({
+      id: meetingId,
+      title: 'Checklist',
+      user_edits_json: JSON.stringify(edits),
+    });
+  saveEdits({ [oldPath]: { original: '[]', edited: JSON.stringify(rows) } });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  const id = `action-continuation-${meetingId}-own`;
+  expect(getEntity(id)).toBeTruthy();
+  const metadata = parseActionMetadata(getEntity(id)!.metadata);
+  db.prepare('UPDATE entities SET metadata = ? WHERE id = ?').run(
+    JSON.stringify({
+      ...metadata,
+      assignee_name: 'Me',
+      assignee_is_self: true,
+    }),
+    id,
+  );
+  for (const edits of [
+    {},
+    { [oldPath]: { edited: 'broken' } },
+    { [oldPath]: { edited: '[{}]' } },
+  ]) {
+    saveEdits(edits);
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    expect(getEntity(id)).toBeTruthy();
+  }
+  saveEdits({ [newPath]: { original: '[]', edited: JSON.stringify(rows) } });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  expect(parseActionMetadata(getEntity(id)!.metadata)).toMatchObject({
+    source_path: newPath,
+    assignee_name: 'Me',
+    assignee_is_self: true,
+  });
+  updateEntityStatus(id, 'completed');
+  expect(
+    JSON.parse(
+      JSON.parse(getMeeting(meetingId)!.user_edits_json!)[newPath].edited,
+    )[0].completed,
+  ).toBe(true);
+  saveEdits({ [newPath]: { original: '[]', edited: '[]' } });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  expect(getEntity(id)).toBeUndefined();
+});
+it('keeps completion with the matching owner when two people have the same task wording', () => {
+  const meetingId = 'same-wording-different-owners';
+  saveMeeting({
+    id: meetingId,
+    title: 'Owner continuity',
+    analysis_json: JSON.stringify({
+      all_action_items: [
+        { text: 'Send the checklist', assignee: 'Me' },
+        { text: 'Send the checklist', assignee: 'Other' },
+      ],
+    }),
+    user_edits_json: JSON.stringify({
+      'completion:all_action_items:0': { original: 'false', edited: 'true' },
+    }),
+  });
+  for (const owner of ['Me', 'Other'])
+    upsertEntity({
+      id: `owner-checklist-${owner}`,
+      type: 'action_item',
+      name: 'Send the checklist',
+      status: 'active',
+      dedupe_by_name: false,
+      metadata: {
+        origin: 'extraction',
+        source_meeting_id: meetingId,
+        original_description: 'Send the checklist',
+        assignee_name: owner,
+      },
+    });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  expect(getEntity('owner-checklist-Me')?.status).toBe('completed');
+  expect(getEntity('owner-checklist-Other')?.status).toBe('active');
+});
+it('does not transfer a source checkbox to a retained task whose owner changed in the rewritten notes', () => {
+  const meetingId = 'changed-note-owner';
+  saveMeeting({
+    id: meetingId,
+    title: 'Owner change',
+    analysis_json: JSON.stringify({
+      all_action_items: [{ text: 'Send the checklist', assignee: 'Other' }],
+    }),
+    user_edits_json: JSON.stringify({
+      'completion:all_action_items:0': { original: 'false', edited: 'true' },
+    }),
+  });
+  upsertEntity({
+    id: 'retained-own-checklist',
+    type: 'action_item',
+    name: 'Send the checklist',
+    status: 'active',
+    dedupe_by_name: false,
+    metadata: {
+      origin: 'extraction',
+      commitment_state: 'confirmed',
+      source_meeting_id: meetingId,
+      original_description: 'Send the checklist',
+      assignee_name: 'Me',
+    },
+  });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  expect(getEntity('retained-own-checklist')?.status).toBe('active');
+  expect(
+    parseActionMetadata(getEntity('retained-own-checklist')!.metadata)
+      .assignee_name,
+  ).toBe('Me');
+});
+it('mirrors Home completion into a legacy string action after a case-only rewrite', () => {
+  const meetingId = 'legacy-string-home-completion';
+  saveMeeting({
+    id: meetingId,
+    title: 'Legacy completion',
+    analysis_json: JSON.stringify({ action_items: ['send the checklist'] }),
+  });
+  upsertEntity({
+    id: 'legacy-string-task',
+    type: 'action_item',
+    name: 'Send the checklist',
+    status: 'active',
+    dedupe_by_name: false,
+    metadata: {
+      origin: 'extraction',
+      source_meeting_id: meetingId,
+      source_path: 'v2:action:0',
+      original_description: 'Send the checklist',
+      assignee_name: 'Me',
+    },
+  });
+  updateEntityStatus('legacy-string-task', 'completed');
+  expect(
+    JSON.parse(getMeeting(meetingId)!.user_edits_json!)[
+      'completion:v2:action:0'
+    ].edited,
+  ).toBe('true');
+});
+it('keeps ordinary native notes out of tasks and removes an unreviewed erroneous projection without deleting the note', () => {
+  const meetingId = 'plain-native-note';
+  const path = 'native_continuations:topic:0:point:0';
+  const edits = {
+    [path]: {
+      original: '[]',
+      edited: JSON.stringify([
+        { id: 'note', text: 'Ordinary discussion note' },
+      ]),
+    },
+  };
+  saveMeeting({
+    id: meetingId,
+    title: 'Ordinary notes',
+    analysis_json: JSON.stringify({
+      all_action_items: [],
+      topics: [{ key_points: ['Background'] }],
+    }),
+    user_edits_json: JSON.stringify(edits),
+  });
+  const id = `action-continuation-${meetingId}-note`;
+  upsertEntity({
+    id,
+    type: 'action_item',
+    name: 'Ordinary discussion note',
+    status: 'active',
+    dedupe_by_name: false,
+    metadata: {
+      origin: 'user',
+      commitment_state: 'confirmed',
+      source_meeting_id: meetingId,
+      source_path: path,
+      continuation_id: 'note',
+    },
+  });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  expect(getEntity(id)).toBeUndefined();
+  expect(JSON.parse(getMeeting(meetingId)!.user_edits_json!)).toEqual(edits);
+});
+it('uses declared task intent and inherited ownership instead of treating every authored line as mine', () => {
+  const meetingId = 'typed-native-intent';
+  const path = 'native_continuations:all_action_items:0';
+  saveMeeting({
+    id: meetingId,
+    title: 'Native intent',
+    analysis_json: JSON.stringify({
+      all_action_items: [{ text: 'Parent task', assignee: 'Other' }],
+    }),
+    user_edits_json: JSON.stringify({
+      [path]: {
+        original: '[]',
+        edited: JSON.stringify([
+          { id: 'note', text: 'A plain comment', kind: 'note' },
+          {
+            id: 'decision',
+            text: 'A decision acknowledgement',
+            kind: 'decision',
+            completed: false,
+          },
+          { id: 'other', text: 'Inherited task' },
+          {
+            id: 'own',
+            text: 'Write checklist',
+            kind: 'action',
+            assignee: 'Me',
+          },
+          {
+            id: 'unknown',
+            text: 'Resolve question',
+            kind: 'action',
+            assignee: null,
+          },
+        ]),
+      },
+    }),
+  });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  const task = (key: string) =>
+    getEntity(`action-continuation-${meetingId}-${key}`);
+  expect(task('note')).toBeUndefined();
+  expect(task('decision')).toBeUndefined();
+  expect(parseActionMetadata(task('other')!.metadata).assignee_name).toBe(
+    'Other',
+  );
+  expect(isPersonalAction(task('other')!, {})).toBe(false);
+  expect(isPersonalAction(task('own')!, {})).toBe(true);
+  expect(isPersonalAction(task('unknown')!, {})).toBe(false);
+  updateActionCommitmentState(task('unknown')!.id, 'confirmed');
+  expect(isPersonalAction(task('unknown')!, {})).toBe(true);
+});
+it('does not reopen a completed native task when a restored note row omits its completion flag', () => {
+  const meetingId = 'native-closed-continuity';
+  const path = 'native_continuations:all_action_items:0';
+  const row = {
+    id: 'closed',
+    text: 'Send checklist',
+    kind: 'action',
+    assignee: 'Me',
+  };
+  const setRow = (value: unknown) =>
+    saveMeeting({
+      id: meetingId,
+      title: 'Closed continuity',
+      user_edits_json: JSON.stringify({
+        [path]: { original: '[]', edited: JSON.stringify([value]) },
+      }),
+    });
+  setRow(row);
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  const id = `action-continuation-${meetingId}-closed`;
+  updateEntityStatus(id, 'completed');
+  setRow(row);
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  expect(getEntity(id)?.status).toBe('completed');
+  setRow({ ...row, completed: false });
+  syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+  expect(getEntity(id)?.status).toBe('active');
+});
+
+it('does not mirror completion into a source action with a different recorded owner', () => {
+  const meetingId = 'completion-source-owner-changed';
+  saveMeeting({
+    id: meetingId,
+    title: 'Fictional owner continuity',
+    analysis_json: JSON.stringify({
+      all_action_items: [{ text: 'Send checklist', assignee: 'Other' }],
+    }),
+    user_edits_json: '{}',
+  });
+  const task = upsertEntity({
+    id: 'completion-owner-task',
+    type: 'action_item',
+    name: 'Send checklist',
+    status: 'active',
+    dedupe_by_name: false,
+    metadata: {
+      origin: 'extraction',
+      commitment_state: 'confirmed',
+      source_meeting_id: meetingId,
+      source_path: 'all_action_items:0',
+      original_description: 'Send checklist',
+      assignee_name: 'Me',
+    },
+  });
+  updateEntityStatus(task.id, 'completed');
+  expect(getEntity(task.id)?.status).toBe('completed');
+  expect(JSON.parse(getMeeting(meetingId)!.user_edits_json!)).toEqual({});
 });

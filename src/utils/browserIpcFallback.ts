@@ -20,6 +20,7 @@ import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
 import type { LocalArtifact } from '../api/localArtifacts';
 import type { Meeting } from '../types';
 import { hasVerifiedSpeakerAttribution } from './speakerAttributionTrust';
+import { invokeTaskPreview } from './taskPreview';
 
 type IpcRendererLike = Window['ipcRenderer'];
 type BrowserCaptureJournal = {
@@ -1137,6 +1138,11 @@ const createInvokeFallback =
     captureJournals: Map<string, BrowserCaptureJournal>,
   ): IpcRendererLike['invoke'] =>
   async <T = unknown>(channel: string, ...args: unknown[]): Promise<T> => {
+    if (channel.startsWith('TASKS_'))
+      return invokeTaskPreview(
+        channel,
+        args[0] as Record<string, unknown>,
+      ) as T;
     let result: unknown;
 
     switch (channel) {

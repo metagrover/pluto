@@ -4,6 +4,7 @@ import type { ConversationTurnMode } from './conversationController';
 import type { RetrievalResult } from './intelligenceTypes';
 import { CANONICAL_COMMITMENT_ANSWER_GUIDANCE } from './meetingNotesEvidence';
 import { excerptQueryEvidence } from './queryEvidenceExcerpt';
+import { responseLengthGuidance } from './responsePreferences';
 
 export const getIntentClassificationPrompt = (query: string): string => {
   return `Analyze the following user query sent to an AI meeting assistant.
@@ -22,6 +23,7 @@ Query: "${query}"`;
 };
 
 export interface AskPlutoPromptOptions {
+  responseWordLimit?: number;
   omissionReview?: {
     claims: string[];
     previousAnswer: string;
@@ -84,6 +86,7 @@ export const getAskPlutoPrompt = (
       'omissionReview' in omissionReviewOrOptions ||
       'expansionReview' in omissionReviewOrOptions ||
       'isPlanningQuery' in omissionReviewOrOptions ||
+      'responseWordLimit' in omissionReviewOrOptions ||
       'disputedEntity' in omissionReviewOrOptions ||
       'projectContext' in omissionReviewOrOptions ||
       'activeConversationContext' in omissionReviewOrOptions ||
@@ -289,27 +292,29 @@ ${details.join('\n')}`;
   ]
     .filter(Boolean)
     .join(' ');
-  const responseLimit = omissionReview
-    ? 'Use up to 220 words to cover the additional supported details. If there are none, briefly state that this search did not confirm anything new.'
-    : task === 'draft'
-      ? conciseDraft
-        ? `Keep the entire draft under ${conciseDraftWords} words. Preserve its concrete questions and requested uncertainty. Use a greeting and one compact paragraph. Omit a sign-off for a chat message unless the user requests one; include one only when the requested format clearly needs it, such as an email. Do not use labels, sections, or bullets.`
-        : 'Keep the draft under 140 words unless the user explicitly asks for a longer format. Prefer a single connected message over sections or bullets.'
-      : expansionReview && isPlanningQuery && task === 'analysis'
-        ? 'Use up to 260 words. Prefer two or three specific observations and practical next moves over a broad inventory of projects.'
-        : expansionReview
-          ? 'Use up to 180 words for genuinely additional context. Do not fill space by repeating takeaways.'
-          : options.projectContext && task === 'analysis'
-            ? 'Use up to 360 words when the evidence supports that depth. Prefer a coherent project picture over one bullet per fact.'
-            : isPlanningQuery
-              ? 'Use up to 260 words. Give specific priorities and reasoning rather than an inventory of every project.'
-              : task === 'analysis'
-                ? 'Use up to 300 words. Prefer a small number of well-supported observations and useful recommendations over a long speculative review.'
-                : task === 'comparison'
-                  ? 'Use up to 260 words and cover every material comparison supported by the selected sources.'
-                  : multiMeetingSynthesis
-                    ? 'Cover each meeting that has meaningful evidence, using up to 260 words. Do not collapse a multi-meeting request into one or two generic points.'
-                    : 'Use the space the question needs, up to 260 words. A simple fact may take one sentence; a broad question should cover its material supported details. Return fewer details rather than inventing coverage.';
+  const responseLimit =
+    responseLengthGuidance(options.responseWordLimit) ||
+    (omissionReview
+      ? 'Use up to 220 words to cover the additional supported details. If there are none, briefly state that this search did not confirm anything new.'
+      : task === 'draft'
+        ? conciseDraft
+          ? `Keep the entire draft under ${conciseDraftWords} words. Preserve its concrete questions and requested uncertainty. Use a greeting and one compact paragraph. Omit a sign-off for a chat message unless the user requests one; include one only when the requested format clearly needs it, such as an email. Do not use labels, sections, or bullets.`
+          : 'Keep the draft under 140 words unless the user explicitly asks for a longer format. Prefer a single connected message over sections or bullets.'
+        : expansionReview && isPlanningQuery && task === 'analysis'
+          ? 'Use up to 260 words. Prefer two or three specific observations and practical next moves over a broad inventory of projects.'
+          : expansionReview
+            ? 'Use up to 180 words for genuinely additional context. Do not fill space by repeating takeaways.'
+            : options.projectContext && task === 'analysis'
+              ? 'Use up to 360 words when the evidence supports that depth. Prefer a coherent project picture over one bullet per fact.'
+              : isPlanningQuery
+                ? 'Use up to 260 words. Give specific priorities and reasoning rather than an inventory of every project.'
+                : task === 'analysis'
+                  ? 'Use up to 300 words. Prefer a small number of well-supported observations and useful recommendations over a long speculative review.'
+                  : task === 'comparison'
+                    ? 'Use up to 260 words and cover every material comparison supported by the selected sources.'
+                    : multiMeetingSynthesis
+                      ? 'Cover each meeting that has meaningful evidence, using up to 260 words. Do not collapse a multi-meeting request into one or two generic points.'
+                      : 'Use the space the question needs, up to 260 words. A simple fact may take one sentence; a broad question should cover its material supported details. Return fewer details rather than inventing coverage.');
 
   const conversationTurns = expansionReview
     ? priorTurns.filter((turn) => turn.role === 'user').slice(-2)

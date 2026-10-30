@@ -21,7 +21,7 @@ import {
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { upsertEntity } from '../../api/knowledgeGraph';
+import { applyTaskChatAction } from '../../api/tasks';
 import {
   appendWorkspaceChatMessage,
   archiveWorkspaceChatThread,
@@ -55,6 +55,7 @@ import { Logo } from '../Brand/Logo';
 import type { CitationChain } from './CitationCard';
 
 interface AskPlutoProps {
+  onOpenTask?: (id: string) => void;
   onOpenMeeting: (
     id: string,
     target?: { sectionId?: string; timestampMs?: number },
@@ -89,6 +90,7 @@ export interface AskPlutoMessage {
   retrievalPolicy?: AskPlutoQueryResponse['retrievalPolicy'];
   actionProposal?: AskPlutoQueryResponse['actionProposal'];
   actionState?: 'saving' | 'completed' | 'failed';
+  actionTaskId?: string;
 }
 
 const groupCitationsByMeeting = (citations: CitationChain[]) => {
@@ -151,6 +153,7 @@ const toWorkspacePayload = (
     : {}),
   ...(message.actionProposal ? { actionProposal: message.actionProposal } : {}),
   ...(message.actionState ? { actionState: message.actionState } : {}),
+  ...(message.actionTaskId ? { actionTaskId: message.actionTaskId } : {}),
 });
 
 const summarizeAnswer = (content: string): string =>
@@ -169,6 +172,7 @@ const formatConversationDate = (value: string): string => {
 
 export const AskPluto: React.FC<AskPlutoProps> = ({
   onOpenMeeting,
+  onOpenTask,
   onOpenArtifact,
   onOpenSettings,
   visible,
@@ -833,7 +837,12 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
   const confirmAction = async (message: AskPlutoMessage) => {
     const proposal = message.actionProposal;
-    if (!proposal || message.actionState === 'saving') return;
+    if (
+      !proposal ||
+      message.actionState === 'saving' ||
+      message.actionState === 'completed'
+    )
+      return;
     setMessages((current) =>
       current.map((candidate) =>
         candidate.id === message.id
@@ -842,23 +851,16 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       ),
     );
     try {
-      await upsertEntity({
-        type: 'action_item',
-        name: proposal.text,
-        status: 'active',
-        due_date: null,
-        dedupe_by_name: true,
-        metadata: {
-          commitment_state: 'confirmed',
-          origin: 'user',
-          created_from: 'ask_pluto',
-          created_at: new Date().toISOString(),
-        },
-      });
+      const actionTaskId = await applyTaskChatAction(
+        proposal.kind === 'create_commitment'
+          ? { kind: 'create_task', text: proposal.text, label: 'Add task' }
+          : proposal,
+        message.id,
+      );
       setMessages((current) =>
         current.map((candidate) =>
           candidate.id === message.id
-            ? { ...candidate, actionState: 'completed' }
+            ? { ...candidate, actionState: 'completed', actionTaskId }
             : candidate,
         ),
       );
@@ -870,6 +872,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           payload: toWorkspacePayload({
             ...message,
             actionState: 'completed',
+            actionTaskId,
           }),
         }).catch(() => undefined);
       }
@@ -1348,7 +1351,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                             </p>
                             <p className="mt-0.5 text-[11px] text-pro-text-muted">
                               {msg.actionState === 'completed'
-                                ? 'Saved to your commitments'
+                                ? 'Saved to Tasks'
                                 : msg.actionState === 'failed'
                                   ? 'Could not save it. Try again.'
                                   : 'Nothing changes until you confirm'}
@@ -1375,6 +1378,17 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                               />
                             ) : null}
                           </button>
+                          {msg.actionState === 'completed' &&
+                            msg.actionTaskId &&
+                            onOpenTask && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenTask(msg.actionTaskId!)}
+                                className="text-[12px] font-medium text-pro-text-main hover:underline"
+                              >
+                                View task
+                              </button>
+                            )}
                         </div>
                       )}
 

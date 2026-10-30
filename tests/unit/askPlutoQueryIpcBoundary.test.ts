@@ -288,9 +288,7 @@ describe('Ask Pluto query IPC boundary', () => {
       "conversationResolution.turnMode === 'act'",
     );
     expect(actionBranch).toBeGreaterThan(-1);
-    expect(queryHandler).toContain(
-      'parseConversationActionProposal(queryText)',
-    );
+    expect(queryHandler).toContain('prepareTaskChatReply');
     expect(actionBranch).toBeLessThan(
       queryHandler.indexOf('await parseQuery('),
     );

@@ -36,6 +36,7 @@ export interface WorkspaceChatMessagePayload {
   retrievalPolicy?: AskPlutoQueryResponse['retrievalPolicy'];
   actionProposal?: AskPlutoQueryResponse['actionProposal'];
   actionState?: 'saving' | 'completed' | 'failed';
+  actionTaskId?: string;
 }
 
 export interface WorkspaceChatMessage {

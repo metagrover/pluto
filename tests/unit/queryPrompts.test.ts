@@ -7,6 +7,26 @@ import {
 import { calculateOllamaContextBudget } from '../../electron/llm/unifiedProvider';
 
 describe('getAskPlutoPrompt', () => {
+  it('uses an explicit saved length preference instead of a conflicting default cap', () => {
+    const prompt = getAskPlutoPrompt(
+      'Summarize the decisions',
+      [],
+      'factual',
+      [],
+      '',
+      'analysis',
+      undefined,
+      undefined,
+      undefined,
+      { responseWordLimit: 60 },
+    );
+    expect(prompt).toContain('fewer than 60 words');
+    expect(prompt).not.toContain('Use up to 300 words');
+    expect(prompt).toContain(
+      'preserving uncertainty, attribution, and conditions',
+    );
+  });
+
   it('preserves canonical lifecycle when answering task details', () => {
     const prompt = getAskPlutoPrompt(
       'Who is sending it, and under what condition?',

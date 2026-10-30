@@ -138,6 +138,7 @@ export const persistDashboardPriorityOrder = async (
       if (!entity || entity.type !== 'action_item') continue;
       const {
         dashboard_daily_priority: _previousPriority,
+        task_focus_excluded_date: previousExclusion,
         ...metadataWithoutPriority
       } = parseActionMetadata(entity.metadata);
       const rank = orderedIds.indexOf(entity.id);
@@ -147,7 +148,12 @@ export const persistDashboardPriorityOrder = async (
               ...metadataWithoutPriority,
               dashboard_daily_priority: { date: input.dateKey, rank },
             }
-          : metadataWithoutPriority;
+          : {
+              ...metadataWithoutPriority,
+              ...(previousExclusion
+                ? { task_focus_excluded_date: previousExclusion }
+                : {}),
+            };
       await deps.upsertEntity({
         id: entity.id,
         type: 'action_item',

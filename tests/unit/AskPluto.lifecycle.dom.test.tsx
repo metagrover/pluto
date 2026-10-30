@@ -1573,69 +1573,81 @@ describe('Ask Pluto request lifecycle', () => {
     expect(historyButton?.getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('requires confirmation before creating a commitment', async () => {
-    const invoke = vi.fn((channel: string) => {
-      if (channel === 'intelligence:suggested-queries')
-        return Promise.resolve([]);
-      if (channel === 'intelligence:query') {
-        return Promise.resolve({
-          status: 'answered',
-          answer:
-            'I can add “send the release note” as an open commitment. Confirm it below.',
-          citations: [],
-          turnMode: 'act',
-          retrievalPolicy: 'none',
-          actionProposal: {
-            kind: 'create_commitment',
-            text: 'send the release note',
-            label: 'Add commitment',
-          },
-        });
-      }
-      if (channel === 'UPSERT_ENTITY') {
-        return Promise.resolve({ id: 'commitment-1' });
-      }
-      return Promise.resolve(null);
-    });
-    Object.defineProperty(window, 'ipcRenderer', {
-      configurable: true,
-      value: { invoke, on: vi.fn(() => () => undefined) },
-    });
-    await act(async () => {
-      root.render(
-        <AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />,
-      );
-    });
-
-    const input = container.querySelector('input') as HTMLInputElement;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        'value',
-      )?.set?.call(input, 'Create a commitment to send the release note');
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await act(async () => {
-      container
-        .querySelector('form')
-        ?.dispatchEvent(
-          new Event('submit', { bubbles: true, cancelable: true }),
+  it.each(['create_commitment', 'set_task_status'] as const)(
+    'requires confirmation before applying %s through the shared task API',
+    async (kind) => {
+      const invoke = vi.fn((channel: string) => {
+        if (channel === 'intelligence:suggested-queries')
+          return Promise.resolve([]);
+        if (channel === 'intelligence:query') {
+          return Promise.resolve({
+            status: 'answered',
+            answer:
+              'I can add “send the release note” as an open commitment. Confirm it below.',
+            citations: [],
+            turnMode: 'act',
+            retrievalPolicy: 'none',
+            actionProposal: {
+              kind,
+              ...(kind === 'set_task_status'
+                ? { taskId: 'commitment-1', status: 'completed' }
+                : {}),
+              text: 'send the release note',
+              label: 'Add commitment',
+            },
+          });
+        }
+        if (channel === 'TASKS_CHAT_APPLY') {
+          return Promise.resolve('commitment-1');
+        }
+        return Promise.resolve(null);
+      });
+      Object.defineProperty(window, 'ipcRenderer', {
+        configurable: true,
+        value: { invoke, on: vi.fn(() => () => undefined) },
+      });
+      await act(async () => {
+        root.render(
+          <AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />,
         );
-    });
+      });
 
-    expect(invoke).not.toHaveBeenCalledWith('UPSERT_ENTITY', expect.anything());
-    const confirm = [...container.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Add commitment'),
-    );
-    expect(confirm).toBeDefined();
-    await act(async () => confirm?.click());
-    expect(invoke).toHaveBeenCalledWith(
-      'UPSERT_ENTITY',
-      expect.objectContaining({
-        type: 'action_item',
-        name: 'send the release note',
-      }),
-    );
-    expect(container.textContent).toContain('Saved to your commitments');
-  });
+      const input = container.querySelector('input') as HTMLInputElement;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value',
+        )?.set?.call(input, 'Create a commitment to send the release note');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => {
+        container
+          .querySelector('form')
+          ?.dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+          );
+      });
+
+      expect(invoke).not.toHaveBeenCalledWith(
+        'TASKS_CHAT_APPLY',
+        expect.anything(),
+      );
+      const confirm = [...container.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Add commitment'),
+      );
+      expect(confirm).toBeDefined();
+      await act(async () => confirm?.click());
+      expect(invoke).toHaveBeenCalledWith(
+        'TASKS_CHAT_APPLY',
+        expect.objectContaining({
+          proposal: expect.objectContaining({
+            kind: kind === 'create_commitment' ? 'create_task' : kind,
+            text: 'send the release note',
+          }),
+          requestId: expect.any(String),
+        }),
+      );
+      expect(container.textContent).toContain('Saved to Tasks');
+    },
+  );
 });

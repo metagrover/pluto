@@ -46,7 +46,7 @@ interface DashboardProps {
   isRecording: boolean;
   setSelectedMeetingId: (id: string | number | null) => void;
   setActiveTab: (
-    tab: 'hub' | 'people' | 'projects' | 'meetings' | 'chat',
+    tab: 'hub' | 'tasks' | 'people' | 'projects' | 'meetings' | 'chat',
   ) => void;
   setAskPlutoVisible?: (visible: boolean) => void;
   updatingTaskIds: Set<string>;
@@ -494,6 +494,7 @@ export const CurrentReadClaim = ({ claim }: { claim: string }) => {
 };
 
 export const Dashboard = ({
+  setActiveTab,
   model,
   date = new Date(),
   loading,
@@ -896,18 +897,27 @@ export const Dashboard = ({
                 Today&apos;s focus
               </h2>
             </div>
-            <button
-              type="button"
-              ref={addCommitmentButtonRef}
-              aria-label="Add a commitment"
-              aria-expanded={addingCommitment}
-              disabled={isCreatingCommitment}
-              title="Add a commitment"
-              onClick={() => setAddingCommitment((value) => !value)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-pro-border/70 text-pro-text-muted transition-colors hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-            >
-              <Plus className="h-4 w-4" aria-hidden="true" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="text-[12px] text-pro-text-muted hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+                onClick={() => setActiveTab('tasks')}
+              >
+                View all tasks
+              </button>
+              <button
+                type="button"
+                ref={addCommitmentButtonRef}
+                aria-label="Add a commitment"
+                aria-expanded={addingCommitment}
+                disabled={isCreatingCommitment}
+                title="Add a commitment"
+                onClick={() => setAddingCommitment((value) => !value)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-pro-border/70 text-pro-text-muted transition-colors hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
           </div>
 
           {addingCommitment ? (

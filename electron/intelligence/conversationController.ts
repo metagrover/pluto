@@ -35,7 +35,7 @@ const CHALLENGE =
 const DRAFT =
   /\b(?:draft|write|rewrite|compose|word|rephrase|create)\b[\s\S]{0,80}\b(?:email|message|note|reply|follow-up|follow up|response|summary)\b|\b(?:email|message|reply)\s+draft\b/i;
 const ACTION =
-  /^(?:please\s+)?(?:create|add|save|record|mark|schedule|send|update|archive|delete|remove|assign|complete)\b/i;
+  /^(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:create|add|save|record|mark|schedule|send|update|archive|delete|remove|assign|complete|finish|reopen)\b/i;
 const PRIOR_REFERENCE =
   /\b(?:it|that|this|those|these|the (?:point|insight|answer|recommendation|risk|concern)|you (?:said|mentioned|suggested|recommended)|your (?:answer|point|suggestion)|above|earlier|previous)\b/i;
 const QUESTION_OR_REQUEST =

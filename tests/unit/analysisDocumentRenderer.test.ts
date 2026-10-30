@@ -147,6 +147,8 @@ continues on next line.
     'writer-audit-v1',
     'writer-editor-v1',
     'writer-editor-bounded-v1',
+    'writer-only-v1',
+    'writer-source-action-review-v1',
   ] as const)(
     'treats incomplete %s provenance as a conflict boundary',
     (pipelineVersion) => {
@@ -168,7 +170,13 @@ continues on next line.
           model: 'local',
           generation_path: 'single_pass',
           prompt_version:
-            pipelineVersion === 'writer-audit-v1' ? 'notes-v10' : 'notes-v11',
+            pipelineVersion === 'writer-audit-v1'
+              ? 'notes-v10'
+              : pipelineVersion === 'writer-source-action-review-v1'
+                ? 'notes-v38'
+                : pipelineVersion === 'writer-only-v1'
+                  ? 'notes-v100'
+                  : 'notes-v11',
           generated_at: '2026-08-26T00:00:00.000Z',
           error_categories: [],
           pipeline_version: pipelineVersion,
