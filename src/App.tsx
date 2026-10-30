@@ -54,6 +54,7 @@ import { MeetingView } from './components/features/MeetingView';
 import { PreMeetingBriefSheet } from './components/features/PreMeetingBriefSheet';
 import { RecordingFinalizingView } from './components/features/RecordingFinalizingView';
 import { RECORDING_SCRATCHPAD_STORAGE_KEY } from './components/features/RecordingMeetingRail';
+import { TasksView } from './components/features/TasksView';
 import { ZenMode } from './components/features/ZenMode';
 import {
   DASHBOARD_ACTION_COMPLETION_ERROR,
@@ -165,6 +166,7 @@ const dashboardPreviewEnabled = previewParam === 'dashboard';
 const chatPreviewEnabled = previewParam === 'chat';
 const peoplePreviewEnabled = previewParam === 'people';
 const projectsPreviewEnabled = previewParam === 'projects';
+const tasksPreviewEnabled = previewParam === 'tasks';
 const SOURCES_ENABLED = isFeatureEnabled('sources');
 
 type MeetingRetryRoute =
@@ -312,6 +314,7 @@ function App() {
     Array<{
       tab:
         | 'hub'
+        | 'tasks'
         | 'people'
         | 'projects'
         | 'sources'
@@ -327,20 +330,30 @@ function App() {
     }>
   >([]);
   const [activeTab, setActiveTab] = useState<
-    'hub' | 'people' | 'projects' | 'sources' | 'meetings' | 'chat' | 'settings'
+    | 'hub'
+    | 'tasks'
+    | 'people'
+    | 'projects'
+    | 'sources'
+    | 'meetings'
+    | 'chat'
+    | 'settings'
   >(
-    chatPreviewEnabled
-      ? 'chat'
-      : peoplePreviewEnabled
-        ? 'people'
-        : projectsPreviewEnabled
-          ? 'projects'
-          : dashboardPreviewEnabled || meetingPreviewEnabled
-            ? 'hub'
-            : window.__PLUTO_BROWSER_PREVIEW__
-              ? 'projects'
-              : 'hub',
+    tasksPreviewEnabled
+      ? 'tasks'
+      : chatPreviewEnabled
+        ? 'chat'
+        : peoplePreviewEnabled
+          ? 'people'
+          : projectsPreviewEnabled
+            ? 'projects'
+            : dashboardPreviewEnabled || meetingPreviewEnabled
+              ? 'hub'
+              : window.__PLUTO_BROWSER_PREVIEW__
+                ? 'projects'
+                : 'hub',
   );
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(
     Boolean(previewParam) ||
@@ -1648,6 +1661,8 @@ function App() {
         defaultLabel = 'Back to Project';
       } else if (activeTab === 'projects') {
         defaultLabel = 'Back to Projects';
+      } else if (activeTab === 'tasks') {
+        defaultLabel = 'Back to Tasks';
       } else if (activeTab === 'sources') {
         defaultLabel = 'Back to Sources';
       } else if (activeTab === 'meetings') {
@@ -1803,6 +1818,7 @@ function App() {
       if (activeTab === 'people' && selectedPersonId) return 'Back to Person';
       if (activeTab === 'people') return 'Back to People';
       if (activeTab === 'projects') return 'Back to Projects';
+      if (activeTab === 'tasks') return 'Back to Tasks';
       if (activeTab === 'meetings') return 'All meetings';
       if (activeTab === 'chat') return 'Back to Chat';
       return 'Back to Dashboard';
@@ -2463,7 +2479,9 @@ function App() {
                           : 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
                         : !selectedMeetingId && activeTab === 'people'
                           ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                          : !selectedMeetingId && activeTab === 'projects'
+                          : !selectedMeetingId &&
+                              (activeTab === 'projects' ||
+                                activeTab === 'tasks')
                             ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
                             : !selectedMeetingId && activeTab === 'meetings'
                               ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
@@ -2610,6 +2628,13 @@ function App() {
                   onPrepareMeeting={handlePrepareMeeting}
                 />
               </>
+            ) : activeTab === 'tasks' ? (
+              <TasksView
+                initialTaskId={selectedTaskId}
+                onOpenMeeting={(id) =>
+                  handleOpenMeeting(id, { label: 'Back to Tasks' })
+                }
+              />
             ) : activeTab === 'people' ? (
               <div className="mx-auto w-full max-w-[1180px] animate-in pb-20">
                 <PeopleTab
@@ -2660,6 +2685,11 @@ function App() {
             ) : activeTab === 'chat' ? (
               <div className="min-h-full w-full flex flex-col">
                 <AskPluto
+                  onOpenTask={(id) => {
+                    setSelectedTaskId(id);
+                    setSelectedMeetingId(null);
+                    setActiveTab('tasks');
+                  }}
                   visible={true}
                   messages={askPlutoConversation}
                   setMessages={setAskPlutoConversation}

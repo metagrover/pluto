@@ -14,6 +14,7 @@ import {
   type KnowledgeWorkspacePayload,
   getKnowledgeWorkspace,
 } from '../../api/knowledgeWorkspace';
+import { subscribeTasksChanged } from '../../api/tasks';
 import {
   type WorkingMemorySnapshot,
   listWorkingMemorySnapshots,
@@ -49,6 +50,7 @@ export const transitionDashboardRefreshState = (
     : { loading: false, refreshing: false };
 
 interface DashboardHomeData {
+  focusSelectionDate: string | null;
   overdueActions: Entity[];
   staleActions: Entity[];
   activeActions: Entity[];
@@ -75,6 +77,7 @@ interface DashboardHomeData {
 }
 
 interface DashboardHomeLoaders {
+  getFocusSelectionDate?: () => Promise<string | null>;
   getOverdueActionItems: () => Promise<Entity[]>;
   getStaleActionItems: () => Promise<Entity[]>;
   getActiveActionItems: () => Promise<Entity[]>;
@@ -174,6 +177,11 @@ export const loadDashboardHomeData = async (
   ]);
 
   return {
+    focusSelectionDate: await loadOptional(
+      'focus selection',
+      loaders.getFocusSelectionDate ?? (async () => null),
+      null,
+    ),
     overdueActions,
     staleActions,
     activeActions,
@@ -264,6 +272,11 @@ export const useDashboardHome = ({
 
       try {
         const data = await loadDashboardHomeData({
+          getFocusSelectionDate: () =>
+            window.ipcRenderer.invoke(
+              'GET_SETTING',
+              'personal_task_focus_date',
+            ),
           getOverdueActionItems,
           getStaleActionItems: () => getStaleActionItems(7),
           getActiveActionItems: () => getActionItemsByStatus('active'),
@@ -327,9 +340,14 @@ export const useDashboardHome = ({
     });
 
     void refresh().catch(() => {});
+    const tasksChanged = () => {
+      void refresh().catch(() => {});
+    };
+    const unsubscribeTasks = subscribeTasksChanged(tasksChanged);
 
     return () => {
       cancelled = true;
+      unsubscribeTasks();
     };
   }, [dateKey, isRecording, meetings]);
 

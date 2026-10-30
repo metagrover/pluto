@@ -22,6 +22,22 @@ const brief: PreMeetingBrief = {
   relevantContext: [],
   emptyMessage: null,
 };
+it('applies explicit preparation length guidance without changing evidence admission', async () => {
+  const generate = vi.fn().mockResolvedValue(
+    JSON.stringify({
+      overview: [
+        {
+          evidenceId: 'invented',
+          quote: 'ship the smaller beta first',
+          summary: 'The group agreed to ship a smaller beta first.',
+        },
+      ],
+    }),
+  );
+  const result = await synthesizePreMeetingBrief(brief, generate, 60);
+  expect(generate.mock.calls[0][0]).toContain('fewer than 60 words');
+  expect(result).toBe(brief);
+});
 it('accepts concise recaps with exact source excerpts and rejects unsupported claims', async () => {
   const result = await synthesizePreMeetingBrief(brief, async () =>
     JSON.stringify({

@@ -96,6 +96,7 @@ export interface DashboardActionInsightItem {
   dismissLabel: 'Dismiss' | 'Dismiss blocker' | 'Reopen' | null;
   snoozeLabel: 'Snooze' | 'Snooze blocker' | 'Reopen' | null;
   dailyPriorityRank: number | null;
+  focusExcluded?: boolean;
 }
 
 export interface DashboardCommitmentSourceSynthesis {
@@ -248,6 +249,7 @@ export interface DashboardBriefingFocus {
 export interface DashboardHomeModelInput {
   isRecording: boolean;
   dateKey?: string;
+  focusSelectionDate?: string | null;
   meetings: Meeting[];
   overdueActions: Entity[];
   staleActions: Entity[];
@@ -883,6 +885,7 @@ const actionToInsightItem = (
               ? 'Snooze blocker'
               : 'Snooze',
     dailyPriorityRank: getDailyPriorityRank(metadata, dateKey),
+    focusExcluded: metadata.task_focus_excluded_date === dateKey,
   };
 };
 
@@ -1164,6 +1167,7 @@ const buildTopOfMind = (
 
 export const buildDashboardCommitments = (
   actionInsights: DashboardActionInsights,
+  explicitFocus = false,
 ): DashboardCommitments => {
   const openItems =
     actionInsights.state === 'populated'
@@ -1181,8 +1185,14 @@ export const buildDashboardCommitments = (
           })
           .map(({ item }) => item)
       : [];
-  const items = openItems.slice(0, MAX_DASHBOARD_COMMITMENTS);
-  const backlog = openItems.slice(MAX_DASHBOARD_COMMITMENTS);
+  const items = openItems
+    .filter(
+      (item) =>
+        !item.focusExcluded &&
+        (!explicitFocus || item.dailyPriorityRank !== null),
+    )
+    .slice(0, MAX_DASHBOARD_COMMITMENTS);
+  const backlog = openItems.filter((item) => !items.includes(item));
 
   if (items.length === 0) {
     return {
@@ -2044,7 +2054,10 @@ export const buildDashboardHomeModel = (
     attentionAlerts,
     input.dateKey ?? getDashboardDateKey(),
   );
-  const commitments = buildDashboardCommitments(commitmentActionInsights);
+  const commitments = buildDashboardCommitments(
+    commitmentActionInsights,
+    input.focusSelectionDate === (input.dateKey ?? getDashboardDateKey()),
+  );
   const recentWin = buildRecentWin(
     input.meetings,
     input.dateKey ?? getDashboardDateKey(),

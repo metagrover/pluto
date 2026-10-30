@@ -1,0 +1,175 @@
+.tasks-workspace {
+  color: hsl(var(--pro-text-main));
+  --task-text-secondary: color-mix(
+    in srgb,
+    hsl(var(--pro-text-main)) 75%,
+    hsl(var(--pro-bg))
+  );
+}
+.tasks-workspace .text-pro-text-muted {
+  color: var(--task-text-secondary);
+}
+.tasks-workspace :is(button, input, textarea):focus-visible {
+  outline: 2px solid hsl(var(--pro-accent));
+  outline-offset: 3px;
+}
+.task-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: hsl(var(--pro-text-main));
+  font-size: 12px;
+  font-weight: 500;
+  transition: background-color 120ms ease-out;
+}
+.task-button:hover {
+  background: hsl(var(--pro-text-main) / 0.06);
+}
+.task-button-primary {
+  background: hsl(var(--pro-accent));
+  color: hsl(var(--pro-accent-foreground, 0 0% 100%));
+}
+.task-button-primary:hover {
+  background: hsl(var(--pro-accent) / 0.88);
+}
+.dark .tasks-workspace .task-button-primary {
+  color: hsl(var(--pro-bg));
+}
+.dark .tasks-workspace input[type="date"] {
+  color-scheme: dark;
+}
+.tasks-workspace button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.task-view {
+  position: relative;
+  min-height: 43px;
+  padding-bottom: 10px;
+  font-size: 13px;
+  color: var(--task-text-secondary);
+}
+.task-view.is-active {
+  color: hsl(var(--pro-text-main));
+  font-weight: 600;
+}
+.task-view.is-active::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: hsl(var(--pro-accent));
+}
+.task-search {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  padding: 5px 0;
+  font-size: 13px;
+  color: hsl(var(--pro-text-main));
+  caret-color: hsl(var(--pro-accent));
+}
+.task-search::placeholder,
+.task-field > :is(input, textarea)::placeholder,
+.task-input::placeholder {
+  color: var(--task-text-secondary);
+  opacity: 1;
+}
+.task-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  color: var(--task-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+.task-field > :is(input, textarea),
+.task-input {
+  border: 1px solid hsl(var(--pro-border));
+  background: hsl(var(--pro-bg));
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: hsl(var(--pro-text-main));
+  font-size: 13px;
+  font-weight: 400;
+  min-height: 35px;
+}
+.task-field textarea {
+  resize: vertical;
+}
+.task-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  border: 1px solid hsl(var(--pro-border));
+  border-radius: 5px;
+  padding: 4px 7px;
+  font-size: 11px;
+  color: hsl(var(--pro-text-main));
+}
+.task-tag[aria-pressed="true"] {
+  background: hsl(var(--pro-accent) / 0.1);
+  border-color: hsl(var(--pro-accent) / 0.5);
+}
+.task-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 17px 8px;
+  border-radius: 4px;
+}
+.task-row:hover,
+.task-row.is-selected {
+  background: hsl(var(--pro-text-main) / 0.025);
+}
+.task-check {
+  display: flex;
+  width: 24px;
+  min-height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--task-text-secondary);
+}
+.task-check:hover {
+  color: hsl(var(--pro-accent));
+}
+.task-focus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+  color: var(--task-text-secondary);
+}
+.task-focus[aria-pressed="true"] {
+  color: hsl(var(--pro-accent));
+}
+.task-row-tag {
+  border-radius: 4px;
+  padding: 0 5px;
+  background: hsl(var(--pro-text-main) / 0.05);
+}
+.tasks-workspace ::selection {
+  background: hsl(var(--pro-accent) / 0.2);
+}
+@media (max-width: 1279px) {
+  .task-details {
+    grid-row: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tasks-workspace * {
+    transition: none;
+  }
+}

@@ -35,6 +35,9 @@ https://github.com/user-attachments/assets/edbfcc31-2b37-4648-b18a-c0b14b11973d
 - **Track everyone’s commitments.** Keep track of who promised what across
   conversations, including your own follow-ups. Get reminders for confirmed
   commitments with due dates.
+- **Keep your tasks together.** Add personal work alongside meeting follow-ups,
+  organize with projects and tags, and choose up to five tasks for today’s focus.
+  Chat can prepare a task change for you to confirm.
 - **Follow project milestones.** Keep milestones, decisions, and open work
   connected to the meetings behind them.
 - **Recognize familiar voices with Voice ID.** Confirm speaker matches and

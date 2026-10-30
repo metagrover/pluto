@@ -232,9 +232,7 @@ export interface AskPlutoQueryResponse<Citation = unknown> {
     | 'topic_switch'
     | 'lookup';
   retrievalPolicy?: 'none' | 'reuse' | 'fresh';
-  actionProposal?: {
-    kind: 'create_commitment';
-    text: string;
-    label: string;
-  };
+  actionProposal?:
+    | import('./tasks').TaskChatProposal
+    | { kind: 'create_commitment'; text: string; label: string };
 }
