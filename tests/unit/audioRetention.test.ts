@@ -601,6 +601,37 @@ describe('audio retention', () => {
     sqlite.close();
   });
 
+  it('prunes orphans when a stable direct reference is inside a journal audio root', async () => {
+    const root = makeRoot();
+    const sqlite = makeDatabase();
+    const chunks = path.join(root, 'nested', 'capture-journal', 'chunks');
+    fs.mkdirSync(chunks, { recursive: true });
+    const audioPath = path.join(chunks, 'mic.enc');
+    fs.writeFileSync(audioPath, 'source audio');
+    const orphan = path.join(root, 'abandoned.wav');
+    fs.writeFileSync(orphan, 'orphan');
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(orphan, old, old);
+    const meeting = eligibleMeeting('nested', audioPath);
+    sqlite
+      .prepare('INSERT INTO meetings (id, audio_path) VALUES (?, ?)')
+      .run('nested', audioPath);
+    const manager = createAudioRetentionManager({
+      rootDir: root,
+      sqlite,
+      listMeetings: () => [meeting],
+      getSetting: () => '10',
+      audioKeyStore: null,
+    });
+    expect(await manager.sweep()).toMatchObject({
+      retainedBytes: 12,
+      deletedBytes: 6,
+    });
+    expect(fs.existsSync(audioPath)).toBe(true);
+    expect(fs.existsSync(orphan)).toBe(false);
+    sqlite.close();
+  });
+
   it('defers cleanup when an encrypted index becomes referenced during the scan', async () => {
     const root = makeRoot();
     const sqlite = makeDatabase();

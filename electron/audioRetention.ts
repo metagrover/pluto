@@ -387,8 +387,13 @@ export const createAudioRetentionManager = (options: {
       try {
         const artifacts = await resolveArtifacts(meeting);
         retainedBytes += artifacts.bytes;
-        for (const artifactPath of artifacts.paths) {
-          referencedPaths.add(path.resolve(artifactPath));
+        for (const artifactPath of [
+          ...artifacts.paths,
+          meeting.audio_path,
+          meeting.system_audio_path,
+          meeting.mixed_audio_path,
+        ]) {
+          if (artifactPath) referencedPaths.add(path.resolve(artifactPath));
         }
         if (artifacts.bytes === 0) continue;
         const reason = blockReason(meeting);
