@@ -19,3 +19,6 @@ export const notesSourceGuidance =
 
 export const notesProseGuidance =
   'Write concise, readable third person notes, naming the relevant speaker when attribution matters. Do not paste raw first-person transcript fragments into finished prose. Repair false starts, repeated words and speech fillers without changing the supported meaning. Each section heading must fit all its items. Avoid repeating the same fact in multiple points.';
+
+export const notesMultilingualGuidance =
+  "Write prose in SOURCE DATA's primary language; keep schema and source descriptors unchanged.";

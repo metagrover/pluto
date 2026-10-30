@@ -2397,6 +2397,7 @@ export const AudioManager = ({
               model: 'parakeet-tdt-0.6b-v3',
               device: 'coreml',
               computeType: String(resolvedTranscriptionSettings.computeType),
+              language: resolvedTranscriptionSettings.language,
               diarization: false,
               elapsedMs: 0,
               vocabularyHintPolicyVersion:

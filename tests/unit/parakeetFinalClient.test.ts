@@ -364,6 +364,79 @@ describe('ParakeetFinalClient', () => {
     });
   });
 
+  it('preserves English as the default native language hint and sends null when auto-detect is requested', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+    const ready = client.prepare();
+    child.respond(prepared(String(child.writes[0].id)));
+    await ready;
+
+    const englishTranscription = client.transcribe({
+      meetingId: 'english-call',
+      role: 'final_validation',
+      source: 'mix',
+      audioPath: '/user/recordings/english-call.wav',
+      language: 'en',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(2));
+    expect(child.writes[1]).toMatchObject({
+      method: 'transcribe',
+      language: 'en',
+    });
+    child.respond(success(String(child.writes[1].id)));
+    await expect(englishTranscription).resolves.toMatchObject({
+      language: 'en',
+      meta: { language: 'en' },
+    });
+
+    const autoTranscription = client.transcribe({
+      meetingId: 'russian-call',
+      role: 'final_validation',
+      source: 'mix',
+      audioPath: '/user/recordings/russian-call.wav',
+      language: 'auto',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(3));
+    expect(child.writes[2]).toMatchObject({
+      method: 'transcribe',
+      language: null,
+    });
+    child.respond(success(String(child.writes[2].id), 'Привет'));
+    await expect(autoTranscription).resolves.toMatchObject({
+      language: 'auto',
+      meta: { language: 'auto' },
+      segments: [{ text: 'Привет' }],
+    });
+  });
+
+  it('falls back to the English hint for missing or unknown languages instead of silently auto-detecting', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+    const ready = client.prepare();
+    child.respond(prepared(String(child.writes[0].id)));
+    await ready;
+
+    for (const [index, language] of [undefined, '', 'ru', 'fr'].entries()) {
+      const transcription = client.transcribe({
+        meetingId: `fallback-${index}`,
+        role: 'final_validation',
+        source: 'mix',
+        audioPath: '/user/recordings/fallback.wav',
+        language: language as string,
+      });
+      const writeIndex = index + 1;
+      await vi.waitFor(() =>
+        expect(child.writes).toHaveLength(writeIndex + 1),
+      );
+      expect(child.writes[writeIndex]).toMatchObject({
+        method: 'transcribe',
+        language: 'en',
+      });
+      child.respond(success(String(child.writes[writeIndex].id)));
+      await expect(transcription).resolves.toMatchObject({ language: 'en' });
+    }
+  });
+
   it('rejects paths outside the approved audio root before writing', async () => {
     const child = new FakeChild();
     const client = new ParakeetFinalClient({ paths, spawn: () => child });

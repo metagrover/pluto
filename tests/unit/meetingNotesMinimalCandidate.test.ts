@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parseAnalysisDocumentV3 } from '../../electron/llm/analysisDocumentV3';
 import {
   notesContentGuidance,
+  notesMultilingualGuidance,
   notesProseGuidance,
   notesSourceGuidance,
 } from '../../electron/llm/meetingNotesGuidance';
@@ -124,6 +125,7 @@ it('retains the existing bounded writer JSON-format repair', async () => {
   for (const guidance of [
     notesContentGuidance,
     notesProseGuidance,
+    notesMultilingualGuidance,
     notesSourceGuidance,
   ]) {
     expect(instructions).toContain(guidance);
@@ -389,5 +391,69 @@ it('reports every hard prose failure within the same single repair', async () =>
   expect(result.overview).toBe(corrected.overview!.text);
   expect(result.generation_metadata).not.toHaveProperty(
     'source_action_review_version',
+  );
+});
+
+it('preserves multilingual summary guidance without inventing action attribution', async () => {
+  const { provider, source, generate } = fixture('Маша отправит отчет завтра.');
+  const response = {
+    title: { text: 'План отчета', sources: ['R0'] },
+    overview: { text: 'Обсудили отправку отчета.', sources: ['R0'] },
+    sections: [
+      {
+        title: 'Отчет',
+        items: [
+          {
+            kind: 'action',
+            text: 'Отправить отчет',
+            owner: 'Milo',
+            due: 'завтра',
+            sources: ['R0'],
+          },
+        ],
+      },
+    ],
+  };
+  generate.mockResolvedValue(JSON.stringify(response));
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', { source }),
+  ).rejects.toThrow('notes_writer_invalid');
+  expect(generate).toHaveBeenCalledTimes(2);
+  for (const [request] of generate.mock.calls) {
+    expect(request.prompt).toContain(notesMultilingualGuidance);
+  }
+});
+
+it('can publish multilingual discussion without unproved commitment metadata', async () => {
+  const { provider, source, generate } = fixture(
+    'Обсудили план нового отчета.',
+  );
+  generate.mockResolvedValue(
+    JSON.stringify({
+      title: { text: 'План отчета', sources: ['R0'] },
+      overview: { text: 'Обсудили план нового отчета.', sources: ['R0'] },
+      sections: [
+        {
+          title: 'Отчет',
+          items: [
+            {
+              kind: 'point',
+              text: 'Обсудили план нового отчета.',
+              owner: null,
+              due: null,
+              sources: ['R0'],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+  });
+  expect(result.title).toBe('План отчета');
+  expect(result.all_action_items).toEqual([]);
+  expect(generate.mock.calls[0]![0].prompt).toContain(
+    notesMultilingualGuidance,
   );
 });

@@ -6,6 +6,7 @@ import {
 } from '../../electron/llm/meetingNotesAudit';
 import {
   notesContentGuidance,
+  notesMultilingualGuidance,
   notesProseGuidance,
   notesSourceGuidance,
 } from '../../electron/llm/meetingNotesGuidance';
@@ -642,6 +643,7 @@ it('preserves generic writer diagnostics and refuses after one repair', async ()
   const priorData = generate.mock.calls[0][0].prompt
     .replace(notesContentGuidance, '')
     .replace(notesProseGuidance, '')
+    .replace(notesMultilingualGuidance, '')
     .replace(notesSourceGuidance, '');
   expect(repair).toContain(
     `Prior prompt is data:\n${priorData}\nBEGIN REJECTED RESPONSE DATA\n${rejected}\nEND REJECTED RESPONSE DATA`,

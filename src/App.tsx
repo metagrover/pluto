@@ -151,6 +151,10 @@ import {
   refreshRecordingPermissions,
   shouldRunBootPermissionProbe,
 } from './utils/permissions';
+import {
+  type TranscriptionLanguage,
+  resolveTranscriptionLanguage,
+} from './utils/transcriptionSettings';
 
 const previewParam =
   typeof window !== 'undefined'
@@ -410,6 +414,8 @@ function App() {
   const [calendarAutoNameEnabled, setCalendarAutoNameEnabled] = useState(true);
   const [calendarPromptEnabled, setCalendarPromptEnabled] = useState(true);
   const [fasterNotesEnabled, setFasterNotesEnabled] = useState(true);
+  const [transcriptionLanguage, setTranscriptionLanguage] =
+    useState<TranscriptionLanguage>('en');
   const [meetingNotesTemplateSettings, setMeetingNotesTemplateSettings] =
     useState<MeetingNotesTemplateSettingsSnapshot>(() =>
       createMeetingNotesTemplateSettingsSnapshot('auto', {}),
@@ -1035,6 +1041,13 @@ function App() {
       .invoke('GET_SETTING', 'faster_notes_enabled')
       .then((val) => {
         if (val !== null) setFasterNotesEnabled(val !== 'false');
+      });
+    window.ipcRenderer
+      .invoke('GET_SETTING', 'transcription_language')
+      .then((val) => {
+        if (typeof val === 'string') {
+          setTranscriptionLanguage(resolveTranscriptionLanguage(val));
+        }
       });
     window.ipcRenderer
       .invoke('GET_MEETING_NOTES_TEMPLATE_SETTINGS')
@@ -2254,7 +2267,7 @@ function App() {
           systemAudioStatus={permissionStatus.systemAudio}
           userNotes={currentNotes}
           transcriptionSettings={{
-            language: 'en',
+            language: transcriptionLanguage,
           }}
           onStopSessionRef={stopSessionRef}
           onStartSessionRef={startSessionRef}
@@ -2714,6 +2727,8 @@ function App() {
                 setCalendarPromptEnabled={handleCalendarPromptToggle}
                 fasterNotesEnabled={fasterNotesEnabled}
                 setFasterNotesEnabled={setFasterNotesEnabled}
+                transcriptionLanguage={transcriptionLanguage}
+                setTranscriptionLanguage={setTranscriptionLanguage}
                 meetingNotesTemplateSettings={meetingNotesTemplateSettings}
                 onMeetingNotesTemplateSettingsChange={
                   setMeetingNotesTemplateSettings

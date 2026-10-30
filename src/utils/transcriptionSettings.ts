@@ -1,3 +1,5 @@
+export type TranscriptionLanguage = 'en' | 'auto';
+
 export interface TranscriptionSettings {
   backend?: string | null;
   preset?: string | null;
@@ -13,7 +15,7 @@ export interface ResolvedTranscriptionSettings {
   model: 'parakeet-tdt-0.6b-v3';
   device: 'coreml';
   computeType: 'float16';
-  language: 'en';
+  language: TranscriptionLanguage;
   liveEngine: 'parakeet_eou_320ms';
   finalEngine: 'parakeet_coreml';
 }
@@ -29,8 +31,37 @@ export const DEFAULT_TRANSCRIPTION_SETTINGS: ResolvedTranscriptionSettings = {
   finalEngine: 'parakeet_coreml',
 };
 
-export const resolveTranscriptionLanguage = (_language?: string | null): 'en' =>
-  'en';
+export const resolveTranscriptionLanguage = (
+  language?: string | null,
+): TranscriptionLanguage => {
+  return language?.trim().toLowerCase() === 'auto' ? 'auto' : 'en';
+};
+
+export const TRANSCRIPTION_LANGUAGE_SETTING_KEY = 'transcription_language';
+
+/**
+ * Reads the user's saved final-transcription language. The saved setting is
+ * authoritative for every final run (automatic, retry, speaker labels), so a
+ * user who chooses Auto-detect gets a null native hint on every run. Missing
+ * or unreadable settings fall back to any stored meeting language or English.
+ */
+export const readConfiguredTranscriptionLanguage = async (
+  invoke: (channel: string, ...args: unknown[]) => Promise<unknown>,
+  fallbackLanguage?: string | null,
+): Promise<TranscriptionLanguage> => {
+  try {
+    const value = await invoke(
+      'GET_SETTING',
+      TRANSCRIPTION_LANGUAGE_SETTING_KEY,
+    );
+    if (typeof value === 'string' && value.trim()) {
+      return resolveTranscriptionLanguage(value);
+    }
+  } catch {
+    // Fall back when GET_SETTING is unavailable in narrow test harnesses.
+  }
+  return resolveTranscriptionLanguage(fallbackLanguage);
+};
 
 export const resolveTranscriptionBackend = (
   _backend?: string | null,

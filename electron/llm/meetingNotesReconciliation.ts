@@ -2,6 +2,7 @@ import { acceptEditedNotes, parseNotesDraft } from './meetingNotesAudit';
 import { findNotesGuardrailIssues } from './meetingNotesGuardrails';
 import {
   notesContentGuidance,
+  notesMultilingualGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
 import {
@@ -34,6 +35,7 @@ export const buildSourceReconciliationPrompt = (sourceText: string): string =>
   [
     'Reconcile original source, not meeting notes. Attribute facts where relevant; put discussion in facts. Do not invent ids, headings, overview or filler.',
     notesContentGuidance,
+    notesMultilingualGuidance,
     notesSourceGuidance,
     'Return compact JSON with exactly four arrays: {facts: Text[], actions: Action[], decisions: Decision[], questions: Text[]}. Empty shape: {"facts":[],"actions":[],"decisions":[],"questions":[]}.',
     'Field definitions, not content: Text = {text: nonempty string, sources: copied source descriptor[]}; Action = {text: nonempty string, sources: copied source descriptor[], owner: string | null, due: string | null}; Decision = {text: nonempty string, sources: copied source descriptor[], owner: string | null}. Use null for unknown metadata.',

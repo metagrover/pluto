@@ -47,6 +47,7 @@ import {
 import { resolveConfiguredOllamaModel } from '../src/utils/ollamaModels';
 import { readProjectDisplayTitle } from '../src/utils/projectBriefing';
 import { parseTranscriptSegments } from '../src/utils/transcript';
+import { resolveTranscriptionLanguage } from '../src/utils/transcriptionSettings';
 import { registerDepartureService } from './activeCall/departureService';
 import type { DepartureSession } from './activeCall/departureTypes';
 import { createActiveCallDetector } from './activeCall/detector';
@@ -2450,8 +2451,12 @@ app.whenReady().then(async () => {
     beginMeetingTranscription(meetingId || null);
     beginTranscriptionWork();
     try {
+      const requestedLanguage = resolveTranscriptionLanguage(
+        request?.language ?? db.getSetting('transcription_language'),
+      );
       return await parakeetFinalClient.transcribe({
         ...request,
+        language: requestedLanguage,
         capability,
         signal,
       });
@@ -10229,6 +10234,9 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
   }
 
   try {
+    const recoveryLanguage = resolveTranscriptionLanguage(
+      db.getSetting('transcription_language'),
+    );
     const recovery = await recoverInterruptedCaptureJournals(
       getMeetingArtifactsRootDir(),
       {
@@ -10300,7 +10308,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               role: 'final_validation',
               source: encryptedContext.source,
               audioPath: inputPath,
-              language: 'en',
+              language: recoveryLanguage,
               capability: {
                 version: 1,
                 meetingId: encryptedContext.meetingId,
@@ -10350,7 +10358,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                 role: 'final_validation',
                 source: 'mix',
                 audioPath: alignedPath,
-                language: 'en',
+                language: recoveryLanguage,
               }),
           );
           return {
@@ -10375,8 +10383,8 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           model: 'parakeet-tdt-0.6b-v3',
           device: 'coreml',
           computeType: 'float16',
-          languageMode: 'fixed',
-          requestedLanguage: 'en',
+          languageMode: recoveryLanguage === 'auto' ? 'detected' : 'fixed',
+          requestedLanguage: recoveryLanguage === 'auto' ? null : 'en',
           pipelineVersion: 'live_chunk_v1',
         },
       },

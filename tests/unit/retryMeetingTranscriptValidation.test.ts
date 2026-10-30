@@ -168,6 +168,34 @@ describe('retryMeetingTranscriptValidation', () => {
     ]);
   });
 
+  it('forwards auto-detect language to validation retries from stored metadata or explicit option', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_json: JSON.stringify({
+        transcription: { language: 'auto' },
+        segments: [],
+      }),
+    };
+    const finalLanguages: unknown[] = [];
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
+        finalLanguages.push((payload as { language?: unknown })?.language);
+        return { segments: [] };
+      }
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    await retryMeetingTranscriptValidation('synthetic-id', invoke);
+    expect(finalLanguages.length).toBeGreaterThan(0);
+    expect(finalLanguages.every((lang) => lang === 'auto')).toBe(true);
+  });
+
   it('does not generate downstream intelligence while validation still needs attention', async () => {
     let current = { ...meeting };
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {

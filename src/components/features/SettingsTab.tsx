@@ -40,6 +40,10 @@ import {
   OLLAMA_GENERAL_MODEL,
   OLLAMA_QUICK_CHAT_MODEL,
 } from '../../utils/ollamaModels';
+import {
+  type TranscriptionLanguage,
+  resolveTranscriptionLanguage,
+} from '../../utils/transcriptionSettings';
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
 import { CalendarSettings } from './CalendarSettings';
@@ -72,6 +76,8 @@ interface SettingsTabProps {
   setCalendarPromptEnabled?: (val: boolean) => void;
   fasterNotesEnabled?: boolean;
   setFasterNotesEnabled?: (val: boolean) => void;
+  transcriptionLanguage?: TranscriptionLanguage;
+  setTranscriptionLanguage?: (val: TranscriptionLanguage) => void;
   meetingNotesTemplateSettings?: MeetingNotesTemplateSettingsSnapshot;
   onMeetingNotesTemplateSettingsChange?: (
     snapshot: MeetingNotesTemplateSettingsSnapshot,
@@ -314,6 +320,8 @@ export const SettingsTab = ({
   setCalendarPromptEnabled,
   fasterNotesEnabled = true,
   setFasterNotesEnabled,
+  transcriptionLanguage,
+  setTranscriptionLanguage,
   meetingNotesTemplateSettings = defaultMeetingNotesTemplateSettings,
   onMeetingNotesTemplateSettingsChange = () => {},
 }: SettingsTabProps) => {
@@ -346,6 +354,14 @@ export const SettingsTab = ({
   const [speakerModelsState, setSpeakerModelsState] = useState<
     'idle' | 'preparing' | 'ready' | 'error'
   >('idle');
+  const [localTranscriptionLanguage, setLocalTranscriptionLanguage] =
+    useState<TranscriptionLanguage>(
+      resolveTranscriptionLanguage(transcriptionLanguage),
+    );
+  const effectiveTranscriptionLanguage =
+    transcriptionLanguage !== undefined
+      ? resolveTranscriptionLanguage(transcriptionLanguage)
+      : localTranscriptionLanguage;
   const [browserCallDetectionEnabled, setBrowserCallDetectionEnabled] =
     useState(false);
   const [departureAccessibility, setDepartureAccessibility] = useState<{
@@ -402,6 +418,17 @@ export const SettingsTab = ({
       setReminderSettingsBusy(false);
     }
   };
+  useEffect(() => {
+    if (transcriptionLanguage !== undefined) return;
+    void window.ipcRenderer
+      .invoke('GET_SETTING', 'transcription_language')
+      .then((value) => {
+        if (typeof value === 'string') {
+          setLocalTranscriptionLanguage(resolveTranscriptionLanguage(value));
+        }
+      });
+  }, [transcriptionLanguage]);
+
   useEffect(() => {
     void window.ipcRenderer
       .invoke('GET_SETTING', 'browser_call_detection_enabled')
@@ -1043,8 +1070,31 @@ export const SettingsTab = ({
           </Section>
           <Section title="Recording">
             <SettingsRow
+              htmlFor="settings-transcription-language"
+              label="Transcription language"
+              helper="Used for final transcripts. Choose Auto-detect for meetings that are not in English. Live preview stays in English."
+            >
+              <SearchSelect
+                id="settings-transcription-language"
+                ariaLabel="Transcription language"
+                value={effectiveTranscriptionLanguage}
+                searchable={false}
+                options={[
+                  { value: 'en', label: 'English (Default)' },
+                  { value: 'auto', label: 'Auto-detect' },
+                ]}
+                onValueChange={(value) => {
+                  const next = resolveTranscriptionLanguage(value);
+                  setLocalTranscriptionLanguage(next);
+                  setTranscriptionLanguage?.(next);
+                  persistSetting('transcription_language', next);
+                }}
+              />
+            </SettingsRow>
+
+            <SettingsRow
               label="Parakeet local transcription"
-              helper="English-only live and final transcription, fully local on this Mac."
+              helper="Runs entirely on this Mac."
               actionControl
             >
               <button

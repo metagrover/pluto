@@ -662,6 +662,44 @@ describe('SettingsTab', () => {
     act(() => root.unmount());
   });
 
+  it('defaults transcription language to English and persists Auto-detect under the Meetings tab', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const setTranscriptionLanguage = vi.fn();
+
+    await act(async () =>
+      root.render(
+        <SettingsTab
+          {...defaultProps}
+          initialTab="meetings"
+          setTranscriptionLanguage={setTranscriptionLanguage}
+        />,
+      ),
+    );
+
+    const selector = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Transcription language"]',
+    )!;
+    expect(selector).not.toBeNull();
+    expect(selector.textContent).toContain('English (Default)');
+
+    await act(async () => selector.click());
+    const autoOption = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ].find((item) => item.dataset.value === 'auto')!;
+    expect(autoOption).toBeDefined();
+    await act(async () => autoOption.click());
+
+    expect(setTranscriptionLanguage).toHaveBeenCalledWith('auto');
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith('SET_SETTING', {
+      key: 'transcription_language',
+      value: 'auto',
+    });
+
+    act(() => root.unmount());
+  });
+
   it('selects a default template and saves customized guidance', async () => {
     const initial = createMeetingNotesTemplateSettingsSnapshot('auto', {});
     const onChange = vi.fn();

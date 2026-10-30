@@ -9,6 +9,7 @@ import type {
   TranscriptionRuntimeHealth,
   TranscriptionWord,
 } from '../../src/services/transcription/contracts';
+import { resolveTranscriptionLanguage } from '../../src/utils/transcriptionSettings';
 import type {
   NativePreparationProgressEvent,
   NativeProcessSpawn,
@@ -445,6 +446,7 @@ export class ParakeetFinalClient {
         throw new Error('parakeet_cancelled');
       }
       const id = this.requestID('transcribe');
+      const requestedLanguage = resolveTranscriptionLanguage(request.language);
       let transcriptionSettled: Promise<void> | null = null;
       const startedAt = (this.options.now ?? Date.now)();
       const abort = () => {
@@ -477,12 +479,17 @@ export class ParakeetFinalClient {
       });
       request.signal?.addEventListener('abort', abort, { once: true });
       try {
+        // A language hint makes FluidAudio drop tokens outside that script,
+        // so 'auto' sends null and lets Parakeet v3 detect the spoken language.
+        // Anything else (including a missing value) keeps the English default,
+        // because a null hint would silently switch to auto-detect.
+        const nativeLanguage = requestedLanguage === 'auto' ? null : 'en';
         const nativeRequest = this.runtimeHost.transport.request({
           schemaVersion: 1,
           id,
           method: 'transcribe',
           audioPath: request.audioPath,
-          language: request.language,
+          language: nativeLanguage,
           vocabulary: request.vocabulary ?? [],
           ...(request.capability ? { capability: request.capability } : {}),
         });
@@ -505,7 +512,7 @@ export class ParakeetFinalClient {
         );
         return {
           segments,
-          language: request.language,
+          language: requestedLanguage,
           duration: transcription.durationSeconds,
           vad: {
             status: transcription.noSpeech ? 'no_speech' : 'speech',
@@ -519,7 +526,7 @@ export class ParakeetFinalClient {
             model: 'parakeet-tdt-0.6b-v3',
             providerVersion: health.providerVersion ?? 'FluidAudio-0.15.5',
             modelBundleVersion: health.modelBundleVersion,
-            language: request.language,
+            language: requestedLanguage,
             source: request.source,
             elapsedMs: (this.options.now ?? Date.now)() - startedAt,
             confidence: transcription.confidence,

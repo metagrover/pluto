@@ -7,6 +7,7 @@ import {
 import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
 import {
   notesContentGuidance,
+  notesMultilingualGuidance,
   notesProseGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
@@ -91,6 +92,7 @@ export const buildNotesEditorPrompt = ({
         ]
       : []),
     notesProseGuidance,
+    notesMultilingualGuidance,
     notesSourceGuidance,
     getTemplateGuidance(template),
     'Optional terminology: Terminology[]. Omit or use [] when no correction is supported.',

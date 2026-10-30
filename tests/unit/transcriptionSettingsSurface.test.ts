@@ -16,6 +16,7 @@ describe('transcription settings surface', () => {
     expect(settings).not.toContain('settings-transcription-preset');
     expect(settings).not.toContain('settings-whisper-model');
     expect(settings).not.toContain('whisper-language');
-    expect(settings).not.toContain('transcription_language');
+    expect(settings).toContain('settings-transcription-language');
+    expect(settings).toContain('transcription_language');
   });
 });

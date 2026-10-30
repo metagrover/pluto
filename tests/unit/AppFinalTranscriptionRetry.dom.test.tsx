@@ -90,6 +90,10 @@ describe('App final transcription retry boundary', () => {
         transcript_integrity_json: '{}',
       };
       let finishWorker!: () => void;
+      let finishLanguageLoad!: (language: string) => void;
+      const languageLoad = new Promise<string>((resolve) => {
+        finishLanguageLoad = resolve;
+      });
       let detailRefreshRejected = false;
       runFinal.mockImplementation(
         () =>
@@ -113,6 +117,8 @@ describe('App final transcription retry boundary', () => {
         configurable: true,
         value: {
           invoke: vi.fn(async (channel: string, key?: string) => {
+            if (channel === 'GET_SETTING' && key === 'transcription_language')
+              return languageLoad;
             if (channel === 'GET_SETTING')
               return key === 'setup_complete' ? 'true' : null;
             if (channel === 'GET_MEETINGS') return structuredClone([meeting]);
@@ -157,6 +163,12 @@ describe('App final transcription retry boundary', () => {
           await flush();
         });
         expect(runFinal).toHaveBeenCalledOnce();
+        // Queued work must read saved settings, not the renderer's initial English value.
+        expect(runFinal.mock.calls[0]![2]).not.toHaveProperty('language');
+        await act(async () => {
+          finishLanguageLoad('auto');
+          await flush();
+        });
         await act(async () => {
           Array.from(container.querySelectorAll('button'))
             .find((button) => button.textContent === 'Open retry meeting')

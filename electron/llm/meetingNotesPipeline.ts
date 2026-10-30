@@ -33,6 +33,7 @@ import {
 } from './meetingNotesGuardrails';
 import {
   notesContentGuidance,
+  notesMultilingualGuidance,
   notesProseGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
@@ -543,6 +544,9 @@ const withOneRepair = async <T>(
       'Repair the prior response into the required JSON contract.',
       notesContentGuidance,
       notesProseGuidance,
+      ...(prompt.includes(notesMultilingualGuidance)
+        ? [notesMultilingualGuidance]
+        : []),
       notesSourceGuidance,
       'Return only valid JSON. Correct against original SOURCE DATA, not the rejected draft as ground truth. Restore supported missing content; retain unaffected material and metadata.',
       'Use only provided source references exactly; never invent evidence or references. Remove unsupported claims, but deletion is not a fix for missing content or conditions.',
@@ -558,6 +562,7 @@ const withOneRepair = async <T>(
       prompt
         .replace(notesContentGuidance, '')
         .replace(notesProseGuidance, '')
+        .replace(notesMultilingualGuidance, '')
         .replace(notesSourceGuidance, ''),
       'BEGIN REJECTED RESPONSE DATA',
       raw,

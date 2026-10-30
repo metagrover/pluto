@@ -326,6 +326,78 @@ describe('runPersistedMeetingFinalTranscription', () => {
     },
   );
 
+  it('forwards auto-detect language from provisional metadata or explicit override to runFinalTranscription', async () => {
+    const meeting = {
+      id: 'meeting-auto-lang',
+      title: 'Multilingual Meeting',
+      created_at: '2026-08-15T00:00:00.000Z',
+      started_at: '2026-08-15T00:00:00.000Z',
+      duration_seconds: 60,
+      audio_path: '/approved/mic.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      system_audio_path: '/approved/system.wav',
+      capture_journal_generation: 'generation-1',
+      transcript_status: 'provisional',
+      transcript_json: JSON.stringify({
+        transcription: {
+          language: 'auto',
+        },
+        segments: [],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        evidenceProvenance: {
+          kind: 'sealed_capture_activity_v2',
+          digestSha256: 'digest',
+        },
+      }),
+    } as Meeting;
+    mocks.runFinal.mockResolvedValue({ status: 'cancelled' });
+    const invoke = vi.fn(async (channel: string) =>
+      channel === 'GET_TRANSCRIPTION_VOCABULARY' ? { terms: [] } : null,
+    );
+
+    await runPersistedMeetingFinalTranscription(meeting, invoke);
+    expect(mocks.runFinal.mock.calls[0]?.[0]).toMatchObject({
+      language: 'auto',
+    });
+
+    await runPersistedMeetingFinalTranscription(
+      {
+        ...meeting,
+        transcript_json: JSON.stringify({
+          transcription: { language: 'en' },
+          segments: [],
+        }),
+      },
+      invoke,
+      { language: 'auto', manualRetry: true },
+    );
+    expect(mocks.runFinal.mock.calls[1]?.[0]).toMatchObject({
+      language: 'auto',
+    });
+
+    const invokeWithSavedAuto = vi.fn(async (channel: string, key?: unknown) =>
+      channel === 'GET_SETTING' && key === 'transcription_language'
+        ? 'auto'
+        : channel === 'GET_TRANSCRIPTION_VOCABULARY'
+          ? { terms: [] }
+          : null,
+    );
+    await runPersistedMeetingFinalTranscription(
+      {
+        ...meeting,
+        transcript_json: JSON.stringify({
+          transcription: { language: 'en' },
+          segments: [],
+        }),
+      },
+      invokeWithSavedAuto,
+    );
+    expect(mocks.runFinal.mock.calls[2]?.[0]).toMatchObject({
+      language: 'auto',
+    });
+  });
+
   it('rebuilds sealed System audio and its mix before an explicit historical retry', async () => {
     const meeting = {
       id: 'meeting-mixed-rate-retry',

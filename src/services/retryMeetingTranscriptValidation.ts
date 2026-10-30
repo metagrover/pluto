@@ -23,6 +23,10 @@ import {
 } from '../utils/transcriptSchema.ts';
 import { assertValidTranscriptTrustCandidate } from '../utils/transcriptTrustState.ts';
 import {
+  readConfiguredTranscriptionLanguage,
+  resolveTranscriptionLanguage,
+} from '../utils/transcriptionSettings.ts';
+import {
   buildPartialCaptureGapProcessingLease,
   selectDownstreamResumeStage,
 } from './downstreamProcessingLease.ts';
@@ -271,6 +275,21 @@ const readRunId = (meeting: Meeting): string | null => {
   }
 };
 
+const readStoredTranscriptionLanguage = (
+  transcriptJson?: string | null,
+): string | null => {
+  try {
+    const parsed = JSON.parse(transcriptJson || '{}') as {
+      transcription?: { language?: unknown };
+    };
+    return typeof parsed.transcription?.language === 'string'
+      ? parsed.transcription.language
+      : null;
+  } catch {
+    return null;
+  }
+};
+
 const readLiveTranscriptResponsiveness = (transcriptJson?: string | null) => {
   try {
     const parsed = JSON.parse(transcriptJson || '{}') as Record<
@@ -448,6 +467,7 @@ export const retryMeetingTranscriptValidation = async (
     now?: () => number;
     validationTimeoutMs?: number;
     reason?: 'automatic' | 'manual';
+    language?: string | null;
   } = {},
 ): Promise<{ status: 'validated' | 'needs_attention' | 'superseded' }> => {
   const meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
@@ -466,6 +486,7 @@ export const retryMeetingTranscriptValidation = async (
       invoke,
       {
         runId: crypto.randomUUID(),
+        language: options.language,
       },
     );
     return {
@@ -706,6 +727,13 @@ export const retryMeetingTranscriptValidation = async (
       : ({ status: 'needs_attention' } as const);
   };
   let validation: Awaited<ReturnType<typeof runRecordingTranscriptValidation>>;
+  const resolvedLanguage =
+    options.language != null
+      ? resolveTranscriptionLanguage(options.language)
+      : await readConfiguredTranscriptionLanguage(
+          invoke,
+          readStoredTranscriptionLanguage(meeting.transcript_json),
+        );
   const validateTranscript = (
     mode: 'checkpointed' | 'recovered_channels' | 'full_mix',
   ) =>
@@ -723,13 +751,13 @@ export const retryMeetingTranscriptValidation = async (
       transcriptionScheduling: 'sequential_channels',
       checkpointEvidenceVerified:
         mode === 'checkpointed' && checkpointEvidenceVerified,
-      transcribe: async (audioPath, options) =>
+      transcribe: async (audioPath, transcribeOptions) =>
         (await invoke('TRANSCRIPTION_TRANSCRIBE_FINAL', {
           meetingId: String(meeting.id),
           role: 'final_validation',
-          source: options.canonicalSource,
+          source: transcribeOptions.canonicalSource,
           audioPath,
-          language: 'en',
+          language: resolvedLanguage,
           vocabulary: [],
         })) as {
           segments?: Array<{ start: number; end: number; text: string }>;

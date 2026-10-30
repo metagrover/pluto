@@ -4,6 +4,7 @@ import {
   parseNotesDraft,
 } from '../../electron/llm/meetingNotesAudit';
 import { buildNotesEditorPrompt } from '../../electron/llm/meetingNotesEditor';
+import { notesMultilingualGuidance } from '../../electron/llm/meetingNotesGuidance';
 import {
   buildCompactNotesWriterPrompt,
   buildNotesAuditPrompt,
@@ -33,6 +34,30 @@ const stagePrompts = () => [
   buildNotesMergePrompt(input),
   buildSourceReconciliationPrompt(''),
 ];
+
+it.each([
+  'Bonjour tout le monde.',
+  'Gracias.',
+  'Обсудили план отчета.',
+  'Review the outline.',
+])(
+  'keeps source-language guidance in every writing stage for %s',
+  (sourceText) => {
+    const localized = { ...input, sourceText };
+    for (const prompt of [
+      buildNotesWriterPrompt(localized),
+      buildCompactNotesWriterPrompt(localized),
+      buildNotesEditorPrompt(localized),
+      buildNotesAuditPrompt(localized),
+      buildNotesMergePrompt(localized),
+      buildSourceReconciliationPrompt(sourceText),
+    ]) {
+      expect(prompt.split('BEGIN SOURCE DATA')[0]).toContain(
+        notesMultilingualGuidance,
+      );
+    }
+  },
+);
 
 it('keeps the compact writer within its own fields and evidence limit', () => {
   const prompt = buildCompactNotesWriterPrompt({ ...input, maxSourceSpans: 2 });

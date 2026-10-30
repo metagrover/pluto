@@ -11,6 +11,10 @@ import type {
 } from '../../utils/transcriptSchema.ts';
 import { buildTranscriptJsonPayload } from '../../utils/transcriptSchema.ts';
 import { assertValidTranscriptTrustCandidate } from '../../utils/transcriptTrustState.ts';
+import {
+  readConfiguredTranscriptionLanguage,
+  resolveTranscriptionLanguage,
+} from '../../utils/transcriptionSettings.ts';
 import { processValidatedMeetingDownstream } from '../processValidatedMeetingDownstream.ts';
 import {
   type FinalTranscriptionResourcePolicy,
@@ -171,6 +175,7 @@ export const runPersistedMeetingFinalTranscription = async (
   options: {
     signal?: AbortSignal;
     runId?: string;
+    language?: string | null;
     manualRetry?: boolean;
     rebuildSealedAudio?: boolean;
     onTranscriptCommitted?: () => Promise<void> | void;
@@ -207,7 +212,13 @@ export const runPersistedMeetingFinalTranscription = async (
       : provisional.segments;
   const runId = options.runId ?? crypto.randomUUID();
   const meetingId = String(meeting.id);
-  const language = provisional.payload.transcription?.language || 'en';
+  const language =
+    options.language != null
+      ? resolveTranscriptionLanguage(options.language)
+      : await readConfiguredTranscriptionLanguage(
+          invoke,
+          provisional.payload.transcription?.language,
+        );
   let vocabulary = readFinalTranscriptionVocabulary(meetingId);
   if (!vocabulary) {
     vocabulary = sanitizeVocabularyTerms(
