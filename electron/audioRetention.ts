@@ -124,6 +124,41 @@ export const createAudioRetentionManager = (options: {
   const rootDir = path.resolve(options.rootDir);
   const orphanGracePeriodMs =
     options.orphanGracePeriodMs ?? DEFAULT_ORPHAN_AUDIO_GRACE_PERIOD_MS;
+  // Never age artifacts created during this manager's lifetime into orphans.
+  // A long recording, queued stitch, or enrollment may not be DB-referenced yet.
+  const orphanCutoffMs = Date.now() - orphanGracePeriodMs;
+  const blockReason = (meeting: AudioRetentionMeeting) =>
+    audioRetentionBlockReason(
+      meeting,
+      options.isMeetingActive?.(String(meeting.id)) ?? false,
+      Boolean(
+        options.sqlite
+          .prepare(
+            `SELECT 1 FROM meeting_analysis_runs
+             WHERE meeting_id = ?
+               AND (notes_status = 'running' OR secondary_status = 'running')
+             LIMIT 1`,
+          )
+          .get(String(meeting.id)),
+      ),
+      options.isHistoricalMigrationBlocked?.(String(meeting.id)) ?? false,
+    );
+  const measureArtifact = async (artifactPath: string): Promise<number> => {
+    const stat = await fs.promises.lstat(artifactPath);
+    if (stat.isSymbolicLink()) throw new Error('artifact_path_invalid');
+    const realRoot = await fs.promises.realpath(rootDir);
+    if (!insideRoot(realRoot, await fs.promises.realpath(artifactPath))) {
+      throw new Error('artifact_path_invalid');
+    }
+    if (stat.isFile()) return stat.size;
+    let bytes = 0;
+    if (stat.isDirectory()) {
+      for (const entry of await fs.promises.readdir(artifactPath)) {
+        bytes += await measureArtifact(path.join(artifactPath, entry));
+      }
+    }
+    return bytes;
+  };
   const writeStatus = (
     meetingId: string,
     status: 'retained' | 'blocked' | 'deleting' | 'deleted' | 'failed',
@@ -214,48 +249,14 @@ export const createAudioRetentionManager = (options: {
     }
     let bytes = 0;
     for (const artifactPath of paths) {
-      const stat = await fs.promises.lstat(artifactPath);
-      if (stat.isSymbolicLink()) throw new Error('artifact_path_invalid');
-      if (stat.isDirectory()) {
-        const stack = [artifactPath];
-        while (stack.length > 0) {
-          const directory = stack.pop()!;
-          for (const entry of await fs.promises.readdir(directory, {
-            withFileTypes: true,
-          })) {
-            const child = path.join(directory, entry.name);
-            if (entry.isSymbolicLink())
-              throw new Error('artifact_path_invalid');
-            if (entry.isDirectory()) stack.push(child);
-            else if (entry.isFile())
-              bytes += (await fs.promises.stat(child)).size;
-          }
-        }
-      } else if (stat.isFile()) {
-        bytes += stat.size;
-      }
+      bytes += await measureArtifact(artifactPath);
     }
     return { paths: [...paths], bytes };
   };
 
   const runDeleteMeetingAudio = async (meeting: AudioRetentionMeeting) => {
     const meetingId = String(meeting.id);
-    const hasActiveAnalysis = Boolean(
-      options.sqlite
-        .prepare(
-          `SELECT 1 FROM meeting_analysis_runs
-           WHERE meeting_id = ?
-             AND (notes_status = 'running' OR secondary_status = 'running')
-           LIMIT 1`,
-        )
-        .get(meetingId),
-    );
-    const reason = audioRetentionBlockReason(
-      meeting,
-      options.isMeetingActive?.(meetingId) ?? false,
-      hasActiveAnalysis,
-      options.isHistoricalMigrationBlocked?.(meetingId) ?? false,
-    );
+    const reason = blockReason(meeting);
     if (reason) {
       writeStatus(meetingId, 'blocked', 0, reason);
       return { status: 'blocked' as const, reason, deletedBytes: 0 };
@@ -298,64 +299,76 @@ export const createAudioRetentionManager = (options: {
     }
   };
 
-  const scanOrphanArtifacts = async (enforce: boolean) => {
+  const scanOrphanArtifacts = async (
+    enforce: boolean,
+    referencedPaths: Set<string>,
+  ) => {
     let retainedBytes = 0;
     let deletedBytes = 0;
+    let measurementComplete = true;
+    const candidates: Array<{
+      fullPath: string;
+      bytes: number;
+      isWorkDir: boolean;
+    }> = [];
     try {
-      const referencedPaths = new Set<string>();
-      for (const meeting of options.listMeetings()) {
-        for (const raw of [
-          meeting.audio_path,
-          meeting.system_audio_path,
-          meeting.mixed_audio_path,
-        ]) {
-          if (raw) referencedPaths.add(path.resolve(raw));
-        }
-      }
       const entries = await fs.promises.readdir(rootDir, {
         withFileTypes: true,
       });
-      const now = Date.now();
       for (const entry of entries) {
         const fullPath = path.join(rootDir, entry.name);
-        if (!insideRoot(rootDir, fullPath)) continue;
-        if (entry.isFile()) {
-          if (!entry.name.endsWith('.wav') && !entry.name.endsWith('.enc')) {
-            continue;
-          }
-          if (referencedPaths.has(path.resolve(fullPath))) continue;
-          try {
-            const stat = await fs.promises.stat(fullPath);
-            if (stat.isSymbolicLink()) continue;
-            if (now - stat.mtimeMs < orphanGracePeriodMs) continue;
-            retainedBytes += stat.size;
-            if (enforce) {
-              await fs.promises.unlink(fullPath);
-              deletedBytes += stat.size;
-            }
-          } catch {
-            // Skip file that disappeared or could not be stat-ed/unlinked
-          }
-        } else if (
-          entry.isDirectory() &&
-          entry.name.startsWith('.speaker-profile-')
-        ) {
-          try {
-            const stat = await fs.promises.stat(fullPath);
-            if (stat.isSymbolicLink()) continue;
-            if (now - stat.mtimeMs < orphanGracePeriodMs) continue;
-            if (enforce) {
-              await fs.promises.rm(fullPath, { recursive: true, force: true });
-            }
-          } catch {
-            // Skip directory that could not be stat-ed/removed
+        const isAudio =
+          entry.isFile() &&
+          (entry.name.endsWith('.wav') || entry.name.endsWith('.enc'));
+        const isWorkDir =
+          entry.isDirectory() && entry.name.startsWith('.speaker-profile-');
+        if ((!isAudio && !isWorkDir) || referencedPaths.has(fullPath)) continue;
+        try {
+          const bytes = await measureArtifact(fullPath);
+          retainedBytes += bytes;
+          const stat = await fs.promises.lstat(fullPath);
+          if (!enforce || stat.mtimeMs >= orphanCutoffMs) continue;
+          candidates.push({ fullPath, bytes, isWorkDir });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            measurementComplete = false;
           }
         }
       }
-    } catch {
-      // Root directory may not exist or be accessible yet
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        measurementComplete = false;
+      }
     }
-    return { retainedBytes, deletedBytes };
+    if (enforce && measurementComplete && candidates.length > 0) {
+      // Read live state once after filesystem awaits. Unpublished artifacts
+      // cannot be attributed to a meeting, so any blocked work defers pruning.
+      const meetings = options.listMeetings();
+      // A newly published index may own old segments absent from our snapshot.
+      // Defer the whole orphan pass until those references have been resolved.
+      const ownershipChanged = meetings.some((meeting) =>
+        [
+          meeting.audio_path,
+          meeting.system_audio_path,
+          meeting.mixed_audio_path,
+        ].some((raw) => raw && !referencedPaths.has(path.resolve(raw))),
+      );
+      if (
+        !ownershipChanged &&
+        !meetings.some((meeting) => blockReason(meeting))
+      ) {
+        // Keep the live-state check and deletion in one event-loop turn.
+        for (const { fullPath, bytes, isWorkDir } of candidates) {
+          try {
+            fs.rmSync(fullPath, { recursive: isWorkDir, force: true });
+            deletedBytes += bytes;
+          } catch {
+            measurementComplete = false;
+          }
+        }
+      }
+    }
+    return { retainedBytes, deletedBytes, measurementComplete };
   };
 
   const runSweep = async (
@@ -366,6 +379,7 @@ export const createAudioRetentionManager = (options: {
     );
     const budgetBytes = budgetGb === null ? null : budgetGb * GIB;
     const candidates: AudioRetentionMeeting[] = [];
+    const referencedPaths = new Set<string>();
     let retainedBytes = 0;
     let blockedMeetings = 0;
     let measurementComplete = true;
@@ -373,22 +387,11 @@ export const createAudioRetentionManager = (options: {
       try {
         const artifacts = await resolveArtifacts(meeting);
         retainedBytes += artifacts.bytes;
+        for (const artifactPath of artifacts.paths) {
+          referencedPaths.add(path.resolve(artifactPath));
+        }
         if (artifacts.bytes === 0) continue;
-        const reason = audioRetentionBlockReason(
-          meeting,
-          options.isMeetingActive?.(String(meeting.id)) ?? false,
-          Boolean(
-            options.sqlite
-              .prepare(
-                `SELECT 1 FROM meeting_analysis_runs
-                 WHERE meeting_id = ?
-                   AND (notes_status = 'running' OR secondary_status = 'running')
-                 LIMIT 1`,
-              )
-              .get(String(meeting.id)),
-          ),
-          options.isHistoricalMigrationBlocked?.(String(meeting.id)) ?? false,
-        );
+        const reason = blockReason(meeting);
         if (reason) {
           blockedMeetings += 1;
           writeStatus(String(meeting.id), 'blocked', artifacts.bytes, reason);
@@ -407,7 +410,12 @@ export const createAudioRetentionManager = (options: {
         );
       }
     }
-    const orphanSweep = await scanOrphanArtifacts(enforceBudget);
+    // An unreadable encrypted index leaves its segment ownership unknown.
+    const orphanSweep = await scanOrphanArtifacts(
+      enforceBudget && measurementComplete,
+      referencedPaths,
+    );
+    measurementComplete &&= orphanSweep.measurementComplete;
     retainedBytes += orphanSweep.retainedBytes;
     let deletedBytes = orphanSweep.deletedBytes;
     let deletedMeetings = 0;

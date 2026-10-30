@@ -526,9 +526,12 @@ describe('audio retention', () => {
     });
 
     const inspection = await manager.inspect();
-    // inspect() measures referenced meeting + unreferenced files older than grace
-    expect(inspection.retainedBytes).toBeGreaterThanOrEqual(
-      'old orphan audio data'.length + 'referenced audio data'.length,
+    // Inspection counts all retained audio, including recent files and scratch work.
+    expect(inspection.retainedBytes).toBe(
+      'old orphan audio data'.length +
+        'referenced audio data'.length +
+        'recent orphan audio data'.length +
+        'scratch'.length,
     );
 
     const result = await manager.sweep();
@@ -537,8 +540,238 @@ describe('audio retention', () => {
     expect(fs.existsSync(oldSpeakerDir)).toBe(false);
     expect(fs.existsSync(recentOrphanPath)).toBe(true);
     expect(fs.existsSync(referencedPath)).toBe(true);
-    expect(result.deletedBytes).toBeGreaterThanOrEqual(
-      'old orphan audio data'.length,
+    expect(result.deletedBytes).toBe(
+      'old orphan audio data'.length + 'scratch'.length,
+    );
+    sqlite.close();
+  });
+
+  it('preserves every segment of a referenced encrypted bundle during orphan cleanup', async () => {
+    const root = makeRoot();
+    const sqlite = makeDatabase();
+    const context = {
+      meetingId: 'bundle',
+      generation: 'generation-1',
+      keyId: 'key-1',
+      meetingKey: Buffer.alloc(32, 7),
+    };
+    const bundlePath = await writeEncryptedAudioBundle({
+      rootDir: root,
+      totalFrames: 16,
+      source: 'mic',
+      context,
+      produceWindow: async (_start, frames) => new Float32Array(frames),
+    });
+    const files = fs.readdirSync(root).map((name) => path.join(root, name));
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    for (const file of files) fs.utimesSync(file, old, old);
+    const meeting = {
+      ...eligibleMeeting('bundle', bundlePath),
+      capture_journal_generation: context.generation,
+    };
+    sqlite
+      .prepare('INSERT INTO meetings (id, audio_path) VALUES (?, ?)')
+      .run('bundle', bundlePath);
+    const manager = createAudioRetentionManager({
+      rootDir: root,
+      sqlite,
+      listMeetings: () => [meeting],
+      getSetting: () => '10',
+      audioKeyStore: {
+        getMeetingAudioKey: () => ({
+          meetingKey: context.meetingKey,
+          keyId: context.keyId,
+        }),
+        deleteMeetingAudioKey: vi.fn(() => true),
+      },
+    });
+    const bytes = files.reduce(
+      (total, file) => total + fs.statSync(file).size,
+      0,
+    );
+    expect(await manager.inspect()).toMatchObject({
+      retainedBytes: bytes,
+      measurementComplete: true,
+    });
+    expect(await manager.sweep()).toMatchObject({
+      retainedBytes: bytes,
+      deletedBytes: 0,
+    });
+    for (const file of files) expect(fs.existsSync(file)).toBe(true);
+    sqlite.close();
+  });
+
+  it('defers cleanup when an encrypted index becomes referenced during the scan', async () => {
+    const root = makeRoot();
+    const sqlite = makeDatabase();
+    const context = {
+      meetingId: 'published',
+      generation: 'generation-1',
+      keyId: 'key-1',
+      meetingKey: Buffer.alloc(32, 7),
+    };
+    const bundlePath = await writeEncryptedAudioBundle({
+      rootDir: root,
+      totalFrames: 16,
+      source: 'mic',
+      context,
+      produceWindow: async (_start, frames) => new Float32Array(frames),
+    });
+    const files = fs.readdirSync(root).map((name) => path.join(root, name));
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    for (const file of files) fs.utimesSync(file, old, old);
+    const meeting = eligibleMeeting('published', bundlePath);
+    sqlite
+      .prepare('INSERT INTO meetings (id, audio_path) VALUES (?, ?)')
+      .run('published', bundlePath);
+    const listMeetings = vi
+      .fn()
+      .mockReturnValueOnce([])
+      .mockReturnValue([meeting]);
+    const manager = createAudioRetentionManager({
+      rootDir: root,
+      sqlite,
+      listMeetings,
+      getSetting: () => '10',
+      audioKeyStore: null,
+    });
+    expect(await manager.sweep()).toMatchObject({ deletedBytes: 0 });
+    for (const file of files) expect(fs.existsSync(file)).toBe(true);
+    sqlite.close();
+  });
+
+  it.each(['recording', 'analysis', 'migration', 'recovery', 'missing-key'])(
+    'defers orphan deletion while %s leaves ownership unsafe',
+    async (state) => {
+      const root = makeRoot();
+      const sqlite = makeDatabase();
+      const orphanPath = path.join(root, 'unpublished.enc');
+      fs.writeFileSync(orphanPath, 'unpublished audio');
+      const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      fs.utimesSync(orphanPath, old, old);
+      const workDir = path.join(root, '.speaker-profile-active');
+      fs.mkdirSync(workDir);
+      fs.writeFileSync(path.join(workDir, 'scratch.wav'), 'scratch');
+      fs.utimesSync(workDir, old, old);
+      const meeting = eligibleMeeting(
+        'busy',
+        state === 'missing-key' ? orphanPath : undefined,
+      );
+      if (state === 'recovery') meeting.finalization_status = 'needs_attention';
+      sqlite
+        .prepare('INSERT INTO meetings (id, audio_path) VALUES (?, ?)')
+        .run('busy', meeting.audio_path ?? null);
+      if (state === 'analysis') {
+        sqlite
+          .prepare('INSERT INTO meeting_analysis_runs VALUES (?, ?, ?)')
+          .run('busy', 'running', 'pending');
+      }
+      const manager = createAudioRetentionManager({
+        rootDir: root,
+        sqlite,
+        listMeetings: () => [meeting],
+        getSetting: () => '10',
+        audioKeyStore: null,
+        isMeetingActive: () => state === 'recording',
+        isHistoricalMigrationBlocked: () => state === 'migration',
+      });
+      const result = await manager.sweep();
+      expect(result.deletedBytes).toBe(0);
+      expect(fs.existsSync(orphanPath)).toBe(true);
+      expect(fs.existsSync(workDir)).toBe(true);
+      if (state === 'missing-key')
+        expect(result.measurementComplete).toBe(false);
+      sqlite.close();
+    },
+  );
+
+  it('keeps files created in this session even after the grace period passes', async () => {
+    const root = makeRoot();
+    const sqlite = makeDatabase();
+    const manager = createAudioRetentionManager({
+      rootDir: root,
+      sqlite,
+      listMeetings: () => [],
+      getSetting: () => '10',
+      audioKeyStore: null,
+    });
+    const file = path.join(root, 'unpublished.wav');
+    fs.writeFileSync(file, 'still in use');
+    const now = Date.now();
+    const clock = vi
+      .spyOn(Date, 'now')
+      .mockReturnValue(now + 2 * 60 * 60 * 1000);
+    try {
+      expect(await manager.sweep()).toMatchObject({
+        retainedBytes: 12,
+        deletedBytes: 0,
+      });
+      expect(fs.existsSync(file)).toBe(true);
+    } finally {
+      clock.mockRestore();
+      sqlite.close();
+    }
+  });
+
+  it('counts recent audio and speaker work directories and reports orphan scan failures', async () => {
+    const root = makeRoot();
+    const sqlite = makeDatabase();
+    fs.writeFileSync(path.join(root, 'recent.wav'), 'audio');
+    const workDir = path.join(root, '.speaker-profile-recent');
+    fs.mkdirSync(workDir);
+    fs.writeFileSync(path.join(workDir, 'scratch.wav'), 'scratch');
+    const manager = createAudioRetentionManager({
+      rootDir: root,
+      sqlite,
+      listMeetings: () => [],
+      getSetting: () => '10',
+      audioKeyStore: null,
+    });
+    expect(await manager.inspect()).toMatchObject({
+      retainedBytes: 12,
+      measurementComplete: true,
+    });
+    const stat = vi
+      .spyOn(fs.promises, 'lstat')
+      .mockRejectedValue(
+        Object.assign(new Error('denied'), { code: 'EACCES' }),
+      );
+    try {
+      expect(await manager.inspect()).toMatchObject({
+        measurementComplete: false,
+        overBudget: true,
+      });
+    } finally {
+      stat.mockRestore();
+      sqlite.close();
+    }
+  });
+
+  it('rejects capture journal paths whose parent symlink escapes the managed root', async () => {
+    const root = makeRoot();
+    const outside = makeRoot();
+    const sqlite = makeDatabase();
+    const chunks = path.join(outside, 'chunks');
+    fs.mkdirSync(chunks);
+    fs.writeFileSync(path.join(chunks, 'source.wav'), 'preserve');
+    const meetingRoot = path.join(root, 'linked');
+    fs.mkdirSync(meetingRoot);
+    fs.symlinkSync(outside, path.join(meetingRoot, 'capture-journal'));
+    const meeting = eligibleMeeting('linked');
+    sqlite.prepare('INSERT INTO meetings (id) VALUES (?)').run('linked');
+    const manager = createAudioRetentionManager({
+      rootDir: root,
+      sqlite,
+      listMeetings: () => [meeting],
+      getSetting: () => '10',
+      audioKeyStore: null,
+    });
+    expect(await manager.deleteMeetingAudio(meeting)).toMatchObject({
+      status: 'failed',
+      reason: 'artifact_path_invalid',
+    });
+    expect(fs.readFileSync(path.join(chunks, 'source.wav'), 'utf8')).toBe(
+      'preserve',
     );
     sqlite.close();
   });
