@@ -55,7 +55,9 @@ upstream, integrated here, or the explicitly superseded action reviewer above.
 - Refuse stale form writes rather than overwrite a change from another window.
   Refreshes preserve unsaved drafts and their original revision.
 - Reject stale consolidated task IDs and source-title edits with unavailable
-  source blocks. Keep notes, tags, and lifecycle changes transactional.
+  source blocks, and canonicalize self-person and action-owner IDs across person
+  merges so adopted tasks remain owned by the user. Keep notes, tags, and
+  lifecycle changes transactional.
 - Consume native task-change notifications in both Tasks and dashboard.
 - Keep confidential/unavailable meeting tasks and private prior-answer context
   out of contextual provider planning; reject excluded IDs in returned proposals.
@@ -73,17 +75,18 @@ come from upstream. The original local checkout is not reset or cleaned.
 
 ## Fresh validation
 
-- Full unit suite: 564 files, 8,120 tests passed.
+- Full unit suite: 564 files, 8,121 tests passed.
 - TypeScript: `pnpm exec tsc --noEmit` passed.
 - Production bundles: `pnpm exec vite build` passed for renderer, main, and preload.
 - Repository checks: `pnpm run lint`, `pnpm exec biome check`, `pnpm run db:verify`,
   `pnpm run test:installer`, `pnpm run test:release-workflow`, and `git diff --check`
   passed.
 - Disposable database & live acceptance harness check: `resolveMeetingAnalysis`,
-  `getAnalysisEditBlocks`, and `syncMeetingActionEntitiesFromUserEdits` verified on
-  a disposable copy of 78 persisted meetings (3,398 edit blocks, 149 action items)
-  without mutating user data; `commitment_state` production-path harness verified
-  against local Ollama `gemma4:12b` (`notes-v100`, `writer-only-v1`).
+  `getAnalysisEditBlocks`, `syncMeetingActionEntitiesFromUserEdits`, task adoption
+  and completion under a merged self-person identity, live Ollama `gemma4:12b`
+  Task Chat status proposals, response preference learning, and live `notes-v100`
+  (`writer-only-v1`) structured notes generation + Tasks bidirectional sync verified
+  against a disposable copy of 78 persisted meetings without mutating user data.
 - Fictional renderer workspace: Tasks list, source details, and shared project
   dropdown checked visually, including the compact layout. Shared dropdown
   selection, keyboard behavior, and draft preservation have DOM regressions.

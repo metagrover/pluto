@@ -20,11 +20,15 @@ import {
 import { getDashboardDateKey } from '../../src/components/features/dashboardModel';
 
 beforeEach(() => {
+  db.identityStore.setSelfPersonId(null);
+  db.db.prepare('DELETE FROM person_aliases').run();
   db.db.prepare('DELETE FROM commitment_aliases').run();
   db.db.prepare('DELETE FROM entity_links').run();
   db.db.prepare('DELETE FROM meeting_entities').run();
   db.db
-    .prepare("DELETE FROM entities WHERE type IN ('action_item', 'project')")
+    .prepare(
+      "DELETE FROM entities WHERE type IN ('action_item', 'project', 'person')",
+    )
     .run();
   db.setSetting('personal_task_tags_v1', '[]');
   db.setSetting('personal_task_focus_date', '');
@@ -149,6 +153,38 @@ describe('shared personal tasks', () => {
     ).toThrow('not yours');
     reviewPersonalTask({ id: candidate.id, state: 'confirmed' });
     expect(listPersonalTasks().tasks[0].needsReview).toBe(false);
+  });
+  it('resolves canonical self person identity when adopting and updating tasks after a person merge', () => {
+    const aliasSelf = db.upsertEntity({
+      type: 'person',
+      name: 'Punit',
+      dedupe_by_name: false,
+    });
+    const canonicalSelf = db.upsertEntity({
+      type: 'person',
+      name: 'Punit Mishra',
+      dedupe_by_name: false,
+    });
+    db.identityStore.setSelfPersonId(aliasSelf.id);
+    db.mergePerson(aliasSelf.id, canonicalSelf.id);
+    const candidate = db.upsertEntity({
+      type: 'action_item',
+      name: 'Follow up on merged self task',
+      status: 'active',
+      metadata: { commitment_state: 'possible', origin: 'extraction' },
+    });
+    reviewPersonalTask({ id: candidate.id, state: 'confirmed' });
+    expect(db.getEntity(candidate.id)?.assigned_to).toBe(canonicalSelf.id);
+    expect(listPersonalTasks().tasks).toEqual([
+      expect.objectContaining({
+        needsReview: false,
+        entity: expect.objectContaining({ id: candidate.id }),
+      }),
+    ]);
+    setPersonalTaskStatus({ id: candidate.id, status: 'completed' });
+    expect(db.getEntity(candidate.id)?.status).toBe('completed');
+    setPersonalTaskStatus({ id: candidate.id, status: 'active' });
+    expect(db.getEntity(candidate.id)?.status).toBe('active');
   });
   it('keeps a chosen Focus stable through removal, additions, completion, and the next day', () => {
     const ids = Array.from({ length: 7 }, (_, n) =>

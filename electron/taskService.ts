@@ -119,11 +119,25 @@ const taskTags = (metadata: Record<string, unknown>): string[] =>
         (value): value is string => typeof value === 'string',
       )
     : [];
+const canonicalAction = (entity: store.Entity): store.Entity => ({
+  ...entity,
+  assigned_to: entity.assigned_to
+    ? store.resolvePersonIdentityId(entity.assigned_to)
+    : null,
+});
 const selfOptions = () => {
+  const rawSelfId = store.identityStore.getSelfPersonId();
+  const selfPersonId = rawSelfId
+    ? store.resolvePersonIdentityId(rawSelfId)
+    : null;
+  const selfEntity = selfPersonId ? store.getEntity(selfPersonId) : undefined;
   const profile = store.identityStore.getProfile();
   return {
-    selfPersonId: store.identityStore.getSelfPersonId(),
-    selfNames: profile ? [profile.preferredName, ...profile.aliases] : [],
+    selfPersonId,
+    selfNames: [
+      ...(selfEntity?.name ? [selfEntity.name] : []),
+      ...(profile ? [profile.preferredName, ...profile.aliases] : []),
+    ],
   };
 };
 const visibleAction = (entity: store.Entity) => {
@@ -134,7 +148,7 @@ const visibleAction = (entity: store.Entity) => {
     getCommitmentState(entity.metadata) !== 'rejected' &&
     !metadata.meeting_regeneration_retired_at &&
     !metadata.cancelled_at &&
-    !isExplicitOtherActionOwner(entity, selfOptions())
+    !isExplicitOtherActionOwner(canonicalAction(entity), selfOptions())
   );
 };
 const taskRevision = (entity: store.Entity): string =>
@@ -156,7 +170,10 @@ const requireTask = (taskId: string, allowReview = false) => {
     store.resolveCommitmentIdentity(taskId)?.id !== taskId ||
     !visibleAction(entity) ||
     (!allowReview &&
-      !isPersonalAction({ ...entity, status: 'active' }, selfOptions()))
+      !isPersonalAction(
+        { ...canonicalAction(entity), status: 'active' },
+        selfOptions(),
+      ))
   )
     throw new Error(
       'Task is unavailable or is not yours. Refresh Tasks and try again.',
@@ -177,20 +194,23 @@ const patchMetadata = (
 
 export const listPersonalTasks = (): TasksSnapshot => {
   const date = getDashboardDateKey();
+  const options = selfOptions();
   const focusIds = new Set(
     buildDashboardHomeModel({
       isRecording: false,
       meetings: [],
-      overdueActions: store.getOverdueActionItems(),
-      staleActions: store.getStaleActionItems(7),
-      activeActions: store.getActionItemsByStatus('active'),
+      overdueActions: store.getOverdueActionItems().map(canonicalAction),
+      staleActions: store.getStaleActionItems(7).map(canonicalAction),
+      activeActions: store
+        .getActionItemsByStatus('active')
+        .map(canonicalAction),
       attentionAlerts: [],
       workspace: null,
       workingMemorySnapshots: [],
       graphStats: null,
       dateKey: date,
       focusSelectionDate: store.getSetting('personal_task_focus_date'),
-      ...selfOptions(),
+      ...options,
     }).commitments.items.map((item) => item.id),
   );
   const projects = store
@@ -209,8 +229,8 @@ export const listPersonalTasks = (): TasksSnapshot => {
     .flatMap((entity) => {
       const metadata = parseActionMetadata(entity.metadata);
       const personal = isPersonalAction(
-        { ...entity, status: 'active' },
-        selfOptions(),
+        { ...canonicalAction(entity), status: 'active' },
+        options,
       );
       if (!personal && entity.status === 'completed') return [];
       const sourceMeetingId = getActionSourceMeetingId(entity.metadata);
