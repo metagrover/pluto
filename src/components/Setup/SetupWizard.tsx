@@ -27,6 +27,7 @@ import { ModelDownloadProgress } from '../ModelDownloadProgress';
 import { IdentityProfileForm } from '../features/IdentityProfileForm';
 import { WindowDragRegion } from '../layout/WindowDragRegion';
 import { IntelligenceSetup } from './IntelligenceSetup';
+import { NotesConnectionsSetup } from './NotesConnectionsSetup';
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -40,7 +41,9 @@ const requirementTone = (ready: boolean, blocked = false) =>
       : 'text-[oklch(0.53_0.12_255)]';
 
 export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
-  const [step, setStep] = useState<1 | 2 | 3 | 'intelligence'>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 'intelligence' | 'connections'>(
+    1,
+  );
   const [setupError, setSetupError] = useState('');
   const [transcriptionFailure, setTranscriptionFailure] = useState(() =>
     describeTranscriptionSetupFailure(),
@@ -136,9 +139,13 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         return;
       }
       setStep(
-        savedStep === '3' || savedStep === 'intelligence'
+        savedStep === '3' ||
+          savedStep === 'intelligence' ||
+          savedStep === 'connections'
           ? intelligenceComplete === 'true'
-            ? 3
+            ? savedStep === 'connections'
+              ? 'connections'
+              : 3
             : 'intelligence'
           : savedStep === '2'
             ? 2
@@ -243,6 +250,14 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
     } finally {
       setFinishing(false);
     }
+  };
+
+  const continueToConnections = async () => {
+    await window.ipcRenderer.invoke('SET_SETTING', {
+      key: 'setup_step',
+      value: 'connections',
+    });
+    setStep('connections');
   };
 
   const finish = async () => {
@@ -488,31 +503,52 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
       ) : (
         <div className="grid min-h-screen lg:grid-cols-[0.9fr_1.1fr]">
           <ObservatoryPanel
-            eyebrow="Optional · About you"
-            title="A little context, in your own words."
-            description="Add the names people use for you, and the work or interests you bring to your conversations."
+            eyebrow={
+              step === 'connections'
+                ? 'Optional · Note connections'
+                : 'Optional · About you'
+            }
+            title={
+              step === 'connections'
+                ? 'Keep thinking in your favorite app.'
+                : 'A little context, in your own words.'
+            }
+            description={
+              step === 'connections'
+                ? 'Explore your saved meeting notes in ChatGPT or Claude, with separate access controls for each.'
+                : 'Add the names people use for you, and the work or interests you bring to your conversations.'
+            }
             footer="You can change or clear this information anytime in Settings."
           />
           <section
-            aria-label="About you setup"
+            aria-label={
+              step === 'connections'
+                ? 'Note connections setup'
+                : 'About you setup'
+            }
             className="flex items-center bg-pro-bg px-7 py-12 text-pro-text-main sm:px-12 lg:px-16 xl:px-24"
             style={
               {
                 '--pro-bg': '45 25% 96%',
                 '--pro-surface': '45 22% 93%',
                 '--pro-text-main': '220 20% 20%',
+                '--pro-text-muted': '220 10% 40%',
                 '--pro-border': '45 12% 80%',
                 '--pro-accent': '212 80% 42%',
                 colorScheme: 'light',
               } as CSSProperties
             }
           >
-            <div className="w-full max-w-xl">
-              <h2 className="mb-6 font-serif text-[2rem] font-medium leading-[1.12] tracking-[-0.02em]">
-                A little about you
-              </h2>
-              <IdentityProfileForm onComplete={finish} />
-            </div>
+            {step === 'connections' ? (
+              <NotesConnectionsSetup onComplete={finish} />
+            ) : (
+              <div className="w-full max-w-xl">
+                <h2 className="mb-6 font-serif text-[2rem] font-medium leading-[1.12] tracking-[-0.02em]">
+                  A little about you
+                </h2>
+                <IdentityProfileForm onComplete={continueToConnections} />
+              </div>
+            )}
           </section>
         </div>
       )}

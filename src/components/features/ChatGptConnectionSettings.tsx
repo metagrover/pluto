@@ -193,12 +193,12 @@ export const ChatGptConnectionSettings = () => {
               <div className="mt-3">{setupSteps}</div>
             </details>
           ) : (
-            <div className="space-y-3">
-              <h4 className="text-xs font-medium text-pro-text-main">
+            <details className="text-xs leading-relaxed text-pro-text-main/75">
+              <summary className="cursor-pointer rounded font-medium text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent">
                 After you connect
-              </h4>
-              {setupSteps}
-            </div>
+              </summary>
+              <div className="mt-3">{setupSteps}</div>
+            </details>
           )}
         </div>
         <div className="space-y-3 border-t border-pro-border/60 pt-4">

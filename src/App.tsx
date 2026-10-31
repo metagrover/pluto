@@ -49,8 +49,8 @@ import { AskPluto, type AskPlutoMessage } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
 import { IdentityProfileInvitation } from './components/features/IdentityProfileInvitation';
-import { IntelligenceUpgradeNotice } from './components/features/IntelligenceUpgradeNotice';
 import { MeetingView } from './components/features/MeetingView';
+import { NotesConnectionsNotice } from './components/features/NotesConnectionsNotice';
 import { PreMeetingBriefSheet } from './components/features/PreMeetingBriefSheet';
 import { RecordingFinalizingView } from './components/features/RecordingFinalizingView';
 import { RECORDING_SCRATCHPAD_STORAGE_KEY } from './components/features/RecordingMeetingRail';
@@ -2578,10 +2578,9 @@ function App() {
               />
             ) : activeTab === 'hub' ? (
               <>
-                <IntelligenceUpgradeNotice
-                  provider={llmProvider}
+                <NotesConnectionsNotice
                   onOpenSettings={() => {
-                    setSettingsInitialTab('intelligence');
+                    setSettingsInitialTab('advanced');
                     setSettingsNavigationToken((token) => token + 1);
                     setSelectedMeetingId(null);
                     setActiveTab('settings');

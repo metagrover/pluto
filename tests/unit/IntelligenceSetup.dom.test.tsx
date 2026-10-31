@@ -242,7 +242,7 @@ describe('First-run intelligence choice', () => {
         f.container.querySelector<HTMLButtonElement>('#intelligence-continue')!
           .disabled,
       ).toBe(true);
-      expect(f.container.textContent).toContain('Continue with recording');
+      expect(f.container.textContent).not.toContain('Continue with recording');
       expect(f.complete).not.toHaveBeenCalled();
       act(() => f.root.unmount());
     },
@@ -372,7 +372,7 @@ describe('First-run intelligence choice', () => {
     act(() => f.root.unmount());
   });
 
-  it('lets users keep recording while local intelligence is not installed, and remembers their choice', async () => {
+  it('requires ready local intelligence before completing setup', async () => {
     const f = await renderSetup();
     const original = f.invoke.getMockImplementation()!;
     f.invoke.mockImplementation(async (channel, input) =>
@@ -390,15 +390,9 @@ describe('First-run intelligence choice', () => {
       f.container.querySelector<HTMLButtonElement>('#intelligence-continue')!
         .disabled,
     ).toBe(true);
-    const later = [...f.container.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Continue with recording',
-    )!;
-    await act(async () => later.click());
-    expect(f.saved).toMatchObject({
-      llm_provider: 'ollama',
-      intelligence_setup_complete: 'true',
-    });
-    expect(f.complete).toHaveBeenCalledOnce();
+    await f.submit();
+    expect(f.saved.intelligence_setup_complete).toBeUndefined();
+    expect(f.complete).not.toHaveBeenCalled();
     expect(f.invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
     act(() => f.root.unmount());
   });

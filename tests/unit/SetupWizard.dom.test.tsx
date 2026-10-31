@@ -164,6 +164,69 @@ describe('SetupWizard', () => {
     expect(invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
   });
 
+  it('resumes optional note connections and finishes without enabling either app', async () => {
+    const original = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (channel: string, key?: string) => {
+      if (channel === 'GET_SETTING' && key === 'setup_step')
+        return 'connections';
+      if (channel === 'GET_SETTING' && key === 'intelligence_setup_complete')
+        return 'true';
+      return original(channel, key);
+    });
+    const complete = vi.fn();
+    await act(async () => root.render(<SetupWizard onComplete={complete} />));
+    expect(
+      container.querySelector('[aria-label="Note connections setup"]'),
+    ).toBeTruthy();
+    expect(container.textContent).toContain('ChatGPT Desktop');
+    expect(container.textContent).toContain('Claude Desktop');
+    expect(container.textContent).toContain('separate from the AI');
+    expect(
+      invoke.mock.calls.some(([channel]) => channel.includes('SET_ENABLED')),
+    ).toBe(false);
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Skip for now')!
+        .click(),
+    );
+    expect(invoke).toHaveBeenCalledWith('SET_SETTING', {
+      key: 'notes_connections_notice_seen',
+      value: 'true',
+    });
+    expect(invoke).toHaveBeenCalledWith('SET_SETTING', {
+      key: 'setup_complete',
+      value: 'true',
+    });
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it('keeps optional connection setup retryable when persistence fails', async () => {
+    const original = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (channel: string, key?: string) => {
+      if (channel === 'GET_SETTING' && key === 'setup_step')
+        return 'connections';
+      if (channel === 'GET_SETTING' && key === 'intelligence_setup_complete')
+        return 'true';
+      if (channel === 'SET_SETTING') throw new Error('disk unavailable');
+      return original(channel, key);
+    });
+    const complete = vi.fn();
+    await act(async () => root.render(<SetupWizard onComplete={complete} />));
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Skip for now')!
+        .click(),
+    );
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not finish setup',
+    );
+    expect(complete).not.toHaveBeenCalled();
+    expect(
+      container.querySelector<HTMLButtonElement>('button:last-of-type')
+        ?.disabled,
+    ).toBe(false);
+  });
+
   it('prepares local recording requirements without Python or provider setup', async () => {
     act(() => root.render(<SetupWizard onComplete={vi.fn()} />));
     await flush();

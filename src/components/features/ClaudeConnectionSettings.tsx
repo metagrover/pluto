@@ -163,17 +163,20 @@ export const ClaudeConnectionSettings = () => {
             </button>
           </div>
         ) : null}
-        <div className="space-y-3 border-t border-pro-border/60 pt-4">
-          <h4 className="text-xs font-medium text-pro-text-main">
+        <details
+          open={ready}
+          className="space-y-3 border-t border-pro-border/60 pt-4"
+        >
+          <summary className="cursor-pointer rounded text-xs font-medium text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent">
             {ready ? 'Load Pluto in Claude' : 'After you connect'}
-          </h4>
+          </summary>
           <p className="text-xs leading-relaxed text-pro-text-main/75">
             Pluto is a local connector. It won’t appear in Claude’s public
             connector directory. Restart Claude after first connecting, then
             check its local servers below.
           </p>
           {steps}
-        </div>
+        </details>
         <div className="space-y-3 border-t border-pro-border/60 pt-4">
           <p
             id="claude-access-disclosure"

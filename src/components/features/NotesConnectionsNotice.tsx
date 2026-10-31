@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { ProviderId } from '../../../electron/llm/inferenceTypes';
+import { getChatGptConnectionStatus } from '../../api/chatgptConnection';
+import { getClaudeConnectionStatus } from '../../api/claudeConnection';
 
-export function IntelligenceUpgradeNotice({
-  provider,
+export function NotesConnectionsNotice({
   onOpenSettings,
 }: {
-  provider: ProviderId;
   onOpenSettings: () => void;
 }) {
   const [visible, setVisible] = useState(false);
@@ -16,12 +15,18 @@ export function IntelligenceUpgradeNotice({
     const read = (key: string) => window.ipcRenderer.invoke('GET_SETTING', key);
     void Promise.all([
       read('setup_complete'),
-      read('intelligence_setup_complete'),
-      read('intelligence_upgrade_notice_seen'),
+      read('notes_connections_notice_seen'),
+      getChatGptConnectionStatus(),
+      getClaudeConnectionStatus(),
     ])
-      .then(([setup, chosen, seen]) => {
+      .then(([setup, seen, chatgpt, claude]) => {
         if (active)
-          setVisible(setup === 'true' && chosen !== 'true' && seen !== 'true');
+          setVisible(
+            setup === 'true' &&
+              seen !== 'true' &&
+              !chatgpt.enabled &&
+              !claude.enabled,
+          );
       })
       .catch(() => {});
     return () => {
@@ -34,7 +39,7 @@ export function IntelligenceUpgradeNotice({
     setError('');
     try {
       await window.ipcRenderer.invoke('SET_SETTING', {
-        key: 'intelligence_upgrade_notice_seen',
+        key: 'notes_connections_notice_seen',
         value: 'true',
       });
       setVisible(false);
@@ -46,19 +51,19 @@ export function IntelligenceUpgradeNotice({
     }
   };
 
-  if (!visible || provider === 'chatgpt') return null;
+  if (!visible) return null;
   return (
     <aside
-      aria-label="ChatGPT intelligence is available"
+      aria-label="Meeting-note connections are available"
       className="mx-6 mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-pro-border/60 px-4 py-3 text-[13px] text-pro-text-main"
     >
       <div className="min-w-0 flex-1 basis-64">
         <p className="font-medium">
-          You can now use your ChatGPT plan in Pluto.
+          Use your meeting notes in ChatGPT or Claude.
         </p>
         <p className="mt-1 leading-5 text-pro-text-muted">
-          Your current provider stays selected. Recording and transcription stay
-          local.
+          Connect either desktop app to explore your saved notes. Access is
+          optional and managed separately for each app.
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -68,7 +73,7 @@ export function IntelligenceUpgradeNotice({
           onClick={() => void dismiss(false)}
           className="rounded-md px-3 py-2 font-medium text-pro-text-muted hover:bg-pro-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
         >
-          Keep current setup
+          Not now
         </button>
         <button
           type="button"
@@ -76,7 +81,7 @@ export function IntelligenceUpgradeNotice({
           onClick={() => void dismiss(true)}
           className="rounded-md border border-pro-border px-3 py-2 font-medium hover:bg-pro-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
         >
-          Review ChatGPT
+          Review connections
         </button>
       </div>
       {error ? (
