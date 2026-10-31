@@ -1369,12 +1369,16 @@ export const isNonFactualResponseText = (
     }
   }
   if (mode !== 'draft') return false;
+  const requestText = text.replace(
+    /^(?:Hi|Hello|Dear)(?:\s+[\p{L}'-]+){0,4},\s*/iu,
+    '',
+  );
   return (
     /^(?:Subject:|Hi(?:\s+[\p{L}'-]+){0,4},?$|Hello(?:\s+[\p{L}'-]+){0,4},?$|Dear(?:\s+[\p{L}'-]+){0,4},?$|Best,?$|Regards,?$|Sincerely,?$|Thanks,?$|Thank you,?$)/iu.test(
       text,
     ) ||
     /^(?:Could you|Would you|Please|Let me know|Can we|I'd like to|I would like to|Looking forward)\b/i.test(
-      text,
+      requestText,
     )
   );
 };
@@ -1462,7 +1466,7 @@ export const auditAnswerGrounding = (
 
 export const buildSafeAnswerPresentation = (
   answer: string,
-  citations: CitationChain[],
+  inputCitations: CitationChain[],
   mode: AnswerValidationMode = 'grounded',
 ): {
   answer: string;
@@ -1472,6 +1476,12 @@ export const buildSafeAnswerPresentation = (
   unsupportedClaimCount: number;
   unsupportedClaims: string[];
 } => {
+  const citations =
+    mode === 'draft'
+      ? inputCitations.filter((citation) =>
+          isMaterialClaim(citation.claim, mode),
+        )
+      : inputCitations;
   const cleanAnswer = answer
     .replace(/\s*\[Source\s+\d+\]/gi, '')
     .replace(/<?\-?cite[^>]*>[\s\S]*?<\/cite>/gi, '')
@@ -1495,7 +1505,11 @@ export const buildSafeAnswerPresentation = (
       citations,
       outcome: 'answered',
       trustStatus:
-        grounding.trustStatus === 'inferred' ? 'inferred' : 'grounded',
+        mode === 'draft' && citations.length === 0
+          ? undefined
+          : grounding.trustStatus === 'inferred'
+            ? 'inferred'
+            : 'grounded',
       unsupportedClaimCount: 0,
       unsupportedClaims: [],
     };

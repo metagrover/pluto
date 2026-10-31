@@ -44,6 +44,7 @@
       "**/node_modules/**",
       ".pnpm-store/**",
       ".private/**",
+      "artifacts/ask-pluto-benchmark/**",
       "**/dist/**",
       "**/dist-electron/**",
       "**/dist-electron-package/**",
