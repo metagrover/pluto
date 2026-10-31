@@ -24,6 +24,8 @@ const model = process.env.OLLAMA_BENCHMARK_MODEL || OLLAMA_GENERAL_MODEL;
 const seed = Number(process.env.MEETING_NOTES_ACCEPTANCE_SEED ?? 41);
 const reviewProtocol = process.env.MEETING_NOTES_REVIEW_PROTOCOL || 'audit';
 const caseSet = process.env.MEETING_NOTES_ACCEPTANCE_CASE_SET || 'fixed';
+// This selects application generation code, not the Electron runtime. Node
+// diagnostics do not exercise native memory admission or artifact load policy.
 const productionPath =
   process.env.MEETING_NOTES_ACCEPTANCE_PATH === 'production';
 if (!['fixed', 'heldout', 'commitment_state', 'private'].includes(caseSet))
@@ -78,6 +80,12 @@ suite(
           };
           const config = {
             path: productionPath ? 'production' : 'audit_harness',
+            runtime: process.versions.electron
+              ? 'electron'
+              : 'node_semantic_diagnostic',
+            nativeMemoryAdmission: process.versions.electron
+              ? 'required'
+              : 'not_exercised',
             case: fixture.id,
             provider: 'ollama',
             model,
