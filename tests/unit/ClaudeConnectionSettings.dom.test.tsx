@@ -161,7 +161,7 @@ describe('Claude meeting note access', () => {
     api.getClaudeConnectionStatus.mockResolvedValue(ready);
     const container = await render();
     const steps = container.querySelector('ol')!;
-    expect(steps.closest('details')).toBeNull();
+    expect(steps.closest('details')?.open).toBe(true);
     expect(steps.textContent).toContain('Restart Claude once');
     expect(steps.textContent).toContain('Developer → Local MCP servers');
     expect(container.textContent).toContain(

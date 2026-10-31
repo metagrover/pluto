@@ -139,10 +139,10 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
     }
   };
 
-  const continueSetup = async (recordingOnly = false) => {
+  const continueSetup = async () => {
     if (!provider) return;
     if (provider === 'ollama') {
-      if (!recordingOnly && localReadiness?.status !== 'ready') return;
+      if (localReadiness?.status !== 'ready') return;
       await finishSetup(provider);
       return;
     }
@@ -375,16 +375,6 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
                   ? 'Use OpenRouter'
                   : 'Choose an option'}
         </button>
-        {provider === 'ollama' && localReadiness?.status !== 'ready' ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void continueSetup(true)}
-            className="rounded-lg px-3 py-2 text-sm font-medium text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
-          >
-            Continue with recording
-          </button>
-        ) : null}
         {busy && provider === 'chatgpt' && !connected ? (
           <button
             type="button"

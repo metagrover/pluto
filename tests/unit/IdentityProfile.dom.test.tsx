@@ -467,6 +467,8 @@ describe('About you form and invitation', () => {
     expect(container.textContent).toContain('A little about you');
     expect(invoke).not.toHaveBeenCalledWith('RECORDING_READINESS_PREPARE');
     await click('Skip for now');
+    expect(container.textContent).toContain('Your notes, where you think');
+    await click('Skip for now');
     expect(invoke).toHaveBeenCalledWith('SET_SETTING', {
       key: 'setup_complete',
       value: 'true',
@@ -503,12 +505,10 @@ describe('About you form and invitation', () => {
     await act(async () => root.render(<SetupWizard onComplete={complete} />));
     await text('Preferred name', 'Morgan');
     await click('Save and continue');
+    expect(container.textContent).toContain('Your notes, where you think');
+    await click('Skip for now');
     expect(complete).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')).toBeTruthy();
-    expect(
-      container.querySelector<HTMLInputElement>(
-        'input[aria-label="Preferred name"]',
-      )?.value,
-    ).toBe('Morgan');
+    expect(profileState.profile.preferredName).toBe('Morgan');
   });
 });
