@@ -81,6 +81,13 @@ source for attribution, final state, conditions, and unsupported claims. Record
 that review locally beside the report. Case/source hashes let you tie the review
 to the exact input. Keep model versions stable when comparing runs.
 
+The separate `meetingNotesLocalGuardrailsAcceptance` benchmark runs in Node by
+default. Its `MEETING_NOTES_ACCEPTANCE_PATH=production` option selects Pluto's
+generation API; it does not start Electron or exercise native memory admission
+and artifact-specific load settings. Its reports identify that runtime boundary.
+Use it for source-quality diagnostics, and use the Electron workflow above for
+runtime, persistence and downstream acceptance.
+
 This starts from a saved validated transcript. It does not certify recording,
 audio transcription accuracy, visual interactions, or a packaged release. It
 does not alter the production database. The fast harness checks run in ordinary
