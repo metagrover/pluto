@@ -39,6 +39,7 @@ ipcMain.handle = (channel, handler) => {
 };
 let fakeMode = null;
 let mockPort;
+let controlledModelEntry;
 let mockStarted = false;
 const request = http.request;
 http.request = function (input, options, callback) {
@@ -50,7 +51,7 @@ http.request = function (input, options, callback) {
 const server = http.createServer((req, res) => {
   if (req.url === '/api/ps') return res.end(JSON.stringify({ models: [] }));
   if (req.url === '/api/tags')
-    return res.end(JSON.stringify({ models: [{ name: 'gemma4:12b' }] }));
+    return res.end(JSON.stringify({ models: [controlledModelEntry] }));
   let body = '';
   req.on('data', (part) => {
     body += part;
@@ -89,6 +90,14 @@ const server = http.createServer((req, res) => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const report = [];
 async function execute() {
+  const catalog = await (await fetch('http://127.0.0.1:11434/api/tags')).json();
+  controlledModelEntry = catalog.models?.find(
+    (model) => model.name === 'gemma4:12b',
+  );
+  assert(
+    controlledModelEntry?.size > 0 && controlledModelEntry?.digest,
+    'installed Gemma metadata is available',
+  );
   await new Promise((resolve) =>
     server.listen(0, '127.0.0.1', () => {
       mockPort = server.address().port;
@@ -236,6 +245,21 @@ async function execute() {
   assert.equal(draft.status, 'answered');
   assert(draft.answer.toLowerCase().includes('report'));
   assert(!/october|tomorrow|\bby\s+(?:\w+day|\d)/i.test(draft.answer));
+  // Release this replay's real allocation before simulating a cold transport.
+  await fetch('http://127.0.0.1:11434/api/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'gemma4:12b', keep_alive: 0 }),
+  });
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const state = await (await fetch('http://127.0.0.1:11434/api/ps')).json();
+    if (!state.models?.length) break;
+    assert(
+      attempt < 99,
+      'real model allocation settled before controlled transport',
+    );
+    await sleep(100);
+  }
   fakeMode = 'truncated';
   const truncated = await run('truncated', original);
   assert.equal(truncated.status, 'unavailable');
@@ -273,6 +297,7 @@ async function execute() {
 }
 async function finish(code) {
   let exitCode = code;
+  fakeMode = null;
   server.closeAllConnections();
   server.close();
   for (const window of BrowserWindow.getAllWindows()) window.destroy();
@@ -299,7 +324,8 @@ execute().then(
     return finish(1);
   },
 );
+// Four real requests each retain their own provider deadline before fault checks.
 setTimeout(() => {
   console.error('WORKFLOW TIMEOUT');
   void finish(2);
-}, 240000).unref();
+}, 600000).unref();

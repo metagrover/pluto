@@ -9182,11 +9182,14 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               };
           };
           const answerStream =
-            conversationResolution.relation === 'omission_follow_up'
+            conversationResolution.relation === 'omission_follow_up' ||
+            conversationResolution.task === 'draft'
               ? createValidatedAnswerStream(
                   context,
                   onAnswerDelta,
-                  'analysis',
+                  conversationResolution.relation === 'omission_follow_up'
+                    ? 'analysis'
+                    : 'draft',
                   onAnswerPresentation,
                   confirmedSelfName,
                 )

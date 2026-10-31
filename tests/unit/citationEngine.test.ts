@@ -356,6 +356,38 @@ describe('Citation Engine', () => {
       expect(presentation.answer).not.toContain('budget was approved');
     });
 
+    it.each([
+      'Could you share an update on the acceptance report?',
+      'Hi Morgan, could you please provide an update on the status of the acceptance report [Source 1]?',
+    ])(
+      'keeps draft requests and rejects unsupported factual deadlines: %s',
+      (request) => {
+        const stream = createValidatedAnswerStream(
+          sources,
+          () => undefined,
+          'draft',
+        );
+        const result = stream.finalize(request);
+        expect(result.answer).toBe(request.replace(/ \[Source 1\]/, ''));
+        expect(result.outcome).toBe('answered');
+        expect(result.unsupportedClaimCount).toBe(0);
+        expect(result.citations).toEqual([]);
+        expect(result.trustStatus).toBeUndefined();
+        for (const claim of [
+          'The acceptance report is due tomorrow.',
+          'Hi Morgan, the acceptance report is due tomorrow.',
+        ]) {
+          const unsupported = createValidatedAnswerStream(
+            sources,
+            () => undefined,
+            'draft',
+          ).finalize(claim);
+          expect(unsupported.outcome).toBe('no_evidence');
+          expect(unsupported.unsupportedClaimCount).toBeGreaterThan(0);
+        }
+      },
+    );
+
     it('keeps explicitly labeled analytical guidance separate from grounded observations', () => {
       const stream = createValidatedAnswerStream(
         sources,

@@ -116,6 +116,10 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).not.toContain("Begin with the profile's as-of date");
     expect(prompt).not.toContain("Describe Gamma's work in the third person");
     expect(prompt).toContain('without combining adjacent workstreams');
+    expect(prompt).toContain('CITATION RULES');
+    expect(prompt).toContain(
+      'For each factual claim, add an inline source reference',
+    );
   });
 
   it('anchors relative wording in older synthesized notes to the source date', () => {

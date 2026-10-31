@@ -107,7 +107,7 @@ export const getAskPlutoPrompt = (
 
   const omissionReview = options.omissionReview;
   const expansionReview = options.expansionReview;
-  const requiresInlineCitations = Boolean(omissionReview);
+  const requiresInlineCitations = Boolean(omissionReview) || task === 'draft';
   const confirmedSelfName =
     options.confirmedSelfName || options.userProfile?.name;
   const largeScope = context.length > 6;
@@ -284,7 +284,7 @@ ${details.join('\n')}`;
       ? 'Re-evaluate the prior answer against the current synthesized Context. Say what was overstated, give the latest dated supported picture, and identify any remaining uncertainty. Do not merely agree or restate the earlier answer. Do not claim that newer notes do not exist just because this bounded search did not retrieve them.'
       : '',
     ownershipQuestion
-      ? 'Search every provided source for relevant follow-ups. Separate items that explicitly name the person as owner from possible follow-ups where the notes mention the person but do not establish ownership. Never convert participation, discussion, or an unnamed owner into an assignment. Include every distinct explicit assignment in the supplied context, even if it appeared in an earlier answer. Do not infer the purpose, priority, or completion of a task. Canonical completed or rejected task state overrides older note wording: do not reopen those tasks. Describe other assignments found only in notes as recorded in those notes, not confirmed open commitments.'
+      ? 'Search every provided source for relevant follow-ups. Separate items that explicitly name the person as owner from possible follow-ups where the notes mention the person but do not establish ownership. Never convert participation, discussion, or an unnamed owner into an assignment. Include every distinct explicit assignment in the supplied context, even if it appeared in an earlier answer. Do not infer the purpose, priority, or completion of a task. Canonical completed or rejected task state overrides older note wording: do not reopen those tasks. Describe other assignments found only in notes as recorded in those notes, not confirmed open commitments. Check each source separately before composing the answer. Retain explicitly named planned work as a recorded plan even when its current acceptance or completion is unknown; uncertainty is a reason to qualify it, not silently omit it.'
       : '',
     personWorkQuestion
       ? 'For a question about a named person’s work, describe only tasks the synthesized notes explicitly assign to that person or say they are doing. Work concerning their clients, work done for their review, and work done by a colleague are not their tasks. If the available notes show only involvement or dependencies, say that their current work is not confirmed and describe the involvement separately.'
