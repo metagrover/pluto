@@ -1240,6 +1240,54 @@ export const hasSourceReviewedAcceptance = (
   );
 };
 
+/** Scope a literal backward reference only when every earlier occurrence of its
+ * noun phrase identifies the same exact object. This does not infer task acceptance. */
+const referencedTaskClauses = (
+  predicate: string,
+  passages: readonly { speaker: string | null; text: string }[],
+): { clauses: typeof passages; object: string | null; ambiguous: boolean } => {
+  const [, ...rest] = predicate.split(' ');
+  const object = rest.join(' ').replace(/^(?:the|a|an) /, '');
+  const words = object.split(' ');
+  if (words.length < 2 || words.length > 12)
+    return { clauses: [], object: null, ambiguous: false };
+  const clauses: { speaker: string | null; text: string }[] = [];
+  let ambiguous = false;
+  for (const passage of passages) {
+    let prior = ' ';
+    for (const raw of passage.text.split(/(?<!\d)\.|\.(?!\d)|[?!;]/u)) {
+      const text = normalizeTranscriptEvidence(raw);
+      for (let length = 1; length < words.length; length++) {
+        const suffix = words.slice(-length).join(' ');
+        const reference = new RegExp(
+          `\\b(?:this|that|these|those) ${suffix}\\b`,
+          'g',
+        );
+        const expanded = text.replace(reference, rest.join(' '));
+        if (expanded === text || !` ${expanded} `.includes(` ${predicate} `))
+          continue;
+        // Do not guess between another modified object and the claimed one, or
+        // treat an unqualified noun elsewhere as proof of the same referent.
+        const remaining = prior
+          .replaceAll(` ${object} `, ' ')
+          .replace(
+            new RegExp(`\\b(?:this|that|these|those) ${suffix}\\b`, 'g'),
+            ' ',
+          );
+        if (!prior.includes(` ${object} `)) continue;
+        if (` ${remaining} `.includes(` ${suffix} `)) {
+          ambiguous = true;
+          continue;
+        }
+        clauses.push({ speaker: passage.speaker, text: expanded });
+        break;
+      }
+      prior += `${text} `;
+    }
+  }
+  return { clauses, object: clauses.length ? object : null, ambiguous };
+};
+
 /** Field/polarity checks for a claim already reviewed against exact canonical
  * spans. Deliberately no lexical-overlap threshold: paraphrases are audited.
  * Never select this path from persisted metadata or a model confidence flag. */
@@ -1274,7 +1322,18 @@ export const groundSourceReviewedItem = (
     .slice(0, conditionStart)
     .replace(/,\s*(?:which|that)\s+(?:is|are)\s*$/i, '')
     .trim();
-  const predicate = normalizeTranscriptEvidence(task);
+  const normalizedTask = normalizeTranscriptEvidence(task);
+  // Match task identity independently of its declared deadline; validate that
+  // deadline against the selected task clauses below, never a neighboring task.
+  const predicate =
+    item.kind === 'action' && item.due
+      ? normalizedTask.replace(
+          new RegExp(
+            ` (?:by|before|on|due|no later than) ${normalizeTranscriptEvidence(item.due)}$`,
+          ),
+          '',
+        )
+      : normalizedTask;
   const passages = resolved.sourceLines.map((line) => ({
     speaker:
       resolved.speakerAliases?.find(
@@ -1286,9 +1345,17 @@ export const groundSourceReviewedItem = (
       null,
     text: transcriptLineContent(line),
   }));
+  const references =
+    item.kind === 'action' &&
+    !passages.some(({ text }) =>
+      ` ${normalizeTranscriptEvidence(text)} `.includes(` ${predicate} `),
+    )
+      ? referencedTaskClauses(predicate, passages)
+      : { clauses: [], object: null, ambiguous: false };
+  if (references.ambiguous) return null;
   const taskClauses =
     item.kind === 'action' && item.owner && predicate.split(' ').length >= 2
-      ? passages.flatMap(({ speaker, text }) =>
+      ? [...passages, ...references.clauses].flatMap(({ speaker, text }) =>
           text.split(/(?<!\d)\.|\.(?!\d)|[?!;]/u).filter((clause) => {
             if (
               !` ${normalizeTranscriptEvidence(clause)} `.includes(
@@ -1324,8 +1391,16 @@ export const groundSourceReviewedItem = (
       ? copiedDecisionClauses(item.text, resolved)
       : taskClauses;
   const subject = { text: task, owner: item.owner };
+  const omittedPrerequisite = (text: string) =>
+    hasOmittedSubjectCondition(subject, text, passages) ||
+    (references.object !== null &&
+      hasOmittedSubjectCondition(
+        { text: references.object, owner: item.owner },
+        text,
+        passages,
+      ));
   const separatePrerequisite =
-    taskClauses.length > 0 && hasOmittedSubjectCondition(subject, '', passages);
+    taskClauses.length > 0 && omittedPrerequisite('');
   const conditionEvidence =
     taskClauses.length && !separatePrerequisite
       ? taskEvidence
@@ -1346,8 +1421,7 @@ export const groundSourceReviewedItem = (
     hasUnsupportedQuantityScope(item.text, evidence) ||
     (item.kind === 'action' &&
       (hasUnsupportedNotesCondition(item.text, conditionEvidence) ||
-        (separatePrerequisite &&
-          hasOmittedSubjectCondition(subject, item.text, passages)))) ||
+        (separatePrerequisite && omittedPrerequisite(item.text)))) ||
     numbers(item.text).some(
       (number) =>
         !numbers(evidence).includes(number) &&
@@ -1372,13 +1446,18 @@ export const groundSourceReviewedItem = (
         ? item.owner
         : null;
   const comparisonDue = normalizeDateOrdinals(item.due ?? '');
-  const dueEvidence = normalizeDateOrdinals(evidence);
+  const dueEvidence = normalizeDateOrdinals(
+    taskClauses.length ? taskEvidence : evidence,
+  );
   const duePattern = comparisonDue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const due =
     item.due &&
     isSettledDueValue(item.due) &&
     fieldSupportedBySource(comparisonDue, dueEvidence) &&
-    !fieldExplicitlySuperseded(comparisonDue, dueEvidence) &&
+    !fieldExplicitlySuperseded(
+      comparisonDue,
+      normalizeDateOrdinals(evidence),
+    ) &&
     (new RegExp(
       `\\b(?:by|before|on|due|deadline(?: is)?|no later than)\\s+(?:the\\s+)?(?:(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday),?\\s+)?${duePattern}\\b`,
       'i',

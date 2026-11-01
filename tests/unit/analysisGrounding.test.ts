@@ -2282,3 +2282,231 @@ describe('source-reviewed reported responsibility ownership', () => {
     },
   );
 });
+
+describe('same-turn deictic responsibility scope', () => {
+  const action = {
+    text: 'Run the accessibility test.',
+    kind: 'action' as const,
+    owner: 'Riley',
+    due: 'Thursday',
+  };
+  const resolved = (evidence: string) => ({
+    evidence,
+    quotedEvidence: evidence,
+    sourceLines: [`Riley: ${evidence}`],
+    sourceLine: `Riley: ${evidence}`,
+    lineIndex: 0,
+  });
+  it('keeps the launch prerequisite separate from the accepted task of running its test', () => {
+    const evidence =
+      'The launch is blocked until the accessibility test passes. I will run that test on Thursday.';
+    expect(groundSourceReviewedItem(action, resolved(evidence))).toMatchObject({
+      text: 'Run the accessibility test',
+      owner: 'Riley',
+      due: 'Thursday',
+    });
+  });
+  it.each([
+    'Run the accessibility test on Thursday.',
+    'Riley will run the accessibility test on Thursday.',
+  ])(
+    'validates the declared deadline separately from task identity: %s',
+    (text) => {
+      const evidence =
+        'The launch is blocked until the accessibility test passes. I will run that test on Thursday.';
+      expect(
+        groundSourceReviewedItem({ ...action, text }, resolved(evidence)),
+      ).toMatchObject({ owner: 'Riley', due: 'Thursday' });
+      expect(
+        groundSourceReviewedItem(
+          { ...action, text },
+          resolved(evidence.replace('on Thursday', 'on Wednesday')),
+        )?.due,
+      ).toBeNull();
+    },
+  );
+  it.each([
+    'The launch is blocked until the accessibility test passes. I will run that test on Thursday after legal approves.',
+    'The accessibility test must wait until legal approves. I will run that test on Thursday.',
+    'The launch is blocked until the accessibility test passes. The security test is separate. I will run that test on Thursday.',
+    'The launch is blocked until the accessibility test passes. I will not run that test on Thursday.',
+    'The launch is blocked until the accessibility test passes. I could run that test on Thursday if useful.',
+  ])(
+    'does not erase a condition, select an ambiguous antecedent, or turn negation/possibility into acceptance: %s',
+    (evidence) => {
+      expect(groundSourceReviewedItem(action, resolved(evidence))).toBeNull();
+    },
+  );
+  it('retains the resolved task’s own condition', () => {
+    const evidence =
+      'The launch is blocked until the accessibility test passes. I will run that test on Thursday after legal approves.';
+    expect(
+      groundSourceReviewedItem(
+        { ...action, text: 'Run the accessibility test after legal approves.' },
+        resolved(evidence),
+      ),
+    ).toMatchObject({ owner: 'Riley', due: 'Thursday' });
+  });
+  it('does not borrow another task’s deadline while resolving the action reference', () => {
+    const evidence =
+      'The launch is blocked until the accessibility test passes. I will run that test on Wednesday. I will send the report on Thursday.';
+    expect(
+      groundSourceReviewedItem(action, resolved(evidence))?.due,
+    ).toBeNull();
+    expect(
+      groundSourceReviewedItem(
+        { ...action, due: 'Wednesday' },
+        resolved(evidence),
+      )?.due,
+    ).toBe('Wednesday');
+  });
+  it('also keeps a literal task’s deadline separate from neighboring work', () => {
+    const evidence =
+      'I will run the accessibility test on Wednesday. I will send the report on Thursday.';
+    expect(
+      groundSourceReviewedItem(
+        { ...action, text: 'Run the accessibility test on Thursday.' },
+        resolved(evidence),
+      )?.due,
+    ).toBeNull();
+    expect(
+      groundSourceReviewedItem(
+        {
+          ...action,
+          text: 'Run the accessibility test on Wednesday.',
+          due: 'Wednesday',
+        },
+        resolved(evidence),
+      )?.due,
+    ).toBe('Wednesday');
+  });
+});
+
+describe('literal source-reference scoping across unrelated responsibilities', () => {
+  const check = (
+    text: string,
+    evidence: string,
+    owner = 'Arden',
+    due: string | null = null,
+  ) =>
+    groundSourceReviewedItem(
+      { kind: 'action', text, owner, due },
+      {
+        evidence,
+        quotedEvidence: evidence,
+        sourceLines: [`Arden: ${evidence}`],
+        sourceLine: `Arden: ${evidence}`,
+        lineIndex: 0,
+      },
+    );
+  it.each([
+    [
+      'Inspect the rear corridor.',
+      'Entry is prohibited until the rear corridor is cleared. I will inspect that corridor.',
+    ],
+    [
+      'Translate the final abstract.',
+      'Publication waits until the final abstract is ready. I will translate this abstract.',
+    ],
+    [
+      'Collect signed waivers.',
+      'The trip cannot proceed until signed waivers arrive. I will collect those waivers.',
+    ],
+    [
+      'Clean the brass instruments.',
+      'The performance is delayed until the brass instruments are ready. I will clean these instruments.',
+    ],
+  ])(
+    'scopes a unique literal reference without borrowing an outcome prerequisite: %s',
+    (task, source) => {
+      expect(check(task, source)?.owner).toBe('Arden');
+      expect(
+        check(
+          task.replace(/\.$/, ' on Friday.'),
+          source.replace(/\.$/, ' on Friday.'),
+          'Arden',
+          'Friday',
+        ),
+      ).toMatchObject({ owner: 'Arden', due: 'Friday' });
+    },
+  );
+  it.each([
+    [
+      'Inspect the rear corridor.',
+      'Entry is prohibited until the rear corridor is cleared. The front corridor is also closed. I will inspect that corridor.',
+    ],
+    [
+      'Inspect the rear corridor.',
+      'Entry is prohibited until the rear corridor is cleared. I will inspect that corridor after the escort arrives.',
+    ],
+    [
+      'Inspect the rear corridor.',
+      'The rear corridor must wait until the escort arrives. I will inspect that corridor.',
+    ],
+    [
+      'Translate the final abstract.',
+      'Publication waits until the final abstract is ready. I will translate this abstract only if permission is granted.',
+    ],
+    [
+      'Collect signed waivers.',
+      'The trip cannot proceed until signed waivers arrive. I will not collect those waivers.',
+    ],
+    [
+      'Clean the brass instruments.',
+      'The performance is delayed until the brass instruments are ready. I might clean these instruments.',
+    ],
+    [
+      'Inspect the rear corridor.',
+      'Entry is prohibited until the rear corridor is cleared. I will inspect a different corridor.',
+    ],
+    [
+      'Inspect the rear corridor.',
+      'I will inspect that corridor. Entry is prohibited until the rear corridor is cleared.',
+    ],
+  ])(
+    'holds an ambiguous, conditional, negated, uncertain, different or forward reference: %s',
+    (task, source) => {
+      expect(check(task, source)).toBeNull();
+    },
+  );
+  it('retains an action’s own condition independently of the outcome condition', () => {
+    expect(
+      check(
+        'Translate the final abstract only if permission is granted.',
+        'Publication waits until the final abstract is ready. I will translate this abstract only if permission is granted.',
+      )?.owner,
+    ).toBe('Arden');
+  });
+  it('cannot assign a cited first-person promise to another owner', () => {
+    expect(
+      check(
+        'Inspect the rear corridor.',
+        'Entry is prohibited until the rear corridor is cleared. I will inspect that corridor.',
+        'Robin',
+      )?.owner,
+    ).not.toBe('Robin');
+  });
+  it('retains existing conservative validation when the reference is outside this local proof', () => {
+    const lines = [
+      'Robin: The rear corridor is the area for inspection.',
+      'Arden: I will inspect that corridor.',
+    ];
+    expect(
+      groundSourceReviewedItem(
+        {
+          kind: 'action',
+          text: 'Inspect the rear corridor.',
+          owner: 'Arden',
+          due: null,
+        },
+        {
+          evidence: lines.join(' '),
+          quotedEvidence: lines.join(' '),
+          sourceLines: lines,
+          sourceLine: lines.join(' '),
+          lineIndex: 0,
+        },
+      )?.owner,
+    ).toBe('Arden');
+  });
+});
