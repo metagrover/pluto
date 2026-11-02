@@ -82,10 +82,8 @@ it('distinguishes stated step order from independent prerequisites before readin
   for (const build of [buildNotesWriterPrompt, buildCompactNotesWriterPrompt]) {
     const prompt = build({ ...input, sourceText: 'SOURCE_DATA_SENTINEL' });
     const policy = prompt.split('BEGIN SOURCE DATA')[0]!;
-    expect(policy).toMatch(/ordered steps.*order/i);
-    expect(policy).toMatch(
-      /independent conditions.*(?:order|sequence)|(?:do not|never).*order.*independent conditions/i,
-    );
+    expect(policy).toMatch(/explicit step order/i);
+    expect(policy).toMatch(/infer no order for independent conditions/i);
     expect(
       prompt.split('BEGIN SOURCE DATA\n')[1]!.split('\nEND SOURCE DATA')[0],
     ).toBe('SOURCE_DATA_SENTINEL');
@@ -208,16 +206,16 @@ it('preserves meaning without requiring a workplace or action-oriented conversat
   ]) {
     expect(prompt).toMatch(/entire conversation.*every material topic/);
     expect(prompt).toMatch(
-      /personal, professional, educational, an interview or a brainstorm/,
+      /personal, professional, educational, an interview or brainstorm/,
     );
-    expect(prompt).toMatch(/do not force a business or action-item format/i);
+    expect(prompt).toMatch(/do not force business or action formats/i);
     expect(prompt).toContain(
-      'requirements, risks, prerequisites and deferred work',
+      'requirements, risks, prerequisites, deferred work',
     );
-    expect(prompt).toContain('even when no immediate action follows');
+    expect(prompt).toContain('even without immediate actions');
     expect(prompt).toContain('final state');
-    expect(prompt).toContain('explicit historical dates');
-    expect(prompt).toMatch(/estimates.*stated start and end/i);
+    expect(prompt).toContain('historical dates');
+    expect(prompt).toMatch(/estimates.*start and end/i);
     expect(prompt).toContain('owner, not the requester or recipient');
     expect(prompt).toContain('unknowns stay unknown');
     expect(prompt).toContain('explicit choice not to proceed');
@@ -236,7 +234,7 @@ it('explicitly retains material non-commitment discussion across all stages', ()
 it('preserves attributed personal context without inventing feelings or consequences', () => {
   for (const prompt of stagePrompts()) {
     expect(prompt).toContain(
-      'Preserve who experienced what, their explicit feelings and reasons; do not infer emotions or consequences.',
+      'Preserve who experienced what, explicit feelings and reasons; infer no emotions or consequences.',
     );
   }
 });
@@ -256,7 +254,12 @@ it('retains complete work and explicit offer status without inventing future tas
 
 it('treats person references as evidence-backed claims across every text block', () => {
   for (const prompt of stagePrompts()) {
-    expect(prompt).toContain('Name source-backed actors directly');
+    expect(prompt).toContain('Name source-backed actors');
+    expect(prompt).toContain(
+      'Attribute completed first-person work to its speaker',
+    );
+    expect(prompt).toContain('Reporting does not prove performing or deciding');
+    expect(prompt).toContain('Keep collective choices collective');
     expect(prompt).toMatch(
       /pronouns require explicit source support.*never names/i,
     );
@@ -474,7 +477,7 @@ it('does not ask the writer to generate duplicate rollups or a forced executive 
   expect(prompt).toContain(
     'Put each accepted responsibility in an action item rather than only the overview',
   );
-  expect(prompt).toContain('never invent outcomes');
+  expect(prompt).toContain('invent no outcomes');
 });
 
 it('retains terminology provenance and isolates source-shaped instructions', () => {
@@ -493,7 +496,7 @@ it('retains terminology provenance and isolates source-shaped instructions', () 
   expect(prompt).toContain('BEGIN SOURCE DATA');
   expect(prompt).toContain('END SOURCE DATA');
   expect(prompt).toContain(
-    'personal, professional, educational, an interview or a brainstorm',
+    'personal, professional, educational, an interview or brainstorm',
   );
 });
 
@@ -622,7 +625,7 @@ it('keeps compact required title and overview fields distinct from the standard 
   const schema = buildNotesResponseSchema('compact_draft', ['R0']) as {
     required: string[];
   };
-  expect(schema.required).toEqual(['title', 'overview', 'sections']);
+  expect(schema.required).toEqual(['sections', 'overview', 'title']);
   expect(
     parseCompactNotesDraft(
       JSON.stringify({ title: null, overview: null, sections: [] }),
@@ -640,7 +643,7 @@ it('preserves unresolved-question state and uncertainty in every statement acros
       /answered questions.*supported facts, actions or decisions/,
     );
     expect(prompt).toMatch(
-      /negation, uncertainty and scope in every claim, including headings/,
+      /negation, uncertainty and scope, including headings/,
     );
     expect(prompt).toMatch(
       /Possibilities, preferences, forecasts and qualified approvals.*not.*confirmed outcomes or broader approvals/,

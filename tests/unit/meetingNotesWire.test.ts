@@ -340,3 +340,33 @@ it('keeps ambiguous adjacent-word markers rather than joining words', () => {
     JSON.parse(wire.decode('{"text":"One [R0]word","sources":["R0"]}')).text,
   ).toBe('One [R0]word');
 });
+
+it('normalizes only duplicate parenthesized wire annotations and preserves literal source identifiers', () => {
+  const spans = [
+    { segment: 0, start: 0, end: 12 },
+    { segment: 1, start: 0, end: 14 },
+  ];
+  const wire = createNotesWireRequest('', spans);
+  const result = JSON.parse(
+    wire.decode(
+      JSON.stringify({
+        text: 'The plan is ready. ([R0]) It has two stages. ([R0, R1])',
+        sources: ['R0', 'R1'],
+      }),
+    ),
+  );
+  expect(result.text).toBe('The plan is ready. It has two stages.');
+  expect(result.sources).toEqual(spans);
+  const prompt = `BEGIN SOURCE DATA\n${JSON.stringify({ descriptor: spans[0], speaker: 'Milo', text: 'The identifier is R0.' })}\nEND SOURCE DATA`;
+  const literal = createNotesWireRequest(prompt, [spans[0]!]);
+  expect(
+    JSON.parse(
+      literal.decode(
+        JSON.stringify({
+          text: 'The identifier is R0 ([R0]).',
+          sources: ['R0'],
+        }),
+      ),
+    ).text,
+  ).toBe('The identifier is R0 ([R0]).');
+});

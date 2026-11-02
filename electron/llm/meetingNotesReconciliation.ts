@@ -38,7 +38,7 @@ export const buildSourceReconciliationPrompt = (sourceText: string): string =>
     notesMultilingualGuidance,
     notesSourceGuidance,
     'Return compact JSON with exactly four arrays: {facts: Text[], actions: Action[], decisions: Decision[], questions: Text[]}. Empty shape: {"facts":[],"actions":[],"decisions":[],"questions":[]}.',
-    'Field definitions, not content: Text = {text: nonempty string, sources: copied source descriptor[]}; Action = {text: nonempty string, sources: copied source descriptor[], owner: string | null, due: string | null}; Decision = {text: nonempty string, sources: copied source descriptor[], owner: string | null}. Use null for unknown metadata.',
+    'Fields (not content): Text = {text: nonempty string, sources: copied source descriptor[]}; Action = {text: nonempty string, sources: copied source descriptor[], owner: string | null, due: string | null}; Decision = {text: nonempty string, sources: copied source descriptor[], owner: string | null}. Unknown metadata is null.',
     'BEGIN SOURCE DATA',
     sourceText,
     'END SOURCE DATA',

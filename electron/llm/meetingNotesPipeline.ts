@@ -387,7 +387,11 @@ export const formatNotesRepairFeedback = (error: unknown): string | null => {
       const commitment = commitmentPattern.exec(diagnostic);
       if (commitment) {
         // Compact writers receive array positions, not the parser's canonical ids.
-        return `The failed item is sections[${commitment[1]}].items[${commitment[2]}] (zero-based array indices). Its action/decision classification, wording, owner, due date or cited evidence is unproved. Re-read the original source for that item. A description or task-scope clarification is a point, not a settled choice. A permitted activity is not a promise to perform it; preserve the exact permission/negation wording when recording a settled policy. Unaccepted conditional willingness remains a point with can/could wording, not a promise with will. Do not change valid actions into points merely to avoid validation. Retain all supported operations, conditions, reasons and history with complete supporting references. Return the complete corrected JSON.`;
+        const prefix =
+          messages.size > 1
+            ? `Failed item sections[${commitment[1]}].items[${commitment[2]}]`
+            : `The failed item is sections[${commitment[1]}].items[${commitment[2]}]`;
+        return `${prefix} (zero-based array indices): its action/decision classification, wording, owner, due date or cited evidence is unproved. Re-read the original source for that item. A description or task-scope clarification is a point, not a settled choice. Scope a decision to the source establishing its settled choice and reason. Put an earlier uncertain offer or proposal and its author in a separate point item, so its uncertainty does not become evidence for the decision. A permitted activity is not a promise to perform it; preserve the exact permission/negation wording when recording a settled policy. Unaccepted conditional willingness remains a point with can/could wording, not a promise with will. Do not change source-backed actions or settled decisions into points merely to avoid validation. A validation failure does not itself establish that the source lacks acceptance or a settled choice. When a target mixes a choice with factual context or scope clarification, split those roles into a decision and separate point items with their own supporting references. Retain all supported operations, conditions, reasons and history with complete supporting references. Return the complete corrected JSON.`;
       }
       const grounding = groundingPattern.exec(diagnostic);
       if (!grounding) return [];
@@ -399,7 +403,11 @@ export const formatNotesRepairFeedback = (error: unknown): string | null => {
       const path = target
         .replace(/^s(\d+):title$/, 'sections[$1].title')
         .replace(/^s(\d+):item:(\d+)$/, 'sections[$1].items[$2]');
-      return `${diagnostic}: ${REVIEW_RETRY_INSTRUCTIONS[reason]} Correct ${path}; retain unaffected supported content and complete source references.`;
+      const correction =
+        reason === 'unsupported_pronoun'
+          ? `Correct ${path}: replace unproved gendered pronouns with the person's name or neutral wording. Retain unaffected supported content.`
+          : `Correct ${path}: update both its wording and sources. Include the provided source references that actually establish each claim and condition in this block; references on other blocks do not support this one. Retain unaffected supported content.`;
+      return `Failed item ${path} (${diagnostic}): ${REVIEW_RETRY_INSTRUCTIONS[reason]} ${correction}`;
     });
     return [...new Set(feedback)].join('\n');
   }
@@ -437,15 +445,6 @@ const retainUnchangedNotesBlocks = (
       : notesSourceSpanLimit(input.provider);
     const before = parseCompactNotesDraft(raw, maxSpans, input.provider);
     const after = parseCompactNotesDraft(repairedRaw, maxSpans, input.provider);
-    // shortcut: Structural or ambiguous repairs retain the full-document path until the writer has explicit repair ids.
-    if (
-      before.sections.length !== after.sections.length ||
-      before.sections.some(
-        (section, index) =>
-          section.items.length !== after.sections[index]!.items.length,
-      )
-    )
-      return repairedRaw;
     type Compact = {
       title: unknown;
       overview: unknown;
@@ -472,7 +471,8 @@ const retainUnchangedNotesBlocks = (
         const path = /^s(\d+):item:(\d+)$/.exec(target!)!;
         const section = Number(path[1]);
         const index = Number(path[2]);
-        const key = sourceKey(before.sections[section]!.items[index]!);
+        const original = before.sections[section]!.items[index]!;
+        const key = sourceKey(original);
         const matching = replacements.filter(
           ({ item }) => sourceKey(item) === key,
         );
@@ -482,6 +482,10 @@ const retainUnchangedNotesBlocks = (
           matching.length !== 1
         )
           return repairedRaw;
+        // A citation set can be reused by another claim during a split or
+        // reclassification. It does not bind a different role to this item.
+        // Legitimate role changes still pass the complete-document factory.
+        if (matching[0]!.item.kind !== original.kind) return repairedRaw;
         next.sections[section]!.items[index] = matching[0]!.value;
       }
     }

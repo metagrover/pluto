@@ -36,6 +36,7 @@ import {
 } from './meetingNotesSource';
 import {
   type AuditVerdict,
+  MAX_NOTES_SUMMARY_SOURCE_SPANS,
   MeetingNotesError,
   NOTES_PROMPT_VERSION,
   type NotesAudit,
@@ -378,7 +379,7 @@ export const parseCompactNotesDraft = (
           parsed.title.sources.length <=
             (NOTES_EXPERIMENTS_ENABLED && sourceSpanLimit > 3
               ? 96
-              : sourceSpanLimit) &&
+              : MAX_NOTES_SUMMARY_SOURCE_SPANS) &&
           parsed.title.sources.every((source) => parseSpan(source) !== null)
         ? {
             id: 'title',
@@ -395,7 +396,7 @@ export const parseCompactNotesDraft = (
       : isRecord(parsed.overview) &&
           exactKeys(parsed.overview, ['text', 'sources']) &&
           Array.isArray(parsed.overview.sources) &&
-          parsed.overview.sources.length <= sourceSpanLimit
+          parsed.overview.sources.length <= MAX_NOTES_SUMMARY_SOURCE_SPANS
         ? parseSupportedText(parsed.overview, 'overview')
         : null;
   if (parsed.overview !== undefined && parsed.overview !== null && !overview) {

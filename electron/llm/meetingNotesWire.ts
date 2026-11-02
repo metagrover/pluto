@@ -167,9 +167,9 @@ export const createNotesWireRequest = (
       const citedLabels = value.sources;
       // Normalize duplicate wire annotations, preserving literal source identifiers and all citations.
       decoded.text = decoded.text.replace(
-        /\s*\[([RP]\d+(?:\.\d+)?(?:,\s*[RP]\d+(?:\.\d+)?)*)\](?=\s|[.!?,;:]|$)/g,
-        (marker, group: string) =>
-          group
+        /\s*(?:\(\[([RP]\d+(?:\.\d+)?(?:,\s*[RP]\d+(?:\.\d+)?)*)\]\)|\[([RP]\d+(?:\.\d+)?(?:,\s*[RP]\d+(?:\.\d+)?)*)\])(?=\s|[.!?,;:]|$)/g,
+        (marker, wrapped: string | undefined, bare: string | undefined) =>
+          (wrapped ?? bare ?? '')
             .split(/,\s*/)
             .every(
               (label) =>

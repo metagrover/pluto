@@ -51,7 +51,7 @@ export const REVIEW_RETRY_INSTRUCTIONS = {
   quantity_scope:
     'Preserve only the quantities and quantity scope stated in this case’s source.',
   unsupported_condition:
-    'Retain the exact supported prerequisites and polarity; do not substitute another condition.',
+    'Check whether this claim’s own source states a prerequisite. If none is stated, remove the invented condition or ordering phrase while retaining the supported claim. If a prerequisite is stated, preserve its exact meaning, polarity and scope; never substitute another condition.',
   unresolved_reference:
     'Name a referent only when this source window identifies it; otherwise state the uncertainty.',
   ongoing_responsibility:
@@ -61,7 +61,7 @@ export const REVIEW_RETRY_INSTRUCTIONS = {
   unsupported_due:
     'Use only a supported calendar deadline; preserve vague timing in prose without an invented date.',
   unsupported_pronoun:
-    'Use the source-supported name or neutral wording; the prior text introduced a gendered pronoun absent from this source. First-person speech does not establish gender.',
+    'Use the source-supported name or neutral wording; the prior text introduced a gendered pronoun absent from this source. Do not assign gendered pronouns to a speaker without explicit pronoun support, and do not transfer pronouns from quoted fictional characters or other people. First-person speech does not establish gender.',
   raw_source_quote:
     'Rewrite the supported meaning as readable third-person prose instead of copying the source quotation.',
   source_grounding:

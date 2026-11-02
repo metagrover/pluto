@@ -8,6 +8,7 @@ import {
 } from '../../electron/llm/meetingNotesAudit';
 import { parseEditedNotes } from '../../electron/llm/meetingNotesEditor';
 import { buildNotesResponseSchema } from '../../electron/llm/meetingNotesSchema';
+import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
 import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
 
@@ -48,6 +49,60 @@ const validate = (
 ) => validator.validate(buildNotesResponseSchema(contract, ['R0']), value);
 
 describe('local notes wire schemas', () => {
+  it('retains evidence from multiple topics in summaries without widening individual items', () => {
+    const source = createNotesSource(
+      JSON.stringify([
+        { speaker: 'Arden', text: 'The gallery opens tomorrow.' },
+        { speaker: 'Robin', text: 'The workshop is full.' },
+        { speaker: 'Ellis', text: 'The courtyard is closed.' },
+        { speaker: 'Mara', text: 'The evening concert is cancelled.' },
+      ]),
+    );
+    const spans = source.segments.map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+    const request = createNotesWireRequest('', spans);
+    const summary = {
+      sources: request.sourceLabels,
+      text: 'Gallery, workshop, courtyard and concert updates.',
+    };
+    const value = {
+      sections: [
+        {
+          title: 'Updates',
+          items: [
+            {
+              sources: ['R0'],
+              kind: 'point',
+              owner: null,
+              due: null,
+              text: 'The gallery opens tomorrow.',
+            },
+          ],
+        },
+      ],
+      overview: summary,
+      title: summary,
+    };
+    const schema = buildNotesResponseSchema(
+      'compact_draft',
+      request.sourceLabels,
+    );
+    expect(validator.validate(schema, value)).toBe(true);
+    const parsed = parseCompactNotesDraft(
+      request.decode(JSON.stringify(value)),
+    );
+    expect(parsed.overview?.sources).toEqual(spans);
+    expect(parsed.title?.sources).toEqual(spans);
+    value.sections[0]!.items[0]!.sources = request.sourceLabels;
+    expect(validator.validate(schema, value)).toBe(false);
+    expect(() =>
+      parseCompactNotesDraft(request.decode(JSON.stringify(value))),
+    ).toThrow();
+  });
+
   it('requires a cited compact overview or explicit null for new generation', () => {
     const value = {
       title: null,
@@ -78,7 +133,7 @@ describe('local notes wire schemas', () => {
     { text: '', sources: ['R0'] },
     { text: 'x'.repeat(12_001), sources: ['R0'] },
     { text: 'Outline', sources: [] },
-    { text: 'Outline', sources: ['R0', 'R0', 'R0', 'R0'] },
+    { text: 'Outline', sources: Array(37).fill('R0') },
     { text: 'Outline', sources: ['R9'] },
     { text: 'Outline', sources: ['R0'], owner: 'Milo' },
   ])('rejects malformed or unsupported compact overview %#', (overview) => {

@@ -29,6 +29,7 @@ import {
   watchLocalModelMemory,
 } from './localModelMemory';
 
+import { acceptEditedNotes, parseCompactNotesDraft } from './meetingNotesAudit';
 import {
   notesContextTokens,
   notesSourceSpanLimit,
@@ -45,6 +46,12 @@ import {
 } from './meetingNotesContinuation';
 import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
 import {
+  parseNotesOverview,
+  prepareNotesOverview,
+} from './meetingNotesOverview';
+import {
+  NOTES_BOUNDED_LIMITS,
+  formatNotesRepairFeedback,
   generateMeetingNotes,
   precomputeNextMeetingNotesLeaf,
 } from './meetingNotesPipeline';
@@ -611,6 +618,8 @@ interface TextGenerationOptions {
   jsonMode?: boolean;
   responseSchema?: Record<string, unknown>;
   modelOverride?: string;
+  /** Request-local native catalog evidence, never model output or saved metadata. */
+  onOllamaArtifact?: (digest: string | undefined) => void;
   signal?: AbortSignal;
   onStart?: () => void;
   onToken?: (delta: string) => void;
@@ -757,6 +766,11 @@ export class UnifiedLLMProvider implements LLMProvider {
         ? {}
         : undefined;
     let completedStages = 0;
+    let overviewRefreshed = false;
+    const acceptedOverviews = new Map<string, string>();
+    let modelStageCalls = 0;
+    let overviewProfileActive = false;
+    let overviewProfileArtifact: string | undefined;
     const input: Parameters<typeof generateMeetingNotes>[0] = {
       source,
       context: {
@@ -825,6 +839,13 @@ export class UnifiedLLMProvider implements LLMProvider {
       onPlan: options.onPlan,
       onRepartition: options.onRepartition,
       generate: async (request) => {
+        if (
+          overviewProfileActive &&
+          modelStageCalls >= NOTES_BOUNDED_LIMITS.maxModelCalls
+        )
+          throw new MeetingNotesError('notes_model_call_limit');
+        modelStageCalls += 1;
+        let writerArtifact: string | undefined;
         const wire = createNotesWireRequest(
           request.prompt,
           request.sourceSpans ?? [],
@@ -834,6 +855,9 @@ export class UnifiedLLMProvider implements LLMProvider {
         const raw = await this.generateResumableAnalysisText({
           prompt: wire.prompt,
           task: request.task,
+          onOllamaArtifact: (digest) => {
+            writerArtifact = digest;
+          },
           jsonMode: true,
           signal: request.signal,
           ...(this.providerType === 'ollama' &&
@@ -872,7 +896,109 @@ export class UnifiedLLMProvider implements LLMProvider {
           workClass: options.workClass,
         });
         completedStages += 1;
-        return wire.decode(raw);
+        const decoded = wire.decode(raw);
+        if (overviewProfileActive && writerArtifact !== overviewProfileArtifact)
+          throw new MeetingNotesError('notes_semantic_review_incomplete');
+        if (
+          this.providerType !== 'ollama' ||
+          request.responseContract !== 'compact_draft' ||
+          request.task !== 'notesWriter' ||
+          !isEstablishedGemmaArtifact(writerArtifact)
+        )
+          return decoded;
+        try {
+          parseCompactNotesDraft(
+            decoded,
+            notesSourceSpanLimit(this.providerType),
+            this.providerType,
+          );
+        } catch {
+          // Keep the writer's existing schema repair and rejected-response feedback.
+          return decoded;
+        }
+        const overview = prepareNotesOverview(
+          source,
+          request.sourceSpans ?? [],
+          request.contextTokens,
+        );
+        if (!overview) return decoded;
+        overviewProfileActive = true;
+        overviewProfileArtifact = writerArtifact;
+        const draft = JSON.parse(decoded);
+        const overviewKey = `${writerArtifact}:${overview.prompt}`;
+        const cachedOverview = acceptedOverviews.get(overviewKey);
+        if (cachedOverview !== undefined) {
+          draft.overview = { text: cachedOverview, sources: overview.sources };
+          overviewRefreshed = true;
+          return JSON.stringify(draft);
+        }
+        let correction = '';
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const remainingMs =
+            options.optionalReviewDeadlineAtMs === undefined
+              ? semanticReviewTimeoutMs
+              : options.optionalReviewDeadlineAtMs - Date.now();
+          if (
+            remainingMs <= 0 ||
+            remainingMs < (options.optionalReviewMinStartMs ?? 0)
+          )
+            throw new MeetingNotesError('notes_review_budget_exhausted');
+          const timeout = AbortSignal.timeout(
+            Math.min(semanticReviewTimeoutMs, remainingMs),
+          );
+          const parentSignal = request.signal ?? options.signal;
+          const signal = parentSignal
+            ? AbortSignal.any([parentSignal, timeout])
+            : timeout;
+          if (modelStageCalls >= NOTES_BOUNDED_LIMITS.maxModelCalls)
+            throw new MeetingNotesError('notes_model_call_limit');
+          modelStageCalls += 1;
+          options.onStage?.('notesAudit');
+          let overviewArtifact: string | undefined;
+          const result = await this.generateResumableAnalysisText({
+            onOllamaArtifact: (digest) => {
+              overviewArtifact = digest;
+            },
+            prompt: overview.prompt + correction,
+            responseSchema: overview.responseSchema,
+            task: 'notesAudit',
+            jsonMode: true,
+            notesModel: model,
+            notesStageObserver: options.onStageEvent,
+            notesBudget: {
+              contextTokens: request.contextTokens,
+              outputTokens: overview.outputTokens,
+            },
+            workClass: options.workClass,
+            signal,
+          });
+          if (overviewArtifact !== writerArtifact)
+            throw new MeetingNotesError('notes_semantic_review_incomplete');
+          signal.throwIfAborted();
+          try {
+            const text = parseNotesOverview(result);
+            draft.overview = { text, sources: overview.sources };
+            // Validate metadata independently so a body-only repair can reuse
+            // it. The assembled document still passes the full strict factory.
+            acceptEditedNotes({
+              source,
+              draft: {
+                meetingType: 'general',
+                title: null,
+                sections: [],
+                overview: { id: 'overview', text, sources: overview.sources },
+              },
+            });
+            acceptedOverviews.set(overviewKey, text);
+            overviewRefreshed = true;
+            return JSON.stringify(draft);
+          } catch (error) {
+            if (attempt)
+              throw new MeetingNotesError('notes_semantic_review_incomplete');
+            correction = `\n${formatNotesRepairFeedback(error) ?? 'The prior response did not match the required JSON schema. Return exactly the required resolution.'}`;
+          }
+        }
+        throw new MeetingNotesError('notes_semantic_review_incomplete');
       },
       provider: this.providerType,
       model,
@@ -880,8 +1006,9 @@ export class UnifiedLLMProvider implements LLMProvider {
         options.contextTokens ?? notesContextTokens(this.providerType),
       ...(options.signal ? { signal: options.signal } : {}),
     };
+    let document: AnalysisDocumentV3;
     try {
-      return await generateMeetingNotes(input);
+      document = await generateMeetingNotes(input);
     } catch (error) {
       if (
         this.providerType !== 'ollama' ||
@@ -893,11 +1020,14 @@ export class UnifiedLLMProvider implements LLMProvider {
         throw error;
       options.signal?.throwIfAborted();
       // Repartition the complete source; every smaller request still needs fresh admission.
-      return generateMeetingNotes({
+      document = await generateMeetingNotes({
         ...input,
         contextTokens: error.maxContextTokens,
       });
     }
+    if (overviewRefreshed && document.generation_metadata)
+      document.generation_metadata.source_overview_review_version = 1;
+    return document;
   }
 
   async precomputeStructuredAnalysisLeaf(
@@ -1738,6 +1868,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       notesModel,
       modelOverride,
       onNotesMetrics,
+      onOllamaArtifact,
       onNotesPartial,
       onProgress,
       notesContinuation,
@@ -1790,6 +1921,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       typeof entry?.digest === 'string' && entry.digest.trim()
         ? entry.digest
         : undefined;
+    onOllamaArtifact?.(allocationDigest);
     const runner =
       typeof entry?.details?.runner === 'string'
         ? entry.details.runner.trim().toLowerCase() || undefined
