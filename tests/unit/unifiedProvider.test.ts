@@ -383,8 +383,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
   });
 
-  it('versions notes and source review cache identity as notes-v100', () => {
-    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v100');
+  it('versions notes and source review cache identity as notes-v101', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v101');
   });
 
   beforeEach(() => {
@@ -3264,6 +3264,7 @@ it('unloads externally resident Gemma before POST then reuses bounded placement 
         draft_num_predict: 0,
       });
     expect(options.map((o) => o.num_predict)).toEqual([2048, 2048, 64, 2500]);
+    expect(options.map((o) => o.temperature)).toEqual([0.1, 0.1, 0.5, 0.2]);
     expect(capacity.mock.calls.map(([input]) => input.resident)).toEqual([
       false,
       true,

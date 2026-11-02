@@ -457,3 +457,211 @@ it('can publish multilingual discussion without unproved commitment metadata', a
     notesMultilingualGuidance,
   );
 });
+
+const knownArtifact =
+  '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c';
+const qualifyResponse = (
+  request: { onOllamaArtifact?: (digest: string) => void },
+  raw: string,
+  digest = knownArtifact,
+) => {
+  request.onOllamaArtifact?.(digest);
+  return raw;
+};
+const overviewResponse = (text = 'Milo will send the outline.') =>
+  JSON.stringify({
+    resolutions: [
+      {
+        id: 'overview',
+        kind: 'point',
+        text,
+        owner: null,
+        due: null,
+        discussion: null,
+      },
+    ],
+  });
+
+it('authors a verified complete-packet overview before ordinary strict publication without granting body-review proof', async () => {
+  const { provider, source, response, generate } = fixture();
+  response.overview.text = 'Milo has already sent the outline.';
+  generate
+    .mockImplementationOnce(async (r) =>
+      qualifyResponse(r, JSON.stringify(response)),
+    )
+    .mockImplementationOnce(async (r) =>
+      qualifyResponse(r, overviewResponse()),
+    );
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+  });
+  expect(generate.mock.calls.map(([r]) => r.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+  ]);
+  const request = generate.mock.calls[1]![0];
+  expect(request.prompt).toContain('I will send the outline.');
+  expect(request.prompt).not.toContain(response.overview.text);
+  expect(request.notesBudget).toEqual({
+    contextTokens: 16384,
+    outputTokens: 1536,
+  });
+  expect(result.overview).toBe('Milo will send the outline.');
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining({ text: 'Send the outline', assignee: 'Milo' }),
+  ]);
+  expect(result.generation_metadata?.pipeline_version).toBe('writer-only-v1');
+  expect(result.generation_metadata?.source_overview_review_version).toBe(1);
+  expect(result.generation_metadata).not.toHaveProperty(
+    'source_action_review_version',
+  );
+  expect(result.generation_metadata).not.toHaveProperty('audit_status');
+  expect(
+    parseAnalysisDocumentV3(JSON.stringify(result))?.generation_metadata
+      ?.source_overview_review_version,
+  ).toBe(1);
+});
+
+it('retains strict body ownership checks after independent overview authoring', async () => {
+  const { provider, source, response, generate } = fixture();
+  response.sections[0]!.items[0]!.owner = 'Nora';
+  generate.mockImplementation(async (r) =>
+    qualifyResponse(
+      r,
+      r.task === 'notesAudit' ? overviewResponse() : JSON.stringify(response),
+    ),
+  );
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', { source }),
+  ).rejects.toThrow('notes_writer_invalid');
+  expect(generate.mock.calls.map(([r]) => r.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+    'notesWriter',
+  ]);
+});
+
+it('retains strict overview source checks after protocol parsing', async () => {
+  const { provider, source, response, generate } = fixture();
+  generate.mockImplementation(async (r) =>
+    qualifyResponse(
+      r,
+      r.task === 'notesAudit'
+        ? overviewResponse('He will send the outline.')
+        : JSON.stringify(response),
+    ),
+  );
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', { source }),
+  ).rejects.toThrow('notes_semantic_review_incomplete');
+  expect(generate.mock.calls.map(([r]) => r.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+    'notesAudit',
+  ]);
+  expect(generate.mock.calls[2]![0].prompt).toContain('Correct overview');
+});
+
+it('keeps the existing writer schema repair before attempting the overview', async () => {
+  const { provider, source, response, generate } = fixture();
+  generate
+    .mockResolvedValueOnce('{bad json')
+    .mockImplementationOnce(async (r) =>
+      qualifyResponse(r, JSON.stringify(response)),
+    )
+    .mockImplementationOnce(async (r) =>
+      qualifyResponse(r, overviewResponse()),
+    );
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+  });
+  expect(result.overview).toBe('Milo will send the outline.');
+  expect(generate.mock.calls.map(([r]) => r.task)).toEqual([
+    'notesWriter',
+    'notesWriter',
+    'notesAudit',
+  ]);
+});
+
+it('bounds overview protocol repair without granting publication to an invalid response', async () => {
+  const { provider, source, response, generate } = fixture();
+  generate
+    .mockImplementationOnce(async (r) =>
+      qualifyResponse(r, JSON.stringify(response)),
+    )
+    .mockImplementation(async (r) => qualifyResponse(r, '{"resolutions":[]}'));
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', { source }),
+  ).rejects.toThrow('notes_semantic_review_incomplete');
+  expect(generate.mock.calls.map(([r]) => r.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+    'notesAudit',
+  ]);
+});
+
+it('keeps overview authoring inside the existing publication deadline', async () => {
+  const { provider, source, response, generate } = fixture();
+  generate.mockImplementation(async (r) =>
+    qualifyResponse(r, JSON.stringify(response)),
+  );
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', {
+      source,
+      optionalReviewDeadlineAtMs: Date.now() - 1,
+    }),
+  ).rejects.toThrow('notes_review_budget_exhausted');
+  expect(generate).toHaveBeenCalledOnce();
+});
+
+it('does not enable the overview profile from the configured model name alone', async () => {
+  const { provider, source, generate } = fixture();
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+  });
+  expect(generate).toHaveBeenCalledOnce();
+  expect(result.generation_metadata).not.toHaveProperty(
+    'source_overview_review_version',
+  );
+});
+
+it('refuses an overview generated after the installed artifact changes between stages', async () => {
+  const { provider, source, response, generate } = fixture();
+  generate
+    .mockImplementationOnce(async (r) =>
+      qualifyResponse(r, JSON.stringify(response)),
+    )
+    .mockImplementationOnce(async (r) =>
+      qualifyResponse(r, overviewResponse(), 'different-digest'),
+    );
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', { source }),
+  ).rejects.toThrow('notes_semantic_review_incomplete');
+  expect(generate).toHaveBeenCalledTimes(2);
+});
+
+it('resumes overview authoring after foreground capture preemption without resetting its deadline', async () => {
+  const { provider, source, response, generate } = fixture();
+  generate
+    .mockImplementationOnce(async (r) =>
+      qualifyResponse(r, JSON.stringify(response)),
+    )
+    .mockRejectedValueOnce(
+      new DOMException('foreground_preempted', 'AbortError'),
+    )
+    .mockImplementationOnce(async (r) =>
+      qualifyResponse(r, overviewResponse()),
+    );
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+  });
+  expect(result.overview).toBe('Milo will send the outline.');
+  expect(generate.mock.calls.map(([r]) => r.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+    'notesAudit',
+  ]);
+  expect(generate.mock.calls[1]![0].signal).toBe(
+    generate.mock.calls[2]![0].signal,
+  );
+});

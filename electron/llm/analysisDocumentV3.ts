@@ -356,6 +356,9 @@ const parseGenerationMetadata = (
       ? { audit_change_count: record.audit_change_count as number }
       : {}),
     ...(sourceProvenance ? { source_provenance: sourceProvenance } : {}),
+    ...(record.source_overview_review_version === 1
+      ? { source_overview_review_version: 1 }
+      : {}),
     ...(proseReview ? { prose_review: proseReview } : {}),
     ...(hierarchy ? { hierarchy } : {}),
   };

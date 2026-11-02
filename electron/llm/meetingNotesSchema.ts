@@ -1,5 +1,8 @@
 import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
-import type { NotesResponseContract } from './meetingNotesTypes';
+import {
+  MAX_NOTES_SUMMARY_SOURCE_SPANS,
+  type NotesResponseContract,
+} from './meetingNotesTypes';
 
 type Schema = Record<string, unknown>;
 const object = (
@@ -57,40 +60,29 @@ export const buildNotesResponseSchema = (
     };
     const compactTitle = object(
       {
+        sources: {
+          ...compactSources,
+          maxItems: MAX_NOTES_SUMMARY_SOURCE_SPANS,
+        },
         text: { type: 'string', minLength: 1, maxLength: 120 },
-        sources: compactSources,
       },
-      ['text', 'sources'],
+      ['sources', 'text'],
     );
     const compactItem = object(
       {
+        sources: compactSources,
         kind: {
           type: 'string',
           enum: ['point', 'action', 'decision', 'question'],
         },
-        text: { type: 'string', minLength: 1, maxLength: 12_000 },
         owner: nullableString,
         due: nullableString,
-        sources: compactSources,
+        text: { type: 'string', minLength: 1, maxLength: 12_000 },
       },
-      ['kind', 'text', 'owner', 'due', 'sources'],
+      ['sources', 'kind', 'owner', 'due', 'text'],
     );
     return object(
       {
-        // Whole-meeting requests produce the document title with the notes,
-        // rather than needing a separate model request after publication.
-        title: paragraphs
-          ? compactTitle
-          : { anyOf: [compactTitle, { type: 'null' }] },
-        overview: {
-          anyOf: [
-            object({
-              text: { type: 'string', minLength: 1, maxLength: 12_000 },
-              sources: compactSources,
-            }),
-            { type: 'null' },
-          ],
-        },
         sections: {
           ...array(
             object({
@@ -103,8 +95,24 @@ export const buildNotesResponseSchema = (
           ),
           maxItems: 64,
         },
+        // Summarize the completed body, with evidence for every included topic.
+        overview: {
+          anyOf: [
+            object({
+              sources: {
+                ...compactSources,
+                maxItems: MAX_NOTES_SUMMARY_SOURCE_SPANS,
+              },
+              text: { type: 'string', minLength: 1, maxLength: 12_000 },
+            }),
+            { type: 'null' },
+          ],
+        },
+        title: paragraphs
+          ? compactTitle
+          : { anyOf: [compactTitle, { type: 'null' }] },
       },
-      ['title', 'overview', 'sections'],
+      ['sections', 'overview', 'title'],
     );
   }
   const text = (requireId: boolean) =>

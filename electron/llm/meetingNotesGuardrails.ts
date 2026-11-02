@@ -77,7 +77,12 @@ function tokens(text: string): string[] {
 }
 
 function conditionTokens(text: string): string[] {
-  return tokens(text.replace(/n['’]t\b/gi, '')).filter(
+  const normalized = text
+    .replace(/n['’]t\b/gi, '')
+    .replace(/\b(?:would|'d)\s+be\b/gi, '')
+    .replace(/\b(?:be|is|are|was|were|been|being)\b/gi, '')
+    .replace(/\bthere\b/gi, '');
+  return tokens(normalized).filter(
     (word) => !/^(?:not|never|no|do|did)$/.test(word),
   );
 }
@@ -200,8 +205,10 @@ function prerequisiteIsSupported(expected: string, actual: string): boolean {
     (/^unless$/i.test(actualOperator[0]) ||
       NEGATION.test(actualOperator[0])) !== NEGATION.test(actualBody);
   if (expectedNegative !== actualNegative) return false;
+  const expectedTokens = conditionTokens(expectedBody);
+  if (!expectedTokens.length) return false;
   const words = new Set(conditionTokens(actualBody));
-  return conditionTokens(expectedBody).every((word) => words.has(word));
+  return expectedTokens.every((word) => words.has(word));
 }
 
 /** A reviewed prerequisite must be supported by this item's exact cited evidence. */

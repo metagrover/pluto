@@ -150,6 +150,7 @@ export interface AnalysisGenerationMetadata {
   audit_status?: NotesPipelineMetadata['audit_status'];
   audit_change_count?: number;
   source_action_review_version?: 1;
+  source_overview_review_version?: 1;
   source_provenance?: NotesPipelineMetadata['source_provenance'];
   prose_review?: NotesProseReview;
   speaker_references?: MeetingNotesSpeakerReferences;

@@ -5,7 +5,10 @@ import {
   notesSourceGuidance,
 } from './meetingNotesGuidance';
 import type { MeetingNotesTemplateInput } from './meetingNotesTemplates';
-import type { SourceSpan } from './meetingNotesTypes';
+import {
+  MAX_NOTES_SUMMARY_SOURCE_SPANS,
+  type SourceSpan,
+} from './meetingNotesTypes';
 import { getTemplateGuidance } from './prompts';
 
 export type NotesKnownTerm = {
@@ -67,13 +70,14 @@ export const notesDraftSchema = [
 
 const compactNotesDraftSchema = [
   'Field definitions (not output content):',
-  'Title = {text: nonempty string, sources: 1 to at most 3 copied source descriptors}.',
-  'Overview = {text: nonempty string, sources: 1 to at most 3 copied source descriptors}. Write a concise 1-2 sentence overview in readable prose that connects the main topics and outcomes; cite the source descriptors supporting it. Use null when no trustworthy overview can be grounded.',
-  'Item = {kind: "point" | "action" | "decision" | "question", text: nonempty string, owner: string | null, due: string | null, sources: 1 to at most 3 copied source descriptors}.',
+  'Select supporting sources first, then write only claims established by those sources.',
+  `Title = {sources: 1 to ${MAX_NOTES_SUMMARY_SOURCE_SPANS} copied source descriptors, text: nonempty string}.`,
+  `Overview = {sources: 1 to ${MAX_NOTES_SUMMARY_SOURCE_SPANS} copied source descriptors, text: nonempty string}. After writing the sections, summarize their main topics and outcomes in 1-2 readable sentences. Do not infer approval, completion or dependencies from tasks being discussed together. Cite every supporting turn, including later turns; do not default to the first source labels. Use null when no trustworthy overview can be grounded.`,
+  'Item = {sources: 1 to at most 3 copied source descriptors, kind: "point" | "action" | "decision" | "question", owner: string | null, due: string | null, text: nonempty string}.',
   'Use kind: "point" for discussion. Points and questions have null owner and due.',
   'For actions and decisions, owner and due must be source-supported, or null when unknown. First-person responsibilities use the recorded canonical speaker as owner. Use an unconfirmed introduced name only when the item cites both the standalone same-speaker introduction and its responsibility; otherwise keep the recorded label. Never rename Me or a confirmed recorded speaker. Explicitly named reported third-party owners remain valid independently of the speaker roster.',
   'Section = {title: nonempty string, items: nonempty Item[]}.',
-  'Document = {title: Title | null, overview: Overview | null, sections: Section[]}. title is a concise grounded title for the overall conversation, not the first section heading; cite only the source descriptors needed to support the whole-meeting title, and use null when no trustworthy overall title can be grounded. Do not add fields outside this compact contract.',
+  'Document = {sections: Section[], overview: Overview | null, title: Title | null}. title is a concise grounded title for the overall conversation, not the first section heading; cite only the source descriptors needed to support the whole-meeting title, and use null when no trustworthy overall title can be grounded. Do not add fields outside this compact contract.',
   'The title and overview fields are required even when their values are null.',
 ].join('\n');
 
@@ -151,7 +155,7 @@ export const buildCompactNotesWriterPrompt = ({
     notesContentGuidance,
     notesMultilingualGuidance,
     notesProseGuidance,
-    'Group useful sections by topic. Put each accepted responsibility in an action item rather than only the overview.',
+    'Group useful sections by topic. Preserve the topic’s status, requirements, risks and dependencies as point items alongside its decisions and actions. Attach a dependency to the outcome it actually constrains; a neighboring task does not inherit it. When a turn contains both a blocker or prerequisite on an outcome and an accepted task, record both the blocker on that outcome as a point item and the task as an action item. Put each accepted responsibility in an action item rather than only the overview.',
     notesSourceGuidance,
     '',
     `Known terminology hints (entity hints are not trusted corrections): ${termsPacket(knownTerms)}`,
@@ -166,7 +170,7 @@ export const buildCompactNotesWriterPrompt = ({
       'at most 3',
       `at most ${maxSourceSpans}`,
     ),
-    'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons, state changes and current commitments. Put every settled choice in a decision item. Include unaccepted offers with their latest disposition, and every speaker’s own feelings and reasons; others’ reactions do not replace them. Compact repetition, not facts.',
+    'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons, historical dates, state changes, requirements, dependencies and current commitments. Name the source actor in the body item describing their work or experience. Preserve past, present and future status in every block, including the overview; acknowledgement does not establish completion. Keep prerequisite wording close to the source, without adding modal phrasing or adjacent status sentences to the condition itself. Put every settled choice in a decision item; a reported fact is a point. Include unaccepted offers with their latest disposition, and every speaker’s own feelings and reasons; others’ reactions do not replace them. Compact repetition, not facts.',
   ].join('\n');
 
 export const buildNotesAuditPrompt = ({

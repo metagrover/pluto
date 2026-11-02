@@ -104,5 +104,18 @@ it('allows the explicit ChatGPT production budget but rejects more than 36 sourc
   ).not.toThrow();
   expect(() =>
     parseCompactNotesDraft(JSON.stringify(draft), 36, 'ollama'),
+  ).not.toThrow();
+  expect(() =>
+    parseCompactNotesDraft(
+      JSON.stringify({
+        ...draft,
+        title: {
+          ...draft.title,
+          sources: compactDraft(37).sections[0].items[0].sources,
+        },
+      }),
+      36,
+      'ollama',
+    ),
   ).toThrow('notes_writer_invalid');
 });

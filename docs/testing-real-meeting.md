@@ -92,3 +92,6 @@ This starts from a saved validated transcript. It does not certify recording,
 audio transcription accuracy, visual interactions, or a packaged release. It
 does not alter the production database. The fast harness checks run in ordinary
 unit tests: `pnpm exec vitest run tests/unit/realMeetingE2E.test.ts`.
+
+
+The established Gemma notes profile is qualified inside Electron using installed-artifact verification. Its writer sampling and source-bound overview step are therefore not exercised by a standalone Node provider run. Use the app/IPC end-to-end path for release acceptance; a passing Node diagnostic cannot qualify that native profile.

@@ -1494,6 +1494,64 @@ describe('completion prerequisite lexical family', () => {
   );
 });
 
+describe('grammatical condition copula and elliptical condition normalization', () => {
+  it.each([
+    [
+      'Wren offered to narrate the orientation recording if it would be useful.',
+      'I could narrate the orientation recording if useful.',
+    ],
+    [
+      'Wren offered to narrate the orientation recording if useful.',
+      'I could narrate the orientation recording if it would be useful.',
+    ],
+    [
+      'Wren offered to narrate the orientation recording if it is useful.',
+      'I could narrate the orientation recording if useful.',
+    ],
+    [
+      'Wren offered to narrate the orientation recording if that would be useful.',
+      'I could narrate the orientation recording if useful.',
+    ],
+    [
+      'Wren offered to narrate the orientation recording if there is interest.',
+      'I could narrate the orientation recording if interest exists.',
+    ],
+  ])(
+    'accepts grammatical copula expansion of elliptical conditions: %s',
+    (claim, source) => {
+      expect(hasUnsupportedNotesCondition(claim, source)).toBe(false);
+    },
+  );
+
+  it.each([
+    [
+      'Wren offered to narrate the orientation recording if it would be.',
+      'I could narrate the orientation recording if useful.',
+    ],
+    [
+      'Wren offered to narrate the orientation recording if it would be required.',
+      'I could narrate the orientation recording if useful.',
+    ],
+    [
+      'Wren offered to narrate the orientation recording if it would not be useful.',
+      'I could narrate the orientation recording if useful.',
+    ],
+    [
+      'Wren offered to narrate the orientation recording unless it would be useful.',
+      'I could narrate the orientation recording if useful.',
+    ],
+    [
+      'Wren offered to narrate the orientation recording if fast.',
+      'I could narrate the orientation recording if useful.',
+    ],
+  ])(
+    'rejects unsupported, empty, or polarity-inverted conditions: %s',
+    (claim, source) => {
+      expect(hasUnsupportedNotesCondition(claim, source)).toBe(true);
+    },
+  );
+});
+
 describe('prerequisites with a separate whole-list state assertion', () => {
   it.each([
     ['neither of which are complete', 'Neither condition is complete.'],
