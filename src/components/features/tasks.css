@@ -9,9 +9,20 @@
 .tasks-workspace .text-pro-text-muted {
   color: var(--task-text-secondary);
 }
-.tasks-workspace :is(button, input, textarea):focus-visible {
+.tasks-workspace button:focus-visible {
   outline: 2px solid hsl(var(--pro-accent));
-  outline-offset: 3px;
+  outline-offset: 2px;
+}
+.tasks-workspace .task-field > :is(input, textarea):focus-visible,
+.tasks-workspace .task-input:focus-visible {
+  outline: none;
+  border-color: hsl(var(--pro-accent));
+  box-shadow: 0 0 0 2px hsl(var(--pro-accent) / 0.25);
+}
+.tasks-workspace :is(.task-search-input, .task-inline-input):focus,
+.tasks-workspace :is(.task-search-input, .task-inline-input):focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 .task-button {
   display: inline-flex;
@@ -66,7 +77,9 @@
   height: 2px;
   background: hsl(var(--pro-accent));
 }
-.task-search {
+.task-search,
+.task-search-input,
+.task-inline-input {
   width: 100%;
   min-width: 0;
   background: transparent;
@@ -74,8 +87,11 @@
   font-size: 13px;
   color: hsl(var(--pro-text-main));
   caret-color: hsl(var(--pro-accent));
+  outline: none;
 }
 .task-search::placeholder,
+.task-search-input::placeholder,
+.task-inline-input::placeholder,
 .task-field > :is(input, textarea)::placeholder,
 .task-input::placeholder {
   color: var(--task-text-secondary);
@@ -160,8 +176,79 @@
   padding: 0 5px;
   background: hsl(var(--pro-text-main) / 0.05);
 }
+.task-empty-badge {
+  display: flex;
+  width: 48px;
+  height: 48px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px solid hsl(var(--pro-border));
+  background: hsl(var(--pro-surface));
+  color: var(--task-text-secondary);
+  box-shadow: 0 1px 2px hsl(var(--pro-border) / 0.2);
+}
 .tasks-workspace ::selection {
   background: hsl(var(--pro-accent) / 0.2);
+}
+.task-details {
+  animation: task-details-enter 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes task-details-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.task-row.is-highlighted {
+  animation: task-highlight-pulse 2.2s ease-out;
+}
+@keyframes task-highlight-pulse {
+  0% {
+    background-color: hsl(var(--pro-accent) / 0.18);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.task-button-success {
+  background: hsl(142 65% 42%);
+  color: #fff;
+}
+.task-button-success:hover {
+  background: hsl(142 65% 38%);
+}
+.dark .tasks-workspace .task-button-success {
+  background: hsl(142 65% 36%);
+  color: #fff;
+}
+.task-button-danger {
+  background: hsl(0 72% 51%);
+  color: #fff;
+}
+.task-button-danger:hover {
+  background: hsl(0 72% 46%);
+}
+.dark .tasks-workspace .task-button-danger {
+  background: hsl(0 72% 48%);
+  color: #fff;
+}
+.task-toast {
+  animation: task-toast-enter 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes task-toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 @media (max-width: 1279px) {
   .task-details {
@@ -171,5 +258,13 @@
 @media (prefers-reduced-motion: reduce) {
   .tasks-workspace * {
     transition: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-details,
+  .task-row.is-highlighted,
+  .task-toast {
+    animation: none;
   }
 }

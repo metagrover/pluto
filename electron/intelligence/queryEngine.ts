@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { AskPlutoActiveMeetingSnapshot } from '../../src/types/askPlutoQuery';
 import { parseAnalysisDocumentV3Json } from '../../src/utils/analysisDocument';
 import {
@@ -20,6 +21,7 @@ import * as dbModule from '../db';
 // We import the llm provider factory
 import { getAllSettings, getProvider } from '../llm/factory';
 import { findExplicitProjectScopes } from './askPlutoProjectScopes';
+import { isCapabilityQuestion } from './conversationController';
 import { containsConfidentialAside } from './evidencePrivacy';
 import {
   type MeetingNotesEvidenceDocument,
@@ -711,12 +713,12 @@ export const parseQuery = async (
   const trimmed = lowerText.trim();
   const isGreeting =
     /^(?:hi|hello|hey)(?:[\s,!]*?(?:pluto|there))?[\s!?.]*$/i.test(trimmed);
-  const isCapabilityQuestion =
-    /^(?:who are you|what can you do|what is this)[\s!?.]*$/i.test(trimmed);
+  const isCapability =
+    isCapabilityQuestion(text) || /^what is this[\s!?.]*$/i.test(trimmed);
   const isThanks = /^(?:thanks|thank you)(?:[\s,!]*pluto)?[\s!?.]*$/i.test(
     trimmed,
   );
-  if (isGreeting || isCapabilityQuestion || isThanks) {
+  if (isGreeting || isCapability || isThanks) {
     console.log('[QueryEngine] Greeting detected, providing canned response');
 
     let cannedResponse =
@@ -724,7 +726,7 @@ export const parseQuery = async (
     if (/^(?:who are you|what is this)\b/i.test(trimmed)) {
       cannedResponse =
         "I'm Pluto, an AI meeting intelligence assistant. I can help you search through your meeting history, summarize discussions, and track action items.";
-    } else if (/^what can you do\b/i.test(trimmed)) {
+    } else if (isCapability) {
       cannedResponse =
         'I can search your synthesized meeting notes, project information, and people information to answer questions, compare decisions, and track action items.';
     } else if (isThanks) {
@@ -763,18 +765,34 @@ export const parseQuery = async (
       options.signal?.throwIfAborted();
 
       // Parse JSON with cleaning to handle model-generated markdown wrappers.
-      const cleanedResponse =
-        typeof response === 'string' ? cleanJsonText(response) : response;
-      const parsed =
-        typeof cleanedResponse === 'string'
-          ? JSON.parse(cleanedResponse)
-          : cleanedResponse;
-      if (parsed.intent) {
-        intent = parsed.intent as ParsedQuery['intent'];
-      }
-      if (Array.isArray(parsed.expanded_keywords)) {
-        expanded_keywords = parsed.expanded_keywords;
-      }
+      const rawText =
+        typeof response === 'string'
+          ? cleanJsonText(response)
+          : JSON.stringify(response);
+      const jsonMatch =
+        typeof rawText === 'string' ? rawText.match(/\{[\s\S]*\}/) : null;
+      const cleanedResponse = jsonMatch ? jsonMatch[0] : rawText;
+      const parsed = z
+        .object({
+          intent: z.enum([
+            'factual',
+            'temporal',
+            'comparative',
+            'exploratory',
+            'conversational',
+          ]),
+          expanded_keywords: z
+            .array(z.string().trim().min(1))
+            .max(24)
+            .default([]),
+        })
+        .parse(
+          typeof cleanedResponse === 'string'
+            ? JSON.parse(cleanedResponse)
+            : cleanedResponse,
+        );
+      intent = parsed.intent;
+      expanded_keywords = parsed.expanded_keywords;
       console.log(
         `[QueryEngine] LLM Classification: ${intent}, Keywords: ${expanded_keywords.join(', ')}`,
       );

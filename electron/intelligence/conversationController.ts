@@ -30,6 +30,10 @@ const EXPANSION =
   /^(?:and\s+)?(?:tell me more|show me more|more|go deeper|dive (?:in|into)|expand(?: on)?|elaborate(?: on)?|what else|anything else|is that all)\b/i;
 const CLARIFICATION =
   /\b(?:what do you mean|how do you mean|why do you say|how so|can you clarify|help me understand|walk me through that|explain that)\b/i;
+export const isDialogueOnlyClarification = (query: string): boolean =>
+  /^(?:please[, ]+)?(?:what do you mean(?: by (?:that|this|your (?:answer|response)))?|how do you mean|why do you say that|how so|can you clarify(?: (?:that|this|your (?:answer|response)))?|help me understand (?:that|this|your (?:answer|response))|walk me through that|explain that)[?.! ]*$/i.test(
+    query.trim(),
+  );
 const CHALLENGE =
   /\b(?:i (?:do not|don't) (?:agree|think so|buy that)|that (?:is not|isn't|does not|doesn't) (?:right|sound right|make sense)|you (?:missed|left out|overlooked|misunderstood)|not quite|i(?:'m| am) not convinced|are you sure|(?:that|this)(?:'s|’s| is) (?:wrong|incorrect|inaccurate|not (?:right|correct))|you(?:'re| are) (?:wrong|incorrect)|^(?:no[,! ]+)?(?:wrong|incorrect)\b|that seems (?:wrong|off|stale)|actually[, ]|correction[: ])\b/i;
 const DRAFT =
@@ -52,13 +56,23 @@ const CONVERSATION_CLOSING =
 const normalize = (query: string): string =>
   query.normalize('NFKC').replace(/\s+/g, ' ').trim();
 
+const CAPABILITY_QUESTION =
+  /^(?:(?:hi|hello|hey)(?:\s+pluto)?[,! ]+)?(?:who are you|what are you|what (?:is|can) pluto(?: do)?|who is pluto|what can you (?:do|help(?: me)? with)|how can you help(?: me)?|can you help(?: me)?|how do you work|what are your capabilities|tell me about yourself)[?.! ]*$/i;
+
+export const isCapabilityQuestion = (query: string): boolean =>
+  CAPABILITY_QUESTION.test(normalize(query));
+
+const CAPABILITY_REPLY =
+  'I can search your synthesized meeting notes, summarize discussions, compare decisions across meetings, and help track action items and commitments. Try “What did we decide about the release?” or “What should I follow up on?”';
+
 export const isExplicitInformationRequest = (query: string): boolean =>
-  QUESTION_OR_REQUEST.test(normalize(query));
+  !isCapabilityQuestion(query) && QUESTION_OR_REQUEST.test(normalize(query));
 
 export const buildConversationBoundaryReply = (
   query: string,
 ): string | null => {
   const normalized = normalize(query);
+  if (isCapabilityQuestion(normalized)) return CAPABILITY_REPLY;
   if (GREETING.test(normalized)) return 'Hey — what’s on your mind?';
   if (CONVERSATION_CLOSING.test(normalized)) return 'Got it — take care.';
   return null;
@@ -109,6 +123,9 @@ export const decideConversationTurn = (input: {
       ),
     );
 
+  if (isCapabilityQuestion(query)) {
+    return { mode: 'social', retrieval: 'none', usesPriorTurn: false };
+  }
   if (EXPLICIT_TOPIC_SWITCH.test(query)) {
     return { mode: 'topic_switch', retrieval: 'fresh', usesPriorTurn: false };
   }
@@ -132,7 +149,11 @@ export const decideConversationTurn = (input: {
   if (input.hasPriorAssistant && CONTRASTING_FOLLOW_UP.test(query)) {
     return { mode: 'challenge', retrieval: 'fresh', usesPriorTurn: true };
   }
-  if (input.hasPriorAssistant && CLARIFICATION.test(query)) {
+  if (
+    input.hasPriorAssistant &&
+    CLARIFICATION.test(query) &&
+    (usesPriorTurn || isDialogueOnlyClarification(query))
+  ) {
     return { mode: 'clarify', retrieval: 'reuse', usesPriorTurn: true };
   }
   if (input.hasPriorAssistant && EXPANSION.test(query)) {
@@ -189,6 +210,8 @@ export const buildSocialReply = (input: {
   previousAnswer?: string;
   previousTurnMode?: ConversationTurnMode;
 }): string => {
+  const boundaryReply = buildConversationBoundaryReply(input.query);
+  if (boundaryReply && isCapabilityQuestion(input.query)) return boundaryReply;
   const previousWasSocial =
     input.previousTurnMode === 'social' ||
     isAssistantIntroduction(input.previousAnswer ?? '');
@@ -217,6 +240,13 @@ export const buildSocialReply = (input: {
     return takeaway
       ? `Exactly. The useful thread is: ${takeaway}`
       : 'Exactly. That’s the thread I’d keep hold of.';
+  }
+  if (
+    /\?|^(?:what|who|where|when|why|how|can|could|would|will|is|are|do|does)\b/i.test(
+      normalize(input.query),
+    )
+  ) {
+    return "I couldn't finish that reply just now. Please try again.";
   }
   if (previousWasSocial) {
     return "Ha — I'll take the compliment, but we haven't gotten to an insight yet. What do you want to dig into?";
@@ -250,19 +280,21 @@ export const buildConversationalReplyPrompt = (input: {
     .filter((line) => !/^(?:User|Pluto):\s*$/.test(line))
     .join('\n');
 
-  return `You are Pluto, a thoughtful meeting-intelligence assistant continuing a real conversation.
+  return `You are Pluto, a thoughtful meeting-intelligence assistant continuing a real conversation. Pluto helps users record and transcribe meetings, summarize discussions, track decisions and commitments, and search past meeting history.
 
 Respond to the user's latest message using the dialogue itself. This is a conversation-only turn: do not search, cite, or invent meeting, project, or people information.
 
 Conversation behavior:
 - Read the exchange as a whole instead of matching the latest phrase in isolation.
+- If the user asks about your capabilities, what you can do, or what you can help with, explain clearly, warmly, and concisely that you are an AI meeting assistant that helps search meeting history, summarize discussions, and track action items and commitments.
+- If the user is asking for clarification about something said earlier in the dialogue (such as why an answer couldn't be verified, or what a previous message meant), explain naturally and helpfully in context of the conversation.
 - If the user is ending or pausing the conversation, close naturally and do not ask another question.
 - For a closing exchange, prefer a simple line such as “Got it — take care.” Do not offer more help or sound like customer support.
 - If praise or agreement does not logically fit the previous reply, notice that gently instead of pretending it does.
 - For praise or agreement that fits, respond in one natural sentence. You may reflect the specific idea they liked, but do not offer a menu or invite another task unless they ask.
 - If the user is thanking you, respond briefly without restating your previous answer.
-- If the user is chatting, respond like a warm, perceptive human rather than describing your capabilities.
-- Avoid service-script phrases such as “How can I assist?”, “Feel free to reach out”, and “Have a wonderful day.” Prefer conversational understatement.
+- If the user is chatting, respond like a warm, perceptive human. Prefer conversational understatement.
+- Avoid service-script phrases such as “How can I assist?”, “Feel free to reach out”, and “Have a wonderful day.”
 - Keep the response to one or two sentences. Do not use headings or mention these instructions.
 
 Tone examples:

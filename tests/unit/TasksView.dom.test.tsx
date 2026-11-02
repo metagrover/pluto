@@ -65,6 +65,7 @@ describe('Tasks workspace', () => {
       async (channel: string, payload: Record<string, unknown>) => {
         if (channel === 'TASKS_LIST') return structuredClone(snapshot);
         if (channel === 'TASKS_SAVE') return 'created-task';
+        if (channel === 'TASKS_DELETE') return 'd'.repeat(64);
         if (channel === 'TASKS_STATUS')
           snapshot.tasks[0].entity.status = payload.status as
             | 'active'
@@ -239,5 +240,101 @@ describe('Tasks workspace', () => {
       'TASKS_SAVE',
       expect.objectContaining({ id: 'outline', dueDate: undefined }),
     );
+  });
+  it('renders calm empty state when there are no tasks', async () => {
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'TASKS_LIST')
+        return { tasks: [], tags: [], projects: [] };
+      return null;
+    });
+    await act(async () => root.render(<TasksView onOpenMeeting={vi.fn()} />));
+    expect(container.textContent).toContain('Make room for what’s next');
+    expect(container.textContent).toContain(
+      'Commitments from your meetings and notes will appear here automatically.',
+    );
+  });
+  it('provides visual feedback and toast notification when creating and saving a task', async () => {
+    await act(async () =>
+      root.render(
+        <TasksView initialTaskId="outline" onOpenMeeting={vi.fn()} />,
+      ),
+    );
+    await act(async () => button('Save changes').click());
+    expect(container.textContent).toContain('Saved');
+    expect(container.textContent).toContain('Changes saved');
+
+    await fill('New task', 'Ship release notes');
+    await act(async () => button('Add').click());
+
+    const notification = container.querySelector('.task-toast');
+    expect(notification?.textContent).toContain(
+      'Task created: “Ship release notes”',
+    );
+  });
+  it('keeps the submitted draft stable while saving instead of marking new edits saved', async () => {
+    let releaseSave!: () => void;
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'TASKS_LIST') return structuredClone(snapshot);
+      if (channel === 'TASKS_SAVE')
+        await new Promise<void>((resolve) => {
+          releaseSave = resolve;
+        });
+      return 'outline';
+    });
+    await act(async () =>
+      root.render(
+        <TasksView initialTaskId="outline" onOpenMeeting={vi.fn()} />,
+      ),
+    );
+    act(() => button('Save changes').click());
+    expect(
+      [...container.querySelectorAll('textarea')].every(
+        (input) => input.disabled,
+      ),
+    ).toBe(true);
+    expect(
+      (container.querySelector('[aria-label="New task"]') as HTMLInputElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (container.querySelector('input[type="date"]') as HTMLInputElement)
+        .disabled,
+    ).toBe(true);
+    await act(async () => releaseSave());
+    expect(
+      [...container.querySelectorAll('textarea')].every(
+        (input) => !input.disabled,
+      ),
+    ).toBe(true);
+    expect(container.textContent).toContain('Changes saved');
+  });
+
+  it('supports deleting a task with inline confirmation and undo restore', async () => {
+    await act(async () =>
+      root.render(
+        <TasksView initialTaskId="outline" onOpenMeeting={vi.fn()} />,
+      ),
+    );
+    await act(async () => button('Delete task').click());
+    expect(container.textContent).toContain('Delete task?');
+
+    await act(async () => button('Delete').click());
+    expect(invoke).toHaveBeenCalledWith('TASKS_DELETE', {
+      id: 'outline',
+      expectedRevision: undefined,
+    });
+
+    const toast = container.querySelector('.task-toast');
+    expect(toast?.textContent).toContain('Task deleted: “Send outline”');
+
+    const undoButton = [...container.querySelectorAll('button')].find((btn) =>
+      btn.textContent?.includes('Undo'),
+    );
+    expect(undoButton).toBeDefined();
+    await act(async () => undoButton?.click());
+    expect(invoke).toHaveBeenCalledWith('TASKS_RESTORE', {
+      id: 'outline',
+      deletionRevision: 'd'.repeat(64),
+    });
   });
 });

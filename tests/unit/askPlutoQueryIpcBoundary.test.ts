@@ -247,6 +247,24 @@ describe('Ask Pluto query IPC boundary', () => {
     );
   });
 
+  it('explains a no-evidence clarification from the prior search without a model or new retrieval', () => {
+    const start = queryHandler.indexOf(
+      "conversationResolution.turnMode === 'clarify' &&",
+    );
+    const branch = queryHandler.slice(
+      start,
+      queryHandler.indexOf('const persistedMeetings =', start),
+    );
+    expect(start).toBeGreaterThan(-1);
+    expect(branch).toContain(
+      "previousAssistantTurn?.outcome === 'no_evidence'",
+    );
+    expect(branch).toContain('isDialogueOnlyClarification(queryText)');
+    expect(branch).toContain('describePreviousConversationFailure(');
+    expect(branch).not.toContain('answerConversationally()');
+    expect(branch).not.toContain('meetingIds?.length');
+  });
+
   it('keeps semantic scope provider-specific and preserves existing local query routing', () => {
     const scopeRequest = queryHandler.slice(
       queryHandler.indexOf('const resolveScope ='),

@@ -6,6 +6,7 @@ import {
   buildNoEvidenceDraftReply,
   buildSocialReply,
   decideConversationTurn,
+  isDialogueOnlyClarification,
   isExplicitInformationRequest,
   parseConversationActionProposal,
 } from '../../electron/intelligence/conversationController';
@@ -183,7 +184,72 @@ describe('conversation controller', () => {
       ),
     ).toBe(true);
     expect(isExplicitInformationRequest('Project Atlas')).toBe(false);
+    expect(isExplicitInformationRequest('what can you help me with?')).toBe(
+      false,
+    );
+    expect(isExplicitInformationRequest('who are you?')).toBe(false);
+    expect(isExplicitInformationRequest('how can you help?')).toBe(false);
   });
+
+  it.each([
+    'what can you help me with?',
+    'What can you do?',
+    'Hi Pluto, how can you help me?',
+    'Tell me about yourself.',
+    'Who are you?',
+  ])('answers a capability question directly: %s', (query) => {
+    expect(decideConversationTurn({ query, hasPriorAssistant: false })).toEqual(
+      {
+        mode: 'social',
+        retrieval: 'none',
+        usesPriorTurn: false,
+      },
+    );
+    expect(buildConversationBoundaryReply(query)).toContain(
+      'synthesized meeting notes',
+    );
+    expect(buildSocialReply({ query })).toContain('synthesized meeting notes');
+  });
+
+  it.each([
+    'Can you help me find decisions about Atlas?',
+    'What can you tell me about the release?',
+    'Tell me about your meeting with Morgan.',
+    'Who are you meeting with tomorrow?',
+    'Hi, summarize the release discussion.',
+    'Thanks, what are my next steps?',
+  ])('keeps a substantive request out of capability replies: %s', (query) => {
+    expect(isExplicitInformationRequest(query)).toBe(true);
+    expect(
+      decideConversationTurn({ query, hasPriorAssistant: true }).mode,
+    ).not.toBe('social');
+    expect(buildConversationBoundaryReply(query)).toBeNull();
+  });
+
+  it('does not replace an unanswered clarification with a capability menu', () => {
+    expect(buildSocialReply({ query: 'What do you mean by that?' })).toBe(
+      "I couldn't finish that reply just now. Please try again.",
+    );
+  });
+
+  it.each(['What do you mean by that?', 'Can you clarify?', 'Explain that.'])(
+    'keeps a dialogue-only clarification in context: %s',
+    (query) => {
+      expect(isDialogueOnlyClarification(query)).toBe(true);
+    },
+  );
+  it.each([
+    'Can you clarify the Orion launch decision?',
+    'Help me understand the hiring restrictions',
+  ])(
+    'allows a clarification with its own subject to retrieve evidence: %s',
+    (query) => {
+      expect(isDialogueOnlyClarification(query)).toBe(false);
+      expect(
+        decideConversationTurn({ query, hasPriorAssistant: true }),
+      ).toMatchObject({ mode: 'lookup', retrieval: 'fresh' });
+    },
+  );
 
   it('grounds a social reply in the prior answer without retrieving again', () => {
     expect(

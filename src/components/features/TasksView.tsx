@@ -2,19 +2,26 @@ import {
   ArrowUpRight,
   Check,
   CheckCheck,
+  CheckCircle2,
   Circle,
+  ListTodo,
   Loader2,
   Plus,
+  RotateCcw,
   Search,
   SlidersHorizontal,
+  Sparkles,
   Star,
   Tag,
+  Trash2,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  deleteTask,
   listTasks,
   removeTaskTag,
+  restoreTask,
   reviewTask,
   saveTask,
   saveTaskTag,
@@ -111,9 +118,49 @@ export function TasksView({
     initialTaskId ?? null,
   );
   const [newTitle, setNewTitle] = useState('');
+  const [toast, setToast] = useState<{
+    id: string;
+    message: string;
+    onUndo?: () => unknown;
+  } | null>(null);
+  const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(
+    null,
+  );
   const newTaskRef = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
   const mutationInFlight = useRef(false);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback(
+    (
+      message: string,
+      options?: {
+        onUndo?: () => unknown;
+        duration?: number;
+      },
+    ) => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      setToast({ id: String(Date.now()), message, onUndo: options?.onUndo });
+      toastTimer.current = setTimeout(() => {
+        setToast(null);
+        toastTimer.current = null;
+      }, options?.duration ?? 4500);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (highlightedTaskId) {
+      const timer = setTimeout(() => setHighlightedTaskId(null), 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightedTaskId]);
   const refresh = useCallback(async () => {
     const next = await listTasks();
     if (mounted.current) {
@@ -244,16 +291,30 @@ export function TasksView({
         />
       )}
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <label className="flex min-w-[160px] flex-1 items-center gap-2 text-pro-text-muted">
-          <Search size={15} aria-hidden="true" />
+        <div className="task-search-bar relative flex min-w-[200px] flex-1 items-center gap-2.5 rounded-lg border border-pro-border bg-pro-surface px-3 py-1.5 text-pro-text-muted transition-all duration-150 focus-within:border-pro-accent focus-within:ring-2 focus-within:ring-pro-accent/25 focus-within:text-pro-text-main">
+          <Search
+            size={15}
+            className="shrink-0 text-pro-text-muted transition-colors"
+            aria-hidden="true"
+          />
           <input
             aria-label="Search tasks"
-            className="task-search"
-            placeholder="Search tasks"
+            className="task-search-input"
+            placeholder="Search tasks…"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-        </label>
+          {search && (
+            <button
+              type="button"
+              className="flex h-5 w-5 items-center justify-center rounded text-pro-text-muted transition-colors hover:text-pro-text-main"
+              aria-label="Clear search"
+              onClick={() => setSearch('')}
+            >
+              <X size={13} aria-hidden="true" />
+            </button>
+          )}
+        </div>
         <button
           className="task-button"
           type="button"
@@ -359,25 +420,29 @@ export function TasksView({
       >
         <div className="min-w-0">
           <form
-            className="flex items-center gap-3 border-y border-pro-border py-3"
+            className="group flex items-center gap-3 border-y border-pro-border py-2.5 transition-colors duration-150 focus-within:border-pro-accent/70"
             onSubmit={(event) => {
               event.preventDefault();
+              const titleToSave = newTitle.trim();
+              if (!titleToSave) return;
               void run(async () => {
-                const id = await saveTask({ title: newTitle });
+                const id = await saveTask({ title: titleToSave });
                 setNewTitle('');
                 setView('open');
                 setSelectedId(id);
+                setHighlightedTaskId(id);
+                showToast(`Task created: “${titleToSave}”`);
               });
             }}
           >
             <Plus
               size={17}
-              className="shrink-0 text-pro-text-muted"
+              className="shrink-0 text-pro-text-muted transition-colors duration-150 group-focus-within:text-pro-accent"
               aria-hidden="true"
             />
             <input
               ref={newTaskRef}
-              className="task-search"
+              className="task-inline-input"
               aria-label="New task"
               placeholder="Add a task…"
               maxLength={1000}
@@ -422,7 +487,7 @@ export function TasksView({
               {visible.map((task) => (
                 <li
                   key={task.entity.id}
-                  className={`task-row ${selectedId === task.entity.id ? 'is-selected' : ''}`}
+                  className={`task-row ${selectedId === task.entity.id ? 'is-selected' : ''} ${highlightedTaskId === task.entity.id ? 'is-highlighted' : ''}`}
                 >
                   {task.needsReview ? (
                     <Circle
@@ -436,16 +501,25 @@ export function TasksView({
                       className="task-check"
                       aria-label={`${task.entity.status === 'completed' ? 'Reopen' : 'Complete'} ${task.entity.name}`}
                       disabled={busy}
-                      onClick={() =>
-                        void run(() =>
-                          setTaskStatus(
-                            task.entity.id,
-                            task.entity.status === 'completed'
-                              ? 'active'
-                              : 'completed',
-                          ),
-                        )
-                      }
+                      onClick={() => {
+                        const isCompleted = task.entity.status === 'completed';
+                        const newStatus = isCompleted ? 'active' : 'completed';
+                        void run(async () => {
+                          await setTaskStatus(task.entity.id, newStatus);
+                          showToast(
+                            isCompleted
+                              ? `Task reopened: “${task.entity.name}”`
+                              : `Task completed: “${task.entity.name}”`,
+                            {
+                              onUndo: () =>
+                                setTaskStatus(
+                                  task.entity.id,
+                                  isCompleted ? 'completed' : 'active',
+                                ),
+                            },
+                          );
+                        });
+                      }}
                     >
                       {task.entity.status === 'completed' ? (
                         <CheckCheck size={17} aria-hidden="true" />
@@ -512,11 +586,17 @@ export function TasksView({
                             task.focused ? 'Remove from Focus' : 'Add to Focus'
                           }
                           disabled={busy}
-                          onClick={() =>
-                            void run(() =>
-                              setTaskFocus(task.entity.id, !task.focused),
-                            )
-                          }
+                          onClick={() => {
+                            const newFocused = !task.focused;
+                            void run(async () => {
+                              await setTaskFocus(task.entity.id, newFocused);
+                              showToast(
+                                newFocused
+                                  ? `Added to Daily Focus (${counts.focus + 1} of 5)`
+                                  : 'Removed from Daily Focus',
+                              );
+                            });
+                          }}
                         >
                           <Star
                             size={15}
@@ -530,42 +610,88 @@ export function TasksView({
               ))}
             </ul>
           ) : (
-            <div className="py-14 text-center">
-              <p className="text-[16px] font-medium text-pro-text-main">
-                {filtered
-                  ? 'No tasks match'
-                  : view === 'focus'
-                    ? 'A little room to focus'
-                    : view === 'completed'
-                      ? 'Completed tasks will live here'
-                      : view === 'review'
-                        ? 'You’re all caught up'
-                        : 'Make room for what’s next'}
-              </p>
-              <p className="mx-auto mt-2 max-w-sm text-[13px] leading-6 text-pro-text-muted">
-                {filtered
-                  ? 'Try another search or clear your filters.'
-                  : view === 'focus'
-                    ? 'Use the star beside any open task to choose it for today.'
-                    : view === 'completed'
-                      ? 'Check off a task when it’s done. You can reopen it here.'
-                      : view === 'review'
-                        ? 'There are no suggestions waiting for review.'
-                        : 'Add a task above. Commitments from your meetings will appear here too.'}
-              </p>
-              {filtered && (
-                <button
-                  type="button"
-                  className="task-button mx-auto mt-4"
-                  onClick={() => {
-                    setSearch('');
-                    setProject('');
-                    setTags([]);
-                    setDue('');
-                  }}
-                >
-                  Clear filters
-                </button>
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              {filtered ? (
+                <>
+                  <div className="task-empty-badge" aria-hidden="true">
+                    <SlidersHorizontal size={20} strokeWidth={1.5} />
+                  </div>
+                  <h2 className="mt-4 font-serif text-[19px] font-medium text-pro-text-main">
+                    No tasks match
+                  </h2>
+                  <p className="mx-auto mt-2 max-w-sm text-[13px] leading-6 text-pro-text-muted">
+                    {search.trim()
+                      ? `No tasks match “${search.trim()}”. Try another search or clear your filters.`
+                      : 'No tasks match the active filters. Try resetting your project or tag selection.'}
+                  </p>
+                  <button
+                    type="button"
+                    className="task-button mt-4"
+                    onClick={() => {
+                      setSearch('');
+                      setProject('');
+                      setTags([]);
+                      setDue('');
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                </>
+              ) : view === 'focus' ? (
+                <>
+                  <div
+                    className="task-empty-badge !border-amber-500/25 !bg-amber-500/10 !text-amber-500"
+                    aria-hidden="true"
+                  >
+                    <Star size={20} strokeWidth={1.5} />
+                  </div>
+                  <h2 className="mt-4 font-serif text-[19px] font-medium text-pro-text-main">
+                    A little room to focus
+                  </h2>
+                  <p className="mx-auto mt-2 max-w-sm text-[13px] leading-6 text-pro-text-muted">
+                    Choose up to five tasks for today. Click the star beside any
+                    open task to keep it front and center.
+                  </p>
+                </>
+              ) : view === 'completed' ? (
+                <>
+                  <div className="task-empty-badge" aria-hidden="true">
+                    <CheckCheck size={20} strokeWidth={1.5} />
+                  </div>
+                  <h2 className="mt-4 font-serif text-[19px] font-medium text-pro-text-main">
+                    Completed tasks will live here
+                  </h2>
+                  <p className="mx-auto mt-2 max-w-sm text-[13px] leading-6 text-pro-text-muted">
+                    Check off tasks as you finish them. You can return here
+                    anytime to review accomplishments or reopen items.
+                  </p>
+                </>
+              ) : view === 'review' ? (
+                <>
+                  <div className="task-empty-badge" aria-hidden="true">
+                    <Sparkles size={20} strokeWidth={1.5} />
+                  </div>
+                  <h2 className="mt-4 font-serif text-[19px] font-medium text-pro-text-main">
+                    You’re all caught up
+                  </h2>
+                  <p className="mx-auto mt-2 max-w-sm text-[13px] leading-6 text-pro-text-muted">
+                    There are no suggestions waiting for review. Commitments
+                    detected from your recorded meetings will appear here.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="task-empty-badge" aria-hidden="true">
+                    <ListTodo size={20} strokeWidth={1.5} />
+                  </div>
+                  <h2 className="mt-4 font-serif text-[19px] font-medium text-pro-text-main">
+                    Make room for what’s next
+                  </h2>
+                  <p className="mx-auto mt-2 max-w-sm text-[13px] leading-6 text-pro-text-muted">
+                    Commitments from your meetings and notes will appear here
+                    automatically.
+                  </p>
+                </>
               )}
             </div>
           )}
@@ -579,9 +705,55 @@ export function TasksView({
             run={run}
             onClose={() => setSelectedId(null)}
             onOpenMeeting={onOpenMeeting}
+            onSaveSuccess={showToast}
+            onDeleteSuccess={showToast}
           />
         )}
       </div>
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="task-toast fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl border border-pro-border bg-pro-surface/95 px-4 py-3 text-[13px] shadow-lg backdrop-blur-md"
+        >
+          <CheckCircle2
+            size={16}
+            className="shrink-0 text-emerald-600 dark:text-emerald-400"
+            aria-hidden="true"
+          />
+          <span className="max-w-[280px] truncate font-medium text-pro-text-main">
+            {toast.message}
+          </span>
+          {toast.onUndo && (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-md bg-pro-accent/10 px-2 py-0.5 text-xs font-semibold text-pro-accent transition-colors hover:bg-pro-accent/20"
+              disabled={busy}
+              onClick={() => {
+                const undoFn = toast.onUndo;
+                setToast(null);
+                if (undoFn) {
+                  void run(async () => {
+                    await undoFn();
+                    showToast('Action undone');
+                  });
+                }
+              }}
+            >
+              <RotateCcw size={12} aria-hidden="true" />
+              Undo
+            </button>
+          )}
+          <button
+            type="button"
+            className="ml-1 rounded p-0.5 text-pro-text-muted transition-colors hover:text-pro-text-main"
+            aria-label="Dismiss notification"
+            onClick={() => setToast(null)}
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -593,6 +765,8 @@ function TaskDetails({
   run,
   onClose,
   onOpenMeeting,
+  onSaveSuccess,
+  onDeleteSuccess,
 }: {
   task: PersonalTask;
   snapshot: TasksSnapshot;
@@ -600,6 +774,11 @@ function TaskDetails({
   run: (action: () => Promise<unknown>) => Promise<boolean>;
   onClose: () => void;
   onOpenMeeting: (id: string) => void;
+  onSaveSuccess?: (message: string) => void;
+  onDeleteSuccess?: (
+    message: string,
+    options?: { onUndo?: () => unknown },
+  ) => void;
 }) {
   const [title, setTitle] = useState(task.entity.name);
   const [date, setDate] = useState(task.entity.due_date?.slice(0, 10) ?? '');
@@ -608,6 +787,22 @@ function TaskDetails({
   const [description, setDescription] = useState(task.description);
   const [tagName, setTagName] = useState('');
   const [revision, setRevision] = useState(task.revision);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>(
+    'idle',
+  );
+
+  useEffect(() => {
+    setSaveStatus('idle');
+  }, [title, date, projectId, tagIds, description]);
+
+  useEffect(() => {
+    if (saveStatus === 'saved') {
+      const timer = setTimeout(() => setSaveStatus('idle'), 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [saveStatus]);
+
   useEffect(() => {
     if (
       title === task.entity.name &&
@@ -630,7 +825,7 @@ function TaskDetails({
     )
     .slice(0, 20);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  useEffect(() => headingRef.current?.focus(), []);
+  useEffect(() => headingRef.current?.focus({ preventScroll: true }), []);
   return (
     <aside
       className="task-details self-start rounded-xl bg-pro-surface p-5 xl:sticky xl:top-4"
@@ -698,9 +893,11 @@ function TaskDetails({
       ) : (
         <form
           className="space-y-4"
-          onSubmit={(event) => {
+          onSubmit={async (event) => {
             event.preventDefault();
-            void run(() =>
+            if (!title.trim()) return;
+            setSaveStatus('saving');
+            const ok = await run(() =>
               saveTask({
                 id: task.entity.id,
                 expectedRevision: revision,
@@ -714,12 +911,19 @@ function TaskDetails({
                 description,
               }),
             );
+            if (ok) {
+              setSaveStatus('saved');
+              onSaveSuccess?.('Changes saved');
+            } else {
+              setSaveStatus('idle');
+            }
           }}
         >
           <label className="task-field">
             Task
             <textarea
               required
+              disabled={busy}
               maxLength={1000}
               rows={3}
               value={title}
@@ -747,11 +951,12 @@ function TaskDetails({
             Due date
             <input
               type="date"
+              disabled={busy}
               value={date}
               onChange={(event) => setDate(event.target.value)}
             />
           </label>
-          <fieldset>
+          <fieldset disabled={busy}>
             <legend className="mb-2 text-[12px] font-medium text-pro-text-muted">
               Tags
             </legend>
@@ -785,6 +990,17 @@ function TaskDetails({
                 maxLength={60}
                 value={tagName}
                 onChange={(event) => setTagName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && tagName.trim()) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void run(async () => {
+                      const tag = await saveTaskTag({ name: tagName.trim() });
+                      setTagIds((ids) => [...new Set([...ids, tag.id])]);
+                      setTagName('');
+                    });
+                  }
+                }}
               />
               <button
                 type="button"
@@ -793,7 +1009,7 @@ function TaskDetails({
                 disabled={busy || !tagName.trim()}
                 onClick={() =>
                   void run(async () => {
-                    const tag = await saveTaskTag({ name: tagName });
+                    const tag = await saveTaskTag({ name: tagName.trim() });
                     setTagIds((ids) => [...new Set([...ids, tag.id])]);
                     setTagName('');
                   })
@@ -807,19 +1023,106 @@ function TaskDetails({
             Description
             <textarea
               rows={3}
+              disabled={busy}
               maxLength={10000}
               placeholder="A little context, if useful"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
             />
           </label>
-          <button
-            type="submit"
-            className="task-button task-button-primary"
-            disabled={busy || !title.trim()}
-          >
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-pro-border/70 pt-4">
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                className={`task-button ${saveStatus === 'saved' ? 'task-button-success' : 'task-button-primary'}`}
+                disabled={busy || !title.trim()}
+              >
+                {saveStatus === 'saving' || (busy && saveStatus !== 'saved') ? (
+                  <>
+                    <Loader2
+                      size={13}
+                      className="animate-spin"
+                      aria-hidden="true"
+                    />
+                    Saving…
+                  </>
+                ) : saveStatus === 'saved' ? (
+                  <>
+                    <Check
+                      size={14}
+                      className="stroke-[2.5]"
+                      aria-hidden="true"
+                    />
+                    Saved
+                  </>
+                ) : (
+                  'Save changes'
+                )}
+              </button>
+              {saveStatus === 'saved' && (
+                <span
+                  role="status"
+                  aria-live="polite"
+                  className="flex items-center gap-1.5 text-[12px] font-medium text-emerald-600 dark:text-emerald-400"
+                >
+                  <Check size={13} aria-hidden="true" />
+                  Changes saved
+                </span>
+              )}
+            </div>
+            {!task.needsReview &&
+              (confirmDelete ? (
+                <div className="flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs dark:bg-red-500/15">
+                  <span className="font-medium text-red-600 dark:text-red-400">
+                    Delete task?
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      className="inline-flex h-7 items-center justify-center rounded-md bg-red-600 px-2.5 text-[11px] font-medium text-white shadow-sm transition-colors hover:bg-red-700 disabled:opacity-50"
+                      disabled={busy}
+                      onClick={() => {
+                        void run(async () => {
+                          const deletionRevision = await deleteTask(
+                            task.entity.id,
+                            task.revision,
+                          );
+                          onClose();
+                          onDeleteSuccess?.(
+                            `Task deleted: “${task.entity.name}”`,
+                            {
+                              onUndo: () =>
+                                restoreTask(task.entity.id, deletionRevision),
+                            },
+                          );
+                        });
+                      }}
+                    >
+                      Delete
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex h-7 items-center justify-center rounded-md px-2.5 text-[11px] font-medium text-pro-text-muted transition-colors hover:bg-pro-text-main/5 hover:text-pro-text-main disabled:opacity-50"
+                      disabled={busy}
+                      onClick={() => setConfirmDelete(false)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="task-button text-red-600 dark:text-red-400 hover:bg-red-500/10 !px-2.5"
+                  disabled={busy}
+                  onClick={() => setConfirmDelete(true)}
+                  aria-label="Delete task"
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  Delete
+                </button>
+              ))}
+          </div>
         </form>
       )}
       {task.sourceMeetingId && (

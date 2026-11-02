@@ -1,3 +1,9 @@
+## 2026-11-02 - Keep deleted personal tasks reversible in their canonical record
+
+- **Refines:** “2026-10-26 - Supply canonical task state through ordinary answer evidence.”
+- **Decision:** Removing a personal task marks its canonical commitment rejected and records its prior review state. Keep its ID, completion status, exact deadline, ownership, source links, tags and description. Undo restores that same record and state only when its deletion revision still matches; concurrent edits or source synchronization require a fresh review instead of an overwrite. No source recording, transcript or note is deleted.
+- **Validation:** Service regressions cover identity and provenance preservation, source resynchronization, canonical exclusion, exact deadlines and stale mutation refusal. Electron workflow acceptance exercises deletion and restoration through the Tasks IPC.
+
 ## 2026-10-29 - Preserve grounding while enabling final Auto-detect (notes-v100)
 
 - **Supersedes:** The heuristic language detection and non-English commitment exceptions in “Offer Auto-detect for final transcription language”; the prompt/cache identity in “Preserve trusted notes policy during bounded repair (notes-v99)”.

@@ -751,6 +751,7 @@ import {
   buildNamedPersonNoEvidenceReply,
   buildNoEvidenceDraftReply,
   buildSocialReply,
+  isDialogueOnlyClarification,
   isExplicitInformationRequest,
 } from './intelligence/conversationController';
 import {
@@ -5080,6 +5081,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('TASKS_LIST', () => personalTasks.listPersonalTasks());
   const taskMutations = {
     TASKS_SAVE: personalTasks.savePersonalTask,
+    TASKS_DELETE: personalTasks.deletePersonalTask,
+    TASKS_RESTORE: personalTasks.restorePersonalTask,
     TASKS_STATUS: personalTasks.setPersonalTaskStatus,
     TASKS_REVIEW: personalTasks.reviewPersonalTask,
     TASKS_FOCUS: personalTasks.setPersonalTaskFocus,
@@ -7868,16 +7871,6 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               ? null
               : buildConversationBoundaryReply(queryText);
             if (boundaryReply) return boundaryReply;
-            if (
-              !promptOverride &&
-              conversationResolution.turnMode === 'social'
-            ) {
-              return buildSocialReply({
-                query: queryText,
-                previousAnswer: previousAssistantTurn?.content,
-                previousTurnMode: previousAssistantTurn?.turnMode,
-              });
-            }
             providerAcquisitionStartedAt = Date.now();
             const provider = await getProvider(settings);
             providerAcquisitionCompletedAt = Date.now();
@@ -7939,7 +7932,10 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                   previousTurnMode: previousAssistantTurn?.turnMode,
                 });
           };
-          if (conversationResolution.relation === 'acknowledgment') {
+          if (
+            conversationResolution.relation === 'acknowledgment' ||
+            conversationResolution.turnMode === 'social'
+          ) {
             const answer = await answerConversationally();
             outputCharacters = answer.length;
             generationCompletedAt = Date.now();
@@ -7951,8 +7947,11 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               citations: [],
               currentMeeting: currentMeetingStatus,
               outcome: 'answered' as const,
-              resolvedScope: previousAssistantTurn?.resolvedScope,
-              conversationContext: previousConversationContext,
+              resolvedScope:
+                conversationResolution.relation === 'new_topic'
+                  ? undefined
+                  : previousAssistantTurn?.resolvedScope,
+              conversationContext: activeConversationContext,
             };
           }
           if (
@@ -8014,6 +8013,31 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               outcome: 'no_evidence' as const,
               resolvedScope: previousAssistantTurn.resolvedScope,
               conversationContext: previousConversationContext,
+            };
+          }
+          if (
+            conversationResolution.turnMode === 'clarify' &&
+            isDialogueOnlyClarification(queryText) &&
+            previousAssistantTurn?.outcome === 'no_evidence'
+          ) {
+            turnMode = conversationResolution.turnMode;
+            retrievalPolicy = 'none';
+            const answer = describePreviousConversationFailure(
+              previousAssistantTurn,
+            );
+            outputCharacters = answer.length;
+            generationCompletedAt = Date.now();
+            finalizationStartedAt = generationCompletedAt;
+            finalizationCompletedAt = generationCompletedAt;
+            return {
+              status: 'answered' as const,
+              answer,
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'answered' as const,
+              resolvedScope: previousAssistantTurn?.resolvedScope,
+              conversationContext: previousConversationContext,
+              turnMode: conversationResolution.turnMode,
             };
           }
           const persistedMeetings = db.getAskPlutoMeetings();
@@ -8334,9 +8358,8 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           retrievalStartedAt = recallCompletedAt;
 
           if (
-            conversationResolution.turnMode === 'social' ||
-            (conversationResolution.relation === 'new_topic' &&
-              (parsed.intent === 'conversational' || parsed.cannedResponse))
+            conversationResolution.relation === 'new_topic' &&
+            (parsed.intent === 'conversational' || parsed.cannedResponse)
           ) {
             console.log('[Pluto] intelligence:query conversational response');
             turnMode = 'social';

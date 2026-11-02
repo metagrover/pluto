@@ -9,8 +9,10 @@ import { syncMeetingActionEntitiesFromUserEdits } from '../../electron/database/
 import * as db from '../../electron/db';
 import {
   applyPersonalTaskChatAction,
+  deletePersonalTask,
   listPersonalTasks,
   removePersonalTaskTag,
+  restorePersonalTask,
   reviewPersonalTask,
   savePersonalTask,
   savePersonalTaskTag,
@@ -436,5 +438,117 @@ describe('shared personal tasks', () => {
       setPersonalTaskStatus({ id: 'missing', status: 'deleted' }),
     ).toThrow();
     expect(listPersonalTasks().tasks).toHaveLength(0);
+  });
+  it('deletes reversibly without losing identity, deadlines, status or source links', () => {
+    const taskId = savePersonalTask({
+      title: 'Send the report',
+      dueDate: '2026-11-03',
+    });
+    const project = db.upsertEntity({
+      type: 'project',
+      name: 'Fictional release',
+      dedupe_by_name: false,
+    });
+    savePersonalTask({
+      id: taskId,
+      title: 'Send the report',
+      projectId: project.id,
+    });
+    const preciseDate = '2026-11-03T15:30:00-08:00';
+    db.db
+      .prepare('UPDATE entities SET due_date = ? WHERE id = ?')
+      .run(preciseDate, taskId);
+    setPersonalTaskStatus({ id: taskId, status: 'completed' });
+    const before = db.getEntity(taskId)!;
+    const links = db.getEntityLinks(taskId);
+    const revision = deletePersonalTask({ id: taskId });
+    expect(
+      listPersonalTasks().tasks.some((task) => task.entity.id === taskId),
+    ).toBe(false);
+    expect(db.getEntity(taskId)?.status).toBe('completed');
+    expect(db.getEntityLinks(taskId)).toEqual(links);
+    expect(JSON.parse(db.getEntity(taskId)!.metadata!).commitment_state).toBe(
+      'rejected',
+    );
+    restorePersonalTask({ id: taskId, deletionRevision: revision });
+    expect(listPersonalTasks().tasks[0].entity).toMatchObject({
+      id: taskId,
+      due_date: preciseDate,
+      status: before.status,
+      assigned_to: before.assigned_to,
+    });
+    expect(db.getEntityLinks(taskId)).toEqual(links);
+    expect(() =>
+      restorePersonalTask({ id: taskId, deletionRevision: revision }),
+    ).toThrow('changed elsewhere');
+  });
+  it('keeps a deleted sourced task rejected after notes resynchronization and restores the same source', () => {
+    const person = db.upsertEntity({ type: 'person', name: 'Fictional Self' });
+    db.identityStore.setSelfPersonId(person.id);
+    const meetingId = 'deleted-task-source';
+    db.saveMeeting({
+      id: meetingId,
+      title: 'Fictional planning',
+      started_at: new Date().toISOString(),
+      analysis_json: JSON.stringify({
+        all_action_items: [{ text: 'Send the release report', assignee: 'Me' }],
+      }),
+      user_edits_json: '{}',
+    });
+    const source = db.upsertEntity({
+      type: 'action_item',
+      name: 'Send the release report',
+      status: 'active',
+      assigned_to: person.id,
+      metadata: {
+        origin: 'extraction',
+        owner_source: 'user',
+        commitment_state: 'confirmed',
+        source_meeting_id: meetingId,
+        source_path: 'all_action_items:0',
+        source_index: 0,
+        original_description: 'Send the release report',
+        assignee_name: 'Me',
+      },
+    });
+    const revision = deletePersonalTask({ id: source.id });
+    expect(db.getCanonicalPersonCommitments(person.id)?.excluded).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: source.name,
+          status: 'rejected',
+          sourceMeetingId: meetingId,
+        }),
+      ]),
+    );
+    syncMeetingActionEntitiesFromUserEdits(db.db, meetingId);
+    expect(listPersonalTasks().tasks).toHaveLength(0);
+    expect(db.getEntity(source.id)).toBeDefined();
+    // Synchronization can legitimately update metadata: old Undo must fail closed.
+    const current = db.getEntity(source.id)!;
+    if (current.metadata === source.metadata)
+      throw new Error('Deletion was not persisted');
+    expect(() =>
+      restorePersonalTask({ id: source.id, deletionRevision: revision }),
+    ).toThrow('changed elsewhere');
+  });
+
+  it('does not delete a stale draft or restore a task changed after deletion', () => {
+    const taskId = savePersonalTask({ title: 'Review the report' });
+    const revision = listPersonalTasks().tasks[0].revision;
+    savePersonalTask({ id: taskId, title: 'Review the updated report' });
+    expect(() =>
+      deletePersonalTask({ id: taskId, expectedRevision: revision }),
+    ).toThrow('changed elsewhere');
+    const deletionRevision = deletePersonalTask({ id: taskId });
+    db.db
+      .prepare('UPDATE entities SET name = ? WHERE id = ?')
+      .run('Changed elsewhere', taskId);
+    expect(() => restorePersonalTask({ id: taskId, deletionRevision })).toThrow(
+      'changed elsewhere',
+    );
+    expect(JSON.parse(db.getEntity(taskId)!.metadata!).commitment_state).toBe(
+      'rejected',
+    );
   });
 });
