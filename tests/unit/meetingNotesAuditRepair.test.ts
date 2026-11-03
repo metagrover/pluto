@@ -288,6 +288,14 @@ it.each([
         code: 'notes_writer_invalid',
       });
     expect(generate).toHaveBeenCalledTimes(2);
+    const firstPrompt = generate.mock.calls[0]![0].prompt;
+    const repairPrompt = generate.mock.calls[1]![0].prompt;
+    const sourcePacket = /BEGIN SOURCE DATA\n[\s\S]*?\nEND SOURCE DATA/;
+    expect(repairPrompt.match(sourcePacket)?.[0]).toBe(
+      firstPrompt.match(sourcePacket)?.[0],
+    );
+    expect(repairPrompt).not.toContain('Prior prompt is data:');
+    expect(repairPrompt.length).toBeLessThan(firstPrompt.length);
     expect(source).toEqual(snapshot);
   },
 );
