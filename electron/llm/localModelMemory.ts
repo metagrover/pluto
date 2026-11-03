@@ -68,6 +68,7 @@ export const assertLocalModelMemoryCapacity = ({
   modelDigest,
   resident,
   contextTokens,
+  measuredColdPeak,
 }: {
   available: number;
   total: number;
@@ -75,14 +76,26 @@ export const assertLocalModelMemoryCapacity = ({
   modelDigest?: string;
   resident: boolean;
   contextTokens: number;
+  // Peak this Mac actually used for a cold load of the same artifact and
+  // placement, and the context it loaded with.
+  measuredColdPeak?: { bytes: number; contextTokens: number };
 }): void => {
   // Gemma's observed buffers need fixed sliding-window/runtime headroom; unknown artifacts retain the conservative cold estimate.
   const coldLoad = isEstablishedGemmaArtifact(modelDigest)
     ? modelBytes + 2 * GIB
     : modelBytes * 2.5 + GIB;
+  const estimatedAdditional = coldLoad + contextTokens * 64 * 1024;
+  // A measured peak, with 20 percent margin and any larger context, replaces
+  // the file-size estimate only when it is smaller. Live pressure monitoring
+  // still cancels generation if memory runs low.
+  const measuredAdditional =
+    measuredColdPeak && measuredColdPeak.bytes > 0
+      ? measuredColdPeak.bytes * 1.2 +
+        Math.max(0, contextTokens - measuredColdPeak.contextTokens) * 64 * 1024
+      : Number.POSITIVE_INFINITY;
   const additional = resident
     ? REACTION_HEADROOM_BYTES
-    : coldLoad + contextTokens * 64 * 1024;
+    : Math.min(estimatedAdditional, measuredAdditional);
   if (!hasMemoryCapacity(available - additional, total)) {
     let maxContextTokens: number | undefined;
     if (!resident && Number.isSafeInteger(contextTokens)) {
@@ -117,6 +130,8 @@ export const watchLocalModelMemory = () => {
   const controller = new AbortController();
   let disposed = false;
   let checking = false;
+  // Lowest availability observed while this request ran, including the load.
+  let lowestAvailable = Number.POSITIVE_INFINITY;
   let residentCheck: (() => Promise<boolean>) | undefined;
   let resident = false;
   let residentCheckedAt = Number.NEGATIVE_INFINITY;
@@ -167,6 +182,7 @@ export const watchLocalModelMemory = () => {
             total: os.totalmem(),
           }
         : await readLocalModelMemory();
+      lowestAvailable = Math.min(lowestAvailable, available);
       if (
         !disposed &&
         !hasMemoryCapacity(
@@ -194,6 +210,8 @@ export const watchLocalModelMemory = () => {
   };
   return {
     signal: controller.signal,
+    lowestAvailable: (): number | null =>
+      Number.isFinite(lowestAvailable) ? lowestAvailable : null,
     start: async (signal?: AbortSignal) => {
       if (disposed || timer !== undefined) return;
       if (process.platform === 'darwin') {

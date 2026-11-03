@@ -30,6 +30,10 @@ import {
   getProvider,
   invalidateProviderCache,
 } from '../../electron/llm/factory';
+import {
+  getLocalThroughputProfile,
+  resetLocalInferenceProfilesForTest,
+} from '../../electron/llm/localInferenceProfile';
 import * as modelMemory from '../../electron/llm/localModelMemory';
 import { setLocalModelMemoryProbeReader } from '../../electron/llm/localModelMemoryProbe';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
@@ -3542,3 +3546,121 @@ it.each(['unavailable', 'pressure'] as const)(
     }
   },
 );
+
+describe('Ask Pluto chat residency', () => {
+  const digest =
+    '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c';
+
+  const runChatTurns = async (totalBytes: number) => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    const totalMemory = vi.spyOn(os, 'totalmem').mockReturnValue(totalBytes);
+    const electron = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    const memory = vi
+      .spyOn(modelMemory, 'readLocalModelMemory')
+      .mockResolvedValue({ available: totalBytes * 0.9, total: totalBytes });
+    const watcher = vi
+      .spyOn(modelMemory, 'watchLocalModelMemory')
+      .mockImplementation(() => ({
+        signal: new AbortController().signal,
+        start: vi.fn(async () => {}),
+        dispose: vi.fn(async () => {}),
+        setResidentCheck: vi.fn(),
+      }));
+    let context: number | null = null;
+    let unloads = 0;
+    const contexts: number[] = [];
+    const transport = vi
+      .spyOn(ollamaTransport, 'ollamaHttpFetch')
+      .mockImplementation(async (url, init) => {
+        if (url.endsWith('/api/ps'))
+          return jsonResponse({
+            models:
+              context === null
+                ? []
+                : [{ name: 'gemma4:12b', digest, context_length: context }],
+          });
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [{ name: 'gemma4:12b', digest, size: 7_556_508_396 }],
+          });
+        if (parseRequestBody(init).keep_alive === 0) {
+          unloads++;
+          context = null;
+          return jsonResponse({ done: true });
+        }
+        return jsonResponse({ response: 'Done.', done: true });
+      });
+    const stream = vi
+      .spyOn(ollamaTransport, 'ollamaHttpStream')
+      .mockImplementation(async (_url, init, onChunk) => {
+        const options = parseRequestBody(init).options as Record<
+          string,
+          unknown
+        >;
+        context = Number(options.num_ctx);
+        contexts.push(context);
+        onChunk(
+          `${JSON.stringify({ response: 'Done.', done: true, done_reason: 'stop', prompt_eval_count: 4000, prompt_eval_duration: 50e9, eval_count: 200, eval_duration: 20e9, load_duration: 30e9 })}\n`,
+        );
+        return { ok: true, status: 200, statusText: 'OK' };
+      });
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'gemma4:12b',
+      });
+      // A short follow-up and a larger first question would otherwise
+      // request different contexts and reload the weights between turns.
+      await provider.answerAskPluto('Short question. '.repeat(40), {
+        mode: 'fast',
+        onToken: () => undefined,
+      });
+      await provider.answerAskPluto('Meeting evidence. '.repeat(700), {
+        mode: 'deep',
+        onToken: () => undefined,
+      });
+      await provider.answerAskPluto('Short follow-up. '.repeat(20), {
+        mode: 'fast',
+        onToken: () => undefined,
+      });
+      return { contexts, unloads };
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+      totalMemory.mockRestore();
+      memory.mockRestore();
+      watcher.mockRestore();
+      transport.mockRestore();
+      stream.mockRestore();
+      if (electron)
+        Object.defineProperty(process.versions, 'electron', electron);
+      else Reflect.deleteProperty(process.versions, 'electron');
+    }
+  };
+
+  it.each([16, 32, 64])(
+    'keeps one chat context across quick, deep and follow-up turns on %i GiB',
+    async (gib) => {
+      const { contexts, unloads } = await runChatTurns(gib * 1024 ** 3);
+      expect(contexts).toEqual([8192, 8192, 8192]);
+      expect(unloads).toBe(0);
+    },
+  );
+
+  it('records measured throughput from completed local generations', async () => {
+    resetLocalInferenceProfilesForTest();
+    await runChatTurns(16 * 1024 ** 3);
+    const profile = getLocalThroughputProfile('gemma4:12b');
+    expect(profile?.samples).toBe(3);
+    expect(profile?.promptTokensPerSecond).toBeCloseTo(80, 5);
+    expect(profile?.outputTokensPerSecond).toBeCloseTo(10, 5);
+    expect(profile?.coldLoadMs).toBeCloseTo(30_000, 0);
+    resetLocalInferenceProfilesForTest();
+  });
+});

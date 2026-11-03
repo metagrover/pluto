@@ -323,7 +323,7 @@ export const buildAskPlutoAcknowledgment = (
 
 const resolveResearchTask = (query: string): AskPlutoResearchTask => {
   if (
-    /\b(?:create|draft|write|rewrite|compose)\b[\s\S]{0,60}\b(?:email|message|note|follow-up|follow up|summary)\b|\b(?:email|message)\s+draft\b/i.test(
+    /\b(?:create|draft|write|rewrite|compose)\b[\s\S]{0,60}\b(?:email|message|note|reply|follow-up|follow up|response|summary|update|post|slack|teams|text|memo|announcement|recap|status note|ping|dm|blurb)\b|\b(?:email|message|slack|update)\s+draft\b/i.test(
       query,
     )
   ) {
