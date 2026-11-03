@@ -514,7 +514,7 @@ ${
     ? task === 'draft'
       ? `Relevant earlier answer for the draft's factual focus:
 ${expansionReview.previousAnswer.slice(0, 1200)}
-Use it only to identify the one item the user means by "it" or "that"; it is not evidence. Draft about that item alone, without combining adjacent workstreams. Take factual details only from Context. If Context does not support the item's current status, ask the recipient for an update instead of asserting one. Do not continue the earlier answer's structure or offer alternatives.
+Use it only to identify the one item the user means by "it" or "that"; it is not evidence. Draft about that item alone, without combining adjacent workstreams. Take factual details only from Context. If Context does not support the item's current status, ask the recipient directly for an update. Keep Pluto's search and missing evidence out of the message. Do not continue the earlier answer's structure or offer alternatives.
 `
       : `Continuation of the earlier answer:
 ${expansionReview.previousAnswer.slice(0, 1200)}

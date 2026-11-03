@@ -1,3 +1,10 @@
+## 2026-11-03 - Plan Ask Pluto turns with recent dialogue
+
+- **Status:** Candidate pending real-profile answer-quality acceptance. The first complete replay tied the pattern baseline at 25/31, with changes in which turns passed. Draft and meeting-scope follow-up fixes need a fresh replay.
+- **Supersedes:** The pattern-first local routing order in “2026-10-25 - Separate local question routing from factual synthesis” and the pattern-first construction of the question frame in “2026-11-02 - Read Ask Pluto questions into a structured frame before routing.” Their evidence and identity rules still apply.
+- **Decision:** One bounded general-model call reads recent dialogue and proposes a route, a standalone question, and the requested people, meeting position, and time range. Conversation and help can reply in that call. Drafts use meeting evidence. Schedule, tasks, and counts use their existing record-backed answers. Retrieval, citations, and grounding continue to govern factual meeting answers.
+- **Fallback:** Use pattern routing when planning is unavailable or invalid. If local memory admission refuses the general model, retain the quick model for answer generation and repair. The existing memory admission and confidential-source checks still apply.
+
 ## 2026-11-02 - Read Ask Pluto questions into a structured frame before routing
 
 - **Status:** Accepted for correctness; live answer-quality acceptance remains required.

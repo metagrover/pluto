@@ -39,11 +39,9 @@ describe('Ask Pluto planner prompt', () => {
         { role: 'assistant', content: 'I can search your meeting notes.' },
       ],
       now: new Date('2026-11-03T12:00:00Z'),
-      priorSources: ['Fictional review'],
     });
     expect(prompt.indexOf('Routes:')).toBeLessThan(prompt.indexOf('Today:'));
     expect(prompt).toContain('Pluto: I can search your meeting notes.');
-    expect(prompt).toContain('Previous answer drew on: Fictional review');
     expect(prompt.trim().endsWith('Latest message: tell me more?\nJSON:')).toBe(
       true,
     );
@@ -63,6 +61,28 @@ describe('parseAskPlutoPlan', () => {
     expect(parseAskPlutoPlan(plan({ route: 'web_search' }))).toBeNull();
     expect(parseAskPlutoPlan(plan({ extra: true }))).toBeNull();
     expect(parseAskPlutoPlan(plan({ question: '' }))).toBeNull();
+  });
+
+  it('routes drafts through meeting evidence even if marked as a task action', () => {
+    expect(
+      parseAskPlutoPlan(plan({ route: 'task_action', task: 'draft' })),
+    ).toMatchObject({ route: 'meetings', task: 'draft' });
+  });
+
+  it('keeps the discussion scope for a draft addressed to a recipient', () => {
+    const draft = plan({
+      route: 'task_action',
+      task: 'draft',
+      meeting: 'last',
+      one_on_one: true,
+      people: ['Sam'],
+    });
+    expect(
+      parseAskPlutoPlan(draft, 'Draft a Slack update to Sam about it.'),
+    ).toMatchObject({ meeting: 'none', one_on_one: false });
+    expect(
+      parseAskPlutoPlan(draft, 'Draft a recap of my last 1:1 with Sam.'),
+    ).toMatchObject({ meeting: 'last', one_on_one: true });
   });
 
   it('requires a reply for conversation and help routes', () => {
@@ -119,6 +139,17 @@ describe('applyAskPlutoPlan', () => {
         true,
       ),
     ).toMatchObject({ turnMode: 'social', retrievalPolicy: 'none' });
+  });
+
+  it('reuses discussion evidence for a follow-up draft without a new meeting', () => {
+    const draft = parseAskPlutoPlan(plan({ task: 'draft' }))!;
+    expect(applyAskPlutoPlan(legacy, draft, true).retrievalPolicy).toBe(
+      'reuse',
+    );
+    expect(
+      applyAskPlutoPlan(legacy, { ...draft, meeting: 'last' }, true)
+        .retrievalPolicy,
+    ).toBe('fresh');
   });
 
   it('treats the first turn as a new topic whatever the model says', () => {
