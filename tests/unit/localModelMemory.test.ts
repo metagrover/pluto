@@ -688,3 +688,42 @@ it('does not read queued old native data from a residency completion microtask',
     Object.defineProperty(process, 'platform', platform);
   }
 });
+
+it('admits from a measured cold-load peak only when it is smaller than the estimate', () => {
+  const memory = {
+    available: 10.6 * GIB,
+    total: 16 * GIB,
+    contextTokens: 8192,
+    resident: false,
+    modelBytes: 7_556_508_396,
+    modelDigest:
+      '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c',
+  };
+  // The file-size estimate refuses 10.6 GiB available after the reserve.
+  expect(() => assertLocalModelMemoryCapacity(memory)).toThrow(
+    'Not enough memory',
+  );
+  // A 7 GiB measured peak at the same context, plus 20 percent, fits.
+  expect(() =>
+    assertLocalModelMemoryCapacity({
+      ...memory,
+      measuredColdPeak: { bytes: 7 * GIB, contextTokens: 8192 },
+    }),
+  ).not.toThrow();
+  // A larger requested context adds its allowance to the measured peak.
+  expect(() =>
+    assertLocalModelMemoryCapacity({
+      ...memory,
+      contextTokens: 32_768,
+      measuredColdPeak: { bytes: 7 * GIB, contextTokens: 8192 },
+    }),
+  ).toThrow('Not enough memory');
+  // A measured peak larger than the estimate never loosens admission.
+  expect(() =>
+    assertLocalModelMemoryCapacity({
+      ...memory,
+      available: 14 * GIB,
+      measuredColdPeak: { bytes: 12 * GIB, contextTokens: 8192 },
+    }),
+  ).not.toThrow();
+});

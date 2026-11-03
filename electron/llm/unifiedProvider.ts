@@ -4,6 +4,10 @@ import { resolveConfiguredOllamaModel } from '../../src/utils/ollamaModels';
 import { ChatGPTError } from '../chatgpt/auth';
 import { getChatGPTAuth } from '../chatgpt/runtime';
 import { askPlutoTimeoutMs } from '../intelligence/askPlutoDeadline';
+import {
+  ASK_PLUTO_CHAT_CONTEXT_TOKENS,
+  estimateLocalFirstTokenMs,
+} from '../intelligence/askPlutoLocalBudget';
 import { knowledgeSynthesisPause } from '../knowledgeSynthesisPause';
 import { isSerializedTaskPreemption } from '../serializedTaskGate';
 import {
@@ -20,6 +24,13 @@ import {
 } from './inferenceCoordinator';
 import type { InferenceRequest } from './inferenceTypes';
 import type { LLMWorkClass } from './llmWorkClass';
+import {
+  describeOllamaPlacement,
+  getMeasuredColdPeak,
+  recordLocalColdPeak,
+  recordLocalThroughput,
+  resolveLocalThroughput,
+} from './localInferenceProfile';
 import {
   LocalModelMemoryError,
   assertLocalModelMemoryCapacity,
@@ -452,6 +463,21 @@ export async function releaseIdleOllamaModel(
     },
   });
 }
+
+// Chat follow-ups usually arrive within minutes; keep the model loaded for
+// them. The periodic low-memory check and native-work admission still unload
+// it sooner when needed.
+export const CHAT_MODEL_WARM_MS = 5 * 60_000;
+
+export const scheduleIdleOllamaModelRelease = (
+  idleMs = CHAT_MODEL_WARM_MS,
+  onError?: () => void,
+): void => {
+  const timer = setTimeout(() => {
+    void releaseIdleOllamaModel(idleMs).catch(() => onError?.());
+  }, idleMs + 1_000);
+  (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
+};
 
 let localTranscriptionModelUnloader: (() => Promise<void>) | undefined;
 export const setLocalTranscriptionModelUnloader = (
@@ -1921,6 +1947,8 @@ export class UnifiedLLMProvider implements LLMProvider {
       typeof entry?.digest === 'string' && entry.digest.trim()
         ? entry.digest
         : undefined;
+    // Availability when a cold load was admitted, to learn its real peak.
+    let availableAtColdAdmission: number | null = null;
     onOllamaArtifact?.(allocationDigest);
     const runner =
       typeof entry?.details?.runner === 'string'
@@ -1969,9 +1997,16 @@ export class UnifiedLLMProvider implements LLMProvider {
             ) * 1024,
           )
         : budget.num_ctx;
+    // Chat turns share one context so follow-ups and repairs reuse the
+    // loaded weights instead of reloading for small size changes.
+    const chatContextFloor =
+      boundedGemmaArtifact && (task === 'askPluto' || task === 'askPlutoDeep')
+        ? Math.min(getOllamaContextCap(task), ASK_PLUTO_CHAT_CONTEXT_TOKENS)
+        : 0;
     // Ollama clamps vision-capable Gemma to 2048; account for that actual allocation.
     const requiredContext = Math.max(
       boundedGemmaArtifact ? 2048 : 0,
+      chatContextFloor,
       requestedContext,
     );
     if (notesBudget && requiredContext > budget.num_ctx)
@@ -2011,13 +2046,22 @@ export class UnifiedLLMProvider implements LLMProvider {
         for (;;) {
           signal?.throwIfAborted();
           try {
+            const reading = await readLocalModelMemory();
             assertLocalModelMemoryCapacity({
-              ...(await readLocalModelMemory()),
+              ...reading,
               modelBytes: entry.size,
               modelDigest: entry.digest,
               resident: isResident,
               contextTokens: num_ctx,
+              measuredColdPeak: getMeasuredColdPeak(
+                model,
+                allocationDigest,
+                describeOllamaPlacement(
+                  getEstablishedGemmaLoadOptions(entry.digest),
+                ),
+              ),
             });
+            availableAtColdAdmission = isResident ? null : reading.available;
             return;
           } catch (error) {
             const remaining = ollamaMemoryReclaimDeadline - Date.now();
@@ -2103,6 +2147,39 @@ export class UnifiedLLMProvider implements LLMProvider {
         ...getEstablishedGemmaLoadOptions(entry?.digest),
       },
       keep_alive: '2h', // Idle models can be released earlier under memory pressure.
+    };
+
+    // Every completed local generation, including notes, refines this Mac's
+    // measured throughput for interactive planning.
+    const recordThroughput = (packet: Record<string, unknown>) => {
+      const metrics = readNotesMetrics(packet);
+      recordLocalThroughput({
+        model,
+        digest: allocationDigest,
+        placement: describeOllamaPlacement(
+          requestBody.options as Record<string, unknown> | undefined,
+        ),
+        promptTokens: metrics.inputTokens,
+        promptMs: metrics.promptMs,
+        outputTokens: metrics.outputTokens,
+        outputMs: metrics.outputMs,
+        loadMs: metrics.loadMs,
+      });
+      const lowest = memory?.lowestAvailable?.() ?? null;
+      if (
+        availableAtColdAdmission !== null &&
+        lowest !== null &&
+        (metrics.loadMs ?? 0) >= 1_000
+      )
+        recordLocalColdPeak({
+          model,
+          digest: allocationDigest,
+          placement: describeOllamaPlacement(
+            requestBody.options as Record<string, unknown> | undefined,
+          ),
+          peakBytes: availableAtColdAdmission - lowest,
+          contextTokens: num_ctx,
+        });
     };
 
     const rememberGemmaAllocation = () => {
@@ -2228,9 +2305,20 @@ export class UnifiedLLMProvider implements LLMProvider {
       let completedWriterInputTokens: number | null = null;
       onNotesPartial?.('');
       let completed = false;
+      // Chat waits for model load and prompt evaluation at this Mac's
+      // measured speed, never less than the task's existing allowance.
+      const capacityTimeoutMs =
+        task === 'askPluto' || task === 'askPlutoDeep'
+          ? estimateLocalFirstTokenMs({
+              inputTokens: estimateNotesTokens(prompt),
+              resident: resident && residency.contextTokens === num_ctx,
+              throughput: resolveLocalThroughput(model),
+              minimumMs: getOllamaTimeoutMs(task),
+            })
+          : getOllamaTimeoutMs(task);
       const deadline = progressAware
         ? createOllamaGenerationDeadline({
-            capacityTimeoutMs: getOllamaTimeoutMs(task),
+            capacityTimeoutMs,
             idleTimeoutMs: OLLAMA_GENERATION_IDLE_TIMEOUT_MS,
             activeTimeoutMs: getOllamaActiveGenerationTimeoutMs(num_predict),
             callerSignal: signal,
@@ -2251,7 +2339,10 @@ export class UnifiedLLMProvider implements LLMProvider {
           if (!line.trim()) continue;
           const packet = JSON.parse(line) as Record<string, unknown>;
           const isDone = packet.done === true;
-          if (isDone) completed = true;
+          if (isDone) {
+            completed = true;
+            recordThroughput(packet);
+          }
           if (isAskPluto && isDone && packet.done_reason === 'length')
             throw new Error('ask_pluto_response_incomplete');
           if (task === 'projectScopeReview' && packet.done === true) {
@@ -2419,6 +2510,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     }
 
     const data = await response.json();
+    if (data?.done === true) recordThroughput(data);
     if (isAskPluto && (data.done !== true || data.done_reason === 'length'))
       throw new Error('ask_pluto_response_incomplete');
     const duration = Date.now() - start;

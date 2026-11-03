@@ -1,5 +1,6 @@
 import type { AskPlutoConversationContext } from '../../src/types/askPlutoQuery';
 import type { AskPlutoResearchTask } from './askPlutoConversation';
+import type { AskPlutoLocalPromptBudget } from './askPlutoLocalBudget';
 import type { ConversationTurnMode } from './conversationController';
 import type { RetrievalResult } from './intelligenceTypes';
 import { CANONICAL_COMMITMENT_ANSWER_GUIDANCE } from './meetingNotesEvidence';
@@ -46,6 +47,8 @@ export interface AskPlutoPromptOptions {
   activeConversationContext?: AskPlutoConversationContext | null;
   conversationMode?: ConversationTurnMode;
   isPlanningQuery?: boolean;
+  // Smaller-Mac local budget; absent means the existing allowances apply.
+  localBudget?: AskPlutoLocalPromptBudget;
 }
 
 export const anchorRelativeSourceDates = (evidence: string): string => {
@@ -91,6 +94,7 @@ export const getAskPlutoPrompt = (
       'projectContext' in omissionReviewOrOptions ||
       'activeConversationContext' in omissionReviewOrOptions ||
       'conversationMode' in omissionReviewOrOptions ||
+      'localBudget' in omissionReviewOrOptions ||
       ('confirmedSelfName' in omissionReviewOrOptions &&
         !('claims' in omissionReviewOrOptions)));
 
@@ -170,10 +174,26 @@ export const getAskPlutoPrompt = (
             : context.length >= 3
               ? Math.floor(4200 / context.length)
               : 1200;
+  // A local budget reserves a quarter for decisions, actions and topics.
+  const localBudget = options.localBudget;
+  const localEvidenceTotal = localBudget
+    ? Math.floor(localBudget.evidenceChars * 0.75)
+    : undefined;
+  const localEvidencePerSource =
+    localEvidenceTotal === undefined
+      ? undefined
+      : Math.max(
+          400,
+          Math.floor(localEvidenceTotal / Math.max(1, context.length)),
+        );
   // Give short notes their full text before dividing the remaining allowance.
-  const evidenceBudgets = context.map(() => evidenceBudget);
+  const evidenceBudgets = context.map(() =>
+    localEvidencePerSource === undefined
+      ? evidenceBudget
+      : Math.min(evidenceBudget, localEvidencePerSource),
+  );
   if (expandedEvidence) {
-    let remaining = 24_000;
+    let remaining = Math.min(24_000, localEvidenceTotal ?? 24_000);
     const shortestFirst = context
       .map((source, index) => ({
         index,
@@ -190,11 +210,23 @@ export const getAskPlutoPrompt = (
       remaining -= allocation;
     });
   }
-  const structuredFieldBudget = largeScope
+  const defaultStructuredFieldBudget = largeScope
     ? 60
     : personExpectationQuestion
       ? 180
       : 320;
+  const structuredFieldBudget = localBudget
+    ? Math.min(
+        defaultStructuredFieldBudget,
+        Math.max(
+          60,
+          Math.floor(
+            (localBudget.evidenceChars * 0.25) /
+              (Math.max(1, context.length) * 2),
+          ),
+        ),
+      )
+    : defaultStructuredFieldBudget;
   const contextStr =
     context.length === 0
       ? 'None'
@@ -323,7 +355,12 @@ ${details.join('\n')}`;
     ? conversationTurns
         .map(
           (turn) =>
-            `${turn.role === 'user' ? 'User' : 'Pluto'}: ${turn.content.slice(0, turn.role === 'user' ? 700 : 2000)}`,
+            `${turn.role === 'user' ? 'User' : 'Pluto'}: ${turn.content.slice(
+              0,
+              turn.role === 'user'
+                ? (localBudget?.priorUserChars ?? 700)
+                : (localBudget?.priorAssistantChars ?? 2000),
+            )}`,
         )
         .join('\n')
     : 'None';

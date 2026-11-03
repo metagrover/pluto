@@ -33,7 +33,7 @@ const CLARIFICATION =
 const CHALLENGE =
   /\b(?:i (?:do not|don't) (?:agree|think so|buy that)|that (?:is not|isn't|does not|doesn't) (?:right|sound right|make sense)|you (?:missed|left out|overlooked|misunderstood)|not quite|i(?:'m| am) not convinced|are you sure|(?:that|this)(?:'s|’s| is) (?:wrong|incorrect|inaccurate|not (?:right|correct))|you(?:'re| are) (?:wrong|incorrect)|^(?:no[,! ]+)?(?:wrong|incorrect)\b|that seems (?:wrong|off|stale)|actually[, ]|correction[: ])\b/i;
 const DRAFT =
-  /\b(?:draft|write|rewrite|compose|word|rephrase|create)\b[\s\S]{0,80}\b(?:email|message|note|reply|follow-up|follow up|response|summary)\b|\b(?:email|message|reply)\s+draft\b/i;
+  /\b(?:draft|write|rewrite|compose|word|rephrase|create)\b[\s\S]{0,80}\b(?:email|message|note|reply|follow-up|follow up|response|summary|update|post|slack|teams|text|memo|announcement|recap|status note|ping|dm|blurb)\b|\b(?:email|message|reply|slack|update)\s+draft\b/i;
 const ACTION =
   /^(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:create|add|save|record|mark|schedule|send|update|archive|delete|remove|assign|complete|finish|reopen)\b/i;
 const PRIOR_REFERENCE =
