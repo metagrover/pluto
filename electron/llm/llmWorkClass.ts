@@ -20,6 +20,7 @@ export const defaultLLMWorkClass = (task: string): LLMWorkClass => {
     task === 'askPluto' ||
     task === 'askPlutoDeep' ||
     task === 'askPlutoLive' ||
+    task === 'queryClassification' ||
     task === 'askPlutoScope'
   )
     return 'ask_pluto';
