@@ -123,4 +123,14 @@ describe('Ask Pluto confirmed self reference', () => {
       'During the meeting, you asked where to set up. You also asked about the schedule. You noted that the room was small.',
     );
   });
+
+  it('rewrites the full name when only a preferred first name is confirmed', () => {
+    expect(
+      addressConfirmedSelf(
+        'Sam Rivera is involved in the launch. Sam owns the demo.',
+        'Sam',
+        ['Sam Rivera', null],
+      ),
+    ).toBe('You are involved in the launch. You own the demo.');
+  });
 });

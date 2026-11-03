@@ -735,6 +735,13 @@ import {
   uniqueAskPlutoEvidenceMeetings,
 } from './intelligence/askPlutoOmissionReview';
 import {
+  ASK_PLUTO_PLAN_SCHEMA,
+  type AskPlutoTurnPlan,
+  applyAskPlutoPlan,
+  buildAskPlutoPlanPrompt,
+  parseAskPlutoPlan,
+} from './intelligence/askPlutoPlanner';
+import {
   buildMeetingCountAnswer,
   describeMeetingReference,
   isCountQuestion,
@@ -7842,7 +7849,142 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               outcome: 'answered' as const,
             };
           }
-          const helpReply = buildPlutoHelpReply(queryText);
+          // Once memory protection refuses the general model, the quick model
+          // stands in for the rest of this request, so planning, answering and
+          // repair do not alternate loads.
+          let memoryFallbackModel: string | undefined;
+          let memoryFallbackProvider:
+            | Awaited<ReturnType<typeof getProvider>>
+            | undefined;
+          const withMemoryFallback = async <T>(
+            run: (
+              provider: Awaited<ReturnType<typeof getProvider>>,
+            ) => Promise<T>,
+            canRetry: () => boolean = () => true,
+          ): Promise<T> => {
+            const provider =
+              memoryFallbackProvider ?? (await getProvider(settings));
+            try {
+              return await run(provider);
+            } catch (error) {
+              const quickModel = resolveConfiguredOllamaModel(settings, true);
+              if (
+                memoryFallbackProvider ||
+                !isLocalProvider ||
+                !(error instanceof LocalModelMemoryError) ||
+                controller.signal.aborted ||
+                !canRetry() ||
+                quickModel === resolveConfiguredOllamaModel(settings)
+              )
+                throw error;
+              console.warn(
+                `[Pluto] Ask Pluto memory fallback to ${quickModel}: ${error.message}`,
+              );
+              memoryFallbackProvider = await getProvider({
+                ...settings,
+                ollama_model: quickModel,
+              });
+              memoryFallbackModel = quickModel;
+              configuredModel = quickModel;
+              return run(memoryFallbackProvider);
+            }
+          };
+          // One planning step reads the message with the recent dialogue and
+          // decides how to answer it; failures fall back to pattern routing.
+          const turnPlan =
+            await (async (): Promise<AskPlutoTurnPlan | null> => {
+              // Diagnostic escape hatch for comparing against pattern routing.
+              if (process.env.PLUTO_ASK_PLANNER === '0') return null;
+              try {
+                if (!(await getProvider(settings)).planAskPlutoTurn)
+                  return null;
+                const previous = latestAssistantTurn(priorTurns);
+                const priorSources = (
+                  previous?.conversationContext?.meetingIds ??
+                  previous?.meetingIds ??
+                  []
+                )
+                  .map((id) => db.getAskPlutoMeeting(id)?.title)
+                  .filter((title): title is string => Boolean(title));
+                const planPrompt = buildAskPlutoPlanPrompt({
+                  question: queryText,
+                  turns: priorTurns,
+                  priorSources,
+                });
+                const raw = await withMemoryFallback(
+                  (provider) =>
+                    provider.planAskPlutoTurn?.(planPrompt, {
+                      signal: controller.signal,
+                      responseSchema: ASK_PLUTO_PLAN_SCHEMA,
+                      onStart: () => recordProgress?.('started'),
+                      onProgress: () => recordProgress?.(),
+                    }) ?? Promise.resolve(''),
+                );
+                const plan = parseAskPlutoPlan(raw);
+                console.log(
+                  '[Pluto] Ask Pluto plan',
+                  JSON.stringify(
+                    plan
+                      ? {
+                          route: plan.route,
+                          relation: plan.relation,
+                          task: plan.task,
+                          people: plan.people.length,
+                          meeting: plan.meeting,
+                          timeframe: Boolean(plan.timeframe),
+                        }
+                      : { invalid: true },
+                  ),
+                );
+                return plan;
+              } catch (error) {
+                if (controller.signal.aborted) throw error;
+                console.warn(
+                  '[Pluto] Ask Pluto planning failed; using pattern routing',
+                );
+                return null;
+              }
+            })();
+          if (
+            turnPlan?.route === 'conversation' ||
+            turnPlan?.route === 'help'
+          ) {
+            const previous = latestAssistantTurn(priorTurns);
+            const answer =
+              (turnPlan.route === 'help'
+                ? (buildPlutoHelpReply(turnPlan.question) ??
+                  buildPlutoHelpReply(queryText))
+                : null) ?? turnPlan.reply;
+            turnMode = turnPlan.route === 'help' ? 'lookup' : 'social';
+            retrievalPolicy = 'none';
+            outputCharacters = answer.length;
+            generationCompletedAt = Date.now();
+            finalizationStartedAt = generationCompletedAt;
+            finalizationCompletedAt = generationCompletedAt;
+            return {
+              status: 'answered' as const,
+              answer,
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'answered' as const,
+              turnMode,
+              // Record what this reply covered so a follow-up can build on it.
+              conversationAnchor: turnPlan.question.slice(0, 700),
+              conversationContext:
+                turnPlan.relation === 'new_topic'
+                  ? {
+                      anchor: turnPlan.question.slice(0, 700),
+                      meetingIds: [],
+                      topic: { kind: 'general' as const },
+                    }
+                  : (previous?.conversationContext ?? {
+                      anchor: turnPlan.question.slice(0, 700),
+                      meetingIds: [],
+                      topic: { kind: 'general' as const },
+                    }),
+            };
+          }
+          const helpReply = turnPlan ? null : buildPlutoHelpReply(queryText);
           if (helpReply) {
             turnMode = 'lookup';
             retrievalPolicy = 'none';
@@ -7859,10 +8001,17 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             };
           }
           conversationResolutionStartedAt = Date.now();
-          const conversationResolution = resolveAskPlutoConversation(
+          const patternResolution = resolveAskPlutoConversation(
             queryText,
             priorTurns,
           );
+          const conversationResolution = turnPlan
+            ? applyAskPlutoPlan(
+                patternResolution,
+                turnPlan,
+                priorTurns.some((turn) => turn.role === 'assistant'),
+              )
+            : patternResolution;
           turnMode = conversationResolution.turnMode;
           retrievalPolicy = conversationResolution.retrievalPolicy;
           conversationResolutionCompletedAt = Date.now();
@@ -7991,8 +8140,10 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             };
           }
           if (
-            conversationResolution.turnMode === 'act' ||
-            isTaskChatRequest(queryText)
+            turnPlan
+              ? turnPlan.route === 'task_action'
+              : conversationResolution.turnMode === 'act' ||
+                isTaskChatRequest(queryText)
           ) {
             const taskReply = await prepareTaskChatReply({
               query: queryText,
@@ -8106,13 +8257,28 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             settings.llm_provider === 'chatgpt'
               ? []
               : matchPeopleInQuestion(
-                  effectiveQueryText,
+                  turnPlan?.people.length
+                    ? `${effectiveQueryText}\n${turnPlan.people.join(', ')}`
+                    : effectiveQueryText,
                   db
                     .getEntitiesByType('person')
                     .filter((person) => person.id !== frameSelfPersonId)
                     .map((person) => ({ id: person.id, name: person.name })),
                 );
-          const frameReference = parseMeetingReference(effectiveQueryText);
+          const frameReference =
+            turnPlan && turnPlan.meeting !== 'none'
+              ? {
+                  position: turnPlan.meeting,
+                  oneOnOne: turnPlan.one_on_one,
+                  matchedText: '',
+                }
+              : turnPlan?.route === 'count'
+                ? {
+                    position: 'all' as const,
+                    oneOnOne: turnPlan.one_on_one,
+                    matchedText: '',
+                  }
+                : parseMeetingReference(effectiveQueryText);
           // A question about a named person's meeting is not a workspace review,
           // even when it asks about commitments or priorities.
           const isPlanning =
@@ -8134,6 +8300,10 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             : undefined;
           const confirmedSelfName =
             selfProfile?.preferredName.trim() || undefined;
+          const selfNameForms = [
+            ...(selfProfile?.aliases ?? []),
+            selfPersonId ? db.getEntity(selfPersonId)?.name : undefined,
+          ];
           const selfReference = resolveAskPlutoSelfReference(
             effectiveQueryText,
             confirmedSelfName,
@@ -8221,6 +8391,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           const parsed = await parseQuery(selfReference.retrievalQuery, {
             signal: controller.signal,
             useModelClassification:
+              !turnPlan &&
               settings.llm_provider !== 'chatgpt' &&
               conversationResolution.relation === 'new_topic' &&
               !isExplicitInformationRequest(queryText),
@@ -8494,9 +8665,11 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
 
           // Upcoming-schedule questions are answered from the calendar store.
           if (
-            settings.llm_provider !== 'chatgpt' &&
-            conversationResolution.relation === 'new_topic' &&
-            isScheduleQuestion(effectiveQueryText, frameTemporal)
+            turnPlan
+              ? turnPlan.route === 'schedule'
+              : settings.llm_provider !== 'chatgpt' &&
+                conversationResolution.relation === 'new_topic' &&
+                isScheduleQuestion(effectiveQueryText, frameTemporal)
           ) {
             const now = new Date();
             const nextOnly = /\bnext\s+(?:meeting|call)\b/i.test(
@@ -8559,8 +8732,10 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
 
           // Overdue and slipping work is read from canonical task state.
           if (
-            conversationResolution.relation === 'new_topic' &&
-            isAttentionQuestion(effectiveQueryText) &&
+            (turnPlan
+              ? turnPlan.route === 'tasks'
+              : conversationResolution.relation === 'new_topic' &&
+                isAttentionQuestion(effectiveQueryText)) &&
             !framePeople.length &&
             !explicitMeetingScope
           ) {
@@ -8643,7 +8818,9 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
 
           // Counts come from meeting records, never from generated prose.
           if (
-            isCountQuestion(effectiveQueryText) &&
+            (turnPlan
+              ? turnPlan.route === 'count'
+              : isCountQuestion(effectiveQueryText)) &&
             frameReference &&
             framePeople.length
           ) {
@@ -9596,7 +9773,11 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             if (distinct.answer)
               lastValidatedPresentation = {
                 ...distinct,
-                answer: addressConfirmedSelf(distinct.answer, answerSelfName),
+                answer: addressConfirmedSelf(
+                  distinct.answer,
+                  answerSelfName,
+                  selfNameForms,
+                ),
               };
           };
           const answerStream =
@@ -9628,10 +9809,6 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                   ? assigneeRecall.answer
                   : buildExtractiveTemporalSummary(effectiveQueryText, context);
           let answerRaw: string;
-          let answerProvider:
-            | Awaited<ReturnType<typeof getProvider>>
-            | undefined;
-          let memoryFallbackModel: string | undefined;
           let answerPrompt: string | undefined;
           const preferences = readResponsePreferences(db);
           const responseWordLimit =
@@ -9744,38 +9921,12 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                 answerStream.push(delta);
               },
             };
-            try {
-              answerRaw = await provider.answerAskPluto(
-                prompt,
-                generationOptions,
-              );
-            } catch (error) {
-              // When memory protection refuses the general model before any
-              // output, answer with the configured quick model rather than
-              // failing; the reply says so.
-              const quickModel = resolveConfiguredOllamaModel(settings, true);
-              if (
-                !isLocalProvider ||
-                !(error instanceof LocalModelMemoryError) ||
-                rawFirstTokenAt ||
-                controller.signal.aborted ||
-                quickModel === resolveConfiguredOllamaModel(settings)
-              )
-                throw error;
-              console.warn(
-                `[Pluto] Ask Pluto memory fallback to ${quickModel}: ${error.message}`,
-              );
-              answerProvider = await getProvider({
-                ...settings,
-                ollama_model: quickModel,
-              });
-              memoryFallbackModel = quickModel;
-              configuredModel = quickModel;
-              answerRaw = await answerProvider.answerAskPluto(
-                prompt,
-                generationOptions,
-              );
-            }
+            // Memory fallback applies only before any output has streamed.
+            answerRaw = await withMemoryFallback(
+              (answerProvider) =>
+                answerProvider.answerAskPluto(prompt, generationOptions),
+              () => !rawFirstTokenAt,
+            );
           }
           controller.signal.throwIfAborted();
           generationCompletedAt = Date.now();
@@ -9788,10 +9939,11 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             conversationResolution.task !== 'draft' &&
             presentation.unsupportedClaimCount > 0
           ) {
-            const provider = answerProvider ?? (await getProvider(settings));
-            const repaired = await provider.answerAskPluto(
-              `${answerPrompt}\n\nRewrite using only facts stated in the supplied notes. Use neutral wording such as "The notes record" unless a passage explicitly names the actor. Do not use you/your or calculate elapsed time from meeting dates. Describe status as last recorded on the source date, never as current today. A decision to use something does not establish that it was implemented or is being used. Do not expand the scope of a note or infer an approval outcome. Preserve conditions and uncertainty.`,
-              { signal: controller.signal, mode: reasoningMode },
+            const repaired = await withMemoryFallback((provider) =>
+              provider.answerAskPluto(
+                `${answerPrompt}\n\nRewrite using only facts stated in the supplied notes. Use neutral wording such as "The notes record" unless a passage explicitly names the actor. Do not use you/your or calculate elapsed time from meeting dates. Describe status as last recorded on the source date, never as current today. A decision to use something does not establish that it was implemented or is being used. Do not expand the scope of a note or infer an approval outcome. Preserve conditions and uncertainty.`,
+                { signal: controller.signal, mode: reasoningMode },
+              ),
             );
             controller.signal.throwIfAborted();
             presentation = createSynthesizedAnswerStream(
@@ -9889,6 +10041,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           const addressedAnswer = addressConfirmedSelf(
             attributionSafeAnswer,
             answerSelfName,
+            selfNameForms,
           );
           const answer = coverageLimited
             ? `I found ${retrievalSummary.matchedMeetingCount} meetings, but this answer covers ${retrievalSummary.includedMeetingCount}. Narrow the time period for complete coverage.\n\n${addressedAnswer}`
@@ -9937,7 +10090,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                     : { kind: 'general' as const },
           };
           const deliveredAnswer = memoryFallbackModel
-            ? `${answer}\n\n_Answered with the smaller ${memoryFallbackModel} model because there wasn't enough free memory to load the main model. Close other apps and ask again for a fuller answer._`
+            ? `${answer}\n\n_Answered with the smaller ${memoryFallbackModel} model while memory is limited._`
             : answer;
           outputCharacters = deliveredAnswer.length;
           finalizationCompletedAt = Date.now();
