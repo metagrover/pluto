@@ -91,6 +91,16 @@ describe('conversation controller', () => {
     });
   });
 
+  it.each([
+    'Draft a short Slack update to Vrinda about it.',
+    'Write a status update for the team.',
+    'Compose a quick post for the channel.',
+  ])('treats a written update request as a draft: %s', (query) => {
+    expect(
+      decideConversationTurn({ query, hasPriorAssistant: true }).mode,
+    ).toBe('draft');
+  });
+
   it('keeps a first-turn greeting out of retrieval', () => {
     expect(
       decideConversationTurn({

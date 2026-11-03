@@ -148,6 +148,7 @@ import {
   isTaskChatRequest,
   prepareTaskChatReply,
 } from './intelligence/taskChatTools';
+import { LocalModelMemoryError } from './llm/localModelMemory';
 import { checkOllamaReadiness } from './llm/ollamaReadiness';
 import { resolveConfiguredProviderModel } from './llm/providerCatalog';
 import {
@@ -690,6 +691,15 @@ import {
   removeRepeatedAskPlutoClaims,
 } from './intelligence/askPlutoAnswerText';
 import {
+  buildAttentionAnswer,
+  isAttentionQuestion,
+} from './intelligence/askPlutoAttention';
+import {
+  type CalendarAnswerEvent,
+  buildScheduleAnswer,
+  isScheduleQuestion,
+} from './intelligence/askPlutoCalendar';
+import {
   asksForExplicitAttribution,
   asksToVerifyProjectAssociation,
   describePreviousConversationFailure,
@@ -712,6 +722,10 @@ import {
 import { classifyAskPlutoFailure } from './intelligence/askPlutoFailures';
 import { buildPlutoHelpReply } from './intelligence/askPlutoHelp';
 import {
+  ASK_PLUTO_LOCAL_MAX_FIRST_TOKEN_MS,
+  planAskPlutoLocalPromptBudget,
+} from './intelligence/askPlutoLocalBudget';
+import {
   clearAskPlutoOmissions,
   describeUnverifiedAskPlutoOmissions,
   getAskPlutoOmissionReview,
@@ -720,6 +734,15 @@ import {
   selectAskPlutoOmissionContext,
   uniqueAskPlutoEvidenceMeetings,
 } from './intelligence/askPlutoOmissionReview';
+import {
+  buildMeetingCountAnswer,
+  describeMeetingReference,
+  isCountQuestion,
+  matchPeopleInQuestion,
+  parseMeetingReference,
+  selectMeetingsOnDays,
+  selectPersonMeetings,
+} from './intelligence/askPlutoQuestionFrame';
 import {
   type AskPlutoReasoningMode,
   getCrossMeetingCandidateLimit,
@@ -809,6 +832,7 @@ import {
   enforceSynthesizedOnlyContext,
   extractNamedPersonQuestionSubject,
   focusContextOnExplicitNamedSubject,
+  isPlanningOrPriorityQuery,
   mergeRetrievalResultsByMeeting,
   parsePersonWorkQuery,
   parseQuery,
@@ -824,6 +848,7 @@ import {
 } from './intelligence/queryEngine';
 import { getAskPlutoPrompt } from './intelligence/queryPrompts';
 import { generateSuggestedQueries } from './intelligence/suggestedQueries';
+import { resolveTemporalDayMentions } from './intelligence/temporalScope';
 import {
   configureKnowledgeDocBackgroundScheduler,
   initializeKnowledgeDocs,
@@ -846,6 +871,10 @@ import {
   invalidateSettingsCache,
 } from './llm/factory';
 import type { ApiKeyProviderId } from './llm/inferenceTypes';
+import {
+  configureLocalInferenceProfileStore,
+  resolveLocalThroughput,
+} from './llm/localInferenceProfile';
 import { notesWriterPolicy } from './llm/meetingNotesBudget';
 import { createNotesSource } from './llm/meetingNotesSource';
 import {
@@ -863,9 +892,11 @@ import type {
 import { CLOUD_CONSENT_VERSION } from './llm/providerCatalog';
 import { inferenceTransportErrorRationale } from './llm/transports/openAICompatible';
 import {
+  CHAT_MODEL_WARM_MS,
   UnifiedLLMProvider,
   releaseIdleOllamaModel,
   runWithLocalTranscription,
+  scheduleIdleOllamaModelRelease,
   setLocalTranscriptionModelUnloader,
 } from './llm/unifiedProvider';
 import {
@@ -1558,6 +1589,7 @@ app.whenReady().then(async () => {
     },
   });
   db.recoverInterruptedMeetingAnalysisRuns();
+  configureLocalInferenceProfileStore(app.getPath('userData'));
   // Two-hour retention is a maximum; release idle model RAM when headroom drops.
   let checkingIdleModelMemory = false;
   const idleModelMemoryTimer = setInterval(async () => {
@@ -6140,7 +6172,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               : inferenceTransportErrorRationale(error),
         } satisfies PersonChatResponse;
       } finally {
-        void releaseIdleOllamaModel(0).catch(() => {
+        scheduleIdleOllamaModelRelease(CHAT_MODEL_WARM_MS, () => {
           console.warn('[Pluto] Person chat model cleanup failed');
         });
         settle();
@@ -7562,10 +7594,14 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
         const settingsCompletedAt = Date.now();
         const isLocalProvider =
           !settings.llm_provider || settings.llm_provider === 'ollama';
-        const requestTimeoutMs = askPlutoTimeoutMs(
-          typeof input === 'string' ? undefined : input.modeOverride,
-          { isLocal: isLocalProvider },
-        );
+        // Locally, the provider bounds the first token from this Mac's
+        // measured speed; this outer limit must not cut it short.
+        const requestTimeoutMs = isLocalProvider
+          ? ASK_PLUTO_LOCAL_MAX_FIRST_TOKEN_MS
+          : askPlutoTimeoutMs(
+              typeof input === 'string' ? undefined : input.modeOverride,
+              { isLocal: isLocalProvider },
+            );
         let recordProgress:
           | ((phase?: 'queued' | 'started' | 'token') => void)
           | undefined;
@@ -8064,12 +8100,29 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               (turn) =>
                 turn.role === 'assistant' && turn.conversationAnchor?.trim(),
             )?.conversationAnchor;
-          const isPlanning = shouldUseWorkspaceIntelligence({
-            query: queryText,
-            relation: conversationResolution.relation,
-            priorQuestion: conversationResolution.priorQuestion,
-            conversationAnchor: planningConversationAnchor,
-          });
+          // Structured reading of who and which meetings the question means.
+          const frameSelfPersonId = db.identityStore.getSelfPersonId();
+          const framePeople =
+            settings.llm_provider === 'chatgpt'
+              ? []
+              : matchPeopleInQuestion(
+                  effectiveQueryText,
+                  db
+                    .getEntitiesByType('person')
+                    .filter((person) => person.id !== frameSelfPersonId)
+                    .map((person) => ({ id: person.id, name: person.name })),
+                );
+          const frameReference = parseMeetingReference(effectiveQueryText);
+          // A question about a named person's meeting is not a workspace review,
+          // even when it asks about commitments or priorities.
+          const isPlanning =
+            !(frameReference && framePeople.length) &&
+            shouldUseWorkspaceIntelligence({
+              query: queryText,
+              relation: conversationResolution.relation,
+              priorQuestion: conversationResolution.priorQuestion,
+              conversationAnchor: planningConversationAnchor,
+            });
           const workspaceIntelligenceMode = resolveWorkspaceIntelligenceMode(
             queryText,
             conversationResolution.relation,
@@ -8319,6 +8372,64 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               !effectiveProjectRecall &&
               !effectivePersonWorkRecall,
           );
+          const frameTemporal =
+            parsed.temporal_range?.from && parsed.temporal_range.to
+              ? {
+                  fromInclusive: parsed.temporal_range.from,
+                  toExclusive: parsed.temporal_range.to,
+                  label: parsed.temporal_range.label || 'the selected period',
+                }
+              : null;
+          const framePersonMeetings =
+            frameReference && framePeople.length
+              ? selectPersonMeetings({
+                  people: framePeople,
+                  meetings: persistedMeetings,
+                  meetingIdsByPerson: new Map(
+                    framePeople.map((person) => [
+                      person.id,
+                      new Set(
+                        db
+                          .getEntityMeetings(person.id)
+                          .map((meeting) => String(meeting.id)),
+                      ),
+                    ]),
+                  ),
+                  reference: frameReference,
+                  range: frameTemporal,
+                })
+              : [];
+          const resolveFrameMeetingScope = () => {
+            if (frameReference && framePeople.length) {
+              if (!framePersonMeetings.length) return null;
+              return {
+                kind: 'named' as const,
+                label: describeMeetingReference({
+                  people: framePeople,
+                  reference: frameReference,
+                  rangeLabel: frameTemporal?.label,
+                }),
+                meetings: framePersonMeetings.slice(
+                  0,
+                  12,
+                ) as db.PersistedMeeting[],
+              };
+            }
+            const days = resolveTemporalDayMentions(effectiveQueryText);
+            if (days.length < 2) return null;
+            const onDays = selectMeetingsOnDays({
+              query: effectiveQueryText,
+              meetings: persistedMeetings,
+              days,
+            });
+            return onDays.length
+              ? {
+                  kind: 'named' as const,
+                  label: `meetings on ${days.map((day) => day.label).join(' and ')}`,
+                  meetings: onDays.slice(0, 12) as db.PersistedMeeting[],
+                }
+              : null;
+          };
           const explicitMeetingScope = semanticScope
             ? semanticScope.kind === 'single' ||
               semanticScope.kind === 'multiple'
@@ -8337,10 +8448,13 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               : null
             : settings.llm_provider === 'chatgpt'
               ? null
-              : resolveExplicitMeetingScope(
+              : // Person and compared-day references are more specific than a
+                // title that also appears in the question.
+                (resolveFrameMeetingScope() ??
+                resolveExplicitMeetingScope(
                   effectiveQueryText,
                   persistedMeetings,
-                );
+                ));
           const requestedMode =
             typeof input !== 'string' &&
             (input.modeOverride === 'fast' || input.modeOverride === 'deep')
@@ -8375,6 +8489,219 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               citations: [],
               currentMeeting: currentMeetingStatus,
               outcome: 'answered' as const,
+            };
+          }
+
+          // Upcoming-schedule questions are answered from the calendar store.
+          if (
+            settings.llm_provider !== 'chatgpt' &&
+            conversationResolution.relation === 'new_topic' &&
+            isScheduleQuestion(effectiveQueryText, frameTemporal)
+          ) {
+            const now = new Date();
+            const nextOnly = /\bnext\s+(?:meeting|call)\b/i.test(
+              effectiveQueryText,
+            );
+            const from =
+              frameTemporal && frameTemporal.fromInclusive > now.toISOString()
+                ? frameTemporal.fromInclusive
+                : now.toISOString();
+            const to =
+              frameTemporal?.toExclusive ??
+              new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+            const snapshot = await calendarService.getSnapshot();
+            let events: CalendarAnswerEvent[] = [];
+            try {
+              events = snapshot.enabled
+                ? calendarService.listDay(from, to).map((event) => ({
+                    title: event.title,
+                    start: event.start,
+                    end: event.end,
+                    attendees: event.attendees.map((person) => ({
+                      name: person.name,
+                      email: person.email,
+                    })),
+                  }))
+                : [];
+            } catch {
+              events = [];
+            }
+            if (nextOnly) events = events.slice(0, 1);
+            const { answer, relatedMeetings } = buildScheduleAnswer({
+              events,
+              meetings: persistedMeetings,
+              rangeLabel: nextOnly
+                ? 'next'
+                : (frameTemporal?.label ?? 'over the next 7 days'),
+              calendarConnected: snapshot.enabled,
+            });
+            turnMode = 'lookup';
+            retrievalPolicy = 'fresh';
+            outputCharacters = answer.length;
+            generationCompletedAt = Date.now();
+            finalizationStartedAt = generationCompletedAt;
+            finalizationCompletedAt = generationCompletedAt;
+            return {
+              status: 'answered' as const,
+              answer,
+              citations: relatedMeetings.map((meeting) => ({
+                claim: meeting.title || 'Untitled meeting',
+                meeting_id: String(meeting.id),
+                meeting_title: meeting.title || 'Untitled meeting',
+                source_type: 'meeting' as const,
+                evidence_valid: true,
+                trust_status: 'grounded' as const,
+              })),
+              currentMeeting: currentMeetingStatus,
+              outcome: 'answered' as const,
+            };
+          }
+
+          // Overdue and slipping work is read from canonical task state.
+          if (
+            conversationResolution.relation === 'new_topic' &&
+            isAttentionQuestion(effectiveQueryText) &&
+            !framePeople.length &&
+            !explicitMeetingScope
+          ) {
+            const snapshot = personalTasks.listPersonalTasks();
+            const open = snapshot.tasks.filter(
+              (task) =>
+                task.entity.status === 'active' ||
+                task.entity.status === 'stale',
+            );
+            const mineIds = new Set(
+              snapshot.tasks.map((task) => task.entity.id),
+            );
+            const ownerName = (id: string | null) =>
+              id ? (db.getEntity(id)?.name ?? null) : null;
+            const { answer, cited } = buildAttentionAnswer({
+              mine: open.map((task) => ({
+                id: task.entity.id,
+                title: task.entity.name,
+                dueDate: task.entity.due_date,
+                createdAt: task.entity.created_at,
+                sourceMeetingId: task.sourceMeetingId,
+                sourceMeetingTitle: task.sourceMeetingTitle,
+              })),
+              others: db
+                .getOverdueActionItems()
+                .filter(
+                  (item) =>
+                    !mineIds.has(item.id) &&
+                    (!frameSelfPersonId ||
+                      item.assigned_to !== frameSelfPersonId),
+                )
+                .map((item) => {
+                  let sourceMeetingId: string | null = null;
+                  try {
+                    const metadata = JSON.parse(item.metadata || '{}') as {
+                      source_meeting_id?: string;
+                    };
+                    sourceMeetingId = metadata.source_meeting_id ?? null;
+                  } catch {
+                    sourceMeetingId = null;
+                  }
+                  return {
+                    id: item.id,
+                    title: item.name,
+                    dueDate: item.due_date,
+                    createdAt: item.created_at,
+                    owner: ownerName(item.assigned_to),
+                    sourceMeetingId,
+                    sourceMeetingTitle: sourceMeetingId
+                      ? (db.getAskPlutoMeeting(sourceMeetingId)?.title ?? null)
+                      : null,
+                  };
+                }),
+            });
+            turnMode = 'lookup';
+            retrievalPolicy = 'fresh';
+            outputCharacters = answer.length;
+            generationCompletedAt = Date.now();
+            finalizationStartedAt = generationCompletedAt;
+            finalizationCompletedAt = generationCompletedAt;
+            return {
+              status: 'answered' as const,
+              answer,
+              citations: cited
+                .filter((item) => item.sourceMeetingId)
+                .map((item) => ({
+                  claim: item.title,
+                  meeting_id: String(item.sourceMeetingId),
+                  meeting_title: item.sourceMeetingTitle || 'Source meeting',
+                  source_type: 'meeting' as const,
+                  entity_id: item.id,
+                  evidence_kind: 'commitment' as const,
+                  evidence_valid: true,
+                  trust_status: 'grounded' as const,
+                })),
+              currentMeeting: currentMeetingStatus,
+              outcome: 'answered' as const,
+            };
+          }
+
+          // Counts come from meeting records, never from generated prose.
+          if (
+            isCountQuestion(effectiveQueryText) &&
+            frameReference &&
+            framePeople.length
+          ) {
+            const label = describeMeetingReference({
+              people: framePeople,
+              reference: { ...frameReference, position: 'all' },
+              rangeLabel: frameTemporal?.label,
+            });
+            const counted =
+              frameReference.position === 'all'
+                ? framePersonMeetings
+                : selectPersonMeetings({
+                    people: framePeople,
+                    meetings: persistedMeetings,
+                    meetingIdsByPerson: new Map(
+                      framePeople.map((person) => [
+                        person.id,
+                        new Set(
+                          db
+                            .getEntityMeetings(person.id)
+                            .map((meeting) => String(meeting.id)),
+                        ),
+                      ]),
+                    ),
+                    reference: { ...frameReference, position: 'all' },
+                    range: frameTemporal,
+                  });
+            const answer = buildMeetingCountAnswer({
+              meetings: counted,
+              label,
+            });
+            turnMode = 'lookup';
+            retrievalPolicy = 'fresh';
+            outputCharacters = answer.length;
+            generationCompletedAt = Date.now();
+            finalizationStartedAt = generationCompletedAt;
+            finalizationCompletedAt = generationCompletedAt;
+            return {
+              status: 'answered' as const,
+              answer,
+              citations: counted.slice(0, 12).map((meeting) => ({
+                claim: meeting.title || 'Untitled meeting',
+                meeting_id: String(meeting.id),
+                meeting_title: meeting.title || 'Untitled meeting',
+                source_type: 'meeting' as const,
+                evidence_valid: true,
+                trust_status: 'grounded' as const,
+              })),
+              currentMeeting: currentMeetingStatus,
+              outcome: counted.length
+                ? ('answered' as const)
+                : ('no_evidence' as const),
+              resolvedScope: {
+                kind: 'meeting_ids' as const,
+                meetingIds: counted.map((meeting) => String(meeting.id)),
+                resolvedAt: new Date().toISOString(),
+                source: 'explicit' as const,
+              },
             };
           }
 
@@ -8479,8 +8806,16 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               input.activeMeetingSnapshot?.meetingId
               ? input.activeMeetingSnapshot
               : undefined;
+          // For planning, "this week" or "today" is a horizon to plan within,
+          // not a filter on which meetings hold the relevant commitments.
+          const planningHorizon =
+            (isPlanning || isPlanningOrPriorityQuery(effectiveQueryText)) &&
+            Boolean(parsed.temporal_range?.to) &&
+            String(parsed.temporal_range?.to) > new Date().toISOString();
           const explicitTemporalRange =
-            parsed.temporal_range?.from && parsed.temporal_range.to
+            !planningHorizon &&
+            parsed.temporal_range?.from &&
+            parsed.temporal_range.to
               ? {
                   fromInclusive: parsed.temporal_range.from,
                   toExclusive: parsed.temporal_range.to,
@@ -8613,10 +8948,26 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             sendStatus('retrieving');
           }
           if (temporalRange && temporalMeetings.length === 0) {
+            const latest = persistedMeetings.slice(0, 3);
+            const latestLines = latest
+              .map(
+                (meeting) =>
+                  `- ${new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(meeting.started_at || meeting.created_at || Date.now()))}: ${meeting.title || 'Untitled meeting'}`,
+              )
+              .join('\n');
             return {
               status: 'answered' as const,
-              answer: `I couldn't find any meetings from ${temporalRange.label}.`,
-              citations: [],
+              answer: latest.length
+                ? `I couldn't find any recorded meetings from ${temporalRange.label}. Your most recent recorded meetings are:\n${latestLines}\n\nAsk about one of them, or about a different period.`
+                : `I couldn't find any meetings from ${temporalRange.label}.`,
+              citations: latest.map((meeting) => ({
+                claim: meeting.title || 'Untitled meeting',
+                meeting_id: String(meeting.id),
+                meeting_title: meeting.title || 'Untitled meeting',
+                source_type: 'meeting' as const,
+                evidence_valid: true,
+                trust_status: 'grounded' as const,
+              })),
               currentMeeting: currentMeetingStatus,
               outcome: 'no_evidence' as const,
               resolvedScope: temporalResolvedScope,
@@ -9129,6 +9480,50 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             commitmentCount: assigneeRecall?.commitmentCount || 0,
             omittedResultCount: retrievalSummary.omittedMeetingCount,
           };
+          // A selected meeting withheld as confidential is named, not hidden
+          // behind a generic "couldn't verify".
+          const withheldScopedMeetings =
+            context.length === 0
+              ? explicitlyScopedMeetings.filter((meeting) =>
+                  containsConfidentialAside(
+                    [
+                      meeting.title,
+                      meeting.user_notes,
+                      meeting.enhanced_notes,
+                      meeting.analysis_json,
+                      meeting.mid_json,
+                    ]
+                      .filter(Boolean)
+                      .join('\n'),
+                  ),
+                )
+              : [];
+          if (
+            withheldScopedMeetings.length &&
+            withheldScopedMeetings.length === explicitlyScopedMeetings.length
+          ) {
+            const names = withheldScopedMeetings
+              .slice(0, 3)
+              .map((meeting) => `“${meeting.title || 'Untitled meeting'}”`)
+              .join(', ');
+            return {
+              status: 'answered' as const,
+              answer: `${names} ${withheldScopedMeetings.length === 1 ? 'contains' : 'contain'} notes marked confidential, so Pluto keeps ${withheldScopedMeetings.length === 1 ? 'it' : 'them'} out of chat answers. Open the meeting to review it directly.`,
+              citations: withheldScopedMeetings.slice(0, 3).map((meeting) => ({
+                claim: meeting.title || 'Untitled meeting',
+                meeting_id: String(meeting.id),
+                meeting_title: meeting.title || 'Untitled meeting',
+                source_type: 'meeting' as const,
+                evidence_valid: true,
+                trust_status: 'grounded' as const,
+              })),
+              currentMeeting: currentMeetingStatus,
+              outcome: 'no_evidence' as const,
+              resolvedScope,
+              retrievalSummary,
+              retrievalTrace,
+            };
+          }
           if (context.length === 0) {
             return {
               status: 'answered' as const,
@@ -9233,6 +9628,10 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                   ? assigneeRecall.answer
                   : buildExtractiveTemporalSummary(effectiveQueryText, context);
           let answerRaw: string;
+          let answerProvider:
+            | Awaited<ReturnType<typeof getProvider>>
+            | undefined;
+          let memoryFallbackModel: string | undefined;
           let answerPrompt: string | undefined;
           const preferences = readResponsePreferences(db);
           const responseWordLimit =
@@ -9309,6 +9708,14 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                   : activeConversationContext || null,
                 conversationMode: conversationResolution.turnMode,
                 isPlanningQuery: isPlanning,
+                localBudget: isLocalProvider
+                  ? planAskPlutoLocalPromptBudget({
+                      throughput: resolveLocalThroughput(
+                        resolveConfiguredOllamaModel(settings),
+                      ),
+                      mode: reasoningMode,
+                    })
+                  : undefined,
               },
             );
             promptCompletedAt = Date.now();
@@ -9319,7 +9726,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             );
             providerRequestedAt = Date.now();
             if (settings.llm_provider === 'chatgpt') recordProgress?.('queued');
-            answerRaw = await provider.answerAskPluto(prompt, {
+            const generationOptions = {
               signal: controller.signal,
               mode: reasoningMode,
               onStart: () => {
@@ -9327,7 +9734,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                 providerStartedAt ??= Date.now();
                 sendStatus('writing');
               },
-              onToken: (delta) => {
+              onToken: (delta: string) => {
                 if (controller.signal.aborted) return;
                 recordProgress?.();
                 if (!rawFirstTokenAt) {
@@ -9336,7 +9743,39 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                 }
                 answerStream.push(delta);
               },
-            });
+            };
+            try {
+              answerRaw = await provider.answerAskPluto(
+                prompt,
+                generationOptions,
+              );
+            } catch (error) {
+              // When memory protection refuses the general model before any
+              // output, answer with the configured quick model rather than
+              // failing; the reply says so.
+              const quickModel = resolveConfiguredOllamaModel(settings, true);
+              if (
+                !isLocalProvider ||
+                !(error instanceof LocalModelMemoryError) ||
+                rawFirstTokenAt ||
+                controller.signal.aborted ||
+                quickModel === resolveConfiguredOllamaModel(settings)
+              )
+                throw error;
+              console.warn(
+                `[Pluto] Ask Pluto memory fallback to ${quickModel}: ${error.message}`,
+              );
+              answerProvider = await getProvider({
+                ...settings,
+                ollama_model: quickModel,
+              });
+              memoryFallbackModel = quickModel;
+              configuredModel = quickModel;
+              answerRaw = await answerProvider.answerAskPluto(
+                prompt,
+                generationOptions,
+              );
+            }
           }
           controller.signal.throwIfAborted();
           generationCompletedAt = Date.now();
@@ -9349,7 +9788,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             conversationResolution.task !== 'draft' &&
             presentation.unsupportedClaimCount > 0
           ) {
-            const provider = await getProvider(settings);
+            const provider = answerProvider ?? (await getProvider(settings));
             const repaired = await provider.answerAskPluto(
               `${answerPrompt}\n\nRewrite using only facts stated in the supplied notes. Use neutral wording such as "The notes record" unless a passage explicitly names the actor. Do not use you/your or calculate elapsed time from meeting dates. Describe status as last recorded on the source date, never as current today. A decision to use something does not establish that it was implemented or is being used. Do not expand the scope of a note or infer an approval outcome. Preserve conditions and uncertainty.`,
               { signal: controller.signal, mode: reasoningMode },
@@ -9497,7 +9936,10 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                     ? { kind: 'meeting_set' as const }
                     : { kind: 'general' as const },
           };
-          outputCharacters = answer.length;
+          const deliveredAnswer = memoryFallbackModel
+            ? `${answer}\n\n_Answered with the smaller ${memoryFallbackModel} model because there wasn't enough free memory to load the main model. Close other apps and ask again for a fuller answer._`
+            : answer;
+          outputCharacters = deliveredAnswer.length;
           finalizationCompletedAt = Date.now();
 
           console.log(
@@ -9506,7 +9948,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
 
           return {
             status: 'answered' as const,
-            answer,
+            answer: deliveredAnswer,
             citations: presentation.citations,
             currentMeeting: currentMeetingStatus,
             outcome: coverageLimited
@@ -9631,7 +10073,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           failureReason: failure.reason,
         };
       } finally {
-        void releaseIdleOllamaModel(0).catch(() => {
+        scheduleIdleOllamaModelRelease(CHAT_MODEL_WARM_MS, () => {
           console.warn('[Pluto] Ask Pluto model cleanup failed');
         });
         event.sender.removeListener('destroyed', abortForDestroyedOwner);

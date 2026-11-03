@@ -2069,6 +2069,10 @@ describe('Query Engine', () => {
       expect(
         parsePersonWorkQuery('Tell me about service reliability?'),
       ).toBeNull();
+      expect(
+        parsePersonWorkQuery('Who is Gamma and what do we work on together?'),
+      ).toBe('Gamma');
+      expect(parsePersonWorkQuery("Who's Gamma?")).toBe('Gamma');
     });
 
     it('uses the synthesized person dossier for current-work questions and follow-ups', () => {

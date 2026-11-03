@@ -13,6 +13,7 @@
 
 import * as db from '../db';
 import type { MidFrontmatter } from './intelligenceTypes';
+import { fits } from './suggestionText';
 
 // =============================================
 // Helpers
@@ -25,11 +26,6 @@ function shuffle<T>(array: T[]): T[] {
     [result[i], result[j]] = [result[j], result[i]];
   }
   return result;
-}
-
-function truncate(str: string, maxLength: number): string {
-  if (str.length <= maxLength) return str;
-  return `${str.slice(0, maxLength).trim()}…`;
 }
 
 function pickRandom<T>(array: T[]): T | null {
@@ -213,7 +209,7 @@ export function generateSuggestedQueries(): string[] {
 
   // ── Second pass: Candidate generation ──────────────────────
   for (const m of recentMeetings) {
-    const mTitle = truncate(m.title, 40);
+    const mTitle = fits(m.title, 60);
     const temporalLabel = getTemporalLabel(m.started_at || m.created_at);
     // Use temporal framing when available: "yesterday's Sprint Review" vs "Sprint Review"
     const framedTitle = temporalLabel ? `${temporalLabel} ${mTitle}` : mTitle;
@@ -242,7 +238,7 @@ export function generateSuggestedQueries(): string[] {
       );
     }
 
-    if (activeItems.length > 0) {
+    if (activeItems.length > 0 && mTitle) {
       candidates.push({
         tier: 0,
         category: 'action_general',
@@ -261,15 +257,15 @@ export function generateSuggestedQueries(): string[] {
         const topicNames =
           mid?.topics?.map((t) => t.name).filter(Boolean) || v3?.topics || [];
         if (topicNames.length > 0) {
-          const topic = pickRandom(topicNames);
+          const topic = fits(pickRandom(topicNames), 40);
           if (topic) {
             candidates.push({
               tier: 1,
               category: 'decision_topic',
-              query: `What was decided about ${truncate(topic, 30)}?`,
+              query: `What was decided about ${topic}?`,
             });
           }
-        } else {
+        } else if (mTitle) {
           candidates.push({
             tier: 1,
             category: 'decision_meeting',
@@ -278,11 +274,16 @@ export function generateSuggestedQueries(): string[] {
         }
 
         // Specific decision rationale query
-        candidates.push({
-          tier: 1,
-          category: 'decision_rationale',
-          query: `Why did we decide to ${truncate(decision.description, 50)}?`,
-        });
+        const decisionText = fits(decision.description, 70)?.replace(
+          /[.!]+$/,
+          '',
+        );
+        if (decisionText)
+          candidates.push({
+            tier: 1,
+            category: 'decision_rationale',
+            query: `Why did we decide: ${decisionText}?`,
+          });
       }
     }
 
@@ -290,11 +291,12 @@ export function generateSuggestedQueries(): string[] {
     const topicNames =
       mid?.topics?.map((t) => t.name).filter(Boolean) || v3?.topics || [];
     for (const name of topicNames) {
-      if (name && topicFrequency[name] > 1) {
+      const topic = fits(name, 40);
+      if (topic && topicFrequency[name] > 1) {
         const variants = [
-          `How has ${truncate(name, 30)} evolved across meetings?`,
-          `What's the latest update on ${truncate(name, 30)}?`,
-          `Has ${truncate(name, 30)} come up before?`,
+          `How has ${topic} evolved across meetings?`,
+          `What's the latest update on ${topic}?`,
+          `Has ${topic} come up before?`,
         ];
         const selectedVariant = pickRandom(variants);
         if (!selectedVariant) continue;
@@ -310,10 +312,11 @@ export function generateSuggestedQueries(): string[] {
     // ── P2: Cross-meeting Continuity (projects) ──
     if (mid && Array.isArray(mid.projects)) {
       for (const p of mid.projects) {
-        if (p.name && projectFrequency[p.name] > 1) {
+        const project = fits(p.name, 40);
+        if (project && projectFrequency[p.name] > 1) {
           const variants = [
-            `What are the open blockers for ${truncate(p.name, 30)}?`,
-            `How is ${truncate(p.name, 30)} progressing?`,
+            `What are the open blockers for ${project}?`,
+            `How is ${project} progressing?`,
           ];
           const selectedVariant = pickRandom(variants);
           if (!selectedVariant) continue;

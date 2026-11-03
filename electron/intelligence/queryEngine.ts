@@ -6,6 +6,7 @@ import {
   searchMeetingNotesFts,
   walkEntityGraph,
 } from '../db';
+import { isQuantifiedSubject } from './askPlutoQuestionFrame';
 
 import type {
   MidFrontmatter,
@@ -929,7 +930,8 @@ export const parseAssigneeActionQuery = (query: string): string | null => {
   for (const pattern of ASSIGNEE_ACTION_QUERY_PATTERNS) {
     const match = query.trim().match(pattern);
     const assignee = match?.[1]?.trim().replace(/[?.!,;:]+$/, '');
-    if (assignee && assignee.length <= 80) return assignee;
+    if (assignee && assignee.length <= 80 && !isQuantifiedSubject(assignee))
+      return assignee;
   }
   return null;
 };
@@ -1506,8 +1508,12 @@ export const focusContextOnExplicitNamedSubject = (
 export const parsePersonWorkQuery = (query: string): string | null => {
   const expectationSubject = extractNamedPersonQuestionSubject(query);
   if (expectationSubject) return expectationSubject;
+  // "Who is Raj Singh and what do we work on?" names only "Raj Singh".
   const overviewSubject = query
-    .match(/\b(?:tell me about|who is)\s+([^\n?.!,;]{1,80})/i)?.[1]
+    .match(/\b(?:tell me about|who(?:'s|\s+is))\s+([^\n?.!,;]{1,80})/i)?.[1]
+    ?.split(
+      /\s+(?:and|or|but|who|what|how|from|in|at|on|to|with|for|lately|recently)\b/i,
+    )[0]
     ?.trim();
   if (overviewSubject && dbModule.findEntity('person', overviewSubject)) {
     return overviewSubject;
