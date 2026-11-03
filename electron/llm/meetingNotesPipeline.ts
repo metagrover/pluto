@@ -403,10 +403,14 @@ export const formatNotesRepairFeedback = (error: unknown): string | null => {
       const path = target
         .replace(/^s(\d+):title$/, 'sections[$1].title')
         .replace(/^s(\d+):item:(\d+)$/, 'sections[$1].items[$2]');
+      const conditionCorrection =
+        reason === 'unsupported_condition'
+          ? ' If the source does not state the dependency, remove the conditional link and retain the independently supported facts as separate statements. A question, nearby discussion or plausible inference is not evidence of a prerequisite. Do not just paraphrase the same unsupported condition.'
+          : '';
       const correction =
         reason === 'unsupported_pronoun'
           ? `Correct ${path}: replace unproved gendered pronouns with the person's name or neutral wording. Retain unaffected supported content.`
-          : `Correct ${path}: update both its wording and sources. Include the provided source references that actually establish each claim and condition in this block; references on other blocks do not support this one. Retain unaffected supported content.`;
+          : `Correct ${path}: update both its wording and sources. Include the provided source references that actually establish each claim and condition in this block; references on other blocks do not support this one. Retain unaffected supported content.${conditionCorrection}`;
       return `Failed item ${path} (${diagnostic}): ${REVIEW_RETRY_INSTRUCTIONS[reason]} ${correction}`;
     });
     return [...new Set(feedback)].join('\n');

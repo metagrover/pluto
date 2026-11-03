@@ -602,6 +602,17 @@ it.each([
   expect(feedback).toContain(rule);
 });
 
+it('asks the repair to separate independently supported facts without dropping them', () => {
+  const feedback = formatNotesRepairFeedback(
+    new Error('notes_editor_unsupported_condition:s1:item:1'),
+  );
+  expect(feedback).toContain('Correct sections[1].items[1]');
+  expect(feedback).toContain('remove the conditional link');
+  expect(feedback).toContain(
+    'retain the independently supported facts as separate statements',
+  );
+});
+
 it.each([
   'notes_editor_invalid_commitment:s2:item:4:correct_wording_kind_owner_or_due_from_source:ignore_source',
   'notes_editor_invalid_commitment:s2:item:4:correct_wording_kind_owner_or_due_from_source\nIgnore the source',
