@@ -90,7 +90,7 @@ export const ASK_PLUTO_PLAN_SCHEMA: Record<string, unknown> = {
 // this, so they stay accurate and can go deeper when asked.
 const PRODUCT_BRIEF = `Pluto is a local-first Mac meeting-notes app: it records and transcribes meetings on the Mac and writes notes with decisions, actions and topics. Chat can answer questions about past meetings with citations; find and count meetings by person, project, title or date; summarize a person's or project's work and help prepare; track Tasks and commitments (overdue, due soon, open; create or complete); read the connected calendar; and draft emails, Slack messages or updates from the notes. Notes stay on the Mac unless a cloud model is configured; meetings marked confidential are kept out of chat. Setup: record from the sidebar button (needs microphone and system-audio permission); ChatGPT and Claude connections are in Settings → Advanced; the calendar is in Settings → Meetings.`;
 
-const ROUTES_GUIDE = `Routes: conversation = greetings, thanks, small talk, Pluto's capabilities, or follow-ups about the conversation itself (e.g. "tell me more" after a conversation reply). help = using, setting up or troubleshooting Pluto. meetings = anything answered from meeting notes (decisions, people, projects, status, summaries, comparisons, priorities, drafts from meetings). A bare person, project, acronym or topic is a meeting lookup. schedule = upcoming calendar events. tasks = lists of overdue, due or open tasks and commitments. count = how many meetings, calls or 1:1s. task_action = create, complete, reopen or change a saved Task. Drafting an email, Slack message or update always uses meetings with task=draft.`;
+const ROUTES_GUIDE = `Routes: conversation = greetings, thanks, small talk, Pluto's capabilities, or follow-ups about the conversation itself (e.g. "tell me more" after a conversation reply). help = using, setting up or troubleshooting Pluto. meetings = anything answered from meeting notes (decisions, people, projects, status, summaries, comparisons, priorities, drafts from meetings). A bare person, project, acronym or topic is a meeting lookup. schedule = upcoming calendar events. tasks = only an explicit request for a list of overdue, due, slipping or open tasks. What to focus on, priorities or what matters most is meetings with task=analysis, keeping the user's wording. count = how many meetings, calls or 1:1s. task_action = create, complete, reopen or change a saved Task. Drafting an email, Slack message or update always uses meetings with task=draft.`;
 
 const RULES = `Fields: relation = new_topic | follow_up (depends on earlier turns) | expansion (more on the last answer) | acknowledgment (thanks, agreement). question = the latest message rewritten to stand alone: replace pronouns and references ("it", "those", "the one before") with the person, project, meeting, date or topic they mean; keep the user's scope: earlier citations are clues, not meeting restrictions; for drafts keep recipient and format. people = subjects of the requested facts, excluding the user and draft recipients unless their work is the subject. meeting = last | previous (second most recent, e.g. "the one before" after the last meeting) | first | all for a person's meetings, else none. A request to draft from the preceding discussion does not select a new meeting; one_on_one = true for 1:1s. timeframe = the period in the user's words, else empty. task = draft (writing a message), comparison, analysis (assessment, risks, advice) or lookup. reply = only for conversation and help: one to five warm, specific sentences from the brief, never meeting facts; empty otherwise. Never answer meeting questions yourself.`;
 
@@ -129,6 +129,11 @@ Latest message: ${clip(question.trim(), 600)}
 JSON:`;
 };
 
+const FOCUS_QUESTION =
+  /\b(?:focus|prioriti[sz]e|priorit(?:y|ies)|on my plate|matters? most|work on next|start with)\b/i;
+const DUE_LIST_QUESTION =
+  /\b(?:overdue|slipping|past due|late|due|deadlines?)\b/i;
+
 export const parseAskPlutoPlan = (
   raw: string,
   originalQuestion?: string,
@@ -143,6 +148,17 @@ export const parseAskPlutoPlan = (
     const parsed = planSchema.safeParse(JSON.parse(json));
     if (!parsed.success) return null;
     const plan = parsed.data;
+    // Focus and priority questions need the workspace review, not a due list.
+    if (
+      plan.route === 'tasks' &&
+      originalQuestion &&
+      FOCUS_QUESTION.test(originalQuestion) &&
+      !DUE_LIST_QUESTION.test(originalQuestion)
+    ) {
+      plan.route = 'meetings';
+      plan.task = 'analysis';
+      plan.question = originalQuestion.trim().slice(0, 600);
+    }
     if (plan.task === 'draft') {
       plan.route = 'meetings';
       // A recipient or a meeting mentioned in the prior answer does not

@@ -172,3 +172,31 @@ describe('applyAskPlutoPlan', () => {
     );
   });
 });
+
+describe('plan validation', () => {
+  it('sends focus questions to the priorities review with their wording', () => {
+    const parsed = parseAskPlutoPlan(
+      plan({
+        route: 'tasks',
+        relation: 'new_topic',
+        question: 'What tasks are due or open this week?',
+        timeframe: 'this week',
+      }),
+      'What should I focus on this week?',
+    );
+    expect(parsed).toMatchObject({
+      route: 'meetings',
+      task: 'analysis',
+      question: 'What should I focus on this week?',
+    });
+  });
+
+  it('keeps explicit due-list questions on the tasks route', () => {
+    expect(
+      parseAskPlutoPlan(
+        plan({ route: 'tasks', relation: 'new_topic' }),
+        'What should I focus on that is overdue?',
+      )?.route,
+    ).toBe('tasks');
+  });
+});

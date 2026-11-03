@@ -719,6 +719,10 @@ import {
   askPlutoTimeoutMs,
   runAskPlutoWithDeadline,
 } from './intelligence/askPlutoDeadline';
+import {
+  cleanDraftText,
+  draftClaimsCoveredByPriorAnswer,
+} from './intelligence/askPlutoDraftSupport';
 import { classifyAskPlutoFailure } from './intelligence/askPlutoFailures';
 import { buildPlutoHelpReply } from './intelligence/askPlutoHelp';
 import {
@@ -8258,17 +8262,21 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           const framePeople =
             settings.llm_provider === 'chatgpt'
               ? []
-              : matchPeopleInQuestion(
-                  turnPlan?.people.length || turnPlan?.task === 'draft'
-                    ? turnPlan.people.join(', ')
-                    : effectiveQueryText,
+              : // With a plan, the planner names the people; matching the whole
+                // question also catches words in titles ("NCT daily").
+                matchPeopleInQuestion(
+                  turnPlan ? turnPlan.people.join(', ') : effectiveQueryText,
                   db
                     .getEntitiesByType('person')
                     .filter((person) => person.id !== frameSelfPersonId)
                     .map((person) => ({ id: person.id, name: person.name })),
                 );
+          // A meeting reference needs a person; "all" alone (for example
+          // across compared days) is not a person-meeting scope.
           const frameReference =
-            turnPlan && turnPlan.meeting !== 'none'
+            turnPlan &&
+            turnPlan.meeting !== 'none' &&
+            (turnPlan.people.length || turnPlan.meeting === 'previous')
               ? {
                   position: turnPlan.meeting,
                   oneOnOne: turnPlan.one_on_one,
@@ -8280,7 +8288,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                     oneOnOne: turnPlan.one_on_one,
                     matchedText: '',
                   }
-                : turnPlan?.task === 'draft'
+                : turnPlan
                   ? null
                   : parseMeetingReference(effectiveQueryText);
           // A question about a named person's meeting is not a workspace review,
@@ -8668,6 +8676,8 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             relation: conversationResolution.relation,
           });
           configuredModel = resolveConfiguredProviderModel(settings);
+          // Diagnostics name the model that actually answered.
+          if (memoryFallbackModel) configuredModel = memoryFallbackModel;
           recallCompletedAt = Date.now();
           retrievalStartedAt = recallCompletedAt;
 
@@ -9964,6 +9974,45 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
 
           finalizationStartedAt = Date.now();
           let presentation = answerStream.finalize(answerRaw);
+          // A draft that restates the validated previous answer may rely on
+          // it; new facts still need grounding in the retrieved notes.
+          if (
+            conversationResolution.task === 'draft' &&
+            presentation.outcome === 'no_evidence' &&
+            previousAssistantTurn &&
+            previousAssistantTurn.outcome !== 'no_evidence' &&
+            draftClaimsCoveredByPriorAnswer(
+              presentation.unsupportedClaims,
+              safePriorConversationContext,
+            )
+          ) {
+            const priorMeetings = (
+              previousAssistantTurn.conversationContext?.meetingIds ??
+              previousAssistantTurn.meetingIds ??
+              []
+            )
+              .map((id) => db.getAskPlutoMeeting(id))
+              .filter((meeting): meeting is db.PersistedMeeting =>
+                Boolean(meeting),
+              )
+              .slice(0, 6);
+            presentation = {
+              ...presentation,
+              answer: cleanDraftText(answerRaw),
+              outcome: 'answered',
+              trustStatus: 'inferred',
+              citations: priorMeetings.map((meeting) => ({
+                claim: meeting.title || 'Untitled meeting',
+                meeting_id: String(meeting.id),
+                meeting_title: meeting.title || 'Untitled meeting',
+                source_type: 'meeting' as const,
+                evidence_valid: true,
+                trust_status: 'inferred' as const,
+              })),
+              unsupportedClaimCount: 0,
+              unsupportedClaims: [],
+            };
+          }
           if (
             answerPrompt &&
             conversationResolution.relation !== 'omission_follow_up' &&
