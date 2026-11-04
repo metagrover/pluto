@@ -1,6 +1,16 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createNotesStore, ensureNotesTable } from '../../electron/notesStore';
+import { createNotesStore } from '../../electron/notesStore';
+
+// The notes tables exactly as the app creates them at startup.
+const notesMigration = readFileSync(
+  path.resolve(__dirname, '../../drizzle/0020_notes.sql'),
+  'utf8',
+)
+  .split('--> statement-breakpoint')
+  .join('\n');
 
 describe('notesStore', () => {
   let db: Database.Database;
@@ -25,7 +35,7 @@ describe('notesStore', () => {
         PRIMARY KEY (person_id, alias)
       );
     `);
-    ensureNotesTable(db);
+    db.exec(notesMigration);
   });
 
   it('initializes default Daily Scratchpad if no notes exist', () => {
@@ -177,7 +187,7 @@ describe('notesStore', () => {
     expect(afterDelete).toBeUndefined();
   });
 
-  it('maintains entity_links and supports getNotesForEntity', () => {
+  it('finds notes by their linked person or project as the link changes', () => {
     const store = createNotesStore(db);
     db.prepare('INSERT INTO entities (id, type, name) VALUES (?, ?, ?)').run(
       'person-john',
@@ -197,29 +207,6 @@ describe('notesStore', () => {
       targetId: 'person-john',
     });
 
-    // Check entity_links
-    const link = db
-      .prepare(
-        "SELECT * FROM entity_links WHERE source_id = ? AND relationship = 'context_note'",
-      )
-      .get(note.id) as
-      | {
-          id: string;
-          source_id: string;
-          target_id: string;
-          relationship: string;
-          source_type: string;
-          target_type: string;
-        }
-      | undefined;
-
-    expect(link).toBeDefined();
-    expect(link?.source_id).toBe(note.id);
-    expect(link?.target_id).toBe('person-john');
-    expect(link?.relationship).toBe('context_note');
-    expect(link?.source_type).toBe('note');
-    expect(link?.target_type).toBe('person');
-
     // getNotesForEntity
     const johnNotes = store.getNotesForEntity('person-john');
     expect(johnNotes.length).toBe(1);
@@ -232,21 +219,6 @@ describe('notesStore', () => {
       noteType: 'project',
     });
 
-    const oldLink = db
-      .prepare(
-        "SELECT * FROM entity_links WHERE source_id = ? AND target_id = 'person-john'",
-      )
-      .get(note.id);
-    expect(oldLink).toBeUndefined();
-
-    const newLink = db
-      .prepare(
-        "SELECT * FROM entity_links WHERE source_id = ? AND target_id = 'project-pluto'",
-      )
-      .get(note.id) as any;
-    expect(newLink).toBeDefined();
-    expect(newLink.target_type).toBe('project');
-
     expect(store.getNotesForEntity('person-john').length).toBe(0);
     expect(store.getNotesForEntity('project-pluto').length).toBe(1);
 
@@ -257,9 +229,21 @@ describe('notesStore', () => {
     });
 
     expect(store.getNotesForEntity('project-pluto').length).toBe(0);
-    const clearedLink = db
-      .prepare('SELECT * FROM entity_links WHERE source_id = ?')
-      .get(note.id);
-    expect(clearedLink).toBeUndefined();
+    expect(store.getNote(note.id)?.targetId).toBeNull();
+  });
+
+  it('keeps existing notes when the migration runs over tables made earlier', () => {
+    const store = createNotesStore(db);
+    const note = store.saveNote({
+      title: 'Before upgrade',
+      content: 'Remember the roadmap',
+      noteType: 'general',
+    });
+    db.exec('DELETE FROM notes_fts');
+
+    db.exec(notesMigration);
+
+    expect(store.getNote(note.id)?.content).toBe('Remember the roadmap');
+    expect(store.searchNotes('roadmap').map((n) => n.id)).toEqual([note.id]);
   });
 });

@@ -43,7 +43,10 @@ export const getNotesForAttendees = (
   if (typeof window === 'undefined' || !window.ipcRenderer?.invoke) {
     return Promise.resolve([]);
   }
-  return window.ipcRenderer.invoke('NOTES_FOR_ATTENDEES', { emails, names });
+  // Always a list, even when the bridge answers with nothing.
+  return Promise.resolve(
+    window.ipcRenderer.invoke('NOTES_FOR_ATTENDEES', { emails, names }),
+  ).then((items) => (Array.isArray(items) ? items : []));
 };
 
 export const getNotesForEntity = (entityId: string): Promise<Note[]> => {

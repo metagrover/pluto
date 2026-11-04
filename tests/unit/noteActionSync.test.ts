@@ -1,10 +1,19 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   syncActionCompletionToNotes,
   syncActionTitleToNotes,
 } from '../../electron/database/noteActionSync';
-import { ensureNotesTable } from '../../electron/notesStore';
+
+// The notes tables exactly as the app creates them at startup.
+const notesMigration = readFileSync(
+  path.resolve(__dirname, '../../drizzle/0020_notes.sql'),
+  'utf8',
+)
+  .split('--> statement-breakpoint')
+  .join('\n');
 
 describe('noteActionSync', () => {
   let db: Database.Database;
@@ -23,7 +32,7 @@ describe('noteActionSync', () => {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    ensureNotesTable(db);
+    db.exec(notesMigration);
   });
 
   it('synchronizes task completion status to Notion-style task blocks in notes', () => {

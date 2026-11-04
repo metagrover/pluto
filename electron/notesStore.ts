@@ -17,87 +17,6 @@ export interface NotesStore {
   getNotesForEntity: (entityId: string) => Note[];
 }
 
-export function ensureNotesTable(db: Database.Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS notes (
-      id TEXT PRIMARY KEY NOT NULL,
-      title TEXT NOT NULL DEFAULT '',
-      content TEXT NOT NULL DEFAULT '',
-      note_type TEXT NOT NULL DEFAULT 'scratchpad',
-      target_id TEXT,
-      pinned INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_notes_target ON notes(target_id);
-    CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-      id UNINDEXED,
-      title,
-      content,
-      tokenize = 'unicode61'
-    );
-
-    CREATE TRIGGER IF NOT EXISTS notes_fts_ai AFTER INSERT ON notes BEGIN
-      INSERT INTO notes_fts(id, title, content) VALUES (new.id, new.title, new.content);
-    END;
-
-    CREATE TRIGGER IF NOT EXISTS notes_fts_ad AFTER DELETE ON notes BEGIN
-      DELETE FROM notes_fts WHERE id = old.id;
-    END;
-
-    CREATE TRIGGER IF NOT EXISTS notes_fts_au AFTER UPDATE ON notes BEGIN
-      DELETE FROM notes_fts WHERE id = old.id;
-      INSERT INTO notes_fts(id, title, content) VALUES (new.id, new.title, new.content);
-    END;
-
-    CREATE TABLE IF NOT EXISTS entity_links (
-      id TEXT PRIMARY KEY NOT NULL,
-      source_id TEXT,
-      target_id TEXT,
-      relationship TEXT NOT NULL,
-      source_type TEXT,
-      target_type TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_entity_links_target ON entity_links(target_id);
-    CREATE INDEX IF NOT EXISTS idx_entity_links_source ON entity_links(source_id);
-  `);
-
-  try {
-    const cols = db.pragma('table_info(entity_links)') as Array<{
-      name: string;
-    }>;
-    if (cols.length > 0) {
-      const colNames = new Set(cols.map((c) => c.name));
-      if (!colNames.has('source_id')) {
-        db.exec('ALTER TABLE entity_links ADD COLUMN source_id TEXT');
-      }
-      if (!colNames.has('target_id')) {
-        db.exec('ALTER TABLE entity_links ADD COLUMN target_id TEXT');
-      }
-      if (!colNames.has('source_type')) {
-        db.exec('ALTER TABLE entity_links ADD COLUMN source_type TEXT');
-      }
-      if (!colNames.has('target_type')) {
-        db.exec('ALTER TABLE entity_links ADD COLUMN target_type TEXT');
-      }
-    }
-  } catch {
-    // Ignore schema inspection error if any
-  }
-
-  try {
-    db.exec(`
-      INSERT INTO notes_fts(id, title, content)
-      SELECT id, title, content FROM notes WHERE id NOT IN (SELECT id FROM notes_fts);
-    `);
-  } catch {
-    // Ignore backfill errors
-  }
-}
-
 function deriveNoteTitle(
   content: string,
   noteType: NoteType,
@@ -120,9 +39,8 @@ function deriveNoteTitle(
   return 'Untitled Note';
 }
 
+// Tables come from the 0020_notes migration, applied at database startup.
 export function createNotesStore(db: Database.Database): NotesStore {
-  ensureNotesTable(db);
-
   const mapNoteRow = (r: {
     id: string;
     title: string;
@@ -291,59 +209,7 @@ export function createNotesStore(db: Database.Database): NotesStore {
       `).run(noteId, title, content, noteType, targetId, pinned);
     }
 
-    // Maintain entity_links
-    if (existing?.targetId && existing.targetId !== targetId) {
-      try {
-        db.prepare(`
-          DELETE FROM entity_links 
-          WHERE source_id = ? AND relationship = 'context_note'
-        `).run(noteId);
-      } catch (err) {
-        console.error('[notesStore] Failed to remove old entity_link:', err);
-      }
-    }
-
-    if (targetId) {
-      try {
-        const existingLink = db
-          .prepare(`
-          SELECT id FROM entity_links 
-          WHERE source_id = ? AND target_id = ? AND relationship = 'context_note'
-        `)
-          .get(noteId, targetId) as { id: string } | undefined;
-
-        if (!existingLink) {
-          db.prepare(`
-            DELETE FROM entity_links 
-            WHERE source_id = ? AND relationship = 'context_note'
-          `).run(noteId);
-
-          const linkId = randomUUID();
-          db.prepare(`
-            INSERT INTO entity_links (id, source_id, target_id, relationship, source_type, target_type, created_at)
-            VALUES (?, ?, ?, 'context_note', 'note', ?, CURRENT_TIMESTAMP)
-          `).run(linkId, noteId, targetId, noteType);
-        } else {
-          db.prepare(`
-            UPDATE entity_links
-            SET target_type = ?
-            WHERE id = ?
-          `).run(noteType, existingLink.id);
-        }
-      } catch (err) {
-        console.error('[notesStore] Failed to maintain entity_links:', err);
-      }
-    } else if (existing?.targetId && !targetId) {
-      try {
-        db.prepare(`
-          DELETE FROM entity_links 
-          WHERE source_id = ? AND relationship = 'context_note'
-        `).run(noteId);
-      } catch (err) {
-        console.error('[notesStore] Failed to clear entity_links:', err);
-      }
-    }
-
+    // The person/project link lives in notes.target_id.
     return getNote(noteId)!;
   };
 
@@ -359,15 +225,6 @@ export function createNotesStore(db: Database.Database): NotesStore {
         WHERE id = ?
       `).run(id);
       return true;
-    }
-
-    try {
-      db.prepare(`
-        DELETE FROM entity_links 
-        WHERE source_id = ? AND relationship = 'context_note'
-      `).run(id);
-    } catch {
-      // Ignore
     }
 
     const res = db.prepare('DELETE FROM notes WHERE id = ?').run(id);
@@ -580,13 +437,9 @@ export function createNotesStore(db: Database.Database): NotesStore {
       FROM notes n
       LEFT JOIN entities e ON n.target_id = e.id
       WHERE n.target_id = ?
-         OR n.id IN (
-           SELECT source_id FROM entity_links 
-           WHERE target_id = ? AND relationship = 'context_note'
-         )
       ORDER BY n.pinned DESC, datetime(n.updated_at) DESC
     `)
-      .all(entityId, entityId) as Array<{
+      .all(entityId) as Array<{
       id: string;
       title: string;
       content: string;
