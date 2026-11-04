@@ -6,6 +6,7 @@ import {
 } from '../../src/utils/actionCommitment';
 import { isContinuationEditPath } from '../../src/utils/meetingNotesEditRebase';
 import { parseDueDate } from '../actionDueDate';
+import { syncActionCompletionToNotes } from './noteActionSync';
 
 const normalizeSourceIdentity = (value: unknown): string =>
   typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
@@ -556,6 +557,17 @@ export const syncMeetingActionEntitiesFromUserEdits = (
           .run(effectiveText, meetingId, entity.id);
       } catch {}
 
+      if (
+        (effectiveStatus === 'completed' || effectiveStatus === 'active') &&
+        entity.status !== effectiveStatus
+      ) {
+        syncActionCompletionToNotes(
+          sqlite,
+          entity.id,
+          effectiveStatus === 'completed',
+        );
+      }
+
       actionsUpdated++;
     }
   }
@@ -752,6 +764,18 @@ export const syncMeetingActionEntitiesFromUserEdits = (
               )
               .run(continuationName, continuationEntityId);
           } catch {}
+
+          if (
+            (continuationStatus === 'completed' ||
+              continuationStatus === 'active') &&
+            existingContinuation.status !== continuationStatus
+          ) {
+            syncActionCompletionToNotes(
+              sqlite,
+              continuationEntityId,
+              continuationStatus === 'completed',
+            );
+          }
 
           continuationsUpdated++;
         }

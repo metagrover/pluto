@@ -23,12 +23,15 @@ export interface TasksSnapshot {
 export interface SaveTaskInput {
   id?: string;
   title: string;
+  status?: 'active' | 'completed';
   dueDate?: string | null;
   projectId?: string | null;
   tagIds?: string[];
   description?: string;
   requestId?: string;
   expectedRevision?: string;
+  sourceNoteId?: string;
+  sourceNoteLineId?: string;
 }
 export type TaskChatProposal =
   | {

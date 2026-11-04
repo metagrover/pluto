@@ -189,6 +189,11 @@ vi.mock('../../electron/db', () => ({
   searchMeetingsFts: vi.fn(),
   searchMeetingNotesFts: vi.fn(),
   searchMeetingContextSectionsFts: vi.fn().mockReturnValue([]),
+  searchNotes: vi.fn().mockReturnValue([]),
+  notesStore: {
+    searchNotes: vi.fn().mockReturnValue([]),
+    getNotesForEntity: vi.fn().mockReturnValue([]),
+  },
   searchLocalArtifacts: vi.fn().mockReturnValue([]),
   searchLocalArtifactsFts: vi.fn().mockReturnValue([]),
   searchEntitiesWithMeetingContext: vi.fn(),
@@ -563,6 +568,47 @@ describe('Query Engine', () => {
   });
 
   describe('retrieveContext', () => {
+    it('incorporates matching living notes into retrieval pipeline as evidence_kind: note', async () => {
+      vi.mocked(dbModule.notesStore.searchNotes).mockImplementation((query) => {
+        if (
+          query.toLowerCase().includes('budget') ||
+          query.toLowerCase().includes('q3')
+        ) {
+          return [
+            {
+              id: 'note-living-101',
+              title: 'Q3 Budget Scratchpad',
+              content:
+                'Finalized Q3 budget: $150k allocated to engineering infrastructure.',
+              noteType: 'scratchpad',
+              targetId: null,
+              targetName: null,
+              pinned: true,
+              createdAt: '2026-09-01T10:00:00Z',
+              updatedAt: '2026-09-01T10:00:00Z',
+            },
+          ];
+        }
+        return [];
+      });
+
+      const results = await retrieveContext({
+        keywords: ['budget', 'q3'],
+        expanded_keywords: [],
+        entity_mentions: [],
+        temporal_range: null,
+        intent: 'factual',
+      });
+
+      const livingNoteResult = results.find(
+        (r) => r.meeting_id === 'note-living-101',
+      );
+      expect(livingNoteResult).toBeDefined();
+      expect(livingNoteResult?.evidence_kind).toBe('note');
+      expect(livingNoteResult?.meeting_title).toBe('Q3 Budget Scratchpad');
+      expect(livingNoteResult?.evidence_text).toContain('Finalized Q3 budget');
+    });
+
     it('does not search local artifacts for Chat with Pluto retrieval', async () => {
       await retrieveContext({
         keywords: ['Juniper', 'launch'],

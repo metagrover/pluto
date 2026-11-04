@@ -551,4 +551,82 @@ describe('shared personal tasks', () => {
       'rejected',
     );
   });
+
+  it('updates existing task idempotently and preserves provenance when sourceNoteLineId is provided', () => {
+    const id1 = savePersonalTask({
+      title: 'Action item from living note',
+      sourceNoteId: 'note-living-1',
+      sourceNoteLineId: 'note-living-1-line-5',
+    });
+
+    const task1 = db.getEntity(id1)!;
+    expect(task1).toBeDefined();
+    expect(task1.name).toBe('Action item from living note');
+    const meta1 = JSON.parse(task1.metadata!);
+    expect(meta1.source_note_id).toBe('note-living-1');
+    expect(meta1.source_note_line_id).toBe('note-living-1-line-5');
+
+    // Save again with same sourceNoteLineId but updated title (e.g. edited in note)
+    const id2 = savePersonalTask({
+      title: 'Action item from living note (updated)',
+      sourceNoteId: 'note-living-1',
+      sourceNoteLineId: 'note-living-1-line-5',
+    });
+
+    expect(id2).toBe(id1);
+    const updated = db.getEntity(id1)!;
+    expect(updated.name).toBe('Action item from living note (updated)');
+    const meta2 = JSON.parse(updated.metadata!);
+    expect(meta2.source_note_id).toBe('note-living-1');
+    expect(meta2.source_note_line_id).toBe('note-living-1-line-5');
+  });
+
+  it('synchronizes status and title updates bidirectionally with notes', () => {
+    // Ensure notes table exists
+    db.notesStore.saveNote({
+      id: 'note-sync-1',
+      title: 'Sprint Planning',
+      content:
+        'Agenda:\n\n[task: Deploy auth microservice]\n- [ ] Plain checklist item',
+      noteType: 'general',
+    });
+
+    // Create or find personal task
+    const taskId = savePersonalTask({
+      title: 'Deploy auth microservice',
+      status: 'active',
+    });
+
+    expect(taskId).toBeDefined();
+
+    // Marking task completed in TasksView / dashboard
+    setPersonalTaskStatus({ id: taskId, status: 'completed' });
+
+    // Note content should automatically update to [task:done: ...]
+    const noteAfterComplete = db.notesStore.getNote('note-sync-1');
+    expect(noteAfterComplete?.content).toContain(
+      '[task:done: Deploy auth microservice]',
+    );
+    // Checklist item should NOT be affected
+    expect(noteAfterComplete?.content).toContain('- [ ] Plain checklist item');
+
+    // Reopening task (active)
+    setPersonalTaskStatus({ id: taskId, status: 'active' });
+    const noteAfterReopen = db.notesStore.getNote('note-sync-1');
+    expect(noteAfterReopen?.content).toContain(
+      '[task: Deploy auth microservice]',
+    );
+    expect(noteAfterReopen?.content).not.toContain('[task:done:');
+
+    // Renaming task in TasksView
+    savePersonalTask({
+      id: taskId,
+      title: 'Deploy auth microservice to staging',
+    });
+
+    const noteAfterRename = db.notesStore.getNote('note-sync-1');
+    expect(noteAfterRename?.content).toContain(
+      '[task: Deploy auth microservice to staging]',
+    );
+  });
 });

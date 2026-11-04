@@ -18,6 +18,16 @@ import {
 } from '../../utils/meetingNotesDocument';
 import { meetingTimestamp } from '../../utils/meetingOrdering';
 import { getTranscriptSegmentStartTime } from '../../utils/transcript';
+import './notes/notes.css';
+import {
+  type EntityOption,
+  INITIAL_SLASH_MENU,
+  NotionBlockGutter,
+  NotionSlashMenu,
+  type SlashMenuState,
+  caretVisualEdges,
+  filterSlashMenuItems,
+} from './notes/editor';
 import { ProjectCommitments } from './projects/ProjectCommitments';
 
 interface MeetingNotesDocumentProps {
@@ -267,6 +277,7 @@ const InlineEditableText = ({
   onSaveStateChange,
   autoFocus = false,
   onSaved,
+  entities = [],
 }: {
   meetingId: string | number;
   path?: string;
@@ -279,11 +290,14 @@ const InlineEditableText = ({
   onSaveStateChange?: (state: SaveState, retry?: () => void) => void;
   autoFocus?: boolean;
   onSaved: () => void;
+  entities?: EntityOption[];
 }) => {
   const [draft, setDraft] = useState(text);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(asHeading);
+  const [slashMenu, setSlashMenu] =
+    useState<SlashMenuState>(INITIAL_SLASH_MENU);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingCaretRef = useRef<number | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -648,6 +662,96 @@ const InlineEditableText = ({
     );
   }
 
+  const executeSlashCommand = (cmdId: string) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const pos = ta.selectionStart;
+    const val = draftRef.current;
+    const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+    const lineEnd = val.indexOf('\n', pos);
+    const endOfLine = lineEnd === -1 ? val.length : lineEnd;
+    const before = val.slice(0, lineStart);
+    const after = val.slice(endOfLine);
+
+    if (cmdId === 'person' || cmdId === 'project') {
+      // Swap "/person" for "@" (or "#") so further typing filters the list.
+      const sigil = cmdId === 'person' ? '@' : '#';
+      const nextVal = `${before}${sigil}${after}`;
+      setDraft(nextVal);
+      draftRef.current = nextVal;
+      setSlashMenu((prev) => ({
+        ...prev,
+        mode: cmdId,
+        query: '',
+        selectedIndex: 0,
+      }));
+      requestAnimationFrame(() => {
+        ta.focus();
+        ta.setSelectionRange(lineStart + 1, lineStart + 1);
+      });
+      return;
+    }
+
+    let replacement = '';
+    if (cmdId === 'todo') replacement = '- [ ] ';
+    else if (cmdId === 'task') replacement = '[task: ]';
+    else if (cmdId === 'bullet') replacement = '- ';
+    else if (cmdId === 'quote') replacement = '> ';
+    else if (cmdId === 'h1') replacement = '# ';
+    else if (cmdId === 'h2') replacement = '## ';
+    else if (cmdId === 'h3') replacement = '### ';
+    else if (cmdId === 'numbered') replacement = '1. ';
+    else if (cmdId === 'divider') replacement = '---\n';
+
+    const nextVal = `${before}${replacement}${after}`;
+    setDraft(nextVal);
+    draftRef.current = nextVal;
+    setSlashMenu(INITIAL_SLASH_MENU);
+    requestAnimationFrame(() => {
+      const newPos = lineStart + replacement.length;
+      ta.focus();
+      ta.setSelectionRange(newPos, newPos);
+    });
+  };
+
+  const selectPersonFromSlash = (person: EntityOption) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const pos = ta.selectionStart;
+    const val = draftRef.current;
+    const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+    const before = val.slice(0, lineStart);
+    const after = val.slice(pos).replace(/^\s+/, '');
+    const nextVal = `${before}@${person.name} ${after}`;
+    setDraft(nextVal);
+    draftRef.current = nextVal;
+    setSlashMenu(INITIAL_SLASH_MENU);
+    requestAnimationFrame(() => {
+      const newPos = lineStart + person.name.length + 2;
+      ta.focus();
+      ta.setSelectionRange(newPos, newPos);
+    });
+  };
+
+  const selectProjectFromSlash = (project: EntityOption) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const pos = ta.selectionStart;
+    const val = draftRef.current;
+    const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+    const before = val.slice(0, lineStart);
+    const after = val.slice(pos).replace(/^\s+/, '');
+    const nextVal = `${before}#${project.name} ${after}`;
+    setDraft(nextVal);
+    draftRef.current = nextVal;
+    setSlashMenu(INITIAL_SLASH_MENU);
+    requestAnimationFrame(() => {
+      const newPos = lineStart + project.name.length + 2;
+      ta.focus();
+      ta.setSelectionRange(newPos, newPos);
+    });
+  };
+
   return (
     <div
       className="meeting-inline-editable relative group w-full"
@@ -666,8 +770,46 @@ const InlineEditableText = ({
         }
         value={draft}
         onChange={(event) => {
-          setDraft(event.target.value);
-          draftRef.current = event.target.value;
+          let nextVal = event.target.value;
+          const pos = event.target.selectionStart;
+          const lineStart = nextVal.lastIndexOf('\n', pos - 1) + 1;
+          const currentLine = nextVal.slice(lineStart, pos);
+
+          // Real-time markdown shortcuts at start of line
+          if (
+            currentLine === '- [ ] ' ||
+            currentLine === '[] ' ||
+            currentLine === '[ ] '
+          ) {
+            const before = nextVal.slice(0, lineStart);
+            const after = nextVal.slice(pos);
+            nextVal = `${before}- [ ] ${after}`;
+          }
+
+          const entityMode =
+            slashMenu.isOpen &&
+            (slashMenu.mode === 'person' || slashMenu.mode === 'project');
+          const sigil = slashMenu.mode === 'person' ? '@' : '#';
+          if (entityMode && currentLine.startsWith(sigil)) {
+            setSlashMenu((prev) => ({
+              ...prev,
+              query: currentLine.slice(1),
+              selectedIndex: 0,
+            }));
+          } else if (currentLine.startsWith('/')) {
+            setSlashMenu({
+              isOpen: true,
+              blockIndex: 0,
+              query: currentLine.slice(1),
+              selectedIndex: 0,
+              mode: 'root',
+            });
+          } else if (slashMenu.isOpen) {
+            setSlashMenu(INITIAL_SLASH_MENU);
+          }
+
+          setDraft(nextVal);
+          draftRef.current = nextVal;
         }}
         onBlur={(event) => {
           editingRef.current = false;
@@ -684,25 +826,128 @@ const InlineEditableText = ({
           }
         }}
         onKeyDown={(event) => {
+          if (slashMenu.isOpen) {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setSlashMenu(INITIAL_SLASH_MENU);
+              return;
+            }
+            const items = filterSlashMenuItems(slashMenu, entities);
+            const options =
+              slashMenu.mode === 'person'
+                ? items.people
+                : slashMenu.mode === 'project'
+                  ? items.projects
+                  : items.commands;
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault();
+              const delta = event.key === 'ArrowDown' ? 1 : -1;
+              if (options.length > 0) {
+                setSlashMenu((prev) => ({
+                  ...prev,
+                  selectedIndex:
+                    (prev.selectedIndex + delta + options.length) %
+                    options.length,
+                }));
+              }
+              return;
+            }
+            if (
+              (event.key === 'Enter' || event.key === 'Tab') &&
+              !event.shiftKey
+            ) {
+              const chosen = options[slashMenu.selectedIndex];
+              if (chosen) {
+                event.preventDefault();
+                if (slashMenu.mode === 'person') {
+                  selectPersonFromSlash(chosen as EntityOption);
+                } else if (slashMenu.mode === 'project') {
+                  selectProjectFromSlash(chosen as EntityOption);
+                } else {
+                  executeSlashCommand(chosen.id);
+                }
+                return;
+              }
+              setSlashMenu(INITIAL_SLASH_MENU);
+            }
+          }
+          // Cmd+Enter toggles the checkbox on the current line
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            const target = event.currentTarget;
+            const pos = target.selectionStart;
+            const val = target.value;
+            const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+            const lineEndRaw = val.indexOf('\n', pos);
+            const lineEnd = lineEndRaw === -1 ? val.length : lineEndRaw;
+            const line = val.slice(lineStart, lineEnd);
+            const toggled = line.replace(
+              /^(\s*[-*+]\s+\[)([ xX])(\])/,
+              (_m, open: string, state: string, close: string) =>
+                `${open}${state.trim() ? ' ' : 'x'}${close}`,
+            );
+            if (toggled !== line) {
+              event.preventDefault();
+              const nextVal = `${val.slice(0, lineStart)}${toggled}${val.slice(lineEnd)}`;
+              setDraft(nextVal);
+              draftRef.current = nextVal;
+              requestAnimationFrame(() => target.setSelectionRange(pos, pos));
+              return;
+            }
+          }
+          if (
+            (event.metaKey || event.ctrlKey) &&
+            event.key.toLowerCase() === 'b'
+          ) {
+            event.preventDefault();
+            const target = event.currentTarget;
+            const start = target.selectionStart;
+            const end = target.selectionEnd;
+            const val = target.value;
+            const sel = val.substring(start, end);
+            const nextVal = `${val.substring(0, start)}**${sel}**${val.substring(end)}`;
+            setDraft(nextVal);
+            draftRef.current = nextVal;
+            requestAnimationFrame(() => {
+              target.setSelectionRange(start + 2, end + 2);
+            });
+            return;
+          }
+          if (
+            (event.metaKey || event.ctrlKey) &&
+            event.key.toLowerCase() === 'i'
+          ) {
+            event.preventDefault();
+            const target = event.currentTarget;
+            const start = target.selectionStart;
+            const end = target.selectionEnd;
+            const val = target.value;
+            const sel = val.substring(start, end);
+            const nextVal = `${val.substring(0, start)}*${sel}*${val.substring(end)}`;
+            setDraft(nextVal);
+            draftRef.current = nextVal;
+            requestAnimationFrame(() => {
+              target.setSelectionRange(start + 1, end + 1);
+            });
+            return;
+          }
           if (event.key === 'Escape') {
             event.preventDefault();
             cancelEditing(event.currentTarget);
             return;
           }
-          if (event.key === 'ArrowUp') {
+          if (
+            (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
+            !event.shiftKey &&
+            !event.metaKey &&
+            !event.ctrlKey &&
+            !event.altKey
+          ) {
             const target = event.currentTarget;
+            const { onFirstLine, onLastLine } = caretVisualEdges(target);
+            const direction = event.key === 'ArrowUp' ? 'up' : 'down';
             if (
-              target.selectionStart === 0 &&
-              navigateToAdjacentEditor(target, 'up')
-            ) {
-              event.preventDefault();
-            }
-          }
-          if (event.key === 'ArrowDown') {
-            const target = event.currentTarget;
-            if (
-              target.selectionEnd === target.value.length &&
-              navigateToAdjacentEditor(target, 'down')
+              (direction === 'up' ? onFirstLine : onLastLine) &&
+              navigateToAdjacentEditor(target, direction)
             ) {
               event.preventDefault();
             }
@@ -819,6 +1064,16 @@ const InlineEditableText = ({
         aria-busy={saving}
         spellCheck
       />
+      {slashMenu.isOpen && (
+        <NotionSlashMenu
+          state={slashMenu}
+          entities={entities}
+          onExecuteCommand={executeSlashCommand}
+          onSelectPerson={selectPersonFromSlash}
+          onSelectProject={selectProjectFromSlash}
+          onClose={() => setSlashMenu(INITIAL_SLASH_MENU)}
+        />
+      )}
       {error && <p className="text-red-500 text-[13px] mt-1">{error}</p>}
     </div>
   );
@@ -837,6 +1092,7 @@ const NoteBlock = ({
   autoFocus,
   selected,
   reminderControls,
+  entities = [],
 }: {
   block: MeetingNotesBlock;
   section: MeetingNotesSection;
@@ -852,6 +1108,7 @@ const NoteBlock = ({
   autoFocus: boolean;
   selected: boolean;
   reminderControls?: React.ReactNode;
+  entities?: EntityOption[];
 }) => {
   const [completionPending, setCompletionPending] = useState(false);
   const [completionError, setCompletionError] = useState<string | null>(null);
@@ -885,10 +1142,22 @@ const NoteBlock = ({
 
   return (
     <div
-      className={`meeting-note-block meeting-note-block--${section.kind} ${block.blockType === 'paragraph' ? 'meeting-note-block--paragraph' : ''} ${selected ? 'is-source-selected' : ''}`}
+      className={`meeting-note-block group meeting-note-block--${section.kind} ${block.blockType === 'paragraph' ? 'meeting-note-block--paragraph' : ''} ${selected ? 'is-source-selected' : ''}`}
       data-authorship={block.authorship}
       data-reminder-target={reminderControls ? 'true' : undefined}
     >
+      <div className="meeting-note-gutter opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity select-none -ml-8 mr-1 mt-0.5 shrink-0 flex items-center">
+        <NotionBlockGutter
+          blockType={block.blockType}
+          onAddBlock={onCreateNativeContinuation}
+          onGripClick={() => {
+            const btn = document.querySelector<HTMLButtonElement>(
+              `[aria-label="Edit item: ${block.text}"]`,
+            );
+            btn?.click();
+          }}
+        />
+      </div>
       {isCheckable ? (
         <label className="meeting-action-check">
           <span className="sr-only">
@@ -938,6 +1207,7 @@ const NoteBlock = ({
             onSaveStateChange={onSaveStateChange}
             autoFocus={autoFocus}
             onSaved={onSaved}
+            entities={entities}
           />
         )}
         {block.assignee || (block.due && !reminderControls) ? (
@@ -1104,6 +1374,7 @@ export const MeetingNotesDocument = ({
     useState<Map<string, NativeMeetingNoteContinuation[]>>(() => new Map());
   const [sourceSelection, setSourceSelection] =
     useState<SourceSelection | null>(() => previewSourceSelection(model));
+  const [entities] = useState<EntityOption[]>([]);
   const meetingRef = useRef(meeting);
   const onDocumentChangedRef = useRef(onDocumentChanged);
   const nativeContinuationStateRef = useRef(
@@ -1424,6 +1695,7 @@ export const MeetingNotesDocument = ({
                           />
                         ) : undefined
                       }
+                      entities={entities}
                     />
                   ))}
                 </div>

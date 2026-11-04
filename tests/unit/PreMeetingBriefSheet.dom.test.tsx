@@ -14,6 +14,10 @@ const api = vi.hoisted(() => ({
   saveMeetingPrep: vi.fn(),
 }));
 vi.mock('../../src/api/meetingPrep', () => api);
+const notesApi = vi.hoisted(() => ({
+  getNotesForAttendees: vi.fn(),
+}));
+vi.mock('../../src/api/notes', () => notesApi);
 import { PreMeetingBriefSheet } from '../../src/components/features/PreMeetingBriefSheet';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
@@ -45,6 +49,7 @@ beforeEach(() => {
     overview: [],
     talkingPoints: [],
   };
+  notesApi.getNotesForAttendees.mockResolvedValue([]);
   api.buildPrepBrief.mockResolvedValue(brief);
   api.synthesizePrepBrief.mockResolvedValue(brief);
   localStorage.clear();
@@ -878,4 +883,58 @@ it('shows all open action items even when the overview fills the briefing budget
       .click(),
   );
   expect(open).toHaveBeenCalledWith('past');
+});
+
+it('offers open items from notes about the attendees and adds them to the agenda', async () => {
+  notesApi.getNotesForAttendees.mockResolvedValue([
+    {
+      id: 'n1:0',
+      noteId: 'n1',
+      noteTitle: '1:1 with Sam',
+      targetName: 'Sam',
+      text: 'Confirm launch date',
+      checked: false,
+    },
+    {
+      id: 'n1:1',
+      noteId: 'n1',
+      noteTitle: '1:1 with Sam',
+      targetName: 'Sam',
+      text: 'Already done',
+      checked: true,
+    },
+    {
+      id: 'n2:0',
+      noteId: 'n2',
+      noteTitle: 'Pricing',
+      targetName: null,
+      text: 'Share pricing draft',
+      checked: false,
+    },
+  ]);
+  await render();
+  expect(notesApi.getNotesForAttendees).toHaveBeenCalledWith(
+    ['sam@example.com'],
+    ['Sam'],
+  );
+  expect(host.textContent).toContain('Confirm launch date');
+  expect(host.textContent).not.toContain('Already done');
+
+  const addOne = [...host.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === '+ Add',
+  ) as HTMLButtonElement;
+  await act(async () => addOne.click());
+  const notes = host.querySelector(
+    'textarea[aria-label="Preparation notes"]',
+  ) as HTMLTextAreaElement;
+  expect(notes.value).toBe('- [ ] Confirm launch date\n');
+
+  const addAll = [...host.querySelectorAll('button')].find((b) =>
+    b.textContent?.includes('Add all to agenda'),
+  ) as HTMLButtonElement;
+  await act(async () => addAll.click());
+  expect(notes.value).toBe(
+    '- [ ] Confirm launch date\n- [ ] Share pricing draft\n',
+  );
+  expect(host.textContent).toContain('All added');
 });

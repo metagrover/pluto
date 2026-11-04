@@ -72,6 +72,7 @@ import type {
   MeetingRetryKind,
   MeetingRetryOperation,
 } from './components/features/meetingFailurePresentation';
+import { NotesView } from './components/features/notes/NotesView';
 import { ProjectCommitments } from './components/features/projects/ProjectCommitments';
 import type {
   CaptureHealthState,
@@ -314,6 +315,7 @@ function App() {
     Array<{
       tab:
         | 'hub'
+        | 'notes'
         | 'tasks'
         | 'people'
         | 'projects'
@@ -331,6 +333,7 @@ function App() {
   >([]);
   const [activeTab, setActiveTab] = useState<
     | 'hub'
+    | 'notes'
     | 'tasks'
     | 'people'
     | 'projects'
@@ -354,6 +357,7 @@ function App() {
                 : 'hub',
   );
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(
     Boolean(previewParam) ||
@@ -1661,6 +1665,8 @@ function App() {
         defaultLabel = 'Back to Project';
       } else if (activeTab === 'projects') {
         defaultLabel = 'Back to Projects';
+      } else if (activeTab === 'notes') {
+        defaultLabel = 'Back to Notes';
       } else if (activeTab === 'tasks') {
         defaultLabel = 'Back to Tasks';
       } else if (activeTab === 'sources') {
@@ -1818,6 +1824,7 @@ function App() {
       if (activeTab === 'people' && selectedPersonId) return 'Back to Person';
       if (activeTab === 'people') return 'Back to People';
       if (activeTab === 'projects') return 'Back to Projects';
+      if (activeTab === 'notes') return 'Back to Notes';
       if (activeTab === 'tasks') return 'Back to Tasks';
       if (activeTab === 'meetings') return 'All meetings';
       if (activeTab === 'chat') return 'Back to Chat';
@@ -2469,7 +2476,7 @@ function App() {
                 ? 'px-4 py-6 md:px-8'
                 : selectedMeetingId
                   ? 'meeting-app-scroll'
-                  : activeTab === 'chat'
+                  : activeTab === 'chat' || activeTab === 'notes'
                     ? 'px-0 py-0'
                     : activeTab === 'settings'
                       ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
@@ -2627,6 +2634,17 @@ function App() {
                   onPrepareMeeting={handlePrepareMeeting}
                 />
               </>
+            ) : activeTab === 'notes' ? (
+              <NotesView
+                initialNoteId={selectedNoteId}
+                onOpenTask={(id) => {
+                  setSelectedTaskId(id);
+                  setActiveTab('tasks');
+                }}
+                onOpenMeeting={(id) =>
+                  handleOpenMeeting(id, { label: 'Back to Notes' })
+                }
+              />
             ) : activeTab === 'tasks' ? (
               <TasksView
                 initialTaskId={selectedTaskId}
@@ -2639,6 +2657,10 @@ function App() {
                 <PeopleTab
                   selectedPersonId={selectedPersonId}
                   onSelectPerson={setSelectedPersonId}
+                  onOpenNote={(noteId) => {
+                    setSelectedNoteId(noteId);
+                    setActiveTab('notes');
+                  }}
                   onOpenMeeting={(meetingId, personContext) =>
                     handleOpenMeeting(meetingId, {
                       personId: selectedPersonId,

@@ -2010,7 +2010,17 @@ export const buildDashboardHomeModel = (
     selfPersonId: input.selfPersonId,
     selfNames: input.selfNames,
   };
-  const isPersonal = (action: Entity) => isPersonalAction(action, selfOptions);
+  const isValidActionItem = (action: Entity) => {
+    const name = action.name?.trim() || '';
+    return (
+      name.length >= 2 &&
+      name !== '/' &&
+      !name.startsWith('/task') &&
+      !/^jot down thoughts/i.test(name)
+    );
+  };
+  const isPersonal = (action: Entity) =>
+    isValidActionItem(action) && isPersonalAction(action, selfOptions);
 
   const rawOverdue = input.overdueActions.filter(isPersonal);
   const rawStale = input.staleActions.filter(isPersonal);

@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  FileText,
   Files,
   FolderKanban,
   Hash,
@@ -31,6 +32,7 @@ import { SidebarUpdateBadge } from './SidebarUpdateBadge';
 
 type ActiveTab =
   | 'hub'
+  | 'notes'
   | 'tasks'
   | 'people'
   | 'projects'
@@ -209,6 +211,20 @@ export const Sidebar = ({
           <h3 className="px-3 text-[11px] font-semibold text-pro-text-muted/70 hover:text-pro-text-muted cursor-default mb-1 transition-colors">
             Execution
           </h3>
+          <button
+            type="button"
+            data-active={
+              activeTab === 'notes' && !selectedMeetingId ? 'true' : undefined
+            }
+            onClick={() => {
+              setActiveTab('notes');
+              setSelectedMeetingId(null);
+            }}
+            className={`sidebar-nav-btn w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'notes' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
+          >
+            <FileText size={16} aria-hidden="true" />
+            <span className="text-[14px]">Notes</span>
+          </button>
           <button
             type="button"
             data-active={

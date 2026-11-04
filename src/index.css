@@ -1689,7 +1689,7 @@
     @apply -m-2 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center;
   }
   .meeting-action-box {
-    @apply relative top-[2px] grid h-[18px] w-[18px] shrink-0 place-content-center rounded-full border-[1.5px] transition-colors;
+    @apply relative top-[2px] grid h-[18px] w-[18px] shrink-0 place-content-center rounded-[4.5px] border-[1.5px] transition-colors;
     border-color: var(--notes-faint);
     background: transparent;
     color: transparent;
@@ -1762,7 +1762,7 @@
     @apply -ml-6 flex list-none items-start gap-2 pl-0;
   }
   .meeting-markdown-preview input[type="checkbox"] {
-    @apply mt-[3px] h-[18px] w-[18px] shrink-0 cursor-pointer appearance-none rounded-full border-[1.5px] bg-transparent;
+    @apply mt-[3px] h-[18px] w-[18px] shrink-0 cursor-pointer appearance-none rounded-[4.5px] border-[1.5px] bg-transparent;
     border-color: var(--notes-faint);
   }
   .meeting-markdown-preview input[type="checkbox"]:checked {

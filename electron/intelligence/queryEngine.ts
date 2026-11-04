@@ -117,6 +117,45 @@ export const buildLiveMeetingRetrievalResult = (
   };
 };
 
+export const buildLivingNoteRetrievalResult = (
+  note: {
+    id: string;
+    title: string;
+    content: string;
+    noteType?: string;
+    targetName?: string | null;
+    updatedAt?: string;
+    createdAt?: string;
+  },
+  query = '',
+): RetrievalResult => {
+  const occurredAt = note.updatedAt || note.createdAt || '';
+  const notes = excerptQueryEvidence(note.content, query, 8000);
+  const evidence = [
+    `[Note]: ${note.title}`,
+    ...(note.targetName ? [`[Linked to]: ${note.targetName}`] : []),
+    ...(occurredAt ? [`[Last updated]: ${occurredAt}`] : []),
+    `[Current note content]:\n${notes}`,
+  ];
+
+  return {
+    meeting_id: note.id,
+    meeting_title: note.title,
+    mid: null,
+    evidence_text: evidence.join('\n'),
+    score: 0,
+    score_breakdown: {
+      fts_rank: 0,
+      graph_proximity: 0,
+      recency_decay: calculateRecencyDecay(occurredAt),
+      mention_weight: 0,
+    },
+    evidence_kind: 'note',
+    source_revision: occurredAt,
+    trust_status: 'grounded',
+  };
+};
+
 const classifyQueryHeuristically = (
   lowerText: string,
 ): ParsedQuery['intent'] => {
@@ -3189,6 +3228,7 @@ export const retrieveContext = async (
     ),
   ].slice(0, 12);
   const facetCandidateIds = new Set<string>();
+  const livingNoteIds = new Set<string>();
 
   const ftsQueryStr = allKeywords
     .map((k) => {
@@ -3373,6 +3413,59 @@ export const retrieveContext = async (
           mention_weight: 0,
         },
       };
+    }
+
+    // Search living notes (notesStore)
+    const notesStore = dbModule.notesStore;
+    if (notesStore?.searchNotes) {
+      const searchTerms = [
+        ...allKeywords,
+        ...(options.query ? [options.query] : []),
+      ];
+      const matchedNotes = new Map<string, any>();
+      for (const term of searchTerms) {
+        try {
+          const notes = notesStore.searchNotes(term, 10);
+          for (const n of notes) {
+            if (
+              options.meetingIds?.length &&
+              !options.meetingIds.includes(String(n.id))
+            ) {
+              continue;
+            }
+            if (parsed.temporal_range) {
+              const noteDate = Date.parse(n.updatedAt || n.createdAt || '');
+              if (
+                !(
+                  noteDate >=
+                    (parsed.temporal_range.from
+                      ? Date.parse(parsed.temporal_range.from)
+                      : Number.NEGATIVE_INFINITY) &&
+                  noteDate <
+                    (parsed.temporal_range.to
+                      ? Date.parse(parsed.temporal_range.to)
+                      : Number.POSITIVE_INFINITY)
+                )
+              ) {
+                continue;
+              }
+            }
+            matchedNotes.set(n.id, n);
+          }
+        } catch {
+          // ignore searchNotes errors
+        }
+      }
+
+      for (const note of matchedNotes.values()) {
+        const id = String(note.id);
+        facetCandidateIds.add(id);
+        livingNoteIds.add(id);
+        resultsMap[id] ||= buildLivingNoteRetrievalResult(
+          note,
+          options.query || allKeywords.join(' '),
+        );
+      }
     }
   }
 
@@ -3582,7 +3675,36 @@ export const retrieveContext = async (
     const result = resultsMap[id];
     if (!result) return [];
     const meeting = dbModule.getAskPlutoMeeting(result.meeting_id);
-    if (!meeting) return [];
+    if (!meeting) {
+      if (
+        livingNoteIds.has(result.meeting_id) &&
+        result.evidence_kind === 'note' &&
+        result.evidence_text
+      ) {
+        currentDates.set(
+          result.meeting_id,
+          Date.parse(result.source_revision || '') || Date.now(),
+        );
+        currentTitleWords.set(
+          result.meeting_id,
+          new Set(
+            (result.meeting_title || '')
+              .toLowerCase()
+              .match(/[\p{L}\p{N}]+/gu) || [],
+          ),
+        );
+        currentWords.set(
+          result.meeting_id,
+          new Set(
+            `${result.meeting_title || ''} ${result.evidence_text}`
+              .toLowerCase()
+              .match(/[\p{L}\p{N}]+/gu) || [],
+          ),
+        );
+        return [result];
+      }
+      return [];
+    }
     if (parsed.temporal_range) {
       const occurredAt = Date.parse(
         meeting.started_at || meeting.created_at || '',

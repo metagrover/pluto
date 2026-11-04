@@ -1,0 +1,1223 @@
+.notes-workspace {
+  color: hsl(var(--pro-text-main));
+  --note-text-secondary: color-mix(
+    in srgb,
+    hsl(var(--pro-text-main)) 75%,
+    hsl(var(--pro-bg))
+  );
+  --note-border: hsl(var(--pro-border));
+}
+
+.notes-workspace .text-pro-text-muted {
+  color: var(--note-text-secondary);
+}
+
+.notes-workspace button:focus-visible,
+.notes-workspace
+  input:not(.notion-block-input):not(.note-title-input):focus-visible {
+  outline: none;
+}
+
+.note-sidebar-item {
+  transition: background-color 120ms ease-out, border-color 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.note-sidebar-item:hover {
+  background: hsl(var(--pro-text-main) / 0.04);
+}
+
+.note-sidebar-item:focus-visible {
+  outline: none;
+}
+
+.note-sidebar-item.is-active {
+  background: hsl(var(--pro-text-main) / 0.08);
+}
+
+.dark .note-sidebar-item:hover {
+  background: hsl(var(--pro-text-main) / 0.06);
+}
+
+.dark .note-sidebar-item.is-active {
+  background: hsl(var(--pro-text-main) / 0.12);
+}
+
+/* Notion-Style Seamless Document Writing: no focus chrome, native caret.
+   The visual resets must win even on focus, so they stay !important. */
+.notion-block-textarea,
+.note-textarea,
+.note-title-input,
+.meeting-inline-editable textarea,
+.meeting-editable-heading {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  resize: none !important;
+  overflow: hidden !important;
+  background: transparent !important;
+}
+
+/* Defaults only. :where() keeps them at zero specificity so each field's
+   own font, color and spacing apply the same whether or not it's focused. */
+:where(
+    .notion-block-textarea,
+    .note-textarea,
+    .note-title-input,
+    .meeting-inline-editable textarea,
+    .meeting-editable-heading
+  ) {
+  caret-color: hsl(var(--pro-accent));
+  font-family: inherit;
+  color: inherit;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  display: block;
+}
+
+.notion-block-textarea::placeholder,
+.note-title-input::placeholder,
+.meeting-inline-editable textarea::placeholder {
+  color: hsl(var(--pro-text-muted) / 0.35);
+  font-weight: 400;
+}
+
+/* Notion-style hover gutters in notes and meeting notes */
+.notion-block-gutter,
+.meeting-note-gutter {
+  transition: opacity 120ms ease-out;
+}
+
+.meeting-note-block:hover .meeting-note-gutter,
+.meeting-note-block:focus-within .meeting-note-gutter {
+  opacity: 1;
+}
+
+/* Custom interactive Notion to-do checkbox (square checklist) */
+.notion-todo-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 3.5px;
+  border-radius: 4px !important;
+  border: 1.5px solid hsl(var(--pro-border));
+  background-color: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 120ms ease-out;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notion-todo-checkbox:hover {
+  border-color: hsl(var(--pro-text-muted));
+  background-color: hsl(var(--pro-text-main) / 0.05);
+}
+
+.notion-todo-checkbox:focus,
+.notion-todo-checkbox:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.notion-todo-checkbox:checked,
+.notion-todo-checkbox.is-checked {
+  border-color: hsl(var(--pro-text-muted));
+  background-color: hsl(var(--pro-text-muted));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3.5 8 2.8 2.8L12.5 4.8' fill='none' stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* Custom interactive Task checkbox (circular task synced with Tasks view) */
+.notion-task-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 3.5px;
+  border-radius: 50% !important;
+  border: 1.5px solid hsl(var(--pro-accent) / 0.7);
+  background-color: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 120ms ease-out;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notion-task-checkbox:hover {
+  border-color: hsl(var(--pro-accent));
+  background-color: hsl(var(--pro-accent) / 0.1);
+}
+
+.notion-task-checkbox:focus,
+.notion-task-checkbox:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.notion-task-checkbox:checked,
+.notion-task-checkbox.is-checked {
+  border-color: hsl(var(--pro-accent));
+  background-color: hsl(var(--pro-accent));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3.5 8 2.8 2.8L12.5 4.8' fill='none' stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* Meeting action box aligns with Notion checkbox aesthetic */
+.meeting-action-box {
+  border-radius: 4px !important;
+}
+
+/* Block Popover & Slash Command Menu animations */
+.notion-floating-menu {
+  animation: notionMenuEnter 110ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes notionMenuEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.note-editor-canvas {
+  max-width: 72ch;
+  line-height: 1.65;
+}
+
+.note-textarea {
+  min-height: 480px;
+  padding-bottom: 240px;
+  resize: none;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.65;
+  background: transparent;
+  color: hsl(var(--pro-text-main));
+}
+
+.note-textarea::placeholder {
+  color: hsl(var(--pro-text-muted));
+  opacity: 0.7;
+}
+
+/* Rich Markdown Preview in Notes */
+.note-markdown-render {
+  max-width: 72ch;
+  color: hsl(var(--pro-text-main));
+  font-size: 15px;
+  line-height: 1.68;
+}
+
+.note-markdown-render > :first-child {
+  margin-top: 0 !important;
+}
+
+.note-markdown-render h1 {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.015em;
+  color: hsl(var(--pro-text-main));
+}
+
+.note-markdown-render h2 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.01em;
+  color: hsl(var(--pro-text-main));
+}
+
+.note-markdown-render h3 {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: hsl(var(--pro-text-main));
+}
+
+.note-markdown-render p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: hsl(var(--pro-text-main));
+}
+
+.note-markdown-render ul,
+.note-markdown-render ol {
+  margin-top: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem;
+}
+
+.note-markdown-render ul {
+  list-style: disc;
+}
+
+.note-markdown-render ol {
+  list-style: decimal;
+}
+
+.note-markdown-render li {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+  line-height: 1.6;
+}
+
+/* Interactive Checkboxes in Markdown */
+.note-markdown-render ul li:has(> input[type="checkbox"]),
+.note-markdown-render ol li:has(> input[type="checkbox"]) {
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-left: -1.5rem;
+  padding-left: 0;
+}
+
+.note-markdown-render input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 17px;
+  height: 17px;
+  margin-top: 3.5px;
+  border-radius: 5px;
+  border: 1.5px solid hsl(var(--pro-border));
+  background-color: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 120ms ease-out;
+}
+
+.note-markdown-render input[type="checkbox"]:hover {
+  border-color: hsl(var(--pro-text-muted));
+}
+
+.note-markdown-render input[type="checkbox"]:focus,
+.note-markdown-render input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.note-markdown-render input[type="checkbox"]:checked {
+  border-color: hsl(var(--pro-accent));
+  background-color: hsl(var(--pro-accent));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3.5 8 2.8 2.8L12.5 4.8' fill='none' stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.note-markdown-render li:has(> input[type="checkbox"]:checked) {
+  color: var(--note-text-secondary);
+  text-decoration: line-through;
+}
+
+.note-markdown-render strong {
+  font-weight: 600;
+  color: hsl(var(--pro-text-main));
+}
+
+.note-markdown-render em {
+  font-style: italic;
+}
+
+.note-markdown-render code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background-color: hsl(var(--pro-text-main) / 0.06);
+  color: hsl(var(--pro-accent));
+}
+
+.note-markdown-render pre {
+  margin: 0.875rem 0;
+  padding: 0.875rem 1rem;
+  border-radius: 8px;
+  background-color: hsl(var(--pro-text-main) / 0.04);
+  border: 1px solid hsl(var(--pro-border) / 0.7);
+  overflow-x: auto;
+}
+
+.note-markdown-render pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 13px;
+  color: hsl(var(--pro-text-main));
+}
+
+.note-markdown-render blockquote {
+  margin: 0.875rem 0;
+  padding-left: 1rem;
+  border-left: 2px solid hsl(var(--pro-text-main) / 0.16);
+  color: var(--note-text-secondary);
+  font-style: italic;
+}
+
+.note-markdown-render hr {
+  margin: 1.5rem 0;
+  border: none;
+  border-top: 1px solid hsl(var(--pro-border) / 0.6);
+}
+
+.ambient-whisper-card {
+  transition: opacity 160ms ease-out, transform 160ms ease-out, border-color
+    160ms ease-out;
+}
+
+.ambient-whisper-card:hover {
+  border-color: hsl(var(--pro-accent) / 0.4);
+}
+
+/* ---------------------------------------------------------------------
+   Block editor type system
+   One baseline (16px on a 26px line) drives every block, so text, gutters,
+   checkboxes and list markers all sit on the same first line.
+   --------------------------------------------------------------------- */
+.note-block-canvas {
+  --nb-size: 16px;
+  --nb-line: 26px;
+  --nb-pad: 3px;
+  --nb-marker: 18px;
+  --nb-marker-gap: 8px;
+  max-width: 44rem;
+  font-size: var(--nb-size);
+  line-height: var(--nb-line);
+  color: hsl(var(--pro-text-main));
+  font-feature-settings: "kern", "calt";
+}
+
+.note-block-canvas li {
+  margin: 0;
+  list-style: none;
+}
+
+.note-block-row {
+  --row-line: var(--nb-line);
+  --row-pad-top: var(--nb-pad);
+  padding-top: var(--row-pad-top);
+  padding-bottom: var(--nb-pad);
+}
+
+.note-block-row > .notion-gutter-container {
+  top: var(--row-pad-top);
+  height: var(--row-line);
+}
+
+.note-block-text {
+  font-size: var(--nb-size);
+  line-height: var(--nb-line);
+  letter-spacing: -0.006em;
+}
+
+.note-block-text::selection,
+.note-doc-title::selection {
+  background: hsl(var(--pro-accent) / 0.2);
+}
+
+/* Headings: more air above than below, tight tracking as size grows */
+.note-block-row[data-block-type="h1"] {
+  --row-line: 36px;
+  margin-top: 26px;
+  margin-bottom: 2px;
+}
+.note-block-row[data-block-type="h1"] .note-block-text {
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 650;
+  letter-spacing: -0.022em;
+}
+
+.note-block-row[data-block-type="h2"] {
+  --row-line: 30px;
+  margin-top: 20px;
+  margin-bottom: 1px;
+}
+.note-block-row[data-block-type="h2"] .note-block-text {
+  font-size: 22px;
+  line-height: 30px;
+  font-weight: 620;
+  letter-spacing: -0.016em;
+}
+
+.note-block-row[data-block-type="h3"] {
+  --row-line: 26px;
+  margin-top: 14px;
+}
+.note-block-row[data-block-type="h3"] .note-block-text {
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.note-block-row:first-child {
+  margin-top: 0;
+}
+
+/* Quote: a quiet rule and the document serif */
+.note-block-row[data-block-type="quote"] {
+  --row-line: 28px;
+}
+.note-quote {
+  width: 100%;
+  padding-left: 16px;
+  border-left: 2px solid hsl(var(--pro-text-main) / 0.16);
+}
+.note-quote .note-block-text {
+  font-family: Lora, Georgia, serif;
+  font-size: 17px;
+  line-height: 28px;
+  font-style: italic;
+  letter-spacing: 0;
+  color: hsl(var(--pro-text-main) / 0.86);
+}
+
+/* List markers share one box so list text always starts on the same column */
+.note-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--nb-marker-gap);
+  width: 100%;
+}
+
+.note-list-marker {
+  flex-shrink: 0;
+  min-width: var(--nb-marker);
+  height: var(--nb-line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: hsl(var(--pro-text-muted));
+  user-select: none;
+}
+
+.note-list-marker--bullet::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.note-list-marker--number {
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+
+.note-block-canvas input[type="checkbox"].notion-todo-checkbox,
+.note-block-canvas input[type="checkbox"].notion-task-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: calc((var(--nb-line) - 16px) / 2) 1px 0;
+}
+
+.note-block-text.is-checked {
+  color: hsl(var(--pro-text-muted) / 0.75);
+  text-decoration: line-through;
+  text-decoration-color: hsl(var(--pro-text-muted) / 0.45);
+}
+
+/* Tasks sync to the Tasks list. A faint wash groups a run of tasks; it
+   bleeds into the margin so task text stays aligned with the paragraphs. */
+.note-task-group {
+  --task-bleed: 10px;
+  margin-inline: calc(var(--task-bleed) * -1);
+  padding-inline: var(--task-bleed);
+  background: hsl(var(--pro-accent) / 0.04);
+  transition: background-color 160ms ease-out;
+}
+
+.note-block-row.note-task-group--start,
+.note-block-row.note-task-group--single {
+  --row-pad-top: 7px;
+  margin-top: 6px;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+.note-block-row.note-task-group--end,
+.note-block-row.note-task-group--single {
+  padding-bottom: 7px;
+  margin-bottom: 6px;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.note-task-group > .notion-gutter-container {
+  left: calc(-2.5rem + var(--task-bleed));
+}
+
+.note-task-group--start .note-block-text,
+.note-task-group--single .note-block-text {
+  padding-right: 4.5rem !important;
+}
+
+.note-task-group__label {
+  position: absolute;
+  top: var(--row-pad-top);
+  right: var(--task-bleed);
+  height: var(--row-line);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: hsl(var(--pro-text-muted));
+  opacity: 0.55;
+  user-select: none;
+  transition: opacity 160ms ease-out;
+}
+
+.note-task-group:hover .note-task-group__label,
+.note-task-group:focus-within .note-task-group__label {
+  opacity: 0.9;
+}
+
+.dark .note-task-group {
+  background: hsl(var(--pro-accent) / 0.065);
+}
+
+/* Document title in the meeting-notes serif */
+.note-doc-title {
+  font-family: Lora, Georgia, serif;
+  font-size: 36px;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  text-wrap: pretty;
+}
+
+.note-doc-title::placeholder {
+  color: hsl(var(--pro-text-muted) / 0.4);
+  font-weight: 500;
+}
+
+/* Divider block */
+.note-divider-block {
+  width: 100%;
+  height: var(--nb-line, 26px);
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  cursor: default;
+  outline: none;
+}
+
+.note-divider-block hr {
+  width: 100%;
+  border: none;
+  border-top: 1px solid hsl(var(--pro-border));
+  margin: 0;
+}
+
+.note-divider-block:focus-visible,
+.note-divider-block:focus {
+  background: hsl(var(--pro-accent) / 0.08);
+}
+
+/* Drag-and-drop reordering */
+.note-block-row.is-dragging {
+  opacity: 0.4;
+}
+
+.note-block-row.is-drop-before::before,
+.note-block-row.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: hsl(var(--pro-accent) / 0.55);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.note-block-row.is-drop-before::before {
+  top: -2px;
+}
+
+.note-block-row.is-drop-after::after {
+  bottom: -2px;
+}
+
+.notion-block-menu__kbd {
+  font-family: inherit;
+  font-size: 10px;
+  color: hsl(var(--pro-text-muted) / 0.8);
+}
+
+.note-doc-header {
+  max-width: 44rem;
+  padding: 28px 1rem 0 2.5rem;
+}
+
+/* ---------------------------------------------------------------------
+   Ask Pluto in notes
+   --------------------------------------------------------------------- */
+.note-ask-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 7px;
+  margin-right: 4px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: hsl(var(--pro-text-main) / 0.8);
+  cursor: pointer;
+  transition: background-color 140ms ease-out, color 140ms ease-out;
+}
+
+.note-ask-trigger:hover,
+.note-ask-trigger.is-active {
+  background: hsl(var(--pro-text-main) / 0.06);
+  color: hsl(var(--pro-text-main));
+}
+
+.note-ask-trigger:focus-visible,
+.note-ask-panel button:focus-visible {
+  outline: 2px solid hsl(var(--pro-accent) / 0.6) !important;
+  outline-offset: 1px;
+}
+
+.note-ask-trigger kbd {
+  font-family: inherit;
+  font-size: 10.5px;
+  color: hsl(var(--pro-text-muted) / 0.8);
+}
+
+.note-ask-panel {
+  width: 360px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid hsl(var(--pro-border) / 0.8);
+  background: hsl(var(--pro-bg));
+  animation: noteAskEnter 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes noteAskEnter {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.note-ask-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 14px 12px 18px;
+}
+
+.note-ask-panel__mark {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: hsl(var(--pro-text-main) / 0.05);
+}
+
+.note-ask-panel__heading {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.note-ask-panel__heading > span:first-child {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: hsl(var(--pro-text-main));
+}
+
+.note-ask-panel__heading > span:last-child {
+  font-size: 12px;
+  color: hsl(var(--pro-text-muted));
+}
+
+.note-ask-panel__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  color: hsl(var(--pro-text-muted));
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+.note-ask-panel__icon-button:hover {
+  background: hsl(var(--pro-text-main) / 0.06);
+  color: hsl(var(--pro-text-main));
+}
+
+.note-ask-panel__thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  scroll-behavior: smooth;
+}
+
+.note-ask-panel__intro p {
+  font-size: 13.5px;
+  line-height: 20px;
+  color: hsl(var(--pro-text-muted));
+  margin: 4px 0 10px;
+}
+
+.note-ask-panel__starters {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -8px;
+}
+
+.note-ask-panel__starter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  font-size: 13.5px;
+  color: hsl(var(--pro-text-main));
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+
+.note-ask-panel__starter svg {
+  color: hsl(var(--pro-text-muted));
+  flex-shrink: 0;
+}
+
+.note-ask-panel__starter:hover {
+  background: hsl(var(--pro-text-main) / 0.05);
+}
+
+.note-ask-panel__question {
+  align-self: flex-end;
+  max-width: 88%;
+  padding: 7px 11px;
+  border-radius: 12px 12px 4px 12px;
+  background: hsl(var(--pro-text-main) / 0.06);
+  font-size: 13.5px;
+  line-height: 20px;
+  color: hsl(var(--pro-text-main));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-ask-panel__answer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-ask-panel__markdown {
+  font-size: 14px;
+  line-height: 22px;
+  color: hsl(var(--pro-text-main));
+  overflow-wrap: anywhere;
+}
+
+.note-ask-panel__markdown > * + * {
+  margin-top: 8px;
+}
+
+.note-ask-panel__markdown ul,
+.note-ask-panel__markdown ol {
+  padding-left: 18px;
+}
+
+.note-ask-panel__markdown ul {
+  list-style: disc;
+}
+
+.note-ask-panel__markdown ol {
+  list-style: decimal;
+}
+
+.note-ask-panel__markdown li + li {
+  margin-top: 3px;
+}
+
+.note-ask-panel__markdown li::marker {
+  color: hsl(var(--pro-text-muted));
+}
+
+.note-ask-panel__markdown strong {
+  font-weight: 600;
+}
+
+.note-ask-panel__actions {
+  display: flex;
+  gap: 2px;
+  margin-left: -6px;
+}
+
+.note-ask-panel__actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: hsl(var(--pro-text-muted));
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+.note-ask-panel__actions button:hover:not(:disabled) {
+  background: hsl(var(--pro-text-main) / 0.06);
+  color: hsl(var(--pro-text-main));
+}
+
+.note-ask-panel__actions button:disabled {
+  cursor: default;
+}
+
+.note-ask-panel__meta {
+  line-height: 16px;
+  font-size: 11.5px;
+  color: hsl(var(--pro-text-muted));
+}
+
+.note-ask-panel__suggestions-lead {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: hsl(var(--pro-text-muted));
+  margin-bottom: 4px;
+}
+
+.note-ask-panel__suggestions ul {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -8px 10px;
+}
+
+.note-ask-panel__suggestions label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  font-size: 14px;
+  line-height: 22px;
+  color: hsl(var(--pro-text-main));
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+
+.note-ask-panel__suggestions label:hover {
+  background: hsl(var(--pro-accent) / 0.05);
+}
+
+.note-ask-panel__suggestions input.notion-task-checkbox {
+  margin-top: 3px;
+}
+
+.note-ask-panel__primary {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  background: hsl(var(--pro-accent));
+  color: hsl(var(--pro-bg));
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 140ms ease-out;
+}
+
+.note-ask-panel__primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.note-ask-panel__primary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.note-ask-panel__done {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: hsl(var(--pro-accent));
+}
+
+.note-ask-panel__reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: hsl(var(--pro-text-muted));
+}
+
+.note-ask-panel__pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: hsl(var(--pro-accent));
+  animation: noteAskPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes noteAskPulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.note-ask-panel__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: hsl(0 70% 50% / 0.07);
+  font-size: 13px;
+  line-height: 19px;
+  color: hsl(var(--pro-text-main));
+}
+
+.note-ask-panel__error {
+  align-items: flex-start;
+}
+
+.note-ask-panel__error-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.note-ask-panel__error details summary {
+  width: fit-content;
+  font-size: 12px;
+  color: hsl(var(--pro-text-muted));
+  cursor: pointer;
+}
+
+.note-ask-panel__error details code {
+  display: block;
+  margin-top: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 16px;
+  color: hsl(var(--pro-text-muted));
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.note-ask-panel__error button {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: hsl(var(--pro-accent));
+  cursor: pointer;
+}
+
+.note-ask-panel__composer {
+  padding: 10px 14px 12px;
+}
+
+.note-ask-panel__selection {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 6px 7px 10px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: hsl(var(--pro-accent) / 0.06);
+}
+
+.note-ask-panel__selection-label {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 26px;
+  color: hsl(var(--pro-accent));
+}
+
+.note-ask-panel__selection-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 26px;
+  color: hsl(var(--pro-text-muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-ask-panel__field {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 12px;
+  border: 1px solid hsl(var(--pro-border));
+  background: hsl(var(--pro-surface));
+  box-shadow: 0 1px 2px hsl(var(--pro-text-main) / 0.04);
+  transition: border-color 140ms ease-out, box-shadow 140ms ease-out;
+}
+
+.note-ask-panel__field:focus-within {
+  border-color: hsl(var(--pro-accent) / 0.45);
+  box-shadow: 0 0 0 3px hsl(var(--pro-accent) / 0.1);
+}
+
+.note-ask-panel__field textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  padding: 2px 0;
+  color: hsl(var(--pro-text-main));
+  caret-color: hsl(var(--pro-accent));
+}
+
+.note-ask-panel__field textarea::placeholder {
+  color: hsl(var(--pro-text-muted) / 0.7);
+}
+
+.note-ask-panel__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: hsl(var(--pro-text-main));
+  color: hsl(var(--pro-bg));
+  cursor: pointer;
+  transition: opacity 140ms ease-out;
+}
+
+.note-ask-panel__send:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+.note-ask-panel__footnote {
+  margin-top: 7px;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: hsl(var(--pro-text-muted) / 0.85);
+  text-align: center;
+}
+
+/* Blocks Pluto just added glow briefly, then settle */
+.note-block-row.is-fresh {
+  animation: noteBlockFresh 1.8s ease-out;
+  border-radius: 6px;
+}
+
+@keyframes noteBlockFresh {
+  0%,
+  35% {
+    box-shadow: inset 0 0 0 999px hsl(var(--pro-accent) / 0.09);
+  }
+  100% {
+    box-shadow: inset 0 0 0 999px hsl(var(--pro-accent) / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .note-ask-panel,
+  .note-ask-panel__pulse,
+  .note-block-row.is-fresh {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Block selection: one soft wash across the selected rows
+   --------------------------------------------------------------------- */
+.note-block-canvas:focus,
+.note-block-canvas:focus-visible {
+  outline: none;
+}
+
+.note-block-row.is-selected {
+  background-color: hsl(var(--pro-accent) / 0.11);
+}
+
+.note-block-row.is-selected-first {
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
+
+.note-block-row.is-selected-last {
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+
+.dark .note-block-row.is-selected {
+  background-color: hsl(var(--pro-accent) / 0.18);
+}
+
+/* While blocks are selected, hide carets and in-text highlights */
+.note-block-canvas.has-block-selection .notion-block-textarea {
+  caret-color: transparent;
+}
+
+.note-block-canvas.is-block-selecting,
+.note-block-canvas.is-block-selecting * {
+  user-select: none;
+  cursor: default;
+}
+
+.note-block-canvas.is-block-selecting .notion-block-textarea::selection {
+  background: transparent;
+}
