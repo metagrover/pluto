@@ -310,7 +310,16 @@ ${details.join('\n')}`;
                           ? 'Answer directly in natural, connected sentences. Use exact names, numbers, and dates from the evidence. Cover the relevant decision, reason, owner, deadline, and next step when supported and useful to the question. Explain how related details fit together without repeating the same fact or listing isolated fragments.'
                           : 'Write a readable chat response in short paragraphs. For summaries, lead with a one-sentence synthesis, then use bullets only when they materially improve the clarity of distinct decisions or action items. Do not create one bullet per source or repeat the same point. Include participant names, decisions, and action items only when the evidence supports them.';
   const formatGuidance = [
-    taskGuidance,
+    ownershipQuestion && task === 'lookup'
+      ? 'Answer this assignment lookup as a compact checklist. Review every Context in order before answering. Include every distinct assignment explicitly owned by the requested person, with one bullet per item. Planned work is still a recorded assignment: retain it and qualify its current status instead of silently dropping it. Preserve the recorded activity, owner, deadline, and any conditions. Separate completed history from work still to do. Work assigned to someone else, work done for this person, and participation alone are not this person’s assignments.'
+      : taskGuidance,
+    ownershipQuestion &&
+    task !== 'draft' &&
+    !context.some((source) =>
+      source.canonical_commitments?.some((record) => record.state === 'open'),
+    )
+      ? 'These sources do not establish which note-only assignments remain open today. Begin with “The notes record these assignments; I can’t confirm their current status.” Call the list recorded assignments, never work still to do or pending work. Preserve any past deadline as an earlier recorded target, not an upcoming due date.'
+      : '',
     CANONICAL_COMMITMENT_ANSWER_GUIDANCE,
     options.conversationMode === 'challenge'
       ? 'Re-evaluate the prior answer against the current synthesized Context. Say what was overstated, give the latest dated supported picture, and identify any remaining uncertainty. Do not merely agree or restate the earlier answer. Do not claim that newer notes do not exist just because this bounded search did not retrieve them.'
@@ -505,7 +514,7 @@ ${
     ? task === 'draft'
       ? `Relevant earlier answer for the draft's factual focus:
 ${expansionReview.previousAnswer.slice(0, 1200)}
-Use it only to identify the one item the user means by "it" or "that"; it is not evidence. Draft about that item alone, without combining adjacent workstreams. Take factual details only from Context. If Context does not support the item's current status, ask the recipient for an update instead of asserting one. Do not continue the earlier answer's structure or offer alternatives.
+Use it only to identify the one item the user means by "it" or "that"; it is not evidence. Draft about that item alone, without combining adjacent workstreams. Take factual details only from Context. If Context does not support the item's current status, ask the recipient directly for an update. Keep Pluto's search and missing evidence out of the message. Do not continue the earlier answer's structure or offer alternatives.
 `
       : `Continuation of the earlier answer:
 ${expansionReview.previousAnswer.slice(0, 1200)}

@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  FolderKanban,
   FolderPlus,
   GitBranch,
   GitMerge,
@@ -622,13 +623,13 @@ export function ProjectsOverview({
         <div className="relative shrink-0">
           <div
             aria-hidden="true"
-            className={`flex h-10 w-10 items-center justify-center rounded-xl border ${palette.border} ${palette.bg} ${palette.text} font-serif text-[13.5px] font-semibold tracking-tight shadow-2xs transition-transform duration-150 group-hover/row:scale-105`}
+            className={`flex h-10 w-10 items-center justify-center rounded-xl border ${palette.border} ${palette.bg} ${palette.text} font-serif text-[13.5px] font-semibold tracking-tight shadow-sm transition-transform duration-150 group-hover/row:scale-105`}
           >
             {monogram}
           </div>
           {entry.status === 'completed' && (
             <div
-              className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500 text-white shadow-2xs"
+              className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500 text-white shadow-sm"
               title="Completed"
             >
               <CheckCircle2 className="h-2.5 w-2.5 stroke-[2.5]" />
@@ -668,7 +669,7 @@ export function ProjectsOverview({
           )}
 
           {entry.recent_change && (
-            <div className="mt-2.5 flex items-start gap-1.5 rounded-lg border border-pro-border/60 bg-pro-surface/70 px-2.5 py-1.5 text-xs text-pro-text-main/90 max-w-fit shadow-2xs">
+            <div className="mt-2.5 flex items-start gap-1.5 rounded-lg border border-pro-border/60 bg-pro-surface/70 px-2.5 py-1.5 text-xs text-pro-text-main/90 max-w-fit shadow-sm">
               <span className="font-semibold text-pro-text-muted shrink-0">
                 Since last time:
               </span>
@@ -814,7 +815,7 @@ export function ProjectsOverview({
               <Star
                 className={`h-4 w-4 ${
                   starred
-                    ? 'fill-amber-400 text-amber-500 drop-shadow-xs'
+                    ? 'fill-amber-400 text-amber-500 drop-shadow-sm'
                     : 'text-current'
                 }`}
               />
@@ -942,7 +943,7 @@ export function ProjectsOverview({
             }}
             title="Promote to standalone initiative"
             aria-label={`Make ${displayTitle} a project`}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all shadow-2xs ${
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all shadow-sm ${
               topic.meeting_count >= 2
                 ? 'border-pro-accent/40 bg-pro-accent/10 text-pro-accent hover:bg-pro-accent hover:text-white'
                 : 'border-pro-border/70 bg-pro-surface text-pro-text-main hover:border-pro-accent/60 hover:text-pro-accent'
@@ -964,8 +965,8 @@ export function ProjectsOverview({
               aria-expanded={isMenuOpen}
               className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all ${
                 isMenuOpen
-                  ? 'border-pro-accent bg-pro-accent text-white shadow-xs'
-                  : 'border-pro-border/70 bg-pro-surface text-pro-text-main hover:border-pro-accent/60 hover:text-pro-accent shadow-2xs'
+                  ? 'border-pro-accent bg-pro-accent text-white shadow-sm'
+                  : 'border-pro-border/70 bg-pro-surface text-pro-text-main hover:border-pro-accent/60 hover:text-pro-accent shadow-sm'
               }`}
             >
               <Layers className="h-3 w-3" />
@@ -1122,7 +1123,7 @@ export function ProjectsOverview({
         {/* Filter Navigation */}
         <nav
           aria-label="Portfolio filters"
-          className="inline-flex items-center rounded-xl border border-pro-border/70 bg-pro-surface/60 p-1 shadow-2xs backdrop-blur-xs gap-1 overflow-x-auto max-w-full"
+          className="inline-flex items-center rounded-xl border border-pro-border/70 bg-pro-surface/60 p-1 shadow-sm backdrop-blur-xs gap-1 overflow-x-auto max-w-full"
         >
           <button
             type="button"
@@ -1130,7 +1131,7 @@ export function ProjectsOverview({
             aria-pressed={filter === 'all'}
             className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
               filter === 'all'
-                ? 'bg-white dark:bg-zinc-800 text-pro-text-main font-semibold shadow-xs'
+                ? 'bg-white dark:bg-zinc-800 text-pro-text-main font-semibold shadow-sm'
                 : 'text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover/40 font-medium'
             }`}
           >
@@ -1154,7 +1155,7 @@ export function ProjectsOverview({
                 aria-pressed={filter === 'primary'}
                 className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
                   filter === 'primary'
-                    ? 'bg-white dark:bg-zinc-800 text-amber-700 dark:text-amber-300 font-semibold shadow-xs'
+                    ? 'bg-white dark:bg-zinc-800 text-amber-700 dark:text-amber-300 font-semibold shadow-sm'
                     : 'text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover/40 font-medium'
                 }`}
               >
@@ -1177,7 +1178,7 @@ export function ProjectsOverview({
                   aria-pressed={filter === 'side'}
                   className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
                     filter === 'side'
-                      ? 'bg-white dark:bg-zinc-800 text-pro-text-main font-semibold shadow-xs'
+                      ? 'bg-white dark:bg-zinc-800 text-pro-text-main font-semibold shadow-sm'
                       : 'text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover/40 font-medium'
                   }`}
                 >
@@ -1201,7 +1202,7 @@ export function ProjectsOverview({
               aria-pressed={filter === 'current'}
               className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
                 filter === 'current'
-                  ? 'bg-white dark:bg-zinc-800 text-pro-text-main font-semibold shadow-xs'
+                  ? 'bg-white dark:bg-zinc-800 text-pro-text-main font-semibold shadow-sm'
                   : 'text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover/40 font-medium'
               }`}
             >
@@ -1225,7 +1226,7 @@ export function ProjectsOverview({
               aria-pressed={filter === 'topics'}
               className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
                 filter === 'topics' || filter === 'other'
-                  ? 'bg-white dark:bg-zinc-800 text-pro-accent font-semibold shadow-xs'
+                  ? 'bg-white dark:bg-zinc-800 text-pro-accent font-semibold shadow-sm'
                   : 'text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover/40 font-medium'
               }`}
             >
@@ -1249,7 +1250,7 @@ export function ProjectsOverview({
               aria-pressed={filter === 'completed'}
               className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg px-2.5 py-1 text-xs transition-all duration-150 ${
                 filter === 'completed'
-                  ? 'bg-white dark:bg-zinc-800 text-emerald-700 dark:text-emerald-300 font-semibold shadow-xs'
+                  ? 'bg-white dark:bg-zinc-800 text-emerald-700 dark:text-emerald-300 font-semibold shadow-sm'
                   : 'text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover/40 font-medium'
               }`}
             >
@@ -1403,12 +1404,18 @@ export function ProjectsOverview({
           {portfolio.current.length === 0 &&
             ['all', 'current', 'primary', 'side'].includes(filter) && (
               <div className="rounded-xl border border-pro-border/50 bg-pro-surface/20 px-6 py-12 text-center mb-10">
-                <h2 className="font-serif text-xl text-pro-text-main">
+                <div
+                  className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-pro-border bg-pro-surface text-pro-text-muted shadow-sm"
+                  aria-hidden="true"
+                >
+                  <FolderKanban size={20} strokeWidth={1.5} />
+                </div>
+                <h2 className="font-serif text-xl font-medium text-pro-text-main">
                   {search
                     ? 'No matching focus themes'
                     : 'No durable themes established yet'}
                 </h2>
-                <p className="mx-auto mt-3 max-w-[58ch] text-sm leading-relaxed text-pro-text-muted">
+                <p className="mx-auto mt-2 max-w-[58ch] text-sm leading-relaxed text-pro-text-muted">
                   {search
                     ? 'Suggestions and discussed work remain searchable below.'
                     : 'Pluto keeps one-off plans and topics out of your portfolio until another conversation reinforces them or you confirm them.'}
@@ -1672,7 +1679,7 @@ function QuickMergeModal({
               onClick={() => setDirection('source_into_target')}
               className={`flex-1 rounded-md py-1.5 font-medium transition-all ${
                 direction === 'source_into_target'
-                  ? 'bg-white dark:bg-zinc-800 text-pro-text-main shadow-xs'
+                  ? 'bg-white dark:bg-zinc-800 text-pro-text-main shadow-sm'
                   : 'text-pro-text-muted hover:text-pro-text-main'
               }`}
             >
@@ -1683,7 +1690,7 @@ function QuickMergeModal({
               onClick={() => setDirection('target_into_source')}
               className={`flex-1 rounded-md py-1.5 font-medium transition-all ${
                 direction === 'target_into_source'
-                  ? 'bg-white dark:bg-zinc-800 text-pro-text-main shadow-xs'
+                  ? 'bg-white dark:bg-zinc-800 text-pro-text-main shadow-sm'
                   : 'text-pro-text-muted hover:text-pro-text-main'
               }`}
             >
@@ -1799,7 +1806,7 @@ function QuickMergeModal({
                 onMerge(effectiveSource, effectiveTarget);
               }
             }}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-pro-accent px-4 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-pro-accent/90 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-pro-accent px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-pro-accent/90 disabled:opacity-40"
           >
             <GitMerge className="h-3.5 w-3.5" />
             {isMerging ? 'Merging…' : 'Confirm Merge'}
@@ -1935,7 +1942,7 @@ function MergeConfirmModal({
             type="button"
             disabled={isMerging}
             onClick={onConfirm}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-pro-accent px-4 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-pro-accent/90 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-pro-accent px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-pro-accent/90 disabled:opacity-40"
           >
             <GitMerge className="h-3.5 w-3.5" />
             {isMerging ? 'Merging…' : `Merge into ${destTitle}`}

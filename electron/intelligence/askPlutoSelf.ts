@@ -79,25 +79,46 @@ export const resolveAskPlutoSelfReference = (
 export const addressConfirmedSelf = (
   answer: string,
   selfName?: string,
+  otherNames: readonly (string | null | undefined)[] = [],
 ): string => {
   if (!selfName?.trim()) return answer;
-  const name = escapeRegExp(selfName.trim());
-  return answer
-    .replace(
-      new RegExp(`(^|[^\\p{L}\\p{N}])${name}(['’]s)?(?![\\p{L}\\p{N}])`, 'giu'),
-      (
-        _match,
-        prefix: string,
-        possessive: string | undefined,
-        offset: number,
-      ) => {
-        const before = answer.slice(0, offset + prefix.length);
-        const capitalized = /(?:^|[.!?]\s+|\n\s*(?:[-*]\s+)?)$/.test(before);
-        return `${prefix}${possessive ? (capitalized ? 'Your' : 'your') : capitalized ? 'You' : 'you'}`;
-      },
-    )
-    .replace(/\b([Yy]ou) is\b/g, '$1 are')
-    .replace(/\b([Yy]ou) has\b/g, '$1 have')
-    .replace(/\b([Yy]ou) was\b/g, '$1 were')
-    .replace(/\b([Yy]ou) does\b/g, '$1 do');
+  // Longest form first, so "Sam Rivera" becomes "you" rather than "you Rivera".
+  const name = [
+    ...new Set(
+      [selfName, ...otherNames]
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ]
+    .sort((left, right) => right.length - left.length)
+    .map(escapeRegExp)
+    .join('|');
+  return (
+    answer
+      .replace(
+        new RegExp(
+          `(^|[^\\p{L}\\p{N}])(?:${name})(['’]s)?(?![\\p{L}\\p{N}])`,
+          'giu',
+        ),
+        (
+          _match,
+          prefix: string,
+          possessive: string | undefined,
+          offset: number,
+        ) => {
+          const before = answer.slice(0, offset + prefix.length);
+          const capitalized = /(?:^|[.!?]\s+|\n\s*(?:[-*]\s+)?)$/.test(before);
+          return `${prefix}${possessive ? (capitalized ? 'Your' : 'your') : capitalized ? 'You' : 'you'}`;
+        },
+      )
+      .replace(/\b([Yy]ou) is\b/g, '$1 are')
+      .replace(/\b([Yy]ou) has\b/g, '$1 have')
+      .replace(/\b([Yy]ou) was\b/g, '$1 were')
+      .replace(/\b([Yy]ou) does\b/g, '$1 do')
+      // Common third-person verbs in meeting notes ("You owns the demo").
+      .replace(
+        /\b([Yy]ou) (own|lead|need|want|work|plan|manage|handle|say|ask|note|mention|agree|expect|send|share|review|prepare|take|make|get|keep|hold|follow|run|drive|support|propose|suggest|confirm|track|update)s\b/g,
+        '$1 $2',
+      )
+  );
 };

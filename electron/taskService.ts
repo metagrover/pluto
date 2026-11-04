@@ -368,6 +368,55 @@ export const setPersonalTaskStatus = (payload: unknown): void =>
     const entity = requireTask(input.id);
     store.updateEntityStatus(entity.id, input.status);
   });
+export const deletePersonalTask = (payload: unknown): string =>
+  store.withCommitmentTransaction(() => {
+    const input = z
+      .object({ id, expectedRevision: z.string().length(64).optional() })
+      .strict()
+      .parse(payload);
+    const entity = requireTask(input.id);
+    if (
+      input.expectedRevision &&
+      taskRevision(entity) !== input.expectedRevision
+    )
+      throw new Error(
+        'This task changed elsewhere. Refresh Tasks before deleting it.',
+      );
+    // Keep the canonical record and its source links so regeneration and Undo agree.
+    patchMetadata(entity, {
+      ...parseActionMetadata(entity.metadata),
+      commitment_state: 'rejected',
+      task_deleted: {
+        at: new Date().toISOString(),
+        state: getCommitmentState(entity.metadata),
+      },
+    });
+    return taskRevision(store.getEntity(entity.id)!);
+  });
+export const restorePersonalTask = (payload: unknown): void =>
+  store.withCommitmentTransaction(() => {
+    const input = z
+      .object({ id, deletionRevision: z.string().length(64) })
+      .strict()
+      .parse(payload);
+    const entity = store.getEntity(input.id);
+    if (
+      !entity ||
+      entity.type !== 'action_item' ||
+      taskRevision(entity) !== input.deletionRevision
+    )
+      throw new Error('This task changed elsewhere and could not be restored.');
+    const metadata = parseActionMetadata(entity.metadata);
+    const deleted = z
+      .object({ at: z.string(), state: z.enum(['possible', 'confirmed']) })
+      .parse(metadata.task_deleted);
+    patchMetadata(entity, {
+      ...metadata,
+      commitment_state: deleted.state,
+      task_deleted: null,
+    });
+    requireTask(entity.id);
+  });
 export const reviewPersonalTask = (payload: unknown): void =>
   store.withCommitmentTransaction(() => {
     const input = z

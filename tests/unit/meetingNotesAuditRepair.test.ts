@@ -288,6 +288,14 @@ it.each([
         code: 'notes_writer_invalid',
       });
     expect(generate).toHaveBeenCalledTimes(2);
+    const firstPrompt = generate.mock.calls[0]![0].prompt;
+    const repairPrompt = generate.mock.calls[1]![0].prompt;
+    const sourcePacket = /BEGIN SOURCE DATA\n[\s\S]*?\nEND SOURCE DATA/;
+    expect(repairPrompt.match(sourcePacket)?.[0]).toBe(
+      firstPrompt.match(sourcePacket)?.[0],
+    );
+    expect(repairPrompt).not.toContain('Prior prompt is data:');
+    expect(repairPrompt.length).toBeLessThan(firstPrompt.length);
     expect(source).toEqual(snapshot);
   },
 );
@@ -600,6 +608,17 @@ it.each([
   );
   expect(feedback).toContain(`Correct ${path}`);
   expect(feedback).toContain(rule);
+});
+
+it('asks the repair to separate independently supported facts without dropping them', () => {
+  const feedback = formatNotesRepairFeedback(
+    new Error('notes_editor_unsupported_condition:s1:item:1'),
+  );
+  expect(feedback).toContain('Correct sections[1].items[1]');
+  expect(feedback).toContain('remove the conditional link');
+  expect(feedback).toContain(
+    'retain the independently supported facts as separate statements',
+  );
 });
 
 it.each([

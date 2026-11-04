@@ -12,6 +12,10 @@ describe('local inference coordinator', () => {
       priority: 30,
       preemptible: false,
     });
+    expect(getLocalInferenceAdmission('queryClassification')).toEqual({
+      priority: 30,
+      preemptible: false,
+    });
     expect(getLocalInferenceAdmission('notesWriter')).toEqual({
       priority: 10,
       preemptible: true,
@@ -55,46 +59,54 @@ describe('local inference coordinator', () => {
     await expect(native).resolves.toBe('native');
   });
 
-  it('settles preemptible background work before foreground inference starts', async () => {
-    const events: string[] = [];
-    const background = runWithLocalInferenceCoordinator({
-      key: Symbol('background'),
-      task: 'knowledgeDoc',
-      run: (signal) =>
-        new Promise<string>((_resolve, reject) => {
-          events.push('background:start');
-          signal.addEventListener(
-            'abort',
-            () => {
-              events.push('background:settled');
-              reject(signal.reason);
-            },
-            { once: true },
-          );
-        }),
-    });
-    await vi.waitFor(() => expect(events).toEqual(['background:start']));
+  it.each([
+    ['knowledgeDoc', 'askPluto'],
+    ['notesWriter', 'askPluto'],
+    ['notesWriter', 'queryClassification'],
+    ['notesWriter', 'askPlutoScope'],
+  ] as const)(
+    'settles %s before admitting %s',
+    async (backgroundTask, foregroundTask) => {
+      const events: string[] = [];
+      const background = runWithLocalInferenceCoordinator({
+        key: Symbol('background'),
+        task: backgroundTask,
+        run: (signal) =>
+          new Promise<string>((_resolve, reject) => {
+            events.push('background:start');
+            signal.addEventListener(
+              'abort',
+              () => {
+                events.push('background:settled');
+                reject(signal.reason);
+              },
+              { once: true },
+            );
+          }),
+      });
+      await vi.waitFor(() => expect(events).toEqual(['background:start']));
 
-    const foreground = runWithLocalInferenceCoordinator({
-      key: Symbol('foreground'),
-      task: 'askPluto',
-      run: async () => {
-        events.push('foreground:start');
-        return 'answer';
-      },
-    });
+      const foreground = runWithLocalInferenceCoordinator({
+        key: Symbol('foreground'),
+        task: foregroundTask,
+        run: async () => {
+          events.push('foreground:start');
+          return 'answer';
+        },
+      });
 
-    await expect(background).rejects.toMatchObject({
-      name: 'AbortError',
-      message: 'foreground_preempted',
-    });
-    await expect(foreground).resolves.toBe('answer');
-    expect(events).toEqual([
-      'background:start',
-      'background:settled',
-      'foreground:start',
-    ]);
-  });
+      await expect(background).rejects.toMatchObject({
+        name: 'AbortError',
+        message: 'foreground_preempted',
+      });
+      await expect(foreground).resolves.toBe('answer');
+      expect(events).toEqual([
+        'background:start',
+        'background:settled',
+        'foreground:start',
+      ]);
+    },
+  );
 
   it('finishes automatic notes before admitting project review', async () => {
     let finish!: () => void;

@@ -412,6 +412,31 @@ describe('Query Engine', () => {
       expect(greetedQuestion.cannedResponse).toBeUndefined();
     });
 
+    it.each(['what can you help me with?', 'Hi Pluto, how can you help me?'])(
+      'bypasses model classification for capabilities: %s',
+      async (query) => {
+        const result = await parseQuery(query);
+        expect(result.intent).toBe('conversational');
+        expect(result.cannedResponse).toContain('synthesized meeting notes');
+        expect(factoryModule.getProvider).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      'Hi, summarize the release discussion.',
+      'Thanks, what are my next steps?',
+      'What can you tell me about Atlas?',
+    ])(
+      'retrieves for substantive requests without model classification: %s',
+      async (query) => {
+        const result = await parseQuery(query, {
+          useModelClassification: false,
+        });
+        expect(result.intent).not.toBe('conversational');
+        expect(result.cannedResponse).toBeUndefined();
+      },
+    );
+
     it('uses the LLM to classify conversational intent for ambiguous queries', async () => {
       const mockProvider = {
         classifyQueryIntent: vi
@@ -454,6 +479,31 @@ describe('Query Engine', () => {
       expect(result.expanded_keywords).toContain('API');
       expect(result.expanded_keywords).toContain('backend');
       expect(result.intent).toBe('factual');
+    });
+
+    it.each([
+      '{"intent":"unknown","expanded_keywords":["API"]}',
+      '{"intent":"factual","expanded_keywords":["API",42]}',
+      '{"intent":"factual","expanded_keywords":[null]}',
+    ])('fails safely on malformed classifier data: %s', async (response) => {
+      vi.mocked(factoryModule.getProvider).mockResolvedValue({
+        classifyQueryIntent: vi.fn().mockResolvedValue(response),
+      } as unknown as LLMProvider);
+      const parsed = await parseQuery('GraphQL');
+      expect(parsed.intent).toBe('factual');
+      expect(parsed.expanded_keywords).toEqual([]);
+    });
+    it('accepts a prose-wrapped valid classification without losing keyword types', async () => {
+      vi.mocked(factoryModule.getProvider).mockResolvedValue({
+        classifyQueryIntent: vi
+          .fn()
+          .mockResolvedValue(
+            'Result: {"intent":"exploratory","expanded_keywords":["API"]}',
+          ),
+      } as unknown as LLMProvider);
+      const parsed = await parseQuery('GraphQL');
+      expect(parsed.intent).toBe('exploratory');
+      expect(parsed.expanded_keywords).toEqual(['API']);
     });
 
     it('handles LLM failures gracefully using fallbacks', async () => {

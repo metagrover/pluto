@@ -132,6 +132,16 @@ describe('meeting references', () => {
     expect(selected.map((meeting) => meeting.id)).toEqual(['m2']);
   });
 
+  it('selects the second most recent matching 1:1', () => {
+    const selected = selectPersonMeetings({
+      people: [people[0]],
+      meetings,
+      meetingIdsByPerson: linked,
+      reference: { position: 'previous', oneOnOne: true },
+    });
+    expect(selected.map((meeting) => meeting.id)).toEqual(['m5']);
+  });
+
   it('counts 1:1s inside a month from records, with a cited list', () => {
     const now = new Date(2026, 10, 2, 21, 0);
     const range = resolveTemporalQuery('in September', now)!.range;

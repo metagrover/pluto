@@ -290,7 +290,7 @@ export const PeopleBriefing = ({
             }}
             title="Delete person"
             aria-label={`Delete ${person.name}`}
-            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg bg-pro-bg/90 text-pro-text-muted/40 opacity-0 pointer-events-none transition-all hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 group-hover:opacity-100 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-500 shadow-2xs"
+            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg bg-pro-bg/90 text-pro-text-muted/40 opacity-0 pointer-events-none transition-all hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 group-hover:opacity-100 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-500 shadow-sm"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -329,7 +329,9 @@ export const PeopleBriefing = ({
 
       {visibleRows.length === 0 ? (
         <div className="people-empty">
-          <UserRound aria-hidden="true" size={22} />
+          <div className="people-empty__icon" aria-hidden="true">
+            <UserRound size={20} strokeWidth={1.5} />
+          </div>
           <h2>No relationship context yet</h2>
           <p>People will appear as Pluto connects them to conversations.</p>
         </div>

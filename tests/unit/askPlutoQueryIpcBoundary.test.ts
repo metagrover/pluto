@@ -151,6 +151,29 @@ describe('Ask Pluto query IPC boundary', () => {
       /parsed.temporal_range \|\|\s*switchesNamedProject \|\|\s*hasMultipleProjectScopes/,
     );
   });
+  it('plans each turn before pattern routing and keeps patterns as the fallback', () => {
+    const planIndex = queryHandler.indexOf('const turnPlan =');
+    const conversationReturn = queryHandler.search(
+      /turnPlan\?\.route === 'conversation' \|\|\s+turnPlan\?\.route === 'help'/,
+    );
+    const helpFallback = queryHandler.indexOf(
+      'const helpReply = turnPlan ? null : buildPlutoHelpReply(queryText);',
+    );
+    const resolution = queryHandler.indexOf('applyAskPlutoPlan(');
+    const retrieval = queryHandler.indexOf('await retrieveContext(');
+    expect(planIndex).toBeGreaterThan(0);
+    expect(planIndex).toBeLessThan(conversationReturn);
+    expect(conversationReturn).toBeLessThan(helpFallback);
+    expect(helpFallback).toBeLessThan(resolution);
+    expect(resolution).toBeLessThan(retrieval);
+    expect(queryHandler).toContain(': patternResolution;');
+    expect(queryHandler).toContain(
+      '(await getProvider(settings)).planAskPlutoTurn',
+    );
+    // A plan replaces the separate quick-model classification.
+    expect(queryHandler).toMatch(/useModelClassification:\s*!turnPlan &&/);
+  });
+
   it('uses structured assignee recall before invoking the answer provider', () => {
     expect(main).toContain('buildAssigneeActionRecall');
     expect(queryHandler).toContain('const assigneeRecall =');
@@ -247,6 +270,24 @@ describe('Ask Pluto query IPC boundary', () => {
     );
   });
 
+  it('explains a no-evidence clarification from the prior search without a model or new retrieval', () => {
+    const start = queryHandler.indexOf(
+      "conversationResolution.turnMode === 'clarify' &&",
+    );
+    const branch = queryHandler.slice(
+      start,
+      queryHandler.indexOf('const persistedMeetings =', start),
+    );
+    expect(start).toBeGreaterThan(-1);
+    expect(branch).toContain(
+      "previousAssistantTurn?.outcome === 'no_evidence'",
+    );
+    expect(branch).toContain('isDialogueOnlyClarification(queryText)');
+    expect(branch).toContain('describePreviousConversationFailure(');
+    expect(branch).not.toContain('answerConversationally()');
+    expect(branch).not.toContain('meetingIds?.length');
+  });
+
   it('keeps semantic scope provider-specific and preserves existing local query routing', () => {
     const scopeRequest = queryHandler.slice(
       queryHandler.indexOf('const resolveScope ='),
@@ -312,7 +353,7 @@ describe('Ask Pluto query IPC boundary', () => {
       );
       const assignmentEnd = queryHandler.indexOf(';', assignmentStart);
       const providerRequest = queryHandler.indexOf(
-        'answerRaw = await provider.answerAskPluto(',
+        'answerRaw = await withMemoryFallback(',
         assignmentEnd,
       );
       expect(assignmentStart).toBeGreaterThan(modeStart);

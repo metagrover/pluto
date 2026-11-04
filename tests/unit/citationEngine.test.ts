@@ -28,6 +28,27 @@ describe('Citation Engine', () => {
     vi.clearAllMocks();
   });
 
+  it('retains explicit planned assignments from every supplied note', () => {
+    const notes = [
+      'Morgan owns the readiness memo. No due date was recorded for that memo.',
+      'Morgan will validate release metrics. Casey will deploy the service.',
+      'Morgan agreed to prepare the budget review. Casey owns the deployment checklist.',
+      'Morgan agreed to send the acceptance report by October 7. Casey owns deployment.',
+    ];
+    const context = notes.map((note, index) => ({
+      meeting_id: `assignment-${index}`,
+      meeting_title: `Planning ${index}`,
+      mid: null,
+      evidence_kind: 'note',
+      evidence_text: `[Current saved notes]:\n${note}`,
+    })) as RetrievalResult[];
+    const answer =
+      'Morgan owns the readiness memo. Morgan will validate release metrics. Morgan agreed to prepare the budget review. Morgan agreed to send the acceptance report by October 7.';
+    const result = buildSynthesizedAnswerPresentation(answer, context);
+    expect(result.answer).toBe(answer);
+    expect(result.unsupportedClaimCount).toBe(0);
+  });
+
   describe('buildCitationChain', () => {
     it('quotes saved person notes rather than retrieval headers', () => {
       const note = 'Maya suggested consulting Avery about design language.';
@@ -354,6 +375,30 @@ describe('Citation Engine', () => {
       );
       expect(presentation.answer).toContain('Best,');
       expect(presentation.answer).not.toContain('budget was approved');
+    });
+
+    it('keeps the rest of a one-paragraph draft when one sentence is unsupported', () => {
+      const finalize = (draft: string) =>
+        createValidatedAnswerStream(sources, () => undefined, 'draft').finalize(
+          draft,
+        );
+
+      const framed = finalize(
+        "Hi Jordan, I'm reaching out regarding the launch. Sam owns launch signoff [Source 1]. Could you confirm the final checklist?",
+      );
+      expect(framed.outcome).toBe('answered');
+      expect(framed.answer).toBe(
+        "Hi Jordan, I'm reaching out regarding the launch. Sam owns launch signoff. Could you confirm the final checklist?",
+      );
+
+      const mixed = finalize(
+        'Hi Jordan, the budget was approved last week [Source 1]. The launch is Friday [Source 1]. Please let me know if anything changes.',
+      );
+      expect(mixed.outcome).toBe('partial');
+      expect(mixed.answer).toBe(
+        'Hi Jordan,\n\nThe launch is Friday. Please let me know if anything changes.',
+      );
+      expect(mixed.answer).not.toContain('budget');
     });
 
     it.each([

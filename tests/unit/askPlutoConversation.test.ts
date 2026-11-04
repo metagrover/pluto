@@ -350,6 +350,33 @@ describe('Ask Pluto conversation scope', () => {
     expect(explanation).toContain('1 transcript passage');
   });
 
+  it('starts capabilities separately from the previous meeting topic', () => {
+    const resolved = resolveAskPlutoConversation(
+      'What can you help me with?',
+      priorTurns,
+    );
+    expect(resolved).toMatchObject({
+      relation: 'new_topic',
+      turnMode: 'social',
+      retrievalPolicy: 'none',
+      retrievalQuery: 'What can you help me with?',
+    });
+    expect(resolved.priorQuestion).toBeUndefined();
+  });
+
+  it('routes dialogue clarifications after no evidence as clarify turn mode', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      { role: 'user', content: 'What can you help me with?' },
+      {
+        role: 'assistant',
+        content: "I couldn't verify an answer from this search.",
+        outcome: 'no_evidence',
+      },
+    ];
+    const resolved = resolveAskPlutoConversation('what do you mean?', turns);
+    expect(resolved.turnMode).toBe('clarify');
+  });
+
   it('carries the assignee into a request for more results', () => {
     const turns: AskPlutoConversationTurn[] = [
       { role: 'user', content: "What's assigned to Gamma?" },

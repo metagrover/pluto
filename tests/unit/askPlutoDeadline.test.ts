@@ -228,12 +228,13 @@ describe('Ask Pluto request deadline', () => {
   });
 });
 
-it('gives a queued request bounded waiting time and starts its response allowance only at admission', async () => {
+it('gives the queued answer its own first-token allowance after planning', async () => {
   vi.useFakeTimers();
   const controller = new AbortController();
   let progress: ((phase?: 'queued' | 'started' | 'token') => void) | undefined;
   const work = new Promise<string>((resolve) => {
-    setTimeout(() => progress?.('queued'), 1);
+    setTimeout(() => progress?.('token'), 1);
+    setTimeout(() => progress?.('queued'), 2);
     setTimeout(() => progress?.('started'), 70_000);
     setTimeout(() => resolve('answer'), 95_000);
   });
@@ -242,6 +243,7 @@ it('gives a queued request bounded waiting time and starts its response allowanc
       progress = fn;
     },
     queueTimeoutMs: 100_000,
+    idleTimeoutMs: 10_000,
   });
   await vi.advanceTimersByTimeAsync(69_000);
   expect(controller.signal.aborted).toBe(false);
