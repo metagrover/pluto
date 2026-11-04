@@ -5,6 +5,7 @@ import type {
   NoteAgendaItem,
   NoteType,
   SaveNoteInput,
+  SetNoteChecklistItemInput,
 } from '../src/types/notes';
 
 export interface NotesStore {
@@ -15,7 +16,10 @@ export interface NotesStore {
   getNotesForAttendees: (emails: string[], names: string[]) => NoteAgendaItem[];
   searchNotes: (query: string, limit?: number) => Note[];
   getNotesForEntity: (entityId: string) => Note[];
+  setChecklistItem: (input: SetNoteChecklistItemInput) => NoteAgendaItem;
 }
+
+const CHECKLIST_LINE = /^(\s*[-*]\s+\[)([ xX])(\]\s+)(.+?)\s*$/;
 
 function deriveNoteTitle(
   content: string,
@@ -220,14 +224,29 @@ export function createNotesStore(db: Database.Database): NotesStore {
       for (const e of entities) matchedPersonIds.add(e.id);
     }
 
-    // Also check person aliases or links
+    // Attendee emails map to people through the links meeting prep keeps
+    // (`email:<address>`), the same source the pre-meeting brief uses.
+    const optionalRows = <T>(query: string, ...args: unknown[]): T[] => {
+      try {
+        return db.prepare(query).all(...args) as T[];
+      } catch {
+        return []; // Older or partial databases may not have this table.
+      }
+    };
     for (const email of normalizedEmails) {
-      const aliases = db
-        .prepare(`
-        SELECT person_id as id FROM person_aliases WHERE lower(alias) = ?
-      `)
-        .all(email) as Array<{ id: string }>;
-      for (const a of aliases) matchedPersonIds.add(a.id);
+      for (const row of optionalRows<{ id: string }>(
+        'SELECT person_id AS id FROM prep_attendee_links WHERE attendee_key = ? AND person_id IS NOT NULL',
+        `email:${email}`,
+      ))
+        matchedPersonIds.add(row.id);
+    }
+    // Notes linked to a person who was later merged into a matched person.
+    for (const id of [...matchedPersonIds]) {
+      for (const row of optionalRows<{ id: string }>(
+        'SELECT person_id AS id FROM person_aliases WHERE canonical_id = ? AND active = 1',
+        id,
+      ))
+        matchedPersonIds.add(row.id);
     }
 
     if (matchedPersonIds.size === 0) return [];
@@ -269,6 +288,7 @@ export function createNotesStore(db: Database.Database): NotesStore {
             targetName: note.targetName,
             text: taskMatch[2].trim(),
             checked: taskMatch[1].toLowerCase() === 'x',
+            lineIndex: i,
           });
         }
       }
@@ -415,6 +435,64 @@ export function createNotesStore(db: Database.Database): NotesStore {
     return rows.map(mapNoteRow);
   };
 
+  // Ticks one checklist line in a note, in place, so the item shown in meeting
+  // prep and the line in the note stay one item. If the note was edited and the
+  // line moved, the item is found by its text when that text is unique.
+  const setChecklistItem = (
+    input: SetNoteChecklistItemInput,
+  ): NoteAgendaItem => {
+    const text = typeof input?.text === 'string' ? input.text.trim() : '';
+    if (
+      !input ||
+      typeof input.noteId !== 'string' ||
+      !Number.isInteger(input.lineIndex) ||
+      !text ||
+      typeof input.checked !== 'boolean'
+    ) {
+      throw new Error('Invalid checklist item');
+    }
+    return db.transaction(() => {
+      const row = db
+        .prepare(
+          `SELECT n.id, n.title, n.content, e.name AS targetName
+           FROM notes n LEFT JOIN entities e ON n.target_id = e.id
+           WHERE n.id = ?`,
+        )
+        .get(input.noteId) as
+        | { id: string; title: string; content: string; targetName: string }
+        | undefined;
+      if (!row) throw new Error('This note no longer exists.');
+      const lines = row.content.split('\n');
+      const matches = (index: number) =>
+        lines[index]?.match(CHECKLIST_LINE)?.[4].trim() === text;
+      let index = matches(input.lineIndex) ? input.lineIndex : -1;
+      if (index < 0) {
+        const found = lines.map((_, i) => i).filter((i) => matches(i));
+        if (found.length !== 1) {
+          throw new Error(
+            'This item changed in its note. Open the note to update it.',
+          );
+        }
+        index = found[0];
+      }
+      const match = lines[index].match(CHECKLIST_LINE)!;
+      lines[index] =
+        `${match[1]}${input.checked ? 'x' : ' '}${match[3]}${match[4]}`;
+      db.prepare(
+        'UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      ).run(lines.join('\n'), row.id);
+      return {
+        id: `${row.id}-line-${index}`,
+        noteId: row.id,
+        noteTitle: row.title,
+        targetName: row.targetName ?? null,
+        text,
+        checked: input.checked,
+        lineIndex: index,
+      };
+    })();
+  };
+
   return {
     listNotes,
     getNote,
@@ -423,5 +501,6 @@ export function createNotesStore(db: Database.Database): NotesStore {
     getNotesForAttendees,
     searchNotes,
     getNotesForEntity,
+    setChecklistItem,
   };
 }

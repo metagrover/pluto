@@ -18,6 +18,34 @@ export interface NoteActionSyncResult {
 }
 
 /**
+ * The note a task was written in. Only that note is updated, so a meeting
+ * action item or a task from another note with the same wording never changes
+ * this note's lines.
+ */
+const sourceNoteId = (metadata: string | null): string | null => {
+  if (!metadata) return null;
+  try {
+    const parsed = JSON.parse(metadata) as { source_note_id?: unknown };
+    return typeof parsed.source_note_id === 'string'
+      ? parsed.source_note_id
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const loadSourceNotes = (
+  sqlite: Database.Database,
+  entity: PersistedEntityRow,
+): PersistedNoteRow[] => {
+  const noteId = sourceNoteId(entity.metadata);
+  if (!noteId) return [];
+  return sqlite
+    .prepare('SELECT id, content FROM notes WHERE id = ?')
+    .all(noteId) as PersistedNoteRow[];
+};
+
+/**
  * Synchronize task completion status from an action_item entity to all notes
  * containing references to this task (e.g., [task: ...] or - [ ] [task] ...).
  */
@@ -43,10 +71,7 @@ export const syncActionCompletionToNotes = (
 
   const normalizedTarget = targetTitle.toLowerCase();
 
-  // Find all notes containing task markers
-  const notes = sqlite
-    .prepare("SELECT id, content FROM notes WHERE content LIKE '%task%'")
-    .all() as PersistedNoteRow[];
+  const notes = loadSourceNotes(sqlite, entity);
 
   let notesUpdated = 0;
 
@@ -118,7 +143,7 @@ export const syncActionCompletionToNotes = (
  */
 export const syncActionTitleToNotes = (
   sqlite: Database.Database,
-  _entityId: string,
+  entityId: string,
   oldTitle: string,
   newTitle: string,
 ): NoteActionSyncResult => {
@@ -135,9 +160,15 @@ export const syncActionTitleToNotes = (
 
   const normalizedOld = trimmedOld.toLowerCase();
 
-  const notes = sqlite
-    .prepare("SELECT id, content FROM notes WHERE content LIKE '%task%'")
-    .all() as PersistedNoteRow[];
+  const entity = sqlite
+    .prepare(
+      'SELECT id, type, name, status, metadata FROM entities WHERE id = ?',
+    )
+    .get(entityId) as PersistedEntityRow | undefined;
+  if (!entity || entity.type !== 'action_item') {
+    return { notesUpdated: 0 };
+  }
+  const notes = loadSourceNotes(sqlite, entity);
 
   let notesUpdated = 0;
 

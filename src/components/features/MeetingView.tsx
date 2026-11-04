@@ -74,6 +74,7 @@ import {
 } from '../../utils/transcriptTrustState';
 import { DetailsMenu } from '../ui/DetailsMenu';
 import { SearchSelect } from '../ui/SearchSelect';
+import { MeetingAskPlutoDock } from './MeetingAskPlutoDock';
 import { MeetingAttachmentsBar } from './MeetingAttachmentsBar';
 import { MeetingCalendarContext } from './MeetingCalendarContext';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
@@ -85,6 +86,8 @@ import {
   MeetingParticipantsPopover,
   resolveMeetingParticipants,
 } from './MeetingParticipants';
+import { PrepForMeeting } from './MeetingPrepEditor';
+import { MeetingWhoWasThere } from './MeetingWhoWasThere';
 import { SpeakerIdentificationModal } from './SpeakerIdentificationModal';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';
@@ -187,6 +190,7 @@ interface MeetingViewProps {
   onBack?: () => void;
   backLabel?: string;
   onOpenPerson?: (personId: string) => void;
+  onOpenMeeting?: (meetingId: string) => void;
 }
 
 export const TranscriptIntegrityPanel = ({
@@ -800,6 +804,7 @@ const SelectedMeetingView = ({
   onBack,
   backLabel,
   onOpenPerson,
+  onOpenMeeting,
   isLoadingDetail = false,
 }: Omit<MeetingViewProps, 'selectedMeeting'> & {
   selectedMeeting: Meeting;
@@ -925,6 +930,22 @@ const SelectedMeetingView = ({
     cancelled: false,
     saving: false,
   });
+
+  // ⌘J asks about this meeting, as it does about a note in Notes.
+  useEffect(() => {
+    const focusAsk = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'j')
+        return;
+      const input = document.querySelector<HTMLElement>(
+        'section[aria-label="Ask Pluto"] textarea, section[aria-label="Ask Pluto"] input',
+      );
+      if (!input) return;
+      event.preventDefault();
+      input.focus();
+    };
+    window.addEventListener('keydown', focusAsk);
+    return () => window.removeEventListener('keydown', focusAsk);
+  }, []);
 
   useEffect(() => {
     setLatestTitle(selectedMeeting.title);
@@ -1305,6 +1326,16 @@ const SelectedMeetingView = ({
     ],
   );
   const participantCount = resolvedParticipants.length;
+  // People the user added (while recording, from their page, or with "Who
+  // was this with?") who are not already identified as a speaker.
+  const addedPeople = meetingEntities.filter(
+    (entity) =>
+      entity.type === 'person' &&
+      (entity.context ?? '').split(',').includes('Manual participant') &&
+      !resolvedParticipants.some(
+        (participant) => participant.personId === entity.id,
+      ),
+  );
   const speakerToPersonIdMap = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of resolvedParticipants) {
@@ -1646,7 +1677,40 @@ const SelectedMeetingView = ({
                     />
                   )}
                 </div>
-              ) : selectedMeeting.duration_seconds ? (
+              ) : null}
+              {addedPeople.length ? (
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  With
+                  {addedPeople.map((person, index) => (
+                    <button
+                      key={person.id}
+                      type="button"
+                      className="font-medium text-pro-text-main hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent rounded"
+                      onClick={() => onOpenPerson?.(person.id)}
+                    >
+                      {person.name}
+                      {index < addedPeople.length - 1 ? ',' : ''}
+                    </button>
+                  ))}
+                </span>
+              ) : !calendarContext &&
+                notesDocument.hasAnalysis &&
+                !resolvedParticipants.some(
+                  (participant) => participant.personId && !participant.isSelf,
+                ) ? (
+                <MeetingWhoWasThere
+                  meetingId={String(selectedMeeting.id)}
+                  onAdded={() => {
+                    void window.ipcRenderer
+                      .invoke('GET_MEETING_ENTITIES', selectedMeeting.id)
+                      .then((entities) => {
+                        if (Array.isArray(entities))
+                          setMeetingEntities(entities);
+                      });
+                  }}
+                />
+              ) : null}
+              {participantCount === 0 && selectedMeeting.duration_seconds ? (
                 <span>
                   {selectedMeeting.duration_seconds < 60
                     ? '< 1 min'
@@ -1946,6 +2010,10 @@ const SelectedMeetingView = ({
               }
             />
           ) : null}
+          <PrepForMeeting
+            meetingId={String(selectedMeeting.id)}
+            onOpenMeeting={onOpenMeeting}
+          />
         </header>
         <TranscriptIntegrityPanel
           status={selectedMeeting.transcript_status}
@@ -2300,6 +2368,17 @@ const SelectedMeetingView = ({
           </div>
         </section>
       )}
+      {notesDocument.hasAnalysis ? (
+        // Ask about this meeting, the same composer used while recording.
+        <>
+          <div className="meeting-ask-dock-spacer" aria-hidden="true" />
+          <MeetingAskPlutoDock
+            key={selectedMeeting.id}
+            meeting={selectedMeeting}
+            onOpenMeeting={onOpenMeeting}
+          />
+        </>
+      ) : null}
       <SpeakerIdentificationModal
         isOpen={isSpeakerModalOpen}
         onClose={() => {

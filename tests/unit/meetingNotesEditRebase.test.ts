@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import {
+  MEETING_USER_NOTES_EDIT_PATH,
   applyMeetingNotesUserEdit,
   rebaseMeetingNotesEdits,
 } from '../../src/utils/meetingNotesEditRebase';
@@ -332,4 +333,19 @@ it('persists explicit unchecking rather than confusing it with archived completi
   );
   expect(result.edits['completion:all_action_items:0']?.edited).toBe('false');
   expect(result.edits['completion:v2:action:0']?.edited).toBe('false');
+});
+
+it('keeps notes the user added after the meeting through regeneration', () => {
+  const edit = {
+    original: 'Typed during the call',
+    edited: 'Typed during the call\nFollow up with legal',
+    edited_at: '2026-01-01T00:00:00Z',
+  };
+  const result = rebaseMeetingNotesEdits({
+    edits: { [MEETING_USER_NOTES_EDIT_PATH]: edit },
+    previousBlocks: [{ path: 'overview', text: 'Old', sourceKey: 'a' }],
+    nextBlocks: [{ path: 'overview', text: 'New', sourceKey: 'b' }],
+  });
+  expect(result.edits[MEETING_USER_NOTES_EDIT_PATH]).toEqual(edit);
+  expect(result.conflicts).toEqual([]);
 });

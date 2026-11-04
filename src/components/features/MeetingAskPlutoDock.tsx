@@ -251,7 +251,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
 
   useEffect(
     () =>
-      window.ipcRenderer.on(
+      window.ipcRenderer.on?.(
         'intelligence:meeting-chat:delta',
         (_event, packet: MeetingAskPlutoAnswerDelta) => {
           if (

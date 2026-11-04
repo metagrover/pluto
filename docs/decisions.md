@@ -1,3 +1,36 @@
+## 2026-11-04 - Count people you add as meeting participants, and keep checklists separate from tasks
+
+- **Status:** Accepted; covered by database, component and in-app checks.
+- **Who was this with?:** A finished meeting with no calendar event and nobody identified as a known person asks "Who was this with?". The chosen or newly named person is added as a `Manual participant`, as adding a participant during recording does, and the header shows "With …" linking to them. This records attendance only; speaker identity is unchanged.
+- **Confirmed participation:** A person's meeting list counts a meeting where the user added them as a participant as confirmed, alongside speaker bindings and captures. Previously these appeared only under "Other meeting links" as mention-only, hiding 1:1s started from a person. Calendar attendees and text mentions are still not confirmation.
+- **One timeline:** A person's page lists meetings and the notes linked to them in one "Meetings and notes" list, newest first, replacing separate "Running 1:1 Notes" and "Meetings" sections.
+- **Note questions:** Ask Pluto in a note linked to a person also reads that person's three most recent confirmed meetings with usable notes. Each is labeled by title and date, answers name the meeting they draw on, and the panel says "About this note and your meetings with …".
+- **Checklists stay checklists:** Plain checkboxes in notes remain things to raise, which "Next time with …" and prep are built on; `[task: …]` lines remain tasks and are labeled as such in the editor. Turning every checkbox into a task would fill Tasks with conversation topics.
+
+## 2026-11-04 - Carry what to raise with a person, start meetings from people and notes, and ask about finished meetings
+
+- **Status:** Accepted; covered by component, app-flow and in-app checks.
+- **Next time with a person:** A person's page opens with "Next time with …": the open checklist items in notes linked to them, ticked in place, plus a line to add another (written into their latest linked note, or a new "1:1 with …" note). These are the same items calendar prep offers, so there is one list with or without a calendar. Task lines stay in Tasks.
+- **Start 1:1 / Start meeting now:** A person's page and a note's "Meeting" menu can start a recording with a title, participants (the person, or the note's linked person) and, from a note, the note's text as the live notes. Without a calendar event, the recording's Prep tab shows the open items for its participants.
+- **Note into prep:** A note's "Meeting" menu lists the next week's calendar meetings; choosing one adds the note's text to that meeting's prep once and says where it went.
+- **Ask on finished meetings:** Supersedes the deferral of completed-meeting chat in "2026-08-18 - Scope note chat to the current meeting evidence". Finished meetings with notes show the meeting-scoped Ask Pluto composer, using the existing `meeting` scope and its evidence boundary; ⌘J focuses it, as it opens Ask in Notes.
+- **Editing as a document:** Clearing a line no longer restores its text while the user is still in it. A generated line left empty is removed from view; its original stays in the edit history. Action items, which back tasks, get their text back if left empty. A block opened from the keyboard starts at its end. "Add item" appears only while working in a section; Enter at the end of a line adds one anyway.
+
+## 2026-11-04 - Show and extend your own notes on finished meetings
+
+- **Status:** Accepted; covered by notes document, edit rebase and in-app checks.
+- **Problem:** Once a summary existed, the meeting page filtered out the "Your notes" section, so notes typed during the meeting disappeared from view and nothing could be added except list items under generated sections. The editor was dropped in a styling pass, not by decision; it contradicts "Make meeting notes one editable document", which keeps the scratchpad as user-authored content.
+- **Decision:** The notes typed during the meeting continue the finished document as ordinary text at its end, with no heading or box, edited like any other block (markdown, lists, checklists). With none yet, a faint "Write anything…" line takes their place. Changes are saved as the `user_notes` edit over the original, so the notes given to the summary writer and the summary itself are never rewritten. Regeneration carries this edit through unchanged instead of treating it as a conflict. Authorship stays unlabeled, as before.
+- **Not yet included:** Ask Pluto and search still read the notes as typed during the meeting, not later additions.
+
+## 2026-11-03 - Keep note tasks and prep items tied to their own note
+
+- **Status:** Accepted; covered by store, task-service and Notes view regressions.
+- **Decision:** A task written in a note matches only tasks from that same note, by title, or by its line when the old title is no longer a task in the note. Saving a note task never attaches it to a meeting action item or another note's task with the same wording, and completing or renaming a task updates only the note it came from. Open checklist items shown in meeting prep are the note's own lines: ticking one in prep, the recording's Prep tab, or a finished meeting ticks it in the note, found by its unique text if the line moved, and refused if it changed. Prep no longer copies them into its notes.
+- **Also:** Mentioning a person or project in a note no longer links the note to them; linking is explicit, and the note's side card offers "Link to [name]" when a mentioned person is invited to an upcoming meeting. Its wording now states only what prep does. A finished meeting shows the brief it was prepared with under "Before the meeting".
+- **Attendee matching:** Prep finds notes for an invitee by exact name or through the email links prep already keeps (`prep_attendee_links`), including notes linked to a person later merged into them. The earlier lookup queried a `person_aliases.alias` column that doesn't exist, so prep's note items failed in the app; its tests used a hand-made table and missed it.
+- **Existing data:** Tasks that were merged with same-titled tasks before this change keep their current source note; nothing is rewritten.
+
 ## 2026-11-03 - Plan Ask Pluto turns with recent dialogue
 
 - **Status:** Accepted on real-profile replay. In a 31-turn replay against the pattern baseline, with free memory above 65% before each run and the planner used on every turn, the planner passed 25 and the baseline 22: four planner wins and one scored loss. In that loss the baseline cited an unrelated meeting for “when did we last meet?”, while the planner resolved the person and reported that no meeting with them was recorded. No grounding or confidential-source regressions; the baseline summarized a non-confidential meeting for “the most recent one” of a confidential 1:1 series that the planner correctly withheld. Drafts failed in both because validation kept a draft paragraph only when every factual sentence was supported, so one framing sentence discarded the whole message; drafts are now validated sentence by sentence (see Routing details). A replay of both draft conversations then delivered complete, cited drafts.

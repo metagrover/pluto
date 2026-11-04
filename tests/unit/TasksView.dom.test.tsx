@@ -249,8 +249,9 @@ describe('Tasks workspace', () => {
     });
     await act(async () => root.render(<TasksView onOpenMeeting={vi.fn()} />));
     expect(container.textContent).toContain('Make room for what’s next');
-    expect(container.textContent).toContain(
-      'Commitments from your meetings and notes will appear here automatically.',
+    await act(async () => button('Write a task').click());
+    expect(document.activeElement).toBe(
+      container.querySelector('input[aria-label="New task"]'),
     );
   });
   it('provides visual feedback and toast notification when creating and saving a task', async () => {

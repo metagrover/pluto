@@ -5,6 +5,7 @@ import type {
   NoteAskPlutoRequest,
   NoteAskPlutoResponse,
   SaveNoteInput,
+  SetNoteChecklistItemInput,
 } from '../types/notes';
 
 const mutate = async <T>(channel: string, payload: unknown): Promise<T> => {
@@ -48,6 +49,10 @@ export const getNotesForAttendees = (
     window.ipcRenderer.invoke('NOTES_FOR_ATTENDEES', { emails, names }),
   ).then((items) => (Array.isArray(items) ? items : []));
 };
+
+export const setNoteChecklistItem = (
+  input: SetNoteChecklistItemInput,
+): Promise<NoteAgendaItem> => mutate('NOTES_SET_CHECKLIST_ITEM', input);
 
 export const getNotesForEntity = (entityId: string): Promise<Note[]> => {
   if (typeof window === 'undefined' || !window.ipcRenderer?.invoke) {

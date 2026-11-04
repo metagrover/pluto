@@ -32,6 +32,15 @@ export interface NoteAgendaItem {
   targetName?: string | null;
   text: string;
   checked: boolean;
+  /** Line in the note's content, used to tick the item in place. */
+  lineIndex?: number;
+}
+
+export interface SetNoteChecklistItemInput {
+  noteId: string;
+  lineIndex: number;
+  text: string;
+  checked: boolean;
 }
 
 /** Quick actions offered by Ask Pluto inside a note. */

@@ -1554,11 +1554,10 @@ describe('MeetingView progressive reveal', () => {
     );
   });
 
-  it('does not show meeting-scoped Ask Pluto in archived transcripts', async () => {
+  it('offers meeting-scoped Ask Pluto on a finished meeting', async () => {
     await act(async () => renderMeeting(analyzedMeeting));
 
-    expect(container.querySelector('[aria-label="Ask Pluto"]')).toBeNull();
-    expect(container.textContent).not.toContain('Ask about this meeting');
+    expect(container.querySelector('[aria-label="Ask Pluto"]')).not.toBeNull();
   });
 
   it('displays unidentified speakers in header metadata and opens identification modal', async () => {

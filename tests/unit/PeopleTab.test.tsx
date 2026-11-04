@@ -53,7 +53,7 @@ describe('PeopleBriefing', () => {
         onSelectPerson={() => {}}
       />,
     );
-    expect(onlyOwner).toContain('No relationship context yet');
+    expect(onlyOwner).toContain('The people in your conversations');
     expect(onlyOwner).not.toContain('Search people');
   });
 
@@ -211,9 +211,7 @@ describe('PeopleBriefing', () => {
     const markup = renderToStaticMarkup(
       <PeopleBriefing rows={[]} onSelectPerson={() => {}} />,
     );
-    expect(markup).toContain(
-      'People will appear as Pluto connects them to conversations.',
-    );
+    expect(markup).toContain('As Pluto connects people to your meetings');
   });
 
   it('groups regular collaborators at the top and occasional conversations below', () => {
@@ -872,7 +870,7 @@ describe('PersonDossier', () => {
       'There is not enough verified context to describe this person yet.',
     );
     expect(markup).toContain('No verified commitments.');
-    expect(markup).toContain('No confirmed meetings yet.');
+    expect(markup).toContain('No meetings or notes yet.');
     expect(markup).toContain('Other meeting links');
     expect(markup).not.toContain('No confirmed conversations yet');
     expect(markup).not.toContain('No scheduled conversations');

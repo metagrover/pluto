@@ -52,13 +52,14 @@ describe('AllMeetingsTab', () => {
     const markup = renderToStaticMarkup(
       <AllMeetingsTab
         meetings={[]}
+        onStartRecording={() => {}}
         onOpenMeeting={() => {}}
         handleDeleteMeeting={() => {}}
       />,
     );
 
     expect(markup).toContain('data-meetings-index="true"');
-    expect(markup).toContain('meetings-index__empty');
-    expect(markup).toContain('Your meetings will appear here');
+    expect(markup).toContain('Start recording');
+    expect(markup).toContain('Keep the conversation');
   });
 });

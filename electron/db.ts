@@ -171,7 +171,10 @@ import {
 } from './localArtifacts';
 import { createLogger } from './logger';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
-import { buildMeetingNotesIdentityProjection } from './meetingParticipantIdentity';
+import {
+  MANUAL_PARTICIPANT_CONTEXT,
+  buildMeetingNotesIdentityProjection,
+} from './meetingParticipantIdentity';
 import type { PrepMeetingOption } from './meetingPrep';
 import { createMeetingPrepStore, findCalendarInviteeName } from './meetingPrep';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
@@ -9861,11 +9864,31 @@ export const getPersonBriefing = (
     )
     .all(canonicalId, canonicalId) as Array<{ meeting_id: string }>;
   for (const row of capturedRows) confirmedIds.add(row.meeting_id);
+  // Adding someone as a participant (while recording, from their page, or
+  // with "Who was this with?") is the user confirming they took part. It says
+  // nothing about who spoke.
+  const contextParts = (context: string | null | undefined) =>
+    (context ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+  for (const meeting of mentionedMeetings)
+    if (contextParts(meeting.context).includes(MANUAL_PARTICIPANT_CONTEXT))
+      confirmedIds.add(meeting.id);
+  const displayContext = (context: string | null | undefined) =>
+    contextParts(context)
+      .filter((part) => part !== MANUAL_PARTICIPANT_CONTEXT)
+      .join(', ') || null;
 
   const confirmed = [...confirmedIds].flatMap((meetingId) => {
     const meeting = getPersonMeetingRecord(meetingId);
     return meeting
-      ? [{ ...meeting, context: mentionedById.get(meetingId)?.context ?? null }]
+      ? [
+          {
+            ...meeting,
+            context: displayContext(mentionedById.get(meetingId)?.context),
+          },
+        ]
       : [];
   });
 

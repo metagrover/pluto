@@ -116,6 +116,13 @@ const sameEditableIdentity = (
   );
 };
 
+/**
+ * Notes the user adds on a finished meeting's "Your notes" section. They are
+ * the user's own text, not a generated field, so regenerating the summary
+ * keeps them as they are.
+ */
+export const MEETING_USER_NOTES_EDIT_PATH = 'user_notes';
+
 export const rebaseMeetingNotesEdits = ({
   edits,
   previousBlocks,
@@ -132,6 +139,10 @@ export const rebaseMeetingNotesEdits = ({
   const conflicts: PreservedEditConflict[] = [];
   for (const [path, edit] of Object.entries(edits)) {
     if (isNoOpMeetingNotesEdit(edit.original, edit.edited)) {
+      continue;
+    }
+    if (path === MEETING_USER_NOTES_EDIT_PATH) {
+      rebased[path] = edit;
       continue;
     }
     const matchingPreviousBlocks = previousBlocks.filter(

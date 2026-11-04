@@ -44,12 +44,15 @@ import {
   setTaskStatus,
   subscribeTasksChanged,
 } from '../../../api/tasks';
+import type { MeetingStartContext } from '../../../types/meetingStart';
 import type { Note, NoteType, SaveNoteInput } from '../../../types/notes';
 import { Logo } from '../../Brand/Logo';
+import { EmptyCanvas } from '../../ui/EmptyCanvas';
 import {
   NoteAskPlutoPanel,
   type NoteAskPlutoSelection,
 } from './NoteAskPlutoPanel';
+import { NoteMeetingMenu } from './NoteMeetingMenu';
 import {
   BlockHistory,
   type BlockSelection,
@@ -267,6 +270,8 @@ interface Props {
   initialNoteId?: string | null;
   onOpenTask?: (taskId: string) => void;
   onOpenMeeting?: (meetingId: string) => void;
+  /** Starts a meeting with this note as its notes; absent while recording. */
+  onStartMeeting?: (start: MeetingStartContext) => void;
 }
 
 export const getDisplayTitle = (note: {
@@ -290,6 +295,133 @@ export const getDisplayTitle = (note: {
   if (note.noteType === 'project' && note.targetName)
     return `${note.targetName} Notes`;
   return 'Untitled Note';
+};
+
+export interface NoteTaskRef {
+  id: string;
+  title: string;
+  status: 'active' | 'completed';
+  sourceNoteId: string | null;
+  sourceNoteLineId: string | null;
+}
+
+export const taskNoteSource = (
+  metadata: unknown,
+): Pick<NoteTaskRef, 'sourceNoteId' | 'sourceNoteLineId'> => {
+  let parsed: unknown = metadata;
+  if (typeof metadata === 'string') {
+    try {
+      parsed = JSON.parse(metadata);
+    } catch {
+      parsed = null;
+    }
+  }
+  const record =
+    parsed && typeof parsed === 'object'
+      ? (parsed as Record<string, unknown>)
+      : {};
+  return {
+    sourceNoteId:
+      typeof record.source_note_id === 'string' ? record.source_note_id : null,
+    sourceNoteLineId:
+      typeof record.source_note_line_id === 'string'
+        ? record.source_note_line_id
+        : null,
+  };
+};
+
+const NOTE_TASK_LINE =
+  /^(?:\[task(?::(?:done|x))?:\s*(.+?)\]|[-*]\s+\[[ xX]\]\s+\[task\]\s+(.+))$/i;
+
+export const noteTaskLineTitle = (line: string): string | null => {
+  const match = line.trim().match(NOTE_TASK_LINE);
+  const title = (match?.[1] || match?.[2] || '').trim();
+  return title || null;
+};
+
+/**
+ * Finds the task a note line refers to, looking only at tasks created from
+ * this note. A line whose text was edited keeps its task through its line id,
+ * as long as that task's old title is no longer a task in the note.
+ */
+export const findNoteTask = (
+  tasks: NoteTaskRef[],
+  noteId: string,
+  title: string,
+  lineId?: string,
+  noteTaskTitles?: Set<string>,
+): NoteTaskRef | undefined => {
+  const key = title.toLowerCase().trim();
+  const own = tasks.filter((task) => task.sourceNoteId === noteId);
+  const byTitle = own.find((task) => task.title.toLowerCase().trim() === key);
+  if (byTitle || !lineId || !noteTaskTitles) return byTitle;
+  return own.find(
+    (task) =>
+      task.sourceNoteLineId === lineId &&
+      !noteTaskTitles.has(task.title.toLowerCase().trim()),
+  );
+};
+
+export interface UpcomingMeetingForNote {
+  title: string;
+  startDate: string;
+  personId: string;
+  personName: string;
+  /** True when the note is linked to this person, so prep will offer it. */
+  linked: boolean;
+}
+
+const sameName = (a: string | undefined, b: string): boolean =>
+  !!a && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Finds an upcoming calendar meeting for the note's linked person, or, for a
+ * note with no link yet, for a person it @mentions. Names must match exactly,
+ * as they must for meeting prep to pick the note up.
+ */
+export const findUpcomingMeetingForNote = ({
+  targetId,
+  content,
+  entities,
+  events,
+}: {
+  targetId: string | null;
+  content: string;
+  entities: Array<{ id: string; name: string; type: string }>;
+  events: Array<{
+    title?: string;
+    /** Calendar events carry `start`; `startDate` is accepted for older data. */
+    start?: string;
+    startDate?: string;
+    attendees: Array<{ name?: string; email?: string }>;
+  }>;
+}): UpcomingMeetingForNote | null => {
+  const people = entities.filter((entity) => entity.type === 'person');
+  const target = entities.find((entity) => entity.id === targetId);
+  const candidates = target
+    ? target.type === 'person'
+      ? [{ person: target, linked: true }]
+      : []
+    : people
+        .filter((person) => content.includes(`@${person.name}`))
+        .map((person) => ({ person, linked: false }));
+  for (const { person, linked } of candidates) {
+    const event = events.find((candidate) =>
+      candidate.attendees.some((attendee) =>
+        sameName(attendee.name, person.name),
+      ),
+    );
+    if (event) {
+      return {
+        title: event.title || 'Meeting',
+        startDate: event.start ?? event.startDate ?? '',
+        personId: person.id,
+        personName: person.name,
+        linked,
+      };
+    }
+  }
+  return null;
 };
 
 export const toggleMarkdownTask = (text: string, taskIndex: number): string => {
@@ -350,7 +482,7 @@ export function extractNoteTitleAndBlocks(
   };
 }
 
-export const NotesView = ({ initialNoteId }: Props) => {
+export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(
     initialNoteId || null,
@@ -360,7 +492,8 @@ export const NotesView = ({ initialNoteId }: Props) => {
   const [calendarEvents, setCalendarEvents] = useState<
     Array<{
       title: string;
-      startDate: string;
+      start?: string;
+      startDate?: string;
       attendees: Array<{ name?: string; email?: string }>;
     }>
   >([]);
@@ -506,7 +639,8 @@ export const NotesView = ({ initialNoteId }: Props) => {
           end: nextWeek,
         })) as Array<{
           title: string;
-          startDate: string;
+          start?: string;
+          startDate?: string;
           attendees: Array<{ name?: string; email?: string }>;
         }>;
         if (Array.isArray(events)) {
@@ -608,9 +742,7 @@ export const NotesView = ({ initialNoteId }: Props) => {
     [notes, selectedNoteId],
   );
 
-  const [availableTasks, setAvailableTasks] = useState<
-    Array<{ id: string; title: string; status: 'active' | 'completed' }>
-  >([]);
+  const [availableTasks, setAvailableTasks] = useState<NoteTaskRef[]>([]);
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -624,6 +756,7 @@ export const NotesView = ({ initialNoteId }: Props) => {
             (t as unknown as { status?: string }).status === 'completed'
               ? ('completed' as const)
               : ('active' as const),
+          ...taskNoteSource(t.entity?.metadata),
         }));
         setAvailableTasks(mapped);
         return mapped;
@@ -640,10 +773,11 @@ export const NotesView = ({ initialNoteId }: Props) => {
         setBlocks((prevBlocks) => {
           let changed = false;
           const next = prevBlocks.map((b) => {
-            if (b.type === 'task') {
-              const matching = updatedTasks.find(
-                (t) =>
-                  t.title.toLowerCase().trim() === b.text.toLowerCase().trim(),
+            if (b.type === 'task' && loadedNoteIdRef.current) {
+              const matching = findNoteTask(
+                updatedTasks,
+                loadedNoteIdRef.current,
+                b.text,
               );
               if (matching) {
                 const isCompleted = matching.status === 'completed';
@@ -675,6 +809,12 @@ export const NotesView = ({ initialNoteId }: Props) => {
       const lines = content.split('\n');
       let count = 0;
       const targetEntity = entities.find((e) => e.id === targetId);
+      const noteTaskTitles = new Set(
+        lines.flatMap((line) => {
+          const title = noteTaskLineTitle(line);
+          return title ? [title.toLowerCase()] : [];
+        }),
+      );
 
       for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
@@ -694,8 +834,12 @@ export const NotesView = ({ initialNoteId }: Props) => {
           const text = (taskMatch[2] || taskMatch[4] || '').trim();
           if (!isValidTaskTitle(text)) continue;
           const sourceNoteLineId = `${noteId}:line:${lineIndex}`;
-          const matching = availableTasks.find(
-            (t) => t.title.toLowerCase().trim() === text.toLowerCase().trim(),
+          const matching = findNoteTask(
+            availableTasks,
+            noteId,
+            text,
+            sourceNoteLineId,
+            noteTaskTitles,
           );
           try {
             const taskId = await saveTask({
@@ -821,10 +965,6 @@ export const NotesView = ({ initialNoteId }: Props) => {
               e.type === 'person' &&
               e.name.toLowerCase().includes(query.trim().toLowerCase()),
           );
-          if (match && !editTargetId) {
-            setEditTargetId(match.id);
-            setEditType('person');
-          }
           return match ? `${prefix}@${match.name} ` : `${prefix}@${query} `;
         },
       );
@@ -839,10 +979,6 @@ export const NotesView = ({ initialNoteId }: Props) => {
               e.type === 'project' &&
               e.name.toLowerCase().includes(query.trim().toLowerCase()),
           );
-          if (match && !editTargetId) {
-            setEditTargetId(match.id);
-            setEditType('project');
-          }
           return match ? `${prefix}#${match.name} ` : `${prefix}#${query} `;
         },
       );
@@ -1760,11 +1896,6 @@ export const NotesView = ({ initialNoteId }: Props) => {
         text: cleanText ? `${cleanText} ${insert}` : insert,
       };
       updateBlocks(next);
-      if (!editTargetId) {
-        setEditTargetId(person.id);
-        setEditType('person');
-        triggerAutoSave({ targetId: person.id, noteType: 'person' }, true);
-      }
       setSlashMenu(INITIAL_SLASH_MENU);
       requestFocus(blockIndex, 'end');
     },
@@ -1783,11 +1914,6 @@ export const NotesView = ({ initialNoteId }: Props) => {
         text: cleanText ? `${cleanText} ${insert}` : insert,
       };
       updateBlocks(next);
-      if (!editTargetId) {
-        setEditTargetId(project.id);
-        setEditType('project');
-        triggerAutoSave({ targetId: project.id, noteType: 'project' }, true);
-      }
       setSlashMenu(INITIAL_SLASH_MENU);
       requestFocus(blockIndex, 'end');
     },
@@ -1894,11 +2020,6 @@ export const NotesView = ({ initialNoteId }: Props) => {
               triggerAutoSave({ content: nextMarkdown });
               return next;
             });
-            if (!editTargetId) {
-              setEditTargetId(match.id);
-              setEditType('person');
-              triggerAutoSave({ targetId: match.id, noteType: 'person' }, true);
-            }
             setSlashMenu(INITIAL_SLASH_MENU);
             return;
           }
@@ -1928,14 +2049,6 @@ export const NotesView = ({ initialNoteId }: Props) => {
               triggerAutoSave({ content: nextMarkdown });
               return next;
             });
-            if (!editTargetId) {
-              setEditTargetId(match.id);
-              setEditType('project');
-              triggerAutoSave(
-                { targetId: match.id, noteType: 'project' },
-                true,
-              );
-            }
             setSlashMenu(INITIAL_SLASH_MENU);
             return;
           }
@@ -2042,10 +2155,10 @@ export const NotesView = ({ initialNoteId }: Props) => {
           // Only sync task status to the Tasks ledger if it's an explicit task!
           // Checklists stay strictly inside the note.
           if (block.type === 'task' && selectedNoteId) {
-            const matching = availableTasks.find(
-              (t) =>
-                t.title.toLowerCase().trim() ===
-                block.text.toLowerCase().trim(),
+            const matching = findNoteTask(
+              availableTasks,
+              selectedNoteId,
+              block.text,
             );
             void saveTask({
               id: matching?.id,
@@ -2548,9 +2661,7 @@ export const NotesView = ({ initialNoteId }: Props) => {
         setEditContent(nextContent);
         triggerAutoSave({ content: nextContent }, true);
         if (selectedNoteId) {
-          const matching = availableTasks.find(
-            (t) => t.title.toLowerCase().trim() === text.toLowerCase().trim(),
-          );
+          const matching = findNoteTask(availableTasks, selectedNoteId, text);
           void saveTask({
             id: matching?.id,
             title: text,
@@ -2642,41 +2753,18 @@ export const NotesView = ({ initialNoteId }: Props) => {
     }
   };
 
-  // Ambient whisper detection: check if linked person OR mentioned person has an upcoming meeting
-  const ambientUpcomingMeeting = useMemo(() => {
-    const targetEntity = entities.find((e) => e.id === editTargetId);
-    let matchedName =
-      targetEntity?.type === 'person' ? targetEntity.name : null;
-
-    if (!matchedName) {
-      // Scan content for @mentions of known people
-      for (const ent of entities) {
-        if (ent.type === 'person' && editContent.includes(`@${ent.name}`)) {
-          matchedName = ent.name;
-          break;
-        }
-      }
-    }
-
-    if (!matchedName) return null;
-
-    const targetNameLower = matchedName.toLowerCase();
-    for (const event of calendarEvents) {
-      const matchesAttendee = event.attendees.some(
-        (a) =>
-          a.name?.toLowerCase().includes(targetNameLower) ||
-          a.email?.toLowerCase().includes(targetNameLower),
-      );
-      if (matchesAttendee) {
-        return {
-          title: event.title || 'Meeting',
-          startDate: event.startDate,
-          personName: matchedName,
-        };
-      }
-    }
-    return null;
-  }, [editTargetId, editContent, entities, calendarEvents]);
+  // The card next to the note only says what meeting prep actually does: it
+  // offers unchecked checklist items from notes linked to an invited person.
+  const ambientUpcomingMeeting = useMemo(
+    () =>
+      findUpcomingMeetingForNote({
+        targetId: editTargetId,
+        content: editContent,
+        entities,
+        events: calendarEvents,
+      }),
+    [editTargetId, editContent, entities, calendarEvents],
+  );
 
   const handleInsertMeetingAgenda = () => {
     if (!ambientUpcomingMeeting) return;
@@ -2805,7 +2893,9 @@ export const NotesView = ({ initialNoteId }: Props) => {
         >
           {filteredNotes.length === 0 ? (
             <div className="p-6 text-center text-pro-text-muted text-[13px]">
-              No notes found
+              {searchQuery.trim()
+                ? 'No notes match your search'
+                : 'Your notes will appear here'}
             </div>
           ) : (
             filteredNotes.map((note) => {
@@ -2946,6 +3036,20 @@ export const NotesView = ({ initialNoteId }: Props) => {
 
               {/* Header Actions */}
               <div className="flex items-center gap-1 shrink-0">
+                <NoteMeetingMenu
+                  title={getDisplayTitle({
+                    title: editTitle,
+                    content: editContent,
+                    noteType: editType,
+                    targetName: targetEntity?.name ?? null,
+                  })}
+                  content={editContent}
+                  personName={
+                    targetEntity?.type === 'person' ? targetEntity.name : null
+                  }
+                  events={calendarEvents}
+                  onStartMeeting={onStartMeeting}
+                />
                 <button
                   type="button"
                   onClick={() => (askOpen ? setAskOpen(false) : openAskPluto())}
@@ -4094,18 +4198,41 @@ export const NotesView = ({ initialNoteId }: Props) => {
                           })}
                         </p>
                         <div className="mt-3 pt-2.5 border-t border-pro-accent/20 space-y-2">
-                          <p className="text-[11px] text-pro-text-muted leading-relaxed">
-                            These notes will automatically be available in
-                            Meeting Prep for {ambientUpcomingMeeting.personName}
-                            .
-                          </p>
-                          <button
-                            type="button"
-                            onClick={handleInsertMeetingAgenda}
-                            className="w-full py-1 px-2 rounded bg-pro-accent/10 hover:bg-pro-accent/20 text-pro-accent text-[11px] font-medium transition-colors cursor-pointer text-center"
-                          >
-                            + Insert Agenda Block
-                          </button>
+                          {ambientUpcomingMeeting.linked ? (
+                            <>
+                              <p className="text-[11px] text-pro-text-muted leading-relaxed">
+                                {ambientUpcomingMeeting.personName} is invited.
+                                Unchecked checklist items in this note will be
+                                offered in this meeting’s prep.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={handleInsertMeetingAgenda}
+                                className="w-full py-1 px-2 rounded bg-pro-accent/10 hover:bg-pro-accent/20 text-pro-accent text-[11px] font-medium transition-colors cursor-pointer text-center"
+                              >
+                                + Insert Agenda Block
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-[11px] text-pro-text-muted leading-relaxed">
+                                {ambientUpcomingMeeting.personName} is invited.
+                                Link this note to them to offer its checklist
+                                items in this meeting’s prep.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleTargetChange(
+                                    ambientUpcomingMeeting.personId,
+                                  )
+                                }
+                                className="w-full py-1 px-2 rounded bg-pro-accent/10 hover:bg-pro-accent/20 text-pro-accent text-[11px] font-medium transition-colors cursor-pointer text-center"
+                              >
+                                Link to {ambientUpcomingMeeting.personName}
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     )}
@@ -4127,8 +4254,9 @@ export const NotesView = ({ initialNoteId }: Props) => {
                           {targetEntity.name}
                         </p>
                         <p className="text-[11px] text-pro-text-muted mt-2 leading-relaxed">
-                          Tasks and notes associated here are referenced during
-                          Ask Pluto conversations and Meeting Prep briefs.
+                          {targetEntity.type === 'person'
+                            ? `When ${targetEntity.name} is invited to a meeting, unchecked checklist items from this note are offered in its prep.`
+                            : `Tasks written in this note are filed under ${targetEntity.name}.`}
                         </p>
                       </div>
                     )}
@@ -4149,34 +4277,38 @@ export const NotesView = ({ initialNoteId }: Props) => {
                   }}
                   onInsertMarkdown={insertAnswerIntoNote}
                   onAddTasks={addSuggestedTasks}
+                  personName={
+                    targetEntity?.type === 'person' ? targetEntity.name : null
+                  }
                 />
               ) : null}
             </div>
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-            <FileText
-              size={36}
-              className="text-pro-text-muted/40 mb-3"
-              aria-hidden="true"
-            />
-            <h2 className="text-[16px] font-medium text-pro-text-main">
-              No note selected
-            </h2>
-            <p className="text-[13px] text-pro-text-muted mt-1 max-w-sm">
-              Press{' '}
-              <kbd className="px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 font-mono text-xs">
-                ⌘N
-              </kbd>{' '}
-              to create a note, or select an existing note from the list.
-            </p>
-            <button
-              type="button"
-              onClick={() => handleCreateNote('general')}
-              className="mt-4 px-3.5 py-1.5 bg-pro-accent text-white dark:text-black rounded-md font-medium text-[13px] hover:opacity-90 cursor-pointer"
-            >
-              Create Note
-            </button>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            <div className="my-auto">
+              <EmptyCanvas
+                kind="notes"
+                title={
+                  notes.length === 0
+                    ? 'A page for whatever’s on your mind'
+                    : 'No note selected'
+                }
+                description={
+                  notes.length === 0
+                    ? 'Save a thought, sketch an agenda, or make a little space to think.'
+                    : 'Pick a note from the list to keep writing, or start a new one.'
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() => handleCreateNote('general')}
+                  className="empty-canvas-action"
+                >
+                  Create Note
+                </button>
+              </EmptyCanvas>
+            </div>
           </div>
         )}
       </main>

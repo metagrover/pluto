@@ -16,6 +16,7 @@ import {
   findReminderNoteBlock,
   nativeContinuationEditPath,
 } from '../../utils/meetingNotesDocument';
+import { MEETING_USER_NOTES_EDIT_PATH } from '../../utils/meetingNotesEditRebase';
 import { meetingTimestamp } from '../../utils/meetingOrdering';
 import { getTranscriptSegmentStartTime } from '../../utils/transcript';
 import './notes/notes.css';
@@ -265,6 +266,32 @@ const toggleMarkdownTask = (text: string, taskIndex: number): string => {
   );
 };
 
+/** A generated line the user cleared is deleted from view; its original stays in the edit history. */
+const isShownBlock = (block: MeetingNotesBlock): boolean =>
+  !(
+    block.path &&
+    !block.nativeContinuation &&
+    block.blockType !== 'action' &&
+    !block.text.trim() &&
+    block.originalText.trim()
+  );
+
+const savedUserNotes = (meeting: Meeting): string => {
+  try {
+    const edits = meeting.user_edits_json
+      ? (JSON.parse(meeting.user_edits_json) as Record<
+          string,
+          { edited?: unknown }
+        >)
+      : {};
+    const edited = edits[MEETING_USER_NOTES_EDIT_PATH]?.edited;
+    if (typeof edited === 'string') return edited;
+  } catch {
+    // Unreadable edits fall back to the notes typed during the meeting.
+  }
+  return meeting.user_notes ?? '';
+};
+
 const InlineEditableText = ({
   meetingId,
   path,
@@ -278,11 +305,21 @@ const InlineEditableText = ({
   autoFocus = false,
   onSaved,
   entities = [],
+  placeholder,
+  allowEmpty = false,
 }: {
   meetingId: string | number;
   path?: string;
   originalText: string;
   text: string;
+  /** Shown, faintly, when the block is empty. */
+  placeholder?: string;
+  /**
+   * Whether clearing the text saves it as empty (removing the line). When
+   * false, an empty block gets its text back only once the user leaves it,
+   * never while they are still typing.
+   */
+  allowEmpty?: boolean;
   asHeading?: boolean;
   onCreateNativeContinuation?: () => Promise<void>;
   onSaveNativeContinuation?: (text: string) => Promise<void>;
@@ -343,11 +380,10 @@ const InlineEditableText = ({
       const ta = textareaRef.current;
       if (!ta) return;
       ta.focus();
-      if (pendingCaretRef.current !== null) {
-        const pos = pendingCaretRef.current;
-        pendingCaretRef.current = null;
-        ta.setSelectionRange(pos, pos);
-      }
+      // Without a click position, start at the end, as in any document.
+      const pos = pendingCaretRef.current ?? ta.value.length;
+      pendingCaretRef.current = null;
+      ta.setSelectionRange(pos, pos);
     }
   }, [editing, asHeading]);
 
@@ -375,7 +411,7 @@ const InlineEditableText = ({
   const save = (newValue: string): Promise<void> => {
     const next = newValue.trim();
     clearSaveTimer();
-    if (!next && !onSaveNativeContinuation) {
+    if (!next && !onSaveNativeContinuation && !allowEmpty) {
       setDraft(text);
       draftRef.current = text;
       reportSaveState('saved');
@@ -463,7 +499,9 @@ const InlineEditableText = ({
     if (!editing) return;
     const next = draft.trim();
     if (next === lastSavedValueRef.current) return;
-    if (!next && onSaveNativeContinuation) return;
+    // An emptied block waits until the user leaves it, so clearing a line
+    // and retyping it never has the old text spring back mid-edit.
+    if (!next && !allowEmpty) return;
     reportSaveState('dirty');
     clearSaveTimer();
     saveTimerRef.current = setTimeout(() => {
@@ -471,7 +509,7 @@ const InlineEditableText = ({
       void save(draftRef.current);
     }, 650);
     return clearSaveTimer;
-  }, [draft, editing, onSaveNativeContinuation]);
+  }, [draft, editing, allowEmpty]);
 
   const beginEditing = () => {
     editSessionStartRef.current = draftRef.current;
@@ -645,7 +683,11 @@ const InlineEditableText = ({
             });
           }}
         >
-          {renderMarkdown()}
+          {placeholder && !draft.trim() ? (
+            <p className="meeting-note-placeholder">{placeholder}</p>
+          ) : (
+            renderMarkdown()
+          )}
         </div>
         <button
           type="button"
@@ -766,8 +808,9 @@ const InlineEditableText = ({
             ? 'Edit section heading'
             : text
               ? `Edit item: ${text}`
-              : 'Edit new item'
+              : placeholder || 'Edit new item'
         }
+        placeholder={placeholder}
         value={draft}
         onChange={(event) => {
           let nextVal = event.target.value;
@@ -1208,6 +1251,11 @@ const NoteBlock = ({
             autoFocus={autoFocus}
             onSaved={onSaved}
             entities={entities}
+            allowEmpty={
+              Boolean(block.path) &&
+              !block.nativeContinuation &&
+              block.blockType !== 'action'
+            }
           />
         )}
         {block.assignee || (block.due && !reminderControls) ? (
@@ -1645,7 +1693,7 @@ export const MeetingNotesDocument = ({
                   onSaved={onDocumentChanged}
                 />
                 <div className="meeting-notes-section__content">
-                  {section.blocks.map((block) => (
+                  {section.blocks.filter(isShownBlock).map((block) => (
                     <NoteBlock
                       key={block.id}
                       block={block}
@@ -1730,6 +1778,40 @@ export const MeetingNotesDocument = ({
               </section>
             );
           })}
+        {/* Your own notes continue the document as ordinary text, with no
+            heading of their own. Saved as an edit over the notes typed
+            during the meeting, so the summary's inputs never change. */}
+        <section
+          className="meeting-notes-section meeting-notes-section--scratchpad"
+          data-notes-section="scratchpad"
+          aria-label="Your notes"
+          onMouseDown={(event) => {
+            // Clicking the blank space below the summary starts writing at
+            // the end of your notes, as in any document.
+            if (event.target !== event.currentTarget) return;
+            event.preventDefault();
+            const section = event.currentTarget;
+            const textarea = section.querySelector('textarea');
+            if (textarea) textarea.focus();
+            else
+              section
+                .querySelector<HTMLButtonElement>('[data-edit-item]')
+                ?.click();
+          }}
+        >
+          <InlineEditableText
+            key={meeting.id}
+            meetingId={meeting.id}
+            path={MEETING_USER_NOTES_EDIT_PATH}
+            originalText={meeting.user_notes ?? ''}
+            text={savedUserNotes(meeting)}
+            placeholder="Write anything…"
+            allowEmpty
+            onSaveStateChange={handleSaveStateChange}
+            onSaved={onDocumentChanged}
+            entities={entities}
+          />
+        </section>
         {deletedContinuation ? (
           <output className="meeting-note-undo" aria-live="polite">
             <span>Item deleted</span>

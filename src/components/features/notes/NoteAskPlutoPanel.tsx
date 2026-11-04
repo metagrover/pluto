@@ -35,6 +35,8 @@ export interface NoteAskPlutoSelection {
 }
 
 interface NoteAskPlutoPanelProps {
+  /** The person the note is linked to; their recent meetings are in scope. */
+  personName?: string | null;
   noteId: string;
   selection: NoteAskPlutoSelection | null;
   onClearSelection: () => void;
@@ -86,6 +88,7 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
   onClose,
   onInsertMarkdown,
   onAddTasks,
+  personName,
 }) => {
   const [messages, setMessages] = useState<PanelMessage[]>([]);
   const [query, setQuery] = useState('');
@@ -275,7 +278,11 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
         </span>
         <div className="note-ask-panel__heading">
           <span>Ask Pluto</span>
-          <span>About this note</span>
+          <span>
+            {personName
+              ? `About this note and your meetings with ${personName}`
+              : 'About this note'}
+          </span>
         </div>
         <button
           type="button"

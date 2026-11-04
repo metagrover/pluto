@@ -318,7 +318,18 @@ export const savePersonalTask = (payload: SaveTaskInput): string =>
       );
     }
     let existing = input.id ? requireTask(input.id) : undefined;
-    if (!existing && input.sourceNoteLineId) {
+    // A note task only ever matches a task from the same note. Matching by
+    // title across all tasks used to attach note lines to unrelated meeting
+    // action items with the same wording.
+    if (!existing && input.sourceNoteId && input.title) {
+      const match = store.db
+        .prepare(
+          "SELECT id FROM entities WHERE type = 'action_item' AND json_extract(metadata, '$.source_note_id') = ? AND lower(trim(name)) = lower(trim(?))",
+        )
+        .get(input.sourceNoteId, input.title) as { id: string } | undefined;
+      if (match) existing = requireTask(match.id);
+    }
+    if (!existing && input.sourceNoteLineId && !input.sourceNoteId) {
       const match = store.db
         .prepare(
           "SELECT id FROM entities WHERE type = 'action_item' AND json_extract(metadata, '$.source_note_line_id') = ?",
@@ -328,7 +339,7 @@ export const savePersonalTask = (payload: SaveTaskInput): string =>
         existing = requireTask(match.id);
       }
     }
-    if (!existing && input.title) {
+    if (!existing && input.title && !input.sourceNoteId) {
       const nameMatches = store.db
         .prepare(
           "SELECT id FROM entities WHERE type = 'action_item' AND lower(trim(name)) = lower(trim(?))",

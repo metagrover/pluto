@@ -30,11 +30,23 @@ describe('notesStore', () => {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       CREATE TABLE IF NOT EXISTS person_aliases (
-        person_id TEXT NOT NULL,
-        alias TEXT NOT NULL,
-        PRIMARY KEY (person_id, alias)
+        person_id TEXT PRIMARY KEY NOT NULL,
+        canonical_id TEXT NOT NULL,
+        moved_aliases_json TEXT,
+        active INTEGER DEFAULT 1 NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        restored_at TEXT
       );
     `);
+    // Attendee email links exactly as the app creates them.
+    db.exec(
+      readFileSync(
+        path.resolve(__dirname, '../../drizzle/0013_prep_attendee_links.sql'),
+        'utf8',
+      )
+        .split('--> statement-breakpoint')
+        .join('\n'),
+    );
     db.exec(notesMigration);
   });
 
@@ -119,8 +131,8 @@ describe('notesStore', () => {
       'INSERT INTO entities (id, type, name, normalized_name) VALUES (?, ?, ?, ?)',
     ).run('sarah-id', 'person', 'Sarah Connor', 'sarah connor');
     db.prepare(
-      'INSERT INTO person_aliases (person_id, alias) VALUES (?, ?)',
-    ).run('sarah-id', 'sarah@sky.net');
+      "INSERT INTO prep_attendee_links (attendee_key, person_id, source) VALUES (?, ?, 'automatic')",
+    ).run('email:sarah@sky.net', 'sarah-id');
 
     store.saveNote({
       title: 'Notes with Sarah',
@@ -141,6 +153,101 @@ describe('notesStore', () => {
     expect(items[1].checked).toBe(true);
     expect(items[2].text).toBe('Align on Q4 hire');
     expect(items[2].checked).toBe(false);
+    expect(items.map((item) => item.lineIndex)).toEqual([0, 1, 2]);
+    // The email alone finds the same note.
+    expect(store.getNotesForAttendees(['Sarah@Sky.net'], [])).toHaveLength(3);
+  });
+
+  it('finds attendee notes linked to a person who was merged into them', () => {
+    const store = createNotesStore(db);
+    db.prepare(
+      'INSERT INTO entities (id, type, name, normalized_name) VALUES (?, ?, ?, ?)',
+    ).run('sam', 'person', 'Sam Rivera', 'sam rivera');
+    db.prepare(
+      'INSERT INTO entities (id, type, name, normalized_name) VALUES (?, ?, ?, ?)',
+    ).run('sam-old', 'person', 'Sammy', 'sammy');
+    db.prepare(
+      'INSERT INTO person_aliases (person_id, canonical_id) VALUES (?, ?)',
+    ).run('sam-old', 'sam');
+    db.prepare(
+      "INSERT INTO prep_attendee_links (attendee_key, person_id, source) VALUES ('email:sam@example.com', 'sam', 'user')",
+    ).run();
+    store.saveNote({
+      title: 'Old note',
+      content: '- [ ] Ask about pricing',
+      noteType: 'person',
+      targetId: 'sam-old',
+    });
+    expect(
+      store
+        .getNotesForAttendees(['sam@example.com'], [])
+        .map((item) => item.text),
+    ).toEqual(['Ask about pricing']);
+  });
+
+  it('ticks a prep checklist item in its note, even after the line moved', () => {
+    const store = createNotesStore(db);
+    const note = store.saveNote({
+      title: 'Notes with Sarah',
+      content: '- [ ] Review billing contract\n- [ ] Align on Q4 hire',
+      noteType: 'general',
+    });
+
+    expect(
+      store.setChecklistItem({
+        noteId: note.id,
+        lineIndex: 1,
+        text: 'Align on Q4 hire',
+        checked: true,
+      }),
+    ).toMatchObject({ checked: true, lineIndex: 1 });
+    expect(store.getNote(note.id)?.content).toBe(
+      '- [ ] Review billing contract\n- [x] Align on Q4 hire',
+    );
+
+    // A line was added above; the item is found by its unique text.
+    store.saveNote({
+      id: note.id,
+      title: 'Notes with Sarah',
+      content: 'Agenda\n- [ ] Review billing contract\n- [x] Align on Q4 hire',
+    });
+    store.setChecklistItem({
+      noteId: note.id,
+      lineIndex: 0,
+      text: 'Review billing contract',
+      checked: true,
+    });
+    expect(store.getNote(note.id)?.content).toBe(
+      'Agenda\n- [x] Review billing contract\n- [x] Align on Q4 hire',
+    );
+  });
+
+  it('refuses to guess when a prep checklist item changed in its note', () => {
+    const store = createNotesStore(db);
+    const note = store.saveNote({
+      title: 'Twice',
+      content: '- [ ] Follow up\n- [ ] Follow up',
+      noteType: 'general',
+    });
+    expect(() =>
+      store.setChecklistItem({
+        noteId: note.id,
+        lineIndex: 5,
+        text: 'Follow up',
+        checked: true,
+      }),
+    ).toThrow('This item changed in its note');
+    expect(() =>
+      store.setChecklistItem({
+        noteId: note.id,
+        lineIndex: 0,
+        text: 'Renamed item',
+        checked: true,
+      }),
+    ).toThrow('This item changed in its note');
+    expect(store.getNote(note.id)?.content).toBe(
+      '- [ ] Follow up\n- [ ] Follow up',
+    );
   });
 
   it('keeps notes_fts in sync via triggers and searches notes', () => {

@@ -83,7 +83,7 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
     vi.clearAllMocks();
   });
 
-  it('displays Running 1:1 Notes with note title and snippet in PersonDossier', async () => {
+  it('lists 1:1 notes with title and snippet in the person timeline', async () => {
     const onOpenNote = vi.fn();
 
     await act(async () => {
@@ -98,10 +98,10 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
       );
     });
 
-    expect(container.textContent).toContain('Running 1:1 Notes');
+    expect(container.textContent).toContain('Meetings and notes');
     expect(container.textContent).toContain('1:1 with Alice');
     expect(container.textContent).toContain(
-      'Review quarterly performance Plan hiring goals',
+      'Note · Review quarterly performance · Plan hiring goals',
     );
 
     const openBtn = container.querySelector(
@@ -158,7 +158,7 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
       );
     });
 
-    expect(container.textContent).toContain('No running 1:1 notes yet');
+    expect(container.textContent).toContain('No meetings or notes yet');
 
     const addNoteBtn = container.querySelector(
       'button[aria-label="+ 1:1 Note for Alice Smith"]',
@@ -177,5 +177,47 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
       }),
     );
     expect(onOpenNote).toHaveBeenCalledWith('note-alice-new');
+  });
+
+  it('interleaves meetings and notes newest first', async () => {
+    await act(async () => {
+      root.render(
+        <PersonDossier
+          detail={{
+            ...personDetail,
+            meetings: [
+              {
+                id: 'm-new',
+                title: 'Alice / me 1:1',
+                started_at: '2026-10-30T10:00:00.000Z',
+                created_at: null,
+                duration_seconds: 1800,
+                context: null,
+                evidence: 'confirmed',
+              },
+              {
+                id: 'm-old',
+                title: 'Kickoff',
+                started_at: '2026-10-01T10:00:00.000Z',
+                created_at: null,
+                duration_seconds: 1800,
+                context: null,
+                evidence: 'confirmed',
+              },
+            ],
+          }}
+          personNotes={sampleNotes}
+          onBack={() => {}}
+          onOpenMeeting={() => {}}
+          onOpenNote={() => {}}
+        />,
+      );
+    });
+    const rows = [
+      ...container.querySelectorAll(
+        '#person-meetings .person-dossier__meetings > button',
+      ),
+    ].map((row) => row.querySelector('strong')?.textContent);
+    expect(rows).toEqual(['Alice / me 1:1', '1:1 with Alice', 'Kickoff']);
   });
 });

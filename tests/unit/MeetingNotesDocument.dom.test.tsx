@@ -267,6 +267,7 @@ describe('MeetingNotesDocument', () => {
     const sectionHeadings = Array.from(
       container.querySelectorAll('[data-notes-section] > h2'),
     ).map((heading) => heading.textContent?.trim());
+    // Your own notes continue the document without a heading of their own.
     expect(sectionHeadings).toEqual([
       'Decisions & next steps',
       'Documentation architecture',
@@ -1473,5 +1474,147 @@ describe('MeetingNotesDocument', () => {
     const textarea = await openBlockEditor('Use docs as code.');
     const nextValue = await pressEnterAt(textarea!, 4);
     expect(nextValue).toBe('Use docs as code.');
+  });
+
+  const userNotesEditor = () =>
+    container.querySelector<HTMLElement>('[aria-label="Your notes"]');
+
+  it('continues the document with your notes, editable like any block', async () => {
+    vi.useFakeTimers();
+    await act(async () => renderDocument());
+    const notes = userNotesEditor()!;
+    expect(notes.textContent).toContain('Keep the migration reversible.');
+    expect(notes.querySelector('h2')).toBeNull();
+
+    const preview = notes.querySelector<HTMLDivElement>(
+      '.meeting-markdown-preview',
+    )!;
+    await act(async () => {
+      preview.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    const textarea = notes.querySelector<HTMLTextAreaElement>('textarea')!;
+    await changeTextarea(
+      textarea,
+      'Keep the migration reversible.\n\nAsk Maya about CI.',
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(650));
+    expect(invoke).toHaveBeenCalledWith('SAVE_USER_EDIT', {
+      meetingId: meeting.id,
+      path: 'user_notes',
+      original: 'Keep the migration reversible.',
+      edited: 'Keep the migration reversible.\n\nAsk Maya about CI.',
+    });
+  });
+
+  it('offers an empty line to write in when there are no notes yet', async () => {
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={{ ...meeting, user_notes: '' }}
+          model={model}
+          transcriptSegments={transcript}
+          onDocumentChanged={vi.fn()}
+        />,
+      ),
+    );
+    expect(userNotesEditor()?.textContent).toContain('Write anything…');
+  });
+
+  it('shows notes added after the meeting instead of the original', async () => {
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={{
+            ...meeting,
+            user_edits_json: JSON.stringify({
+              user_notes: {
+                original: 'Keep the migration reversible.',
+                edited: 'Added later',
+                edited_at: '2026-08-20T00:00:00.000Z',
+              },
+            }),
+          }}
+          model={model}
+          transcriptSegments={transcript}
+          onDocumentChanged={vi.fn()}
+        />,
+      ),
+    );
+    expect(userNotesEditor()?.textContent).toContain('Added later');
+    expect(userNotesEditor()?.textContent).not.toContain('reversible');
+  });
+
+  it('never brings cleared text back while you are still typing', async () => {
+    vi.useFakeTimers();
+    await act(async () => renderDocument());
+    const textarea = (await openBlockEditor(
+      'Markdown will live beside the code.',
+    ))!;
+    await changeTextarea(textarea, '');
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    expect(textarea.value).toBe('');
+  });
+
+  it('keeps a cleared decision empty while you are still typing', async () => {
+    vi.useFakeTimers();
+    await act(async () => renderDocument());
+    const textarea = (await openBlockEditor('Use docs as code.'))!;
+    await changeTextarea(textarea, '');
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    expect(textarea.value).toBe('');
+  });
+
+  it('deletes a cleared summary line once you leave it', async () => {
+    vi.useFakeTimers();
+    await act(async () => renderDocument());
+    const textarea = (await openBlockEditor(
+      'Markdown will live beside the code.',
+    ))!;
+    await changeTextarea(textarea, '');
+    await act(async () => {
+      textarea.blur();
+    });
+    expect(invoke).toHaveBeenCalledWith('SAVE_USER_EDIT', {
+      meetingId: meeting.id,
+      path: 'topic:0:point:0',
+      original: 'Markdown will live beside the code.',
+      edited: '',
+    });
+  });
+
+  it('hides a line the user deleted', async () => {
+    const deleted: MeetingNotesDocumentModel = {
+      ...model,
+      sections: model.sections.map((section) => ({
+        ...section,
+        blocks: section.blocks.map((block) =>
+          block.path === 'topic:0:point:0' ? { ...block, text: '' } : block,
+        ),
+      })),
+    };
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={meeting}
+          model={deleted}
+          transcriptSegments={transcript}
+          onDocumentChanged={vi.fn()}
+        />,
+      ),
+    );
+    expect(container.textContent).not.toContain('Markdown will live');
+    expect(container.textContent).toContain('Use docs as code.');
+  });
+
+  it('starts writing your notes when you click the space below the summary', async () => {
+    await act(async () => renderDocument());
+    const section = container.querySelector<HTMLElement>(
+      '[aria-label="Your notes"]',
+    )!;
+    expect(section.querySelector('textarea')).toBeNull();
+    await act(async () => {
+      section.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(section.querySelector('textarea')).not.toBeNull();
   });
 });

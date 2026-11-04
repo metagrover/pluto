@@ -38,8 +38,8 @@ describe('noteActionSync', () => {
   it('synchronizes task completion status to Notion-style task blocks in notes', () => {
     // Insert an action_item entity
     db.prepare(`
-      INSERT INTO entities (id, type, name, status)
-      VALUES ('task-1', 'action_item', 'Ship v1.0 release', 'active')
+      INSERT INTO entities (id, type, name, status, metadata)
+      VALUES ('task-1', 'action_item', 'Ship v1.0 release', 'active', '{"source_note_id":"note-1"}')
     `).run();
 
     // Insert a note containing [task: Ship v1.0 release]
@@ -73,8 +73,8 @@ describe('noteActionSync', () => {
 
   it('synchronizes task completion to checklist-style tasks with [task] tag', () => {
     db.prepare(`
-      INSERT INTO entities (id, type, name, status)
-      VALUES ('task-2', 'action_item', 'Prepare slides for demo', 'active')
+      INSERT INTO entities (id, type, name, status, metadata)
+      VALUES ('task-2', 'action_item', 'Prepare slides for demo', 'active', '{"source_note_id":"note-2"}')
     `).run();
 
     db.prepare(`
@@ -94,8 +94,8 @@ describe('noteActionSync', () => {
 
   it('synchronizes task title rename across notes', () => {
     db.prepare(`
-      INSERT INTO entities (id, type, name, status)
-      VALUES ('task-3', 'action_item', 'Send feedback to design team', 'active')
+      INSERT INTO entities (id, type, name, status, metadata)
+      VALUES ('task-3', 'action_item', 'Send feedback to design team', 'active', '{"source_note_id":"note-3"}')
     `).run();
 
     db.prepare(`
@@ -124,8 +124,8 @@ describe('noteActionSync', () => {
 
   it('ignores notes that do not reference the task', () => {
     db.prepare(`
-      INSERT INTO entities (id, type, name, status)
-      VALUES ('task-4', 'action_item', 'Fix edge case bug', 'active')
+      INSERT INTO entities (id, type, name, status, metadata)
+      VALUES ('task-4', 'action_item', 'Fix edge case bug', 'active', '{"source_note_id":"note-4"}')
     `).run();
 
     db.prepare(`
@@ -140,5 +140,52 @@ describe('noteActionSync', () => {
       .prepare('SELECT content FROM notes WHERE id = ?')
       .get('note-4') as { content: string };
     expect(note.content).toBe('- [ ] Plain todo item\n- [ ] Another item');
+  });
+
+  it('only updates the note a task came from', () => {
+    db.prepare(`
+      INSERT INTO entities (id, type, name, status, metadata)
+      VALUES ('note-task', 'action_item', 'Send deck', 'active', '{"source_note_id":"note-a"}')
+    `).run();
+    db.prepare(`
+      INSERT INTO notes (id, title, content, note_type)
+      VALUES ('note-a', 'A', '[task: Send deck]', 'general'),
+             ('note-b', 'B', '[task: Send deck]', 'general')
+    `).run();
+
+    expect(
+      syncActionCompletionToNotes(db, 'note-task', true).notesUpdated,
+    ).toBe(1);
+    const content = (id: string) =>
+      (
+        db.prepare('SELECT content FROM notes WHERE id = ?').get(id) as {
+          content: string;
+        }
+      ).content;
+    expect(content('note-a')).toBe('[task:done: Send deck]');
+    expect(content('note-b')).toBe('[task: Send deck]');
+
+    syncActionTitleToNotes(db, 'note-task', 'Send deck', 'Send the deck');
+    expect(content('note-a')).toBe('[task:done: Send the deck]');
+    expect(content('note-b')).toBe('[task: Send deck]');
+  });
+
+  it('never changes notes for a meeting action item with the same wording', () => {
+    db.prepare(`
+      INSERT INTO entities (id, type, name, status, metadata)
+      VALUES ('meeting-task', 'action_item', 'Send deck', 'active', '{"source_meeting_id":"m1"}')
+    `).run();
+    db.prepare(`
+      INSERT INTO notes (id, title, content, note_type)
+      VALUES ('note-c', 'C', '[task: Send deck]', 'general')
+    `).run();
+
+    expect(
+      syncActionCompletionToNotes(db, 'meeting-task', true).notesUpdated,
+    ).toBe(0);
+    expect(
+      syncActionTitleToNotes(db, 'meeting-task', 'Send deck', 'Other')
+        .notesUpdated,
+    ).toBe(0);
   });
 });

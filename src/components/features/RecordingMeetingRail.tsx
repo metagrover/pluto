@@ -9,7 +9,7 @@ import {
 import { getEntitiesByType, upsertEntity } from '../../api/knowledgeGraph';
 import { isGenericSpeakerLabel } from '../../utils/speakerReview';
 import { SearchSelect, type SearchSelectOption } from '../ui/SearchSelect';
-import { SavedMeetingPrep } from './MeetingPrepEditor';
+import { AttendeeNoteChecklist, SavedMeetingPrep } from './MeetingPrepEditor';
 import {
   RecordingCalendarSuggestion,
   type RecordingCalendarSuggestionProps,
@@ -343,10 +343,28 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
                 aria-label="Meeting preparation"
                 className="min-h-0 overflow-y-auto"
               >
-                <SavedMeetingPrep
-                  event={calendarEvent}
-                  onOpenMeeting={onOpenMeeting}
-                />
+                {calendarEvent ? (
+                  <SavedMeetingPrep
+                    event={calendarEvent}
+                    onOpenMeeting={onOpenMeeting}
+                  />
+                ) : (
+                  // Without a calendar event, prep is what's open with the
+                  // people in this meeting.
+                  <div className="p-1">
+                    <AttendeeNoteChecklist
+                      event={{
+                        attendees: participants.map((name) => ({ name })),
+                      }}
+                    />
+                    {participants.length ? null : (
+                      <p className="text-sm text-pro-text-muted">
+                        Add who you’re meeting with to see what’s open with
+                        them.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </section>

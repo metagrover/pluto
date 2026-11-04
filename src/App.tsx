@@ -113,6 +113,7 @@ import {
   loadSelectedMeetingDetail,
   mergeMeetingStatus,
 } from './services/selectedMeetingDetail';
+import type { MeetingStartContext } from './types/meetingStart';
 import type { AppTheme } from './types/theme';
 import { calendarAgendaWindow } from './utils/calendarAgenda';
 import { getCalendarRosterNames } from './utils/calendarRoster';
@@ -486,6 +487,7 @@ function App() {
   const startSessionRef = useRef<
     ((event?: CalendarEvent) => Promise<CaptureStartResult>) | null
   >(null);
+  const pendingStartRef = useRef<MeetingStartContext | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptSegment[]>(
     [],
   );
@@ -1466,7 +1468,11 @@ function App() {
       setZenVisible(true);
       setMeetingAskPlutoConversation([]);
       setSelectedMeetingId(null);
-      if (!meetingTitle && !activeCalendarEventRef.current) {
+      if (
+        !meetingTitle &&
+        !activeCalendarEventRef.current &&
+        !meetingTitleEditedRef.current
+      ) {
         setMeetingTitle('');
         setMeetingParticipants([]);
         setParticipantInput('');
@@ -1512,11 +1518,19 @@ function App() {
       return;
     }
 
+    // A meeting started from a person or a note carries its own title,
+    // people and notes; anything else starts blank.
+    const pending = pendingStartRef.current;
+    pendingStartRef.current = null;
     activeCalendarEventRef.current = null;
     setActiveCalendarEvent(null);
-    setMeetingTitle('');
-    setMeetingParticipants([]);
+    setMeetingTitle(pending?.title ?? '');
+    setMeetingParticipants(pending?.participants ?? []);
     setParticipantInput('');
+    if (pending) {
+      meetingTitleEditedRef.current = true;
+      if (pending.notes !== undefined) setCurrentNotes(pending.notes);
+    }
   };
 
   const handleFinalizationStarted = (meeting: RecordingFinalizationPreview) => {
@@ -1542,6 +1556,23 @@ function App() {
   const handleStartRecording = () => {
     if (startSessionRef.current) void startSessionRef.current();
   };
+  // Starts a meeting from a person ("Start 1:1") or a note ("Record now").
+  const handleStartMeetingWith = async (start: MeetingStartContext) => {
+    if (!startSessionRef.current || captureAction.command !== 'start') return;
+    pendingStartRef.current = start;
+    activeCalendarEventRef.current = null;
+    try {
+      const result = await startSessionRef.current();
+      if (!result.admitted) pendingStartRef.current = null;
+    } catch (error) {
+      pendingStartRef.current = null;
+      console.error('[Recording] Could not start the meeting', error);
+    }
+  };
+  const startRecordingFromEmptyState =
+    captureAction.enabled && captureAction.command === 'start'
+      ? handleStartRecording
+      : undefined;
   const handleReturnToRecording = () => {
     if (finalizingMeeting) {
       setZenVisible(false);
@@ -2582,6 +2613,9 @@ function App() {
                 onBack={handleBack}
                 backLabel={currentBackLabel}
                 onOpenPerson={handleOpenPerson}
+                onOpenMeeting={(meetingId) =>
+                  handleOpenMeeting(meetingId, { label: 'Back to meeting' })
+                }
               />
             ) : activeTab === 'hub' ? (
               <>
@@ -2602,6 +2636,7 @@ function App() {
                 <Dashboard
                   model={dashboardHome.model}
                   loading={dashboardHome.loading}
+                  onStartRecording={startRecordingFromEmptyState}
                   isRecording={isRecording}
                   setSelectedMeetingId={(id) => {
                     if (id != null) {
@@ -2637,6 +2672,11 @@ function App() {
             ) : activeTab === 'notes' ? (
               <NotesView
                 initialNoteId={selectedNoteId}
+                onStartMeeting={
+                  captureAction.command === 'start' && captureAction.enabled
+                    ? (start) => void handleStartMeetingWith(start)
+                    : undefined
+                }
                 onOpenTask={(id) => {
                   setSelectedTaskId(id);
                   setActiveTab('tasks');
@@ -2661,6 +2701,15 @@ function App() {
                     setSelectedNoteId(noteId);
                     setActiveTab('notes');
                   }}
+                  onStartMeeting={
+                    captureAction.command === 'start' && captureAction.enabled
+                      ? (person) =>
+                          void handleStartMeetingWith({
+                            title: `1:1 with ${person.name}`,
+                            participants: [person.name],
+                          })
+                      : undefined
+                  }
                   onOpenMeeting={(meetingId, personContext) =>
                     handleOpenMeeting(meetingId, {
                       personId: selectedPersonId,
@@ -2696,6 +2745,7 @@ function App() {
             ) : activeTab === 'meetings' ? (
               <AllMeetingsTab
                 meetings={safeMeetings}
+                onStartRecording={startRecordingFromEmptyState}
                 onOpenMeeting={(meetingId) =>
                   handleOpenMeeting(meetingId, { label: 'All meetings' })
                 }

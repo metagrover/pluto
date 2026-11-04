@@ -817,6 +817,8 @@ import { createMeetingContextProducer } from './intelligence/meetingContextProdu
 import { generateMid } from './intelligence/midGenerator';
 import { renderMidToMarkdown } from './intelligence/midRenderer';
 import {
+  NOTE_RELATED_MEETINGS,
+  type NoteRelatedMeeting,
   buildNoteAskPlutoPrompt,
   describeNoteAskPlutoFailure,
   generateWithMemoryFallback,
@@ -5207,6 +5209,12 @@ app.whenReady().then(async () => {
   ipcMain.handle('NOTES_FOR_ATTENDEES', (_event, { emails, names }) =>
     db.notesStore.getNotesForAttendees(emails || [], names || []),
   );
+  ipcMain.handle('NOTES_SET_CHECKLIST_ITEM', (_event, input) => {
+    const result = db.notesStore.setChecklistItem(input);
+    for (const window of BrowserWindow.getAllWindows())
+      window.webContents.send('NOTES_CHANGED');
+    return result;
+  });
   ipcMain.handle('NOTES_FOR_ENTITY', (_event, entityId) =>
     db.notesStore.getNotesForEntity(entityId),
   );
@@ -10886,7 +10894,43 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
       try {
         const settings = await getAllSettings(db);
         const provider = await getProvider(settings);
-        const prompt = buildNoteAskPlutoPrompt({ note, request });
+        // A note about a person can draw on recent meetings with them, each
+        // named in the prompt so answers say which meeting they came from.
+        const relatedMeetings: NoteRelatedMeeting[] = [];
+        if (note.targetId && note.noteType === 'person') {
+          const recent = (db.getPersonBriefing(note.targetId)?.meetings ?? [])
+            .filter((meeting) => meeting.evidence === 'confirmed')
+            .slice(0, 8);
+          for (const summary of recent) {
+            if (relatedMeetings.length >= NOTE_RELATED_MEETINGS) break;
+            const meeting = db.getMeeting(summary.id) as
+              | db.PersistedMeeting
+              | undefined;
+            if (!meeting) continue;
+            const evidence = buildMeetingNotesEvidenceDocument(
+              meeting,
+              db.getMeetingNotesIdentityProjection(meeting.id)
+                .speakerDisplayNames,
+            );
+            if (!evidence.hasUsableNotes) continue;
+            const date = summary.started_at || summary.created_at;
+            relatedMeetings.push({
+              title: summary.title,
+              date: date
+                ? new Date(date).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                  })
+                : null,
+              notes: evidence.notesText,
+            });
+          }
+        }
+        const prompt = buildNoteAskPlutoPrompt({
+          note,
+          request,
+          relatedMeetings,
+        });
         let streamed = false;
         const generationOptions = {
           signal: controller.signal,

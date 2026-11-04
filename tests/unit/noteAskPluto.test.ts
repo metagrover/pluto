@@ -91,6 +91,33 @@ describe('buildNoteAskPlutoPrompt', () => {
     expect(prompt).toContain('<selection>\nShip sync first.\n</selection>');
     expect(prompt).toContain('User: Summarize this note.');
   });
+
+  it('adds recent meetings with the person, named so answers can cite them', () => {
+    const prompt = buildNoteAskPlutoPrompt({
+      note,
+      request: { ...valid, intent: 'ask' } as never,
+      relatedMeetings: [
+        {
+          title: 'Maya / me 1:1',
+          date: 'Oct 30',
+          notes: 'Maya owns the roadmap.',
+        },
+        { title: 'Empty', date: null, notes: '   ' },
+        { title: 'Kickoff', date: 'Oct 1', notes: 'Scope agreed.' },
+        { title: 'Planning', date: 'Sep 20', notes: 'Budget set.' },
+        { title: 'Too many', date: 'Sep 1', notes: 'Dropped.' },
+      ],
+    });
+    expect(prompt).toContain('the recent meetings with Maya');
+    expect(prompt).toContain('[Maya / me 1:1]');
+    expect(prompt).toContain(
+      '<meeting name="Maya / me 1:1, Oct 30">\nMaya owns the roadmap.\n</meeting>',
+    );
+    expect(prompt).not.toContain('name="Empty"');
+    expect(prompt).toContain('name="Planning, Sep 20"');
+    expect(prompt).not.toContain('Too many');
+    expect(prompt).not.toContain('Use only the note below');
+  });
 });
 
 describe('parseSuggestedTasks', () => {
