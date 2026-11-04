@@ -1143,18 +1143,7 @@ const getStoredNotes = (): Note[] => {
         : null;
     if (raw) return JSON.parse(raw);
   } catch {}
-  return [
-    {
-      id: 'default-scratchpad',
-      title: 'Daily Scratchpad',
-      content:
-        'Jot down thoughts, agendas, and ideas.\n\n- [ ] Review upcoming priorities\n- [ ] Type `@` to link people or `#` for projects\n',
-      noteType: 'scratchpad',
-      pinned: true,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-  ];
+  return [];
 };
 const saveStoredNotes = (notes: Note[]) => {
   try {
@@ -1172,6 +1161,7 @@ const invokeNotesFallback = (channel: string, payload: unknown) => {
     const input = payload as SaveNoteInput;
     const id = input.id || `note-${Date.now()}`;
     const idx = notes.findIndex((n) => n.id === id);
+    if (input.id && idx === -1) throw new Error('This note no longer exists.');
     const updated: Note = {
       id,
       title:
