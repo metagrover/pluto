@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { AskPlutoActiveMeetingSnapshot } from '../../src/types/askPlutoQuery';
 import { parseAnalysisDocumentV3Json } from '../../src/utils/analysisDocument';
 import {
@@ -21,6 +22,7 @@ import * as dbModule from '../db';
 // We import the llm provider factory
 import { getAllSettings, getProvider } from '../llm/factory';
 import { findExplicitProjectScopes } from './askPlutoProjectScopes';
+import { isCapabilityQuestion } from './conversationController';
 import { containsConfidentialAside } from './evidencePrivacy';
 import {
   type MeetingNotesEvidenceDocument,
@@ -112,6 +114,45 @@ export const buildLiveMeetingRetrievalResult = (
     },
     evidence_kind: 'note',
     trust_status: 'inferred',
+  };
+};
+
+export const buildLivingNoteRetrievalResult = (
+  note: {
+    id: string;
+    title: string;
+    content: string;
+    noteType?: string;
+    targetName?: string | null;
+    updatedAt?: string;
+    createdAt?: string;
+  },
+  query = '',
+): RetrievalResult => {
+  const occurredAt = note.updatedAt || note.createdAt || '';
+  const notes = excerptQueryEvidence(note.content, query, 8000);
+  const evidence = [
+    `[Note]: ${note.title}`,
+    ...(note.targetName ? [`[Linked to]: ${note.targetName}`] : []),
+    ...(occurredAt ? [`[Last updated]: ${occurredAt}`] : []),
+    `[Current note content]:\n${notes}`,
+  ];
+
+  return {
+    meeting_id: note.id,
+    meeting_title: note.title,
+    mid: null,
+    evidence_text: evidence.join('\n'),
+    score: 0,
+    score_breakdown: {
+      fts_rank: 0,
+      graph_proximity: 0,
+      recency_decay: calculateRecencyDecay(occurredAt),
+      mention_weight: 0,
+    },
+    evidence_kind: 'note',
+    source_revision: occurredAt,
+    trust_status: 'grounded',
   };
 };
 
@@ -712,12 +753,12 @@ export const parseQuery = async (
   const trimmed = lowerText.trim();
   const isGreeting =
     /^(?:hi|hello|hey)(?:[\s,!]*?(?:pluto|there))?[\s!?.]*$/i.test(trimmed);
-  const isCapabilityQuestion =
-    /^(?:who are you|what can you do|what is this)[\s!?.]*$/i.test(trimmed);
+  const isCapability =
+    isCapabilityQuestion(text) || /^what is this[\s!?.]*$/i.test(trimmed);
   const isThanks = /^(?:thanks|thank you)(?:[\s,!]*pluto)?[\s!?.]*$/i.test(
     trimmed,
   );
-  if (isGreeting || isCapabilityQuestion || isThanks) {
+  if (isGreeting || isCapability || isThanks) {
     console.log('[QueryEngine] Greeting detected, providing canned response');
 
     let cannedResponse =
@@ -725,7 +766,7 @@ export const parseQuery = async (
     if (/^(?:who are you|what is this)\b/i.test(trimmed)) {
       cannedResponse =
         "I'm Pluto, an AI meeting intelligence assistant. I can help you search through your meeting history, summarize discussions, and track action items.";
-    } else if (/^what can you do\b/i.test(trimmed)) {
+    } else if (isCapability) {
       cannedResponse =
         'I can search your synthesized meeting notes, project information, and people information to answer questions, compare decisions, and track action items.';
     } else if (isThanks) {
@@ -764,18 +805,34 @@ export const parseQuery = async (
       options.signal?.throwIfAborted();
 
       // Parse JSON with cleaning to handle model-generated markdown wrappers.
-      const cleanedResponse =
-        typeof response === 'string' ? cleanJsonText(response) : response;
-      const parsed =
-        typeof cleanedResponse === 'string'
-          ? JSON.parse(cleanedResponse)
-          : cleanedResponse;
-      if (parsed.intent) {
-        intent = parsed.intent as ParsedQuery['intent'];
-      }
-      if (Array.isArray(parsed.expanded_keywords)) {
-        expanded_keywords = parsed.expanded_keywords;
-      }
+      const rawText =
+        typeof response === 'string'
+          ? cleanJsonText(response)
+          : JSON.stringify(response);
+      const jsonMatch =
+        typeof rawText === 'string' ? rawText.match(/\{[\s\S]*\}/) : null;
+      const cleanedResponse = jsonMatch ? jsonMatch[0] : rawText;
+      const parsed = z
+        .object({
+          intent: z.enum([
+            'factual',
+            'temporal',
+            'comparative',
+            'exploratory',
+            'conversational',
+          ]),
+          expanded_keywords: z
+            .array(z.string().trim().min(1))
+            .max(24)
+            .default([]),
+        })
+        .parse(
+          typeof cleanedResponse === 'string'
+            ? JSON.parse(cleanedResponse)
+            : cleanedResponse,
+        );
+      intent = parsed.intent;
+      expanded_keywords = parsed.expanded_keywords;
       console.log(
         `[QueryEngine] LLM Classification: ${intent}, Keywords: ${expanded_keywords.join(', ')}`,
       );
@@ -3171,6 +3228,7 @@ export const retrieveContext = async (
     ),
   ].slice(0, 12);
   const facetCandidateIds = new Set<string>();
+  const livingNoteIds = new Set<string>();
 
   const ftsQueryStr = allKeywords
     .map((k) => {
@@ -3355,6 +3413,59 @@ export const retrieveContext = async (
           mention_weight: 0,
         },
       };
+    }
+
+    // Search living notes (notesStore)
+    const notesStore = dbModule.notesStore;
+    if (notesStore?.searchNotes) {
+      const searchTerms = [
+        ...allKeywords,
+        ...(options.query ? [options.query] : []),
+      ];
+      const matchedNotes = new Map<string, any>();
+      for (const term of searchTerms) {
+        try {
+          const notes = notesStore.searchNotes(term, 10);
+          for (const n of notes) {
+            if (
+              options.meetingIds?.length &&
+              !options.meetingIds.includes(String(n.id))
+            ) {
+              continue;
+            }
+            if (parsed.temporal_range) {
+              const noteDate = Date.parse(n.updatedAt || n.createdAt || '');
+              if (
+                !(
+                  noteDate >=
+                    (parsed.temporal_range.from
+                      ? Date.parse(parsed.temporal_range.from)
+                      : Number.NEGATIVE_INFINITY) &&
+                  noteDate <
+                    (parsed.temporal_range.to
+                      ? Date.parse(parsed.temporal_range.to)
+                      : Number.POSITIVE_INFINITY)
+                )
+              ) {
+                continue;
+              }
+            }
+            matchedNotes.set(n.id, n);
+          }
+        } catch {
+          // ignore searchNotes errors
+        }
+      }
+
+      for (const note of matchedNotes.values()) {
+        const id = String(note.id);
+        facetCandidateIds.add(id);
+        livingNoteIds.add(id);
+        resultsMap[id] ||= buildLivingNoteRetrievalResult(
+          note,
+          options.query || allKeywords.join(' '),
+        );
+      }
     }
   }
 
@@ -3564,7 +3675,36 @@ export const retrieveContext = async (
     const result = resultsMap[id];
     if (!result) return [];
     const meeting = dbModule.getAskPlutoMeeting(result.meeting_id);
-    if (!meeting) return [];
+    if (!meeting) {
+      if (
+        livingNoteIds.has(result.meeting_id) &&
+        result.evidence_kind === 'note' &&
+        result.evidence_text
+      ) {
+        currentDates.set(
+          result.meeting_id,
+          Date.parse(result.source_revision || '') || Date.now(),
+        );
+        currentTitleWords.set(
+          result.meeting_id,
+          new Set(
+            (result.meeting_title || '')
+              .toLowerCase()
+              .match(/[\p{L}\p{N}]+/gu) || [],
+          ),
+        );
+        currentWords.set(
+          result.meeting_id,
+          new Set(
+            `${result.meeting_title || ''} ${result.evidence_text}`
+              .toLowerCase()
+              .match(/[\p{L}\p{N}]+/gu) || [],
+          ),
+        );
+        return [result];
+      }
+      return [];
+    }
     if (parsed.temporal_range) {
       const occurredAt = Date.parse(
         meeting.started_at || meeting.created_at || '',

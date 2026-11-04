@@ -99,12 +99,15 @@ const saveSchema = z
   .object({
     id: id.optional(),
     title,
+    status: z.enum(['active', 'completed']).optional(),
     dueDate: dueDate.optional(),
     projectId: id.nullable().optional(),
     tagIds: z.array(id).max(100).optional(),
     description: z.string().max(10000).optional(),
     requestId: id.optional(),
     expectedRevision: z.string().length(64).optional(),
+    sourceNoteId: id.optional(),
+    sourceNoteLineId: id.optional(),
   })
   .strict();
 const tagSchema = z.object({ id, name: z.string().min(1).max(60) });
@@ -141,6 +144,16 @@ const selfOptions = () => {
   };
 };
 const visibleAction = (entity: store.Entity) => {
+  const name = entity.name?.trim() || '';
+  if (
+    !name ||
+    name === '/' ||
+    name.startsWith('/task') ||
+    name.length < 2 ||
+    /^jot down thoughts/i.test(name)
+  ) {
+    return false;
+  }
   const metadata = parseActionMetadata(entity.metadata);
   return (
     entity.type === 'action_item' &&
@@ -193,6 +206,13 @@ const patchMetadata = (
   });
 
 export const listPersonalTasks = (): TasksSnapshot => {
+  try {
+    store.db
+      .prepare(
+        "DELETE FROM entities WHERE type = 'action_item' AND (trim(name) = '/' OR trim(name) = '' OR trim(name) LIKE '/task%' OR lower(trim(name)) LIKE 'jot down thoughts%')",
+      )
+      .run();
+  } catch {}
   const date = getDashboardDateKey();
   const options = selfOptions();
   const focusIds = new Set(
@@ -285,7 +305,45 @@ export const listPersonalTasks = (): TasksSnapshot => {
 export const savePersonalTask = (payload: SaveTaskInput): string =>
   store.withCommitmentTransaction(() => {
     const input = saveSchema.parse(payload);
-    const existing = input.id ? requireTask(input.id) : undefined;
+    const cleanTitle = input.title?.trim() || '';
+    if (
+      !cleanTitle ||
+      cleanTitle === '/' ||
+      cleanTitle.startsWith('/task') ||
+      cleanTitle.length < 2 ||
+      /^jot down thoughts/i.test(cleanTitle)
+    ) {
+      throw new Error(
+        'Task title cannot be empty, a slash command, or template boilerplate.',
+      );
+    }
+    let existing = input.id ? requireTask(input.id) : undefined;
+    if (!existing && input.sourceNoteLineId) {
+      const match = store.db
+        .prepare(
+          "SELECT id FROM entities WHERE type = 'action_item' AND json_extract(metadata, '$.source_note_line_id') = ?",
+        )
+        .get(input.sourceNoteLineId) as { id: string } | undefined;
+      if (match) {
+        existing = requireTask(match.id);
+      }
+    }
+    if (!existing && input.title) {
+      const nameMatches = store.db
+        .prepare(
+          "SELECT id FROM entities WHERE type = 'action_item' AND lower(trim(name)) = lower(trim(?))",
+        )
+        .all(input.title) as Array<{ id: string }>;
+      for (const match of nameMatches) {
+        try {
+          const candidate = requireTask(match.id);
+          if (candidate) {
+            existing = candidate;
+            break;
+          }
+        } catch {}
+      }
+    }
     if (
       existing &&
       input.expectedRevision &&
@@ -304,8 +362,18 @@ export const savePersonalTask = (payload: SaveTaskInput): string =>
           commitment_state: 'confirmed',
           origin: 'user',
           owner_source: 'user',
-          created_from: input.requestId ? 'ask_pluto' : 'tasks',
+          created_from: input.requestId
+            ? 'ask_pluto'
+            : input.sourceNoteId
+              ? 'notes'
+              : 'tasks',
         };
+    if (input.sourceNoteId !== undefined) {
+      metadata.source_note_id = input.sourceNoteId;
+    }
+    if (input.sourceNoteLineId !== undefined) {
+      metadata.source_note_line_id = input.sourceNoteLineId;
+    }
     if (input.tagIds) {
       const tags = readTags();
       if (input.tagIds.some((value) => !tags.some((tag) => tag.id === value)))
@@ -333,15 +401,34 @@ export const savePersonalTask = (payload: SaveTaskInput): string =>
       metadata.task_description = input.description;
     if (existing && existing.name !== input.title) {
       mirrorTaskTitle(existing, input.title);
+      store.syncActionTitleToNotes(
+        store.db,
+        existing.id,
+        existing.name,
+        input.title,
+      );
       metadata.full_description = input.title;
       metadata.user_edited = true;
       metadata.user_edited_at = new Date().toISOString();
+    }
+    const targetStatus = input.status ?? existing?.status ?? 'active';
+    if (existing && input.status && existing.status !== input.status) {
+      store.syncActionCompletionToMeetingNotes(
+        store.db,
+        existing.id,
+        input.status === 'completed',
+      );
+      store.syncActionCompletionToNotes(
+        store.db,
+        existing.id,
+        input.status === 'completed',
+      );
     }
     const entity = store.upsertEntity({
       id: taskId,
       type: 'action_item',
       name: input.title,
-      status: existing?.status ?? 'active',
+      status: targetStatus,
       due_date: input.dueDate,
       clear_due_date: input.dueDate === null,
       metadata,
@@ -367,6 +454,55 @@ export const setPersonalTaskStatus = (payload: unknown): void =>
       .parse(payload);
     const entity = requireTask(input.id);
     store.updateEntityStatus(entity.id, input.status);
+  });
+export const deletePersonalTask = (payload: unknown): string =>
+  store.withCommitmentTransaction(() => {
+    const input = z
+      .object({ id, expectedRevision: z.string().length(64).optional() })
+      .strict()
+      .parse(payload);
+    const entity = requireTask(input.id);
+    if (
+      input.expectedRevision &&
+      taskRevision(entity) !== input.expectedRevision
+    )
+      throw new Error(
+        'This task changed elsewhere. Refresh Tasks before deleting it.',
+      );
+    // Keep the canonical record and its source links so regeneration and Undo agree.
+    patchMetadata(entity, {
+      ...parseActionMetadata(entity.metadata),
+      commitment_state: 'rejected',
+      task_deleted: {
+        at: new Date().toISOString(),
+        state: getCommitmentState(entity.metadata),
+      },
+    });
+    return taskRevision(store.getEntity(entity.id)!);
+  });
+export const restorePersonalTask = (payload: unknown): void =>
+  store.withCommitmentTransaction(() => {
+    const input = z
+      .object({ id, deletionRevision: z.string().length(64) })
+      .strict()
+      .parse(payload);
+    const entity = store.getEntity(input.id);
+    if (
+      !entity ||
+      entity.type !== 'action_item' ||
+      taskRevision(entity) !== input.deletionRevision
+    )
+      throw new Error('This task changed elsewhere and could not be restored.');
+    const metadata = parseActionMetadata(entity.metadata);
+    const deleted = z
+      .object({ at: z.string(), state: z.enum(['possible', 'confirmed']) })
+      .parse(metadata.task_deleted);
+    patchMetadata(entity, {
+      ...metadata,
+      commitment_state: deleted.state,
+      task_deleted: null,
+    });
+    requireTask(entity.id);
   });
 export const reviewPersonalTask = (payload: unknown): void =>
   store.withCommitmentTransaction(() => {

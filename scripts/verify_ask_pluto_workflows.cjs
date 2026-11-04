@@ -196,6 +196,54 @@ async function execute() {
     );
     return result;
   };
+  const taskId = await invoke('TASKS_SAVE', {
+    title: 'Review the fictional release',
+    dueDate: '2026-11-03',
+  });
+  await invoke('TASKS_STATUS', { id: taskId, status: 'completed' });
+  const deletionRevision = await invoke('TASKS_DELETE', { id: taskId });
+  assert(
+    !(await invoke('TASKS_LIST')).tasks.some(
+      (task) => task.entity.id === taskId,
+    ),
+  );
+  await invoke('TASKS_RESTORE', { id: taskId, deletionRevision });
+  const restored = (await invoke('TASKS_LIST')).tasks.find(
+    (task) => task.entity.id === taskId,
+  );
+  assert.equal(restored.entity.status, 'completed');
+  assert.equal(restored.entity.due_date, '2026-11-03');
+  report.push({ id: 'task-delete-restore', passed: true });
+  const capabilities = await run('capabilities', 'what can you help me with?', [
+    { role: 'user', content: 'What changed on the old release?' },
+    {
+      role: 'assistant',
+      content: 'An older release answer.',
+      resolvedScope: {
+        kind: 'meeting_ids',
+        meetingIds: ['synthetic-workflow-0'],
+        source: 'explicit',
+        resolvedAt: new Date().toISOString(),
+      },
+    },
+  ]);
+  assert(capabilities.answer.includes('synthesized meeting notes'));
+  assert.equal(capabilities.retrievalPolicy, 'none');
+  assert.equal(capabilities.resolvedScope, undefined);
+  const clarification = await run(
+    'clarification',
+    'What do you mean by that?',
+    [
+      { role: 'user', content: 'What happened in the missing meeting?' },
+      {
+        role: 'assistant',
+        content: "I couldn't verify an answer from this search.",
+        outcome: 'no_evidence',
+      },
+    ],
+  );
+  assert(clarification.answer.includes('previous search'));
+  assert.equal(clarification.retrievalPolicy, 'none');
   const original = "What's assigned to Morgan?";
   const first = await run('assignment', original);
   assert.equal(first.status, 'answered');
@@ -207,6 +255,16 @@ async function execute() {
   ])
     assert(first.answer.toLowerCase().includes(term), `${term} present`);
   assert(!/morgan (?:owns|is responsible for) deployment/i.test(first.answer));
+  assert(
+    /(?:can.t confirm|unconfirmed|not confirmed|unknown).*?(?:current status|status)|current status.*?(?:unconfirmed|unknown|not confirmed)/i.test(
+      first.answer,
+    ),
+    'note-only assignments retain unconfirmed current status',
+  );
+  assert(
+    !/work still to do|pending work/i.test(first.answer),
+    'historical notes do not establish pending work today',
+  );
   assert.notEqual(first.trustStatus, 'grounded');
   const turns = [
     { role: 'user', content: original },

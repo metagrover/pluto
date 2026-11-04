@@ -774,6 +774,7 @@ import {
   buildNamedPersonNoEvidenceReply,
   buildNoEvidenceDraftReply,
   buildSocialReply,
+  isDialogueOnlyClarification,
   isExplicitInformationRequest,
 } from './intelligence/conversationController';
 import {
@@ -804,6 +805,13 @@ import { createMeetingAskPlutoVisibleStream } from './intelligence/meetingAskPlu
 import { createMeetingContextProducer } from './intelligence/meetingContextProducer';
 import { generateMid } from './intelligence/midGenerator';
 import { renderMidToMarkdown } from './intelligence/midRenderer';
+import {
+  buildNoteAskPlutoPrompt,
+  describeNoteAskPlutoFailure,
+  generateWithMemoryFallback,
+  parseNoteAskPlutoRequest,
+  parseSuggestedTasks,
+} from './intelligence/noteAskPluto';
 import {
   buildPersonChatContext,
   buildPersonChatPrompt,
@@ -4911,6 +4919,10 @@ app.whenReady().then(async () => {
           String(meetingId),
         );
         invalidateDreamingCatalog();
+        for (const window of BrowserWindow.getAllWindows()) {
+          window.webContents.send('TASKS_CHANGED');
+          window.webContents.send('NOTES_CHANGED');
+        }
         return { success: true };
       } catch (e) {
         console.error('[Pluto] SAVE_USER_EDIT failed:', e);
@@ -5112,6 +5124,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('TASKS_LIST', () => personalTasks.listPersonalTasks());
   const taskMutations = {
     TASKS_SAVE: personalTasks.savePersonalTask,
+    TASKS_DELETE: personalTasks.deletePersonalTask,
+    TASKS_RESTORE: personalTasks.restorePersonalTask,
     TASKS_STATUS: personalTasks.setPersonalTaskStatus,
     TASKS_REVIEW: personalTasks.reviewPersonalTask,
     TASKS_FOCUS: personalTasks.setPersonalTaskFocus,
@@ -5122,13 +5136,63 @@ app.whenReady().then(async () => {
   for (const [channel, mutate] of Object.entries(taskMutations)) {
     ipcMain.handle(channel, (_event, payload) => {
       const result = mutate(payload);
-      queueAllKnowledgeDocsRefresh();
-      invalidateDreamingCatalog();
-      for (const window of BrowserWindow.getAllWindows())
+      let isNoteTask = Boolean(
+        payload &&
+          typeof payload === 'object' &&
+          ('sourceNoteId' in payload || 'sourceNoteLineId' in payload),
+      );
+      if (
+        !isNoteTask &&
+        channel === 'TASKS_STATUS' &&
+        payload &&
+        typeof payload === 'object' &&
+        'id' in payload
+      ) {
+        const entity = db.getEntity(String((payload as { id: unknown }).id));
+        if (entity?.metadata) {
+          try {
+            const meta =
+              typeof entity.metadata === 'string'
+                ? JSON.parse(entity.metadata)
+                : entity.metadata;
+            if (meta?.source_note_id || meta?.created_from === 'notes') {
+              isNoteTask = true;
+            }
+          } catch {}
+        }
+      }
+      if (!isNoteTask) {
+        queueAllKnowledgeDocsRefresh();
+        invalidateDreamingCatalog();
+      }
+      for (const window of BrowserWindow.getAllWindows()) {
         window.webContents.send('TASKS_CHANGED');
+        window.webContents.send('NOTES_CHANGED');
+      }
       return result;
     });
   }
+
+  ipcMain.handle('NOTES_LIST', () => db.notesStore.listNotes());
+  ipcMain.handle('NOTES_GET', (_event, id) => db.notesStore.getNote(id));
+  ipcMain.handle('NOTES_SAVE', (_event, input) => {
+    const result = db.notesStore.saveNote(input);
+    for (const window of BrowserWindow.getAllWindows())
+      window.webContents.send('NOTES_CHANGED');
+    return result;
+  });
+  ipcMain.handle('NOTES_DELETE', (_event, id) => {
+    const result = db.notesStore.deleteNote(id);
+    for (const window of BrowserWindow.getAllWindows())
+      window.webContents.send('NOTES_CHANGED');
+    return result;
+  });
+  ipcMain.handle('NOTES_FOR_ATTENDEES', (_event, { emails, names }) =>
+    db.notesStore.getNotesForAttendees(emails || [], names || []),
+  );
+  ipcMain.handle('NOTES_FOR_ENTITY', (_event, entityId) =>
+    db.notesStore.getNotesForEntity(entityId),
+  );
 
   ipcMain.handle('GET_ENTITY', (_event, id) => db.getEntity(id));
   ipcMain.handle('GET_ENTITIES_BY_TYPE', (_event, type) =>
@@ -5680,6 +5744,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('UPDATE_ENTITY_STATUS', (_event, { id, status }) => {
     const result = db.updateEntityStatus(id, status);
     invalidateDreamingCatalog();
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('TASKS_CHANGED');
+      window.webContents.send('NOTES_CHANGED');
+    }
     return result;
   });
   ipcMain.handle('UPDATE_ACTION_COMMITMENT_STATE', (_event, payload) =>
@@ -7904,16 +7972,6 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               ? null
               : buildConversationBoundaryReply(queryText);
             if (boundaryReply) return boundaryReply;
-            if (
-              !promptOverride &&
-              conversationResolution.turnMode === 'social'
-            ) {
-              return buildSocialReply({
-                query: queryText,
-                previousAnswer: previousAssistantTurn?.content,
-                previousTurnMode: previousAssistantTurn?.turnMode,
-              });
-            }
             providerAcquisitionStartedAt = Date.now();
             const provider = await getProvider(settings);
             providerAcquisitionCompletedAt = Date.now();
@@ -7975,7 +8033,10 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                   previousTurnMode: previousAssistantTurn?.turnMode,
                 });
           };
-          if (conversationResolution.relation === 'acknowledgment') {
+          if (
+            conversationResolution.relation === 'acknowledgment' ||
+            conversationResolution.turnMode === 'social'
+          ) {
             const answer = await answerConversationally();
             outputCharacters = answer.length;
             generationCompletedAt = Date.now();
@@ -7987,8 +8048,11 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               citations: [],
               currentMeeting: currentMeetingStatus,
               outcome: 'answered' as const,
-              resolvedScope: previousAssistantTurn?.resolvedScope,
-              conversationContext: previousConversationContext,
+              resolvedScope:
+                conversationResolution.relation === 'new_topic'
+                  ? undefined
+                  : previousAssistantTurn?.resolvedScope,
+              conversationContext: activeConversationContext,
             };
           }
           if (
@@ -8050,6 +8114,31 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               outcome: 'no_evidence' as const,
               resolvedScope: previousAssistantTurn.resolvedScope,
               conversationContext: previousConversationContext,
+            };
+          }
+          if (
+            conversationResolution.turnMode === 'clarify' &&
+            isDialogueOnlyClarification(queryText) &&
+            previousAssistantTurn?.outcome === 'no_evidence'
+          ) {
+            turnMode = conversationResolution.turnMode;
+            retrievalPolicy = 'none';
+            const answer = describePreviousConversationFailure(
+              previousAssistantTurn,
+            );
+            outputCharacters = answer.length;
+            generationCompletedAt = Date.now();
+            finalizationStartedAt = generationCompletedAt;
+            finalizationCompletedAt = generationCompletedAt;
+            return {
+              status: 'answered' as const,
+              answer,
+              citations: [],
+              currentMeeting: currentMeetingStatus,
+              outcome: 'answered' as const,
+              resolvedScope: previousAssistantTurn?.resolvedScope,
+              conversationContext: previousConversationContext,
+              turnMode: conversationResolution.turnMode,
             };
           }
           const persistedMeetings = db.getAskPlutoMeetings();
@@ -8448,9 +8537,8 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           retrievalStartedAt = recallCompletedAt;
 
           if (
-            conversationResolution.turnMode === 'social' ||
-            (conversationResolution.relation === 'new_topic' &&
-              (parsed.intent === 'conversational' || parsed.cannedResponse))
+            conversationResolution.relation === 'new_topic' &&
+            (parsed.intent === 'conversational' || parsed.cannedResponse)
           ) {
             console.log('[Pluto] intelligence:query conversational response');
             turnMode = 'social';
@@ -10516,6 +10604,135 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
         active.settled,
       ]);
       return { cancelled: true, settled };
+    },
+  );
+
+  // Ask Pluto inside one note. The note is the only source.
+  const activeNoteAskPlutoQueries = new Map<string, AbortController>();
+  ipcMain.handle(
+    'intelligence:note-chat',
+    async (event, rawRequest: unknown) => {
+      const parsed = parseNoteAskPlutoRequest(rawRequest);
+      if (!parsed.ok) {
+        console.warn('[Pluto][Note Ask Pluto] invalid request', {
+          reason: parsed.reason,
+        });
+        return {
+          status: 'unavailable' as const,
+          answer: '',
+          error: 'The question could not be sent.',
+        };
+      }
+      const request = parsed.request;
+      const note = db.notesStore.getNote(request.noteId);
+      if (!note) {
+        return {
+          status: 'unavailable' as const,
+          answer: '',
+          error: 'This note could not be found.',
+        };
+      }
+
+      // One question at a time per window: a new one replaces the last.
+      for (const [key, controller] of activeNoteAskPlutoQueries) {
+        if (key.startsWith(`${event.sender.id}:`)) {
+          controller.abort(new DOMException('Replaced', 'AbortError'));
+          activeNoteAskPlutoQueries.delete(key);
+        }
+      }
+      const controller = new AbortController();
+      const key = `${event.sender.id}:${request.requestId}`;
+      activeNoteAskPlutoQueries.set(key, controller);
+      const abortForDestroyedOwner = () =>
+        controller.abort(new DOMException('Owner destroyed', 'AbortError'));
+      event.sender.once('destroyed', abortForDestroyedOwner);
+
+      try {
+        const settings = await getAllSettings(db);
+        const provider = await getProvider(settings);
+        const prompt = buildNoteAskPlutoPrompt({ note, request });
+        let streamed = false;
+        const generationOptions = {
+          signal: controller.signal,
+          onToken: (delta: string) => {
+            if (!delta || event.sender.isDestroyed()) return;
+            streamed = true;
+            event.sender.send('intelligence:note-chat:delta', {
+              requestId: request.requestId,
+              delta,
+            });
+          },
+        };
+        // Same as Ask Pluto: if memory protection refuses the main local
+        // model before any output, answer with the quick model and say so.
+        const isLocalProvider =
+          !settings.llm_provider || settings.llm_provider === 'ollama';
+        const quickModel = resolveConfiguredOllamaModel(settings, true);
+        const canUseQuickModel =
+          isLocalProvider &&
+          quickModel !== resolveConfiguredOllamaModel(settings);
+        const result = await generateWithMemoryFallback({
+          primary: () => provider.answerAskPluto(prompt, generationOptions),
+          fallback: canUseQuickModel
+            ? async () => {
+                console.warn(
+                  `[Pluto][Note Ask Pluto] memory fallback to ${quickModel}`,
+                );
+                const quickProvider = await getProvider({
+                  ...settings,
+                  ollama_model: quickModel,
+                });
+                return quickProvider.answerAskPluto(prompt, generationOptions);
+              }
+            : null,
+          canFallBack: () => !streamed && !controller.signal.aborted,
+        });
+        const fallbackModel = result.usedFallback ? quickModel : undefined;
+        const answer = result.answer.trim();
+        if (!answer) {
+          return {
+            status: 'unavailable' as const,
+            answer: '',
+            error: 'Pluto did not return an answer. Try again.',
+          };
+        }
+        return {
+          status: 'answered' as const,
+          answer,
+          ...(fallbackModel ? { fallbackModel } : {}),
+          ...(request.intent === 'tasks'
+            ? { suggestedTasks: parseSuggestedTasks(answer, note.content) }
+            : {}),
+        };
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return { status: 'unavailable' as const, answer: '' };
+        }
+        console.warn('[Pluto][Note Ask Pluto] model failed', error);
+        return {
+          status: 'unavailable' as const,
+          answer: '',
+          ...describeNoteAskPlutoFailure(error),
+        };
+      } finally {
+        event.sender.removeListener('destroyed', abortForDestroyedOwner);
+        if (activeNoteAskPlutoQueries.get(key) === controller) {
+          activeNoteAskPlutoQueries.delete(key);
+        }
+      }
+    },
+  );
+
+  ipcMain.handle(
+    'intelligence:note-chat:cancel',
+    (event, requestId: unknown) => {
+      if (typeof requestId !== 'string') return { cancelled: false };
+      const key = `${event.sender.id}:${requestId}`;
+      const controller = activeNoteAskPlutoQueries.get(key);
+      if (!controller) return { cancelled: false };
+      controller.abort(new DOMException('Cancelled', 'AbortError'));
+      activeNoteAskPlutoQueries.delete(key);
+      return { cancelled: true };
     },
   );
 

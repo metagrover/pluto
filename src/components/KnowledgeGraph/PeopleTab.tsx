@@ -5,10 +5,13 @@ import {
   ChevronRight,
   CircleHelp,
   Clock3,
+  ExternalLink,
+  FileText,
   MessageCircle,
   MoreHorizontal,
   Pencil,
   Play,
+  Plus,
   Search,
   Trash2,
   Undo2,
@@ -35,6 +38,11 @@ import {
   upsertEntity,
 } from '../../api/knowledgeGraph';
 import {
+  getNotesForEntity,
+  saveNote,
+  subscribeNotesChanged,
+} from '../../api/notes';
+import {
   type ClientVoiceProfile,
   type VoiceProfileReconciliationStatus,
   deleteSpeakerVoiceProfile,
@@ -42,6 +50,7 @@ import {
   getVoiceReferenceSample,
   setSpeakerVoiceProfileStatus,
 } from '../../api/speakerVoice';
+import type { Note } from '../../types/notes';
 import {
   DREAMING_STATUS_LABEL,
   type DreamingUiStatus,
@@ -290,7 +299,7 @@ export const PeopleBriefing = ({
             }}
             title="Delete person"
             aria-label={`Delete ${person.name}`}
-            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg bg-pro-bg/90 text-pro-text-muted/40 opacity-0 pointer-events-none transition-all hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 group-hover:opacity-100 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-500 shadow-2xs"
+            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg bg-pro-bg/90 text-pro-text-muted/40 opacity-0 pointer-events-none transition-all hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 group-hover:opacity-100 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-500 shadow-sm"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -329,7 +338,9 @@ export const PeopleBriefing = ({
 
       {visibleRows.length === 0 ? (
         <div className="people-empty">
-          <UserRound aria-hidden="true" size={22} />
+          <div className="people-empty__icon" aria-hidden="true">
+            <UserRound size={20} strokeWidth={1.5} />
+          </div>
           <h2>No relationship context yet</h2>
           <p>People will appear as Pluto connects them to conversations.</p>
         </div>
@@ -680,11 +691,15 @@ const MeetingGroup = ({
   );
 };
 
+const EMPTY_NOTES: Note[] = [];
+
 export const PersonDossier = ({
   detail,
   onBack,
   backLabel,
   onOpenMeeting,
+  onOpenNote,
+  personNotes,
   mergeCandidates = [],
   possibleDuplicateCount = 0,
   onIdentityChanged = async () => {},
@@ -693,11 +708,58 @@ export const PersonDossier = ({
   onBack: () => void;
   backLabel?: string;
   onOpenMeeting: (meetingId: string) => void;
+  onOpenNote?: (noteId: string) => void;
+  personNotes?: Note[];
   mergeCandidates?: PersonBriefingRow[];
   possibleDuplicateCount?: number;
   onIdentityChanged?: () => Promise<void>;
 }) => {
   const [currentDetail, setCurrentDetail] = useState(detail);
+  const [fetchedNotes, setFetchedNotes] = useState<Note[]>(EMPTY_NOTES);
+
+  useEffect(() => {
+    if (personNotes !== undefined) return;
+    let cancelled = false;
+    const fetchNotes = async () => {
+      try {
+        const loaded = await getNotesForEntity(detail.person.id);
+        if (!cancelled) setFetchedNotes(loaded || EMPTY_NOTES);
+      } catch (err) {
+        console.error('Failed to fetch notes for person:', err);
+      }
+    };
+    void fetchNotes();
+    const unsub = subscribeNotesChanged(() => {
+      void fetchNotes();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [detail.person.id, personNotes]);
+
+  const notesToDisplay = personNotes ?? fetchedNotes;
+
+  const handleCreateOrOpenNote = async () => {
+    if (notesToDisplay.length > 0) {
+      onOpenNote?.(notesToDisplay[0].id);
+      return;
+    }
+    try {
+      const newNote = await saveNote({
+        title: `1:1 with ${currentDetail.person.name}`,
+        content: '',
+        noteType: 'person',
+        targetId: currentDetail.person.id,
+      });
+      if (personNotes === undefined) {
+        setFetchedNotes((prev) => [newNote, ...prev]);
+      }
+      onOpenNote?.(newNote.id);
+    } catch (err) {
+      console.error('Failed to create 1:1 note:', err);
+    }
+  };
   const [completionStates, setCompletionStates] = useState<
     Record<string, 'saving' | 'error'>
   >({});
@@ -2239,6 +2301,86 @@ export const PersonDossier = ({
         ) : null}
       </section>
 
+      <section
+        className="person-dossier__notes border-b border-pro-border/60 py-8"
+        id="person-notes"
+      >
+        <div className="person-dossier__major-heading mb-4">
+          <div>
+            <h2>Running 1:1 Notes</h2>
+            <span className="text-xs tabular-nums text-pro-text-muted">
+              {notesToDisplay.length}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleCreateOrOpenNote}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-pro-accent/10 hover:bg-pro-accent/20 text-pro-accent text-[12px] font-medium transition-colors cursor-pointer"
+            aria-label={`+ 1:1 Note for ${currentDetail.person.name}`}
+          >
+            <Plus size={13} aria-hidden="true" />
+            <span>+ 1:1 Note</span>
+          </button>
+        </div>
+
+        {notesToDisplay.length === 0 ? (
+          <p className="person-dossier__section-empty text-sm text-pro-text-muted">
+            No running 1:1 notes yet.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {notesToDisplay.map((note) => {
+              const snippet =
+                note.content
+                  .split('\n')
+                  .map((l) => l.trim().replace(/^[-*]\s*(\[[ xX]\])?\s*/, ''))
+                  .filter((l) => l.length > 0)
+                  .join(' ') || 'No additional content yet.';
+              const dateDisplay = new Date(note.updatedAt).toLocaleDateString(
+                undefined,
+                { month: 'short', day: 'numeric' },
+              );
+
+              return (
+                <div
+                  key={note.id}
+                  className="p-4 rounded-xl border border-pro-border bg-black/[0.02] dark:bg-white/[0.02] flex items-start justify-between gap-4"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <FileText
+                        size={14}
+                        className="text-pro-text-muted shrink-0"
+                        aria-hidden="true"
+                      />
+                      <h3 className="font-semibold text-pro-text-main text-[14px] truncate">
+                        {note.title ||
+                          `Notes with ${currentDetail.person.name}`}
+                      </h3>
+                      <span className="text-[11px] text-pro-text-muted shrink-0">
+                        {dateDisplay}
+                      </span>
+                    </div>
+                    <p className="text-[12px] text-pro-text-muted line-clamp-2 leading-relaxed">
+                      {snippet}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onOpenNote?.(note.id)}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded border border-pro-border hover:bg-black/5 dark:hover:bg-white/5 text-[12px] text-pro-text-main font-medium transition-colors cursor-pointer"
+                    aria-label={`Open note ${note.title || '1:1 note'}`}
+                  >
+                    <span>Open in Notes</span>
+                    <ExternalLink size={12} aria-hidden="true" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       <section className="person-dossier__history" id="person-meetings">
         <div className="person-dossier__major-heading">
           <h2>Meetings</h2>
@@ -2293,12 +2435,14 @@ export const PeopleTab: React.FC<{
     meetingId: string,
     personContext?: { id: string; name: string },
   ) => void;
+  onOpenNote?: (noteId: string) => void;
   backLabel?: string;
   onBack?: () => void;
 }> = ({
   selectedPersonId = null,
   onSelectPerson = () => {},
   onOpenMeeting = () => {},
+  onOpenNote,
   backLabel,
   onBack,
 }) => {
@@ -2306,10 +2450,35 @@ export const PeopleTab: React.FC<{
   const [details, setDetails] = useState<Record<string, PersonBriefingDetail>>(
     {},
   );
+  const [personNotes, setPersonNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(false);
+
+  useEffect(() => {
+    if (!selectedPersonId) {
+      setPersonNotes([]);
+      return;
+    }
+    let cancelled = false;
+    const fetchNotes = async () => {
+      try {
+        const loaded = await getNotesForEntity(selectedPersonId);
+        if (!cancelled) setPersonNotes(loaded || []);
+      } catch (err) {
+        console.error('Failed to fetch notes for person:', err);
+      }
+    };
+    void fetchNotes();
+    const unsub = subscribeNotesChanged(() => {
+      void fetchNotes();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [selectedPersonId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2420,6 +2589,8 @@ export const PeopleTab: React.FC<{
               name: selectedDetail.person.name,
             })
           }
+          onOpenNote={onOpenNote}
+          personNotes={personNotes}
           mergeCandidates={rows}
           possibleDuplicateCount={selectedSummary?.possibleDuplicateCount ?? 0}
           onIdentityChanged={async () => {

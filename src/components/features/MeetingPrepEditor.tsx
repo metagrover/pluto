@@ -1,4 +1,12 @@
-import { BookOpen, ChevronDown, Plus, RefreshCw, X } from 'lucide-react';
+import {
+  BookOpen,
+  Check,
+  ChevronDown,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import {
   forwardRef,
   useEffect,
@@ -15,6 +23,8 @@ import {
   listPrepMeetings,
   saveMeetingPrep,
 } from '../../api/meetingPrep';
+import { getNotesForAttendees } from '../../api/notes';
+import type { NoteAgendaItem } from '../../types/notes';
 import {
   formatPrepDate,
   formatPrepParticipants,
@@ -48,6 +58,56 @@ export const MeetingPrepEditor = forwardRef<
   const [meetings, setMeetings] = useState<PrepMeetingOption[]>([]);
   const [loadingMeetings, setLoadingMeetings] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [attendeeNoteItems, setAttendeeNoteItems] = useState<NoteAgendaItem[]>(
+    [],
+  );
+  const [addedNoteItemIds, setAddedNoteItemIds] = useState<Set<string>>(
+    new Set(),
+  );
+
+  useEffect(() => {
+    const attendees = prep.event?.attendees || [];
+    const emails = attendees.map((a) => a.email).filter(Boolean) as string[];
+    const names = attendees.map((a) => a.name).filter(Boolean) as string[];
+
+    if (emails.length > 0 || names.length > 0) {
+      void getNotesForAttendees(emails, names)
+        .then((items) => setAttendeeNoteItems(items.filter((i) => !i.checked)))
+        .catch(() => setAttendeeNoteItems([]));
+    }
+  }, [prep.event]);
+
+  const handleImportSingleItem = (id: string, text: string) => {
+    setAddedNoteItemIds((prev) => new Set([...prev, id]));
+    const next = notesRef.current
+      ? `${notesRef.current.trimEnd()}\n- [ ] ${text}\n`
+      : `- [ ] ${text}\n`;
+    notesRef.current = next;
+    setNotes(next);
+    setStatus('Unsaved changes');
+    try {
+      localStorage.setItem(draftKey, next);
+    } catch {}
+  };
+
+  const handleImportAllNoteItems = () => {
+    if (attendeeNoteItems.length === 0) return;
+    const unadded = attendeeNoteItems.filter(
+      (i) => !addedNoteItemIds.has(i.id),
+    );
+    if (unadded.length === 0) return;
+    setAddedNoteItemIds(new Set(attendeeNoteItems.map((i) => i.id)));
+    const added = unadded.map((item) => `- [ ] ${item.text}`).join('\n');
+    const next = notesRef.current
+      ? `${notesRef.current.trimEnd()}\n${added}\n`
+      : `${added}\n`;
+    notesRef.current = next;
+    setNotes(next);
+    setStatus('Unsaved changes');
+    try {
+      localStorage.setItem(draftKey, next);
+    } catch {}
+  };
   useEffect(() => {
     if (!picker) return;
     const onEscape = (event: KeyboardEvent) => {
@@ -244,6 +304,64 @@ export const MeetingPrepEditor = forwardRef<
               {status}
             </span>
           </div>
+
+          {attendeeNoteItems.length > 0 && (
+            <div className="rounded-lg border border-pro-accent/30 bg-pro-accent/[0.04] p-3 text-xs mb-3 select-none">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-medium text-pro-text-main flex items-center gap-1.5">
+                  <Sparkles size={13} className="text-pro-accent" />
+                  From your running notes with attendees:
+                </span>
+                {attendeeNoteItems.every((i) => addedNoteItemIds.has(i.id)) ? (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                    <Check size={12} /> All added
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleImportAllNoteItems}
+                    className="text-pro-accent hover:underline font-medium cursor-pointer"
+                  >
+                    + Add all to agenda
+                  </button>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                {attendeeNoteItems.map((item) => {
+                  const isAdded = addedNoteItemIds.has(item.id);
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between gap-2 text-pro-text-muted"
+                    >
+                      <span className="truncate">
+                        • {item.text}{' '}
+                        <span className="opacity-60 text-[11px]">
+                          ({item.targetName || item.noteTitle})
+                        </span>
+                      </span>
+                      {isAdded ? (
+                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-0.5 shrink-0">
+                          <Check size={11} /> Added
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleImportSingleItem(item.id, item.text)
+                          }
+                          className="text-[11px] text-pro-accent hover:underline shrink-0 cursor-pointer font-medium"
+                        >
+                          + Add
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <textarea
             id={`prep-notes-${prep.occurrenceKey}`}
             aria-label="Preparation notes"

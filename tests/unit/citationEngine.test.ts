@@ -28,6 +28,27 @@ describe('Citation Engine', () => {
     vi.clearAllMocks();
   });
 
+  it('retains explicit planned assignments from every supplied note', () => {
+    const notes = [
+      'Morgan owns the readiness memo. No due date was recorded for that memo.',
+      'Morgan will validate release metrics. Casey will deploy the service.',
+      'Morgan agreed to prepare the budget review. Casey owns the deployment checklist.',
+      'Morgan agreed to send the acceptance report by October 7. Casey owns deployment.',
+    ];
+    const context = notes.map((note, index) => ({
+      meeting_id: `assignment-${index}`,
+      meeting_title: `Planning ${index}`,
+      mid: null,
+      evidence_kind: 'note',
+      evidence_text: `[Current saved notes]:\n${note}`,
+    })) as RetrievalResult[];
+    const answer =
+      'Morgan owns the readiness memo. Morgan will validate release metrics. Morgan agreed to prepare the budget review. Morgan agreed to send the acceptance report by October 7.';
+    const result = buildSynthesizedAnswerPresentation(answer, context);
+    expect(result.answer).toBe(answer);
+    expect(result.unsupportedClaimCount).toBe(0);
+  });
+
   describe('buildCitationChain', () => {
     it('quotes saved person notes rather than retrieval headers', () => {
       const note = 'Maya suggested consulting Avery about design language.';

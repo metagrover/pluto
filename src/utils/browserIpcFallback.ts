@@ -19,6 +19,7 @@ import type {
 import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
 import type { LocalArtifact } from '../api/localArtifacts';
 import type { Meeting } from '../types';
+import type { Note, SaveNoteInput } from '../types/notes';
 import { hasVerifiedSpeakerAttribution } from './speakerAttributionTrust';
 import { invokeTaskPreview } from './taskPreview';
 
@@ -1133,16 +1134,193 @@ const getSetting = (key: unknown) => {
   }
 };
 
+const notesStorageKey = 'preview.notes';
+const getStoredNotes = (): Note[] => {
+  try {
+    const raw =
+      typeof localStorage !== 'undefined'
+        ? localStorage.getItem(notesStorageKey)
+        : null;
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [
+    {
+      id: 'default-scratchpad',
+      title: 'Daily Scratchpad',
+      content:
+        'Jot down thoughts, agendas, and ideas.\n\n- [ ] Review upcoming priorities\n- [ ] Type `@` to link people or `#` for projects\n',
+      noteType: 'scratchpad',
+      pinned: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  ];
+};
+const saveStoredNotes = (notes: Note[]) => {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(notesStorageKey, JSON.stringify(notes));
+    }
+  } catch {}
+};
+const invokeNotesFallback = (channel: string, payload: unknown) => {
+  const notes = getStoredNotes();
+  if (channel === 'NOTES_LIST') return notes;
+  if (channel === 'NOTES_GET')
+    return notes.find((n) => n.id === payload) || null;
+  if (channel === 'NOTES_SAVE') {
+    const input = payload as SaveNoteInput;
+    const id = input.id || `note-${Date.now()}`;
+    const idx = notes.findIndex((n) => n.id === id);
+    const updated: Note = {
+      id,
+      title:
+        input.title ||
+        (input.content
+          ? input.content.split('\n')[0].replace(/^[#\-\*\s]+/, '')
+          : 'Untitled Note'),
+      content: input.content || '',
+      noteType: input.noteType || (idx >= 0 ? notes[idx].noteType : 'general'),
+      targetId:
+        input.targetId !== undefined
+          ? input.targetId
+          : idx >= 0
+            ? notes[idx].targetId
+            : null,
+      pinned:
+        input.pinned !== undefined
+          ? input.pinned
+          : idx >= 0
+            ? notes[idx].pinned
+            : false,
+      createdAt: idx >= 0 ? notes[idx].createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    if (idx >= 0) notes[idx] = updated;
+    else notes.unshift(updated);
+    saveStoredNotes(notes);
+    return updated;
+  }
+  if (channel === 'NOTES_DELETE') {
+    const id = payload as string;
+    const filtered = notes.filter((n) => n.id !== id);
+    saveStoredNotes(filtered);
+    return true;
+  }
+  if (channel === 'NOTES_FOR_ATTENDEES') {
+    return [];
+  }
+  if (channel === 'NOTES_FOR_ENTITY') {
+    const entityId = payload as string;
+    return notes.filter((n) => n.targetId === entityId);
+  }
+  return null;
+};
+
+const syncBrowserTaskStatusToNotes = (
+  taskId?: string,
+  status?: 'active' | 'completed',
+) => {
+  if (!status || !taskId) return;
+  const tasksSnapshot = invokeTaskPreview('TASKS_LIST', {}) as {
+    tasks: Array<{ entity: { id: string; name: string } }>;
+  };
+  const targetTask = tasksSnapshot?.tasks?.find((t) => t.entity.id === taskId);
+  if (!targetTask?.entity?.name) return;
+  const targetTitle = targetTask.entity.name.trim().toLowerCase();
+  const notes = getStoredNotes();
+  let changed = false;
+  for (const note of notes) {
+    if (!note.content) continue;
+    const lines = note.content.split('\n');
+    let noteChanged = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const bracketMatch = line.match(
+        /^(\s*\[task)(?::(done|x))?(:\s*)(.+?)(\]\s*)$/i,
+      );
+      if (bracketMatch) {
+        const isDone = Boolean(bracketMatch[2]);
+        const lineTitle = bracketMatch[4].trim().toLowerCase();
+        if (lineTitle === targetTitle) {
+          if (status === 'completed' && !isDone) {
+            lines[i] =
+              `${bracketMatch[1]}:done${bracketMatch[3]}${bracketMatch[4]}${bracketMatch[5]}`;
+            noteChanged = true;
+          } else if (status === 'active' && isDone) {
+            lines[i] =
+              `${bracketMatch[1]}${bracketMatch[3]}${bracketMatch[4]}${bracketMatch[5]}`;
+            noteChanged = true;
+          }
+        }
+      }
+    }
+    if (noteChanged) {
+      note.content = lines.join('\n');
+      note.updatedAt = new Date().toISOString();
+      changed = true;
+    }
+  }
+  if (changed) {
+    saveStoredNotes(notes);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('pluto:notes-changed'));
+    }
+  }
+};
+
+// Browser preview has no model, so Ask Pluto in notes returns a fixed sample.
+const previewNoteAskPlutoAnswer = (raw: unknown) => {
+  const intent =
+    raw && typeof raw === 'object' && 'intent' in raw
+      ? String((raw as { intent: unknown }).intent)
+      : 'ask';
+  if (intent === 'tasks') {
+    const suggestedTasks = [
+      'Confirm launch date with the design team',
+      'Send pricing options to finance',
+    ];
+    return {
+      status: 'answered',
+      answer: suggestedTasks.map((task) => `- ${task}`).join('\n'),
+      suggestedTasks,
+    };
+  }
+  return {
+    status: 'answered',
+    answer:
+      '- **Decision:** ship calendar sync before pricing work.\n- **Open:** who owns the onboarding review.\n\n_Sample answer from the browser preview._',
+  };
+};
+
 const createInvokeFallback =
   (
     captureJournals: Map<string, BrowserCaptureJournal>,
   ): IpcRendererLike['invoke'] =>
   async <T = unknown>(channel: string, ...args: unknown[]): Promise<T> => {
-    if (channel.startsWith('TASKS_'))
-      return invokeTaskPreview(
+    if (channel.startsWith('TASKS_')) {
+      const res = invokeTaskPreview(
         channel,
         args[0] as Record<string, unknown>,
       ) as T;
+      if (
+        channel === 'TASKS_STATUS' &&
+        args[0] &&
+        typeof args[0] === 'object'
+      ) {
+        const payload = args[0] as {
+          id?: string;
+          status?: 'active' | 'completed';
+        };
+        syncBrowserTaskStatusToNotes(payload.id, payload.status);
+      }
+      return res;
+    }
+    if (channel.startsWith('NOTES_'))
+      return invokeNotesFallback(channel, args[0]) as T;
+    if (channel === 'intelligence:note-chat') {
+      return previewNoteAskPlutoAnswer(args[0]) as T;
+    }
     let result: unknown;
 
     switch (channel) {

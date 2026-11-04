@@ -189,6 +189,11 @@ vi.mock('../../electron/db', () => ({
   searchMeetingsFts: vi.fn(),
   searchMeetingNotesFts: vi.fn(),
   searchMeetingContextSectionsFts: vi.fn().mockReturnValue([]),
+  searchNotes: vi.fn().mockReturnValue([]),
+  notesStore: {
+    searchNotes: vi.fn().mockReturnValue([]),
+    getNotesForEntity: vi.fn().mockReturnValue([]),
+  },
   searchLocalArtifacts: vi.fn().mockReturnValue([]),
   searchLocalArtifactsFts: vi.fn().mockReturnValue([]),
   searchEntitiesWithMeetingContext: vi.fn(),
@@ -412,6 +417,31 @@ describe('Query Engine', () => {
       expect(greetedQuestion.cannedResponse).toBeUndefined();
     });
 
+    it.each(['what can you help me with?', 'Hi Pluto, how can you help me?'])(
+      'bypasses model classification for capabilities: %s',
+      async (query) => {
+        const result = await parseQuery(query);
+        expect(result.intent).toBe('conversational');
+        expect(result.cannedResponse).toContain('synthesized meeting notes');
+        expect(factoryModule.getProvider).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      'Hi, summarize the release discussion.',
+      'Thanks, what are my next steps?',
+      'What can you tell me about Atlas?',
+    ])(
+      'retrieves for substantive requests without model classification: %s',
+      async (query) => {
+        const result = await parseQuery(query, {
+          useModelClassification: false,
+        });
+        expect(result.intent).not.toBe('conversational');
+        expect(result.cannedResponse).toBeUndefined();
+      },
+    );
+
     it('uses the LLM to classify conversational intent for ambiguous queries', async () => {
       const mockProvider = {
         classifyQueryIntent: vi
@@ -454,6 +484,31 @@ describe('Query Engine', () => {
       expect(result.expanded_keywords).toContain('API');
       expect(result.expanded_keywords).toContain('backend');
       expect(result.intent).toBe('factual');
+    });
+
+    it.each([
+      '{"intent":"unknown","expanded_keywords":["API"]}',
+      '{"intent":"factual","expanded_keywords":["API",42]}',
+      '{"intent":"factual","expanded_keywords":[null]}',
+    ])('fails safely on malformed classifier data: %s', async (response) => {
+      vi.mocked(factoryModule.getProvider).mockResolvedValue({
+        classifyQueryIntent: vi.fn().mockResolvedValue(response),
+      } as unknown as LLMProvider);
+      const parsed = await parseQuery('GraphQL');
+      expect(parsed.intent).toBe('factual');
+      expect(parsed.expanded_keywords).toEqual([]);
+    });
+    it('accepts a prose-wrapped valid classification without losing keyword types', async () => {
+      vi.mocked(factoryModule.getProvider).mockResolvedValue({
+        classifyQueryIntent: vi
+          .fn()
+          .mockResolvedValue(
+            'Result: {"intent":"exploratory","expanded_keywords":["API"]}',
+          ),
+      } as unknown as LLMProvider);
+      const parsed = await parseQuery('GraphQL');
+      expect(parsed.intent).toBe('exploratory');
+      expect(parsed.expanded_keywords).toEqual(['API']);
     });
 
     it('handles LLM failures gracefully using fallbacks', async () => {
@@ -513,6 +568,47 @@ describe('Query Engine', () => {
   });
 
   describe('retrieveContext', () => {
+    it('incorporates matching living notes into retrieval pipeline as evidence_kind: note', async () => {
+      vi.mocked(dbModule.notesStore.searchNotes).mockImplementation((query) => {
+        if (
+          query.toLowerCase().includes('budget') ||
+          query.toLowerCase().includes('q3')
+        ) {
+          return [
+            {
+              id: 'note-living-101',
+              title: 'Q3 Budget Scratchpad',
+              content:
+                'Finalized Q3 budget: $150k allocated to engineering infrastructure.',
+              noteType: 'scratchpad',
+              targetId: null,
+              targetName: null,
+              pinned: true,
+              createdAt: '2026-09-01T10:00:00Z',
+              updatedAt: '2026-09-01T10:00:00Z',
+            },
+          ];
+        }
+        return [];
+      });
+
+      const results = await retrieveContext({
+        keywords: ['budget', 'q3'],
+        expanded_keywords: [],
+        entity_mentions: [],
+        temporal_range: null,
+        intent: 'factual',
+      });
+
+      const livingNoteResult = results.find(
+        (r) => r.meeting_id === 'note-living-101',
+      );
+      expect(livingNoteResult).toBeDefined();
+      expect(livingNoteResult?.evidence_kind).toBe('note');
+      expect(livingNoteResult?.meeting_title).toBe('Q3 Budget Scratchpad');
+      expect(livingNoteResult?.evidence_text).toContain('Finalized Q3 budget');
+    });
+
     it('does not search local artifacts for Chat with Pluto retrieval', async () => {
       await retrieveContext({
         keywords: ['Juniper', 'launch'],

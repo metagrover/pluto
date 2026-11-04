@@ -15,9 +15,9 @@ const REFERENTIAL_PATTERN =
 const DIAGNOSTIC_PATTERN =
   /\b(what went wrong|why (?:couldn't|could not|didn't|did not) you|that didn't answer|that did not answer|why no results|why did that fail|what did you find|which meetings|which sources)\b/i;
 export const EXPANSION_FOLLOW_UP_PATTERN =
-  /^(?:there (?:should|must) be more|is that all|anything else|what else|show me more|tell me more|more|explain|elaborate|go deeper|can you expand|what do you mean)[?.!]*$/i;
+  /^(?:there (?:should|must) be more|is that all|anything else|what else|show me more|tell me more|more|explain|elaborate|go deeper|can you expand)[?.!]*$/i;
 export const TOPIC_EXPANSION_PATTERN =
-  /^(?:there (?:should|must) be more|is that all|anything else|what else|show me more|tell me more|more|explain|elaborate|go deeper|can you expand|what do you mean)\b/i;
+  /^(?:there (?:should|must) be more|is that all|anything else|what else|show me more|tell me more|more|explain|elaborate|go deeper|can you expand)\b/i;
 const DEPTH_REQUEST_PATTERN =
   /\b(?:in (?:more )?detail|more details?|deeper|dive (?:in|into)|expand(?: on)?|elaborate(?: on)?)\b/i;
 const isExpansionRequest = (query: string): boolean =>
@@ -447,6 +447,16 @@ export const resolveAskPlutoConversation = (
         answerQuery: retryQuery,
         priorQuestion: retryQuery,
       };
+  }
+  if (turnDecision.mode === 'social' && !turnDecision.usesPriorTurn) {
+    return {
+      relation: 'new_topic',
+      task: 'lookup',
+      turnMode: 'social',
+      retrievalPolicy: 'none',
+      retrievalQuery: trimmedQuery,
+      answerQuery: trimmedQuery,
+    };
   }
   if (previousAssistant && turnDecision.mode === 'social') {
     return {

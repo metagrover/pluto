@@ -27,6 +27,22 @@ describe('getAskPlutoPrompt', () => {
     );
   });
 
+  it('requires source-by-source coverage of planned as well as agreed assignments', () => {
+    const prompt = getAskPlutoPrompt(
+      "What's assigned to Morgan?",
+      [],
+      'factual',
+    );
+    expect(prompt).toContain('Review every Context in order before answering');
+    expect(prompt).toContain('Planned work is still a recorded assignment');
+    expect(prompt).toContain(
+      'Separate completed history from work still to do',
+    );
+    expect(prompt).toContain('Work assigned to someone else');
+    expect(prompt).toContain('I can’t confirm their current status');
+    expect(prompt).toContain('earlier recorded target');
+  });
+
   it('preserves canonical lifecycle when answering task details', () => {
     const prompt = getAskPlutoPrompt(
       'Who is sending it, and under what condition?',

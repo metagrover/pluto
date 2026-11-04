@@ -15,6 +15,14 @@ export const listTasks = (): Promise<TasksSnapshot> =>
   window.ipcRenderer.invoke('TASKS_LIST');
 export const saveTask = (input: SaveTaskInput): Promise<string> =>
   mutate('TASKS_SAVE', input);
+export const deleteTask = (
+  id: string,
+  expectedRevision?: string,
+): Promise<string> => mutate('TASKS_DELETE', { id, expectedRevision });
+export const restoreTask = (
+  id: string,
+  deletionRevision: string,
+): Promise<void> => mutate('TASKS_RESTORE', { id, deletionRevision });
 export const setTaskStatus = (
   id: string,
   status: 'active' | 'completed',

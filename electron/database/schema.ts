@@ -1538,3 +1538,21 @@ export const meetingPrep = sqliteTable('meeting_prep', {
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const notes = sqliteTable(
+  'notes',
+  {
+    id: text('id').primaryKey().notNull(),
+    title: text('title').notNull().default(''),
+    content: text('content').notNull().default(''),
+    noteType: text('note_type').notNull().default('scratchpad'),
+    targetId: text('target_id'),
+    pinned: integer('pinned').notNull().default(0),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index('idx_notes_target').on(table.targetId),
+    index('idx_notes_updated_at').on(desc(table.updatedAt)),
+  ],
+);

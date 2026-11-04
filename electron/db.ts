@@ -136,6 +136,10 @@ import {
   repairMeetingFtsIndex as repairMeetingSearchFtsIndex,
 } from './database/meetingSearchMaintenance';
 import {
+  syncActionCompletionToNotes,
+  syncActionTitleToNotes,
+} from './database/noteActionSync';
+import {
   type DreamingDecisionInput,
   type DreamingDecisionResult,
   createDreamingProposalStore,
@@ -171,6 +175,7 @@ import { buildMeetingNotesIdentityProjection } from './meetingParticipantIdentit
 import type { PrepMeetingOption } from './meetingPrep';
 import { createMeetingPrepStore, findCalendarInviteeName } from './meetingPrep';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
+import { createNotesStore } from './notesStore';
 import { createPrepAttendeeStore } from './prepAttendees';
 import { projectIdentityName } from './projectIdentityMatching';
 import type { ProjectRoutingMembership } from './projectRouting';
@@ -8205,11 +8210,18 @@ export const updateEntityStatus = (id: string, status: EntityStatus): void => {
   db.transaction(() => {
     if (status === 'completed' || status === 'active') {
       syncActionCompletionToMeetingNotes(db, id, status === 'completed');
+      syncActionCompletionToNotes(db, id, status === 'completed');
     }
     db.prepare(`
     UPDATE entities SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
     `).run(status, id);
   })();
+};
+
+export {
+  syncActionCompletionToMeetingNotes,
+  syncActionCompletionToNotes,
+  syncActionTitleToNotes,
 };
 
 /**
@@ -10584,6 +10596,8 @@ export const resetKnowledge = () => {
     'meeting_notes_fts',
     'meeting_context_sections_fts',
     'meeting_context_sections',
+    'notes',
+    'notes_fts',
   ];
 
   const deleteTransaction = db.transaction(() => {
@@ -11145,3 +11159,9 @@ export const meetingPrepStore = createMeetingPrepStore(db, {
     };
   },
 });
+
+export const notesStore = createNotesStore(db);
+export const searchNotes = (query: string, limit?: number) =>
+  notesStore.searchNotes(query, limit);
+export const getNotesForEntity = (entityId: string) =>
+  notesStore.getNotesForEntity(entityId);

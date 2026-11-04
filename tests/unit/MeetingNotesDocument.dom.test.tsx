@@ -494,6 +494,28 @@ describe('MeetingNotesDocument', () => {
     expect(container.textContent).not.toContain('Use docs as reviewed code.');
   });
 
+  it('applies the highlighted slash command on Enter', async () => {
+    await act(async () => renderDocument());
+    const textarea = await openBlockEditor('Use docs as code.');
+    await changeTextarea(textarea!, 'Use docs as code.\n/num');
+    expect(
+      container.querySelector('.slash-command-menu')?.textContent,
+    ).toContain('Numbered list');
+
+    await act(async () => {
+      textarea?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    expect(container.querySelector('.slash-command-menu')).toBeNull();
+    expect(textarea?.value).toBe('Use docs as code.\n1. ');
+  });
+
   it('offers a keyboard-reachable edit action with native spellcheck', async () => {
     await act(async () => renderDocument());
     const edit = container.querySelector<HTMLButtonElement>(

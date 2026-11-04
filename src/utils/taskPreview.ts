@@ -98,18 +98,53 @@ export const invokeTaskPreview = (
   const snapshot = read();
   let result: unknown;
   const input = payload as unknown as SaveTaskInput;
-  const found = snapshot.tasks.find((task) => task.entity.id === payload.id);
+  const found = snapshot.tasks.find(
+    (task) =>
+      task.entity.id === payload.id ||
+      (input.sourceNoteLineId &&
+        (task as unknown as { sourceNoteLineId?: string }).sourceNoteLineId ===
+          input.sourceNoteLineId) ||
+      (input.title &&
+        task.entity.name.toLowerCase().trim() ===
+          input.title.toLowerCase().trim()),
+  );
   switch (channel) {
     case 'TASKS_LIST':
+      snapshot.tasks = snapshot.tasks.filter((t) => {
+        const name = t.entity.name?.trim() || '';
+        return (
+          name &&
+          name !== '/' &&
+          !name.startsWith('/task') &&
+          name.length >= 2 &&
+          !/^jot down thoughts/i.test(name)
+        );
+      });
       return snapshot;
     case 'TASKS_SAVE': {
-      if (!input.title.trim()) throw new Error('Task title is required.');
-      const item = found ?? task(crypto.randomUUID(), input.title.trim());
-      item.entity.name = input.title.trim();
+      const cleanTitle = input.title?.trim() || '';
+      if (
+        !cleanTitle ||
+        cleanTitle === '/' ||
+        cleanTitle.startsWith('/task') ||
+        cleanTitle.length < 2 ||
+        /^jot down thoughts/i.test(cleanTitle)
+      ) {
+        throw new Error('Valid task title is required.');
+      }
+      const item = found ?? task(crypto.randomUUID(), cleanTitle);
+      item.entity.name = cleanTitle;
+      if (input.status !== undefined) item.entity.status = input.status;
       if (input.dueDate !== undefined) item.entity.due_date = input.dueDate;
       if (input.projectId !== undefined) item.projectId = input.projectId;
       if (input.tagIds) item.tagIds = input.tagIds;
       if (input.description !== undefined) item.description = input.description;
+      if (input.sourceNoteId !== undefined)
+        (item as unknown as { sourceNoteId?: string }).sourceNoteId =
+          input.sourceNoteId;
+      if (input.sourceNoteLineId !== undefined)
+        (item as unknown as { sourceNoteLineId?: string }).sourceNoteLineId =
+          input.sourceNoteLineId;
       if (!found) snapshot.tasks.push(item);
       result = item.entity.id;
       break;

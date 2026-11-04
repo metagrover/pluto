@@ -26,6 +26,18 @@
 - **Evidence:** On a 16 GiB Mac with bounded placement, Gemma measured about 25 s to load, ~55 prompt tokens/s and ~11 output tokens/s; automatic placement measured ~105 prompt tokens/s. Unbounded chat prompts reached ~11k tokens and could not reach a first token inside fixed 90/120 s deadlines. Immediate release after every answer forced a cold load per question, and a refused cold load then failed every later question. Real-profile replay showed 16 of 18 questions unavailable or unanswered. Throughput figures are bounded observations, not answer-quality acceptance.
 - **Validation:** Profile regressions cover first measurement, smoothing, short-evaluation and warm-load exclusion, artifact or placement resets, persistence and corrupt-file recovery. Provider regressions prove three chat turns of different sizes keep one context with no reload on 16, 32 and 64 GiB, and that completed generations update the profile. Prompt regressions leave fast-Mac and unbudgeted prompts unchanged and bound a slow-Mac twelve-source prompt inside the shared context.
 
+## 2026-11-02 - Admit interactive question classification before note writing
+
+- **Refines:** “2026-10-25 - Separate local question routing from factual synthesis.”
+- **Decision:** Give question classification the same foreground work class as Ask Pluto answers and meeting-scope resolution. A shorthand question must not wait behind automatic or manual note writing before its scope is known. Classification still uses the configured routing model. Keep native-audio priority, serialized admission, cancellation, cleanup barriers, and memory protection unchanged.
+- **Validation:** Queue regressions prove that classification and scope resolution preempt note writing only after the interrupted task settles. The default-priority regression reproduced the prior incorrect automatic-notes priority.
+
+## 2026-11-02 - Keep deleted personal tasks reversible in their canonical record
+
+- **Refines:** “2026-10-26 - Supply canonical task state through ordinary answer evidence.”
+- **Decision:** Removing a personal task marks its canonical commitment rejected and records its prior review state. Keep its ID, completion status, exact deadline, ownership, source links, tags and description. Undo restores that same record and state only when its deletion revision still matches; concurrent edits or source synchronization require a fresh review instead of an overwrite. No source recording, transcript or note is deleted.
+- **Validation:** Service regressions cover identity and provenance preservation, source resynchronization, canonical exclusion, exact deadlines and stale mutation refusal. Electron workflow acceptance exercises deletion and restoration through the Tasks IPC.
+
 ## 2026-10-29 - Preserve grounding while enabling final Auto-detect (notes-v100)
 
 - **Supersedes:** The heuristic language detection and non-English commitment exceptions in “Offer Auto-detect for final transcription language”; the prompt/cache identity in “Preserve trusted notes policy during bounded repair (notes-v99)”.
