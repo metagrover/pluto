@@ -377,6 +377,30 @@ describe('Citation Engine', () => {
       expect(presentation.answer).not.toContain('budget was approved');
     });
 
+    it('keeps the rest of a one-paragraph draft when one sentence is unsupported', () => {
+      const finalize = (draft: string) =>
+        createValidatedAnswerStream(sources, () => undefined, 'draft').finalize(
+          draft,
+        );
+
+      const framed = finalize(
+        "Hi Jordan, I'm reaching out regarding the launch. Sam owns launch signoff [Source 1]. Could you confirm the final checklist?",
+      );
+      expect(framed.outcome).toBe('answered');
+      expect(framed.answer).toBe(
+        "Hi Jordan, I'm reaching out regarding the launch. Sam owns launch signoff. Could you confirm the final checklist?",
+      );
+
+      const mixed = finalize(
+        'Hi Jordan, the budget was approved last week [Source 1]. The launch is Friday [Source 1]. Please let me know if anything changes.',
+      );
+      expect(mixed.outcome).toBe('partial');
+      expect(mixed.answer).toBe(
+        'Hi Jordan,\n\nThe launch is Friday. Please let me know if anything changes.',
+      );
+      expect(mixed.answer).not.toContain('budget');
+    });
+
     it.each([
       'Could you share an update on the acceptance report?',
       'Hi Morgan, could you please provide an update on the status of the acceptance report [Source 1]?',

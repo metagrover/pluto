@@ -151,6 +151,29 @@ describe('Ask Pluto query IPC boundary', () => {
       /parsed.temporal_range \|\|\s*switchesNamedProject \|\|\s*hasMultipleProjectScopes/,
     );
   });
+  it('plans each turn before pattern routing and keeps patterns as the fallback', () => {
+    const planIndex = queryHandler.indexOf('const turnPlan =');
+    const conversationReturn = queryHandler.search(
+      /turnPlan\?\.route === 'conversation' \|\|\s+turnPlan\?\.route === 'help'/,
+    );
+    const helpFallback = queryHandler.indexOf(
+      'const helpReply = turnPlan ? null : buildPlutoHelpReply(queryText);',
+    );
+    const resolution = queryHandler.indexOf('applyAskPlutoPlan(');
+    const retrieval = queryHandler.indexOf('await retrieveContext(');
+    expect(planIndex).toBeGreaterThan(0);
+    expect(planIndex).toBeLessThan(conversationReturn);
+    expect(conversationReturn).toBeLessThan(helpFallback);
+    expect(helpFallback).toBeLessThan(resolution);
+    expect(resolution).toBeLessThan(retrieval);
+    expect(queryHandler).toContain(': patternResolution;');
+    expect(queryHandler).toContain(
+      '(await getProvider(settings)).planAskPlutoTurn',
+    );
+    // A plan replaces the separate quick-model classification.
+    expect(queryHandler).toMatch(/useModelClassification:\s*!turnPlan &&/);
+  });
+
   it('uses structured assignee recall before invoking the answer provider', () => {
     expect(main).toContain('buildAssigneeActionRecall');
     expect(queryHandler).toContain('const assigneeRecall =');
@@ -330,7 +353,7 @@ describe('Ask Pluto query IPC boundary', () => {
       );
       const assignmentEnd = queryHandler.indexOf(';', assignmentStart);
       const providerRequest = queryHandler.indexOf(
-        'answerRaw = await provider.answerAskPluto(',
+        'answerRaw = await withMemoryFallback(',
         assignmentEnd,
       );
       expect(assignmentStart).toBeGreaterThan(modeStart);

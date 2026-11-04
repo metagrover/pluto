@@ -21,7 +21,7 @@ export interface FrameMeeting {
 }
 
 export interface MeetingReference {
-  position: 'last' | 'first' | 'all';
+  position: 'last' | 'previous' | 'first' | 'all';
   oneOnOne: boolean;
   matchedText: string;
 }
@@ -200,6 +200,7 @@ export const selectPersonMeetings = ({
     })
     .sort((left, right) => occurredAt(right).localeCompare(occurredAt(left)));
   if (reference.position === 'last') return selected.slice(0, 1);
+  if (reference.position === 'previous') return selected.slice(1, 2);
   if (reference.position === 'first') return selected.slice(-1);
   return selected;
 };
@@ -228,9 +229,11 @@ export const describeMeetingReference = ({
   const base =
     reference.position === 'last'
       ? `your last ${kind} with ${names}`
-      : reference.position === 'first'
-        ? `your first ${kind} with ${names}`
-        : `your ${kind}s with ${names}`;
+      : reference.position === 'previous'
+        ? `your second most recent ${kind} with ${names}`
+        : reference.position === 'first'
+          ? `your first ${kind} with ${names}`
+          : `your ${kind}s with ${names}`;
   return rangeLabel ? `${base} (${rangeLabel})` : base;
 };
 

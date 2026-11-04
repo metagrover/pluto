@@ -592,6 +592,9 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).toContain('under 80 words');
     expect(prompt).toContain('Omit a sign-off for a chat message');
     expect(prompt).toContain('Use it only to identify the one item');
+    expect(prompt).toContain(
+      "Keep Pluto's search and missing evidence out of the message",
+    );
     expect(prompt).not.toContain(
       'Add useful supported context without repeating these sentences',
     );

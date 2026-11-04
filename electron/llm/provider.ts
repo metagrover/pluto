@@ -230,6 +230,15 @@ export interface LLMProvider {
       onToken?: (delta: string) => void;
     },
   ): Promise<string>;
+  planAskPlutoTurn?(
+    prompt: string,
+    options?: {
+      signal?: AbortSignal;
+      responseSchema?: Record<string, unknown>;
+      onStart?: () => void;
+      onProgress?: () => void;
+    },
+  ): Promise<string>;
   classifyQueryIntent(
     prompt: string,
     options?: {

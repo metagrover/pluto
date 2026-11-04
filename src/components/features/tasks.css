@@ -10,12 +10,14 @@
   color: var(--task-text-secondary);
 }
 .tasks-workspace button:focus-visible {
-  outline: none;
+  outline: 2px solid hsl(var(--pro-accent));
+  outline-offset: 2px;
 }
 .tasks-workspace .task-field > :is(input, textarea):focus-visible,
 .tasks-workspace .task-input:focus-visible {
   outline: none;
-  border-color: hsl(var(--pro-border));
+  border-color: hsl(var(--pro-accent));
+  box-shadow: 0 0 0 2px hsl(var(--pro-accent) / 0.25);
 }
 .tasks-workspace :is(.task-search-input, .task-inline-input):focus,
 .tasks-workspace :is(.task-search-input, .task-inline-input):focus-visible {

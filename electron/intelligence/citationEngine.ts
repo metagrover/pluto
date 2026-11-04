@@ -1369,6 +1369,17 @@ export const isNonFactualResponseText = (
     }
   }
   if (mode !== 'draft') return false;
+  // A short opening that names only the topic ("I'm reaching out about the
+  // PBX migration") frames the message and states no fact.
+  if (
+    /^(?:(?:Hi|Hello|Dear)(?:\s+[\p{L}'-]+){0,4},\s*)?(?:I'm|I am|I wanted to|Just)\s+(?:reaching out|writing|following up|checking in|sharing a (?:quick |brief )?(?:update|note))\s+(?:regarding|about|on|re)\b/iu.test(
+      text,
+    ) &&
+    text.split(/\s+/).length <= 14 &&
+    !/\d/.test(text)
+  ) {
+    return true;
+  }
   const requestText = text.replace(
     /^(?:Hi|Hello|Dear)(?:\s+[\p{L}'-]+){0,4},\s*/iu,
     '',
@@ -1393,6 +1404,61 @@ const isMaterialClaim = (
   if (isNonFactualResponseText(withoutCitations, mode)) return false;
   return contentTokens(withoutCitations).length >= 2;
 };
+
+const DRAFT_GREETING = /^((?:Hi|Hello|Dear)(?:\s+[\p{L}'-]+){0,4},)\s*/iu;
+const LEADING_CONNECTIVE =
+  /^(?:Additionally|Also|In addition|Furthermore|Moreover|Similarly),\s*/i;
+
+// A draft keeps its greeting, framing, requests and sign-off. Only factual
+// sentences without support are removed, one sentence at a time, so a single
+// unsupported line does not discard the rest of the message.
+const preserveSupportedDraftSentences = (
+  answer: string,
+  supportedClaimKeys: ReadonlySet<string>,
+): string =>
+  answer
+    .split(/\n+/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => {
+      const kept: string[] = [];
+      let detachedGreeting: string | undefined;
+      let droppedPrevious = false;
+      for (const sentence of paragraph
+        .split(/(?<=[.!?])\s+/)
+        .map((part) => part.trim())
+        .filter(Boolean)) {
+        if (
+          !isMaterialClaim(sentence, 'draft') ||
+          supportedClaimKeys.has(normalizeClaimKey(sentence))
+        ) {
+          const text = droppedPrevious
+            ? sentence
+                .replace(LEADING_CONNECTIVE, '')
+                .replace(/^\p{Ll}/u, (letter) => letter.toLocaleUpperCase())
+            : sentence;
+          kept.push(text);
+          droppedPrevious = false;
+          continue;
+        }
+        const greeting = sentence.match(DRAFT_GREETING)?.[1];
+        if (greeting && kept.length === 0) {
+          detachedGreeting = greeting;
+          continue;
+        }
+        droppedPrevious = true;
+      }
+      const body = kept.join(' ');
+      return detachedGreeting && body ? `${detachedGreeting}\n\n${body}` : body;
+    })
+    .filter(Boolean)
+    .map((paragraph) =>
+      paragraph
+        .replace(/\s*\[Source\s+\d+\]/gi, '')
+        .replace(/\s+([.!?,])/g, '$1')
+        .trim(),
+    )
+    .join('\n\n');
 
 const CONTEXTLESS_CLAIM_PATTERN =
   /\b(?:one|a|another|the)\s+(?:speaker|participant|attendee)\b|\b(?:an?|the)\s+(?:application|app|project|product|tool)\b/i;
@@ -1560,33 +1626,32 @@ export const buildSafeAnswerPresentation = (
   const preservedAnswer =
     mode === 'grounded'
       ? undefined
-      : answer
-          .split(/\n+/)
-          .map((paragraph) => paragraph.trim())
-          .filter(Boolean)
-          .filter((paragraph) => {
-            const sentences = paragraph
-              .split(/(?<=[.!?])\s+/)
-              .map((sentence) => sentence.trim())
-              .filter(Boolean);
-            const material = sentences.filter((s) => isMaterialClaim(s, mode));
-            if (material.length === 0) return true;
-            if (mode === 'analysis') {
+      : mode === 'draft'
+        ? preserveSupportedDraftSentences(answer, supportedClaimKeys)
+        : answer
+            .split(/\n+/)
+            .map((paragraph) => paragraph.trim())
+            .filter(Boolean)
+            .filter((paragraph) => {
+              const sentences = paragraph
+                .split(/(?<=[.!?])\s+/)
+                .map((sentence) => sentence.trim())
+                .filter(Boolean);
+              const material = sentences.filter((s) =>
+                isMaterialClaim(s, mode),
+              );
+              if (material.length === 0) return true;
               return material.some((s) =>
                 supportedClaimKeys.has(normalizeClaimKey(s)),
               );
-            }
-            return material.every((s) =>
-              supportedClaimKeys.has(normalizeClaimKey(s)),
-            );
-          })
-          .map((paragraph) =>
-            paragraph
-              .replace(/\s*\[Source\s+\d+\]/gi, '')
-              .replace(/\s+([.!?])/g, '$1')
-              .trim(),
-          )
-          .join('\n\n');
+            })
+            .map((paragraph) =>
+              paragraph
+                .replace(/\s*\[Source\s+\d+\]/gi, '')
+                .replace(/\s+([.!?])/g, '$1')
+                .trim(),
+            )
+            .join('\n\n');
   const supportedClaimSeparator = supportedClaims.some((claim) =>
     /^[-*]\s/.test(claim),
   )
