@@ -276,7 +276,7 @@ describe('Ask Pluto query IPC boundary', () => {
     );
     const branch = queryHandler.slice(
       start,
-      queryHandler.indexOf('const persistedMeetings =', start),
+      queryHandler.indexOf('const askMeetings =', start),
     );
     expect(start).toBeGreaterThan(-1);
     expect(branch).toContain(
@@ -306,13 +306,25 @@ describe('Ask Pluto query IPC boundary', () => {
 
   it('defers synthesized meeting detail reads until after conversation-only turns', () => {
     expect(queryHandler).toContain('db.getAskPlutoMeetingHeaders()');
-    expect(queryHandler).toContain('db.getAskPlutoMeetings()');
+    expect(queryHandler).toContain('createAskPlutoMeetingSource(db)');
     expect(queryHandler).not.toContain('db.getMeetings()');
-    expect(queryHandler.indexOf('db.getAskPlutoMeetings()')).toBeGreaterThan(
+    expect(
+      queryHandler.indexOf('createAskPlutoMeetingSource(db)'),
+    ).toBeGreaterThan(
       queryHandler.indexOf(
         "conversationResolution.relation === 'acknowledgment'",
       ),
     );
+  });
+
+  it('loads every meeting with notes only for steps that read all of them', () => {
+    // Other steps choose meetings from headers and load only those rows.
+    expect(queryHandler).not.toContain('persistedMeetings.filter');
+    expect(queryHandler.match(/askMeetings\.all\b/g)).toHaveLength(3);
+    for (const call of queryHandler.match(
+      /buildAssigneeActionRecall\([\s\S]*?\)/g,
+    ) ?? [])
+      expect(call).toContain('askMeetings.all');
   });
 
   it('preserves conversation routing metadata across the IPC boundary', () => {

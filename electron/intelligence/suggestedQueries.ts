@@ -134,7 +134,7 @@ interface Candidate {
 
 export function generateSuggestedQueries(): string[] {
   console.log('[suggestedQueries] Generating dynamic suggested queries...');
-  const meetings = db.getMeetings() as db.PersistedMeeting[];
+  const meetings = db.getSuggestedQueryMeetings(10);
   if (!meetings || meetings.length === 0) {
     return [];
   }

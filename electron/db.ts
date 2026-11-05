@@ -2773,6 +2773,9 @@ export const recoverExpiredTranscriptValidationRetries = (
   return recovered;
 };
 
+// Full rows, including transcripts. Callers that only need a few columns use a
+// projection below: transcript_json is stored early in each row and averages
+// hundreds of KB, so every full read walks and decodes it for every meeting.
 export const getMeetings = () => {
   recoverExpiredTranscriptValidationRetriesIfDue();
   return db
@@ -2781,6 +2784,87 @@ export const getMeetings = () => {
     )
     .all();
 };
+
+// Columns buildMeetingNotesEvidenceDocument and project sources read.
+export type ProjectSynthesisMeeting = Pick<
+  PersistedMeeting,
+  | 'id'
+  | 'title'
+  | 'started_at'
+  | 'created_at'
+  | 'user_notes'
+  | 'enhanced_notes'
+  | 'analysis_json'
+  | 'user_edits_json'
+  | 'mid_json'
+  | 'analysis_format_pass'
+>;
+
+/** Meetings for project synthesis, optionally limited to the given ids. */
+export const getProjectSynthesisMeetings = (
+  meetingIds?: Iterable<string> | null,
+): ProjectSynthesisMeeting[] => {
+  const columns = `id, title, started_at, created_at, user_notes, enhanced_notes,
+    analysis_json, user_edits_json, mid_json, analysis_format_pass`;
+  const order = 'ORDER BY COALESCE(started_at, created_at) DESC';
+  if (!meetingIds)
+    return db
+      .prepare(`SELECT ${columns} FROM meetings ${order}`)
+      .all() as ProjectSynthesisMeeting[];
+  return db
+    .prepare(
+      `SELECT ${columns} FROM meetings
+       WHERE id IN (SELECT value FROM json_each(?)) ${order}`,
+    )
+    .all(
+      JSON.stringify([...meetingIds].map(String)),
+    ) as ProjectSynthesisMeeting[];
+};
+
+// Columns audio retention and historical audio migration decide on.
+export type AudioLifecycleMeeting = Pick<
+  PersistedMeeting,
+  | 'id'
+  | 'started_at'
+  | 'created_at'
+  | 'audio_path'
+  | 'system_audio_path'
+  | 'mixed_audio_path'
+  | 'transcript_status'
+  | 'finalization_status'
+  | 'downstream_processing_json'
+  | 'capture_journal_generation'
+>;
+
+export const getAudioLifecycleMeetings = (): AudioLifecycleMeeting[] => {
+  // Retention blocks on retrying transcripts, so expire stale leases first,
+  // as getMeetings does.
+  recoverExpiredTranscriptValidationRetriesIfDue();
+  return db
+    .prepare(
+      `SELECT id, started_at, created_at, audio_path, system_audio_path,
+              mixed_audio_path, transcript_status, finalization_status,
+              downstream_processing_json, capture_journal_generation
+       FROM meetings ORDER BY COALESCE(started_at, created_at) DESC`,
+    )
+    .all() as AudioLifecycleMeeting[];
+};
+
+export type SuggestedQueryMeeting = Pick<
+  PersistedMeeting,
+  'id' | 'title' | 'started_at' | 'created_at' | 'mid_json' | 'analysis_json'
+>;
+
+/** The most recent meetings suggested questions are drawn from. */
+export const getSuggestedQueryMeetings = (
+  limit = 10,
+): SuggestedQueryMeeting[] =>
+  db
+    .prepare(
+      `SELECT id, title, started_at, created_at, mid_json, analysis_json
+       FROM meetings ORDER BY COALESCE(started_at, created_at) DESC LIMIT ?`,
+    )
+    .all(limit) as SuggestedQueryMeeting[];
 
 // Ask Pluto reads published synthesis, never the recording or transcript columns.
 // Keep this projection separate from the general meeting API so a new raw column
@@ -2801,6 +2885,8 @@ export const getAskPlutoMeetings = (): PersistedMeeting[] =>
     )
     .all() as PersistedMeeting[];
 
+// Answered from idx_meetings_headers alone, without reading meeting rows. Keep
+// the column list inside that index.
 export const getAskPlutoMeetingHeaders = (): PersistedMeeting[] =>
   db
     .prepare(
@@ -2809,6 +2895,19 @@ export const getAskPlutoMeetingHeaders = (): PersistedMeeting[] =>
        ORDER BY COALESCE(started_at, created_at) DESC`,
     )
     .all() as PersistedMeeting[];
+
+/** Ask Pluto rows for the given ids, in no particular order. */
+export const getAskPlutoMeetingsByIds = (
+  ids: readonly (string | number)[],
+): PersistedMeeting[] =>
+  ids.length === 0
+    ? []
+    : (db
+        .prepare(
+          `SELECT ${askPlutoMeetingColumns} FROM meetings
+           WHERE id IN (SELECT value FROM json_each(?))`,
+        )
+        .all(JSON.stringify(ids.map(String))) as PersistedMeeting[]);
 
 export const getAskPlutoMeeting = (
   id: string | number,

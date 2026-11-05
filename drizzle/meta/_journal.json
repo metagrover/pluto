@@ -162,6 +162,13 @@
       "when": 1793100000000,
       "tag": "0022_meeting_list_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1793200000000,
+      "tag": "0023_meeting_header_covering_index",
+      "breakpoints": true
     }
   ]
 }
