@@ -10806,20 +10806,46 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             delta,
           });
         });
+        // Same as Ask Pluto: if memory protection refuses the main local
+        // model before any visible output, answer with the quick model.
+        const quickModel = resolveConfiguredOllamaModel(settings, true);
+        const canUseQuickModel =
+          (!settings.llm_provider || settings.llm_provider === 'ollama') &&
+          quickModel !== resolveConfiguredOllamaModel(settings);
+        let answerProvider = provider;
+        const answerOptions: Parameters<typeof provider.answerAskPluto>[1] = {
+          signal: controller.signal,
+          live: structuredLiveAnswer,
+          jsonMode: structuredLiveAnswer,
+          responseSchema: structuredLiveAnswer
+            ? buildLiveMeetingChatSchema(context, assistanceRoute)
+            : undefined,
+          onToken: (delta) => {
+            if (delta && firstTokenAt === undefined) firstTokenAt = Date.now();
+            if (!bufferFactualAnswer) visibleStream.push(delta);
+          },
+        };
         try {
-          answerRaw = await provider.answerAskPluto(prompt, {
-            signal: controller.signal,
-            live: structuredLiveAnswer,
-            jsonMode: structuredLiveAnswer,
-            responseSchema: structuredLiveAnswer
-              ? buildLiveMeetingChatSchema(context, assistanceRoute)
-              : undefined,
-            onToken: (delta) => {
-              if (delta && firstTokenAt === undefined)
-                firstTokenAt = Date.now();
-              if (!bufferFactualAnswer) visibleStream.push(delta);
-            },
-          });
+          ({ answer: answerRaw } = await generateWithMemoryFallback({
+            primary: () => provider.answerAskPluto(prompt, answerOptions),
+            fallback: canUseQuickModel
+              ? async () => {
+                  console.warn(
+                    `[Pluto][Ask Pluto][main] memory fallback to ${quickModel} (${requestId})`,
+                  );
+                  firstTokenAt = undefined;
+                  answerProvider = await getProvider({
+                    ...settings,
+                    ollama_model: quickModel,
+                  });
+                  return answerProvider.answerAskPluto(prompt, answerOptions);
+                }
+              : null,
+            // Buffered answers have shown nothing yet, so they can restart.
+            canFallBack: () =>
+              !controller.signal.aborted &&
+              (bufferFactualAnswer || firstTokenAt === undefined),
+          }));
         } catch (providerError) {
           if (controller.signal.aborted) throw providerError;
           console.warn(
@@ -10855,7 +10881,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                 ? `${conversation.priorQuestion}\nCurrent request: ${query}`
                 : query,
               generate: (prompt, options) =>
-                provider.answerAskPluto(prompt, {
+                answerProvider.answerAskPluto(prompt, {
                   signal: controller.signal,
                   live: true,
                   jsonMode: !options?.plainText,

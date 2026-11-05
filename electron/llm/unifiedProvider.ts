@@ -795,6 +795,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       NOTES_EXPERIMENTS_ENABLED &&
       this.providerType === 'ollama' &&
       compactWriterContract &&
+      hierarchyAuditStrategy !== 'deterministic_only' &&
       options.reuseWriterContext !== false
         ? {}
         : undefined;
@@ -2076,21 +2077,30 @@ export class UnifiedLLMProvider implements LLMProvider {
             ) * 1024,
           )
         : budget.num_ctx;
-    // Chat turns share one context so follow-ups and repairs reuse the
-    // loaded weights instead of reloading for small size changes.
+    const usesSharedChatContext =
+      task === 'askPluto' || task === 'askPlutoDeep' || task === 'askPlutoPlan';
+    // Keep the usual allocation when it fits. A smaller one must still hold
+    // the whole prompt, the output budget and the protocol overhead.
+    const promptContext = Math.max(
+      2048,
+      Math.ceil((estimateNotesTokens(prompt) + num_predict + 512) / 1024) *
+        1024,
+    );
     const chatContextFloor =
-      boundedGemmaArtifact &&
-      (task === 'askPluto' ||
-        task === 'askPlutoDeep' ||
-        task === 'askPlutoPlan')
-        ? Math.min(getOllamaContextCap(task), ASK_PLUTO_CHAT_CONTEXT_TOKENS)
+      boundedGemmaArtifact && usesSharedChatContext
+        ? ASK_PLUTO_CHAT_CONTEXT_TOKENS
         : 0;
     // Ollama clamps vision-capable Gemma to 2048; account for that actual allocation.
-    const requiredContext = Math.max(
+    const preferredContext = Math.max(
       boundedGemmaArtifact ? 2048 : 0,
       chatContextFloor,
       requestedContext,
     );
+    const canShrinkChatContext =
+      (usesSharedChatContext || task === 'askPlutoLive') && !notesBudget;
+    const requiredContext = canShrinkChatContext
+      ? Math.min(preferredContext, promptContext)
+      : preferredContext;
     if (notesBudget && requiredContext > budget.num_ctx)
       throw new MeetingNotesError('notes_input_overflow');
     // Shrinking a sufficient resident allocation only reloads the weights.
@@ -2101,7 +2111,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       residency.contextTokens >= requiredContext &&
       residency.contextTokens <= OLLAMA_MAX_REUSED_CONTEXT_TOKENS
         ? residency.contextTokens
-        : requiredContext;
+        : preferredContext;
     if (entry)
       console.info('[Local inference budget]', {
         task,
@@ -2134,6 +2144,9 @@ export class UnifiedLLMProvider implements LLMProvider {
               modelDigest: entry.digest,
               resident: isResident,
               contextTokens: num_ctx,
+              ...(canShrinkChatContext
+                ? { minimumContextTokens: requiredContext }
+                : {}),
               contextBytesPerToken,
               measuredColdPeak: getMeasuredColdPeak(
                 model,
@@ -2166,8 +2179,25 @@ export class UnifiedLLMProvider implements LLMProvider {
           }
         }
       };
+      const checkColdCapacity = async () => {
+        try {
+          await checkCapacity(false);
+        } catch (error) {
+          if (
+            !(error instanceof LocalModelMemoryError) ||
+            !error.maxContextTokens ||
+            error.maxContextTokens < requiredContext ||
+            error.maxContextTokens >= num_ctx
+          )
+            throw error;
+          num_ctx = error.maxContextTokens;
+          await checkCapacity(false);
+        }
+      };
       try {
-        await checkCapacity(resident && residency.contextTokens === num_ctx);
+        if (resident && residency.contextTokens === num_ctx)
+          await checkCapacity(true);
+        else await checkColdCapacity();
       } catch (error) {
         if (!resident || !(error instanceof LocalModelMemoryError)) throw error;
         await this.requestOllamaUnload(model, signal);

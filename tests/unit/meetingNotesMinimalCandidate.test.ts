@@ -72,6 +72,7 @@ it('writes ordinary local notes once without a model reviewer or semantic-review
       task: 'notesWriter',
       notesModel: 'gemma4:12b',
       notesBudget: { contextTokens: 16384, outputTokens: 2048 },
+      notesContinuation: undefined,
     }),
   );
   expect(result.overview).toBe('An outline will be sent.');
