@@ -328,7 +328,7 @@ describe('meeting regeneration failure presentation', () => {
   });
 });
 
-it('explains memory refusal without offering an unchanged automatic retry', () => {
+it('explains memory refusal and lets the person retry after freeing memory', () => {
   expect(
     resolveMeetingFailurePresentation({
       retryableFinalTranscription: false,
@@ -344,7 +344,7 @@ it('explains memory refusal without offering an unchanged automatic retry', () =
     title: 'Local model needs more memory',
     detail:
       'Your transcript is safe. Close other apps and try again when more memory is available.',
-    actionLabel: null,
+    actionLabel: 'Retry analysis',
   });
 });
 
@@ -359,6 +359,6 @@ it('keeps memory refusals actionable in the regeneration error dialog', () => {
     title: 'Local model needs more memory',
     detail:
       'Close other apps and try again when more memory is available. Your current notes are unchanged.',
-    canRetry: false,
+    canRetry: true,
   });
 });
