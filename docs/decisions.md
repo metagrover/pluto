@@ -1,3 +1,10 @@
+## 2026-11-04 - Stop drafting notes during meetings by default
+
+- **Status:** Accepted from code inspection. A packaged meeting has not yet confirmed zero reuse; the `[Notes timings]` log line (writer stages equal to `leaves`) can confirm it.
+- **Decision:** "Generate notes during meetings" (`faster_notes_enabled`) is off unless the user turns it on; an unset value now means off. People who explicitly turned it on keep it. The precompute code and its admission rules from "2026-08-31 - Admit only exact incremental note leaves under capture headroom" are unchanged.
+- **Rationale:** Final notes reuse a recording-time leaf only on an exact match, but final transcription re-transcribes the audio and replaces the live segments, so the source almost never matches. The recording-time key also leaves out confirmed speaker names and trusted terms, and any later note edit changes every leaf. The work used the local model, memory and heat during meetings for no notes speed-up. Reuse is possible only when final transcription is skipped or fails and notes run on the saved live transcript.
+- **Consequences:** The Settings description now says drafts are rarely reused. Showing a draft from the live transcript at stop, which would make notes appear sooner, is a separate product decision and is not part of this change.
+
 ## 2026-11-04 - Keep a sufficient resident Ollama context instead of shrinking it
 
 - **Status:** Accepted for correctness; covered by provider regressions. Memory use on 16 GiB hardware still needs a packaged run.

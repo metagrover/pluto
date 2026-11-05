@@ -230,7 +230,7 @@ export const AudioManager = ({
   onLiveTranscriptIntegrityChange,
   onRecordingStarted,
   systemAudioStatus = 'unknown',
-  fasterNotesEnabled = true,
+  fasterNotesEnabled = false,
 }: AudioManagerProps) => {
   const fasterNotesEnabledRef = useRef(fasterNotesEnabled);
   fasterNotesEnabledRef.current = fasterNotesEnabled;
@@ -1132,7 +1132,7 @@ export const AudioManager = ({
                 0,
               );
               if (
-                fasterNotesEnabledRef.current !== false &&
+                fasterNotesEnabledRef.current === true &&
                 !liveTranscriptionRecovering &&
                 shouldOfferIncrementalMeetingNotes({
                   sourceCharacterCount,

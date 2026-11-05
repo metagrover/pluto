@@ -2687,7 +2687,9 @@ app.whenReady().then(async () => {
           thermalState: powerMonitor.getCurrentThermalState(),
           freeMemoryBytes: os.freemem(),
           totalMemoryBytes: os.totalmem(),
-          fasterNotesEnabled: db.getSetting('faster_notes_enabled') !== 'false',
+          // Off unless chosen: final transcription replaces the live text, so leaves
+          // written during recording are almost never reused (2026-11-04).
+          fasterNotesEnabled: db.getSetting('faster_notes_enabled') === 'true',
           ...availableMemory,
         };
         return evaluateIncrementalMeetingNotesAdmission(policy).admitted;

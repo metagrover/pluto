@@ -626,7 +626,7 @@ describe('SettingsTab', () => {
 
     expect(container.textContent).toContain('Generate notes during meetings');
     expect(container.textContent).toContain(
-      'Precomputes notes in the background while recording',
+      'Drafts notes from the live transcript while recording',
     );
 
     const recordingSection = Array.from(

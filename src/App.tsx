@@ -433,7 +433,7 @@ function App() {
   const [reportProblemOpen, setReportProblemOpen] = useState(false);
   const [calendarAutoNameEnabled, setCalendarAutoNameEnabled] = useState(true);
   const [calendarPromptEnabled, setCalendarPromptEnabled] = useState(true);
-  const [fasterNotesEnabled, setFasterNotesEnabled] = useState(true);
+  const [fasterNotesEnabled, setFasterNotesEnabled] = useState(false);
   const [transcriptionLanguage, setTranscriptionLanguage] =
     useState<TranscriptionLanguage>('en');
   const [meetingNotesTemplateSettings, setMeetingNotesTemplateSettings] =
@@ -1061,7 +1061,7 @@ function App() {
     window.ipcRenderer
       .invoke('GET_SETTING', 'faster_notes_enabled')
       .then((val) => {
-        if (val !== null) setFasterNotesEnabled(val !== 'false');
+        setFasterNotesEnabled(val === 'true');
       });
     window.ipcRenderer
       .invoke('GET_SETTING', 'transcription_language')
