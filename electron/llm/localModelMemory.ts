@@ -22,6 +22,50 @@ export const getEstablishedGemmaLoadOptions = (
     return { num_gpu: 16, use_mmap: true };
 };
 
+// Conservative fallback context allowance when a model's cache size is unknown.
+const DEFAULT_CONTEXT_BYTES_PER_TOKEN = 64 * 1024;
+
+const positiveInteger = (value: unknown): number | undefined =>
+  Number.isSafeInteger(value) && (value as number) > 0
+    ? (value as number)
+    : undefined;
+
+// Bytes of f16 key/value cache each context token allocates, from Ollama's
+// `/api/show` model_info. Undefined unless every attention dimension is known.
+export const readContextBytesPerToken = (
+  modelInfo: unknown,
+): number | undefined => {
+  if (!modelInfo || typeof modelInfo !== 'object') return undefined;
+  const info = modelInfo as Record<string, unknown>;
+  const arch = info['general.architecture'];
+  if (typeof arch !== 'string' || !arch) return undefined;
+  const layers = positiveInteger(info[`${arch}.block_count`]);
+  const heads = positiveInteger(info[`${arch}.attention.head_count`]);
+  const embedding = positiveInteger(info[`${arch}.embedding_length`]);
+  if (!layers) return undefined;
+  const rawKvHeads = info[`${arch}.attention.head_count_kv`];
+  const kvHeads = Array.isArray(rawKvHeads)
+    ? rawKvHeads.length === layers
+      ? rawKvHeads.map(positiveInteger)
+      : []
+    : Array.from({ length: layers }, () => positiveInteger(rawKvHeads));
+  const headLength =
+    heads && embedding && embedding % heads === 0
+      ? embedding / heads
+      : undefined;
+  const keyLength =
+    positiveInteger(info[`${arch}.attention.key_length`]) ?? headLength;
+  const valueLength =
+    positiveInteger(info[`${arch}.attention.value_length`]) ?? headLength;
+  if (!keyLength || !valueLength || kvHeads.length !== layers) return undefined;
+  let bytes = 0;
+  for (const count of kvHeads) {
+    if (!count) return undefined;
+    bytes += count * (keyLength + valueLength) * 2;
+  }
+  return bytes;
+};
+
 const MEMORY_CHECK_INTERVAL_MS = 100;
 const REACTION_HEADROOM_BYTES = 2 * GIB;
 const hasMemoryCapacity = (available: number, total: number): boolean =>
@@ -68,6 +112,7 @@ export const assertLocalModelMemoryCapacity = ({
   modelDigest,
   resident,
   contextTokens,
+  contextBytesPerToken,
   measuredColdPeak,
 }: {
   available: number;
@@ -76,22 +121,38 @@ export const assertLocalModelMemoryCapacity = ({
   modelDigest?: string;
   resident: boolean;
   contextTokens: number;
+  // Key/value cache bytes per context token read from the model's metadata.
+  contextBytesPerToken?: number;
   // Peak this Mac actually used for a cold load of the same artifact and
   // placement, and the context it loaded with.
   measuredColdPeak?: { bytes: number; contextTokens: number };
 }): void => {
-  // Gemma's observed buffers need fixed sliding-window/runtime headroom; unknown artifacts retain the conservative cold estimate.
-  const coldLoad = isEstablishedGemmaArtifact(modelDigest)
+  // Gemma's observed buffers need fixed sliding-window/runtime headroom.
+  // Other artifacts with known attention metadata charge their weights plus
+  // a CPU-side copy margin and fixed runtime headroom, and their exact cache
+  // per token. Unknown artifacts retain the conservative 2.5x cold estimate.
+  const established = isEstablishedGemmaArtifact(modelDigest);
+  const knownContextBytes =
+    !established &&
+    contextBytesPerToken !== undefined &&
+    Number.isFinite(contextBytesPerToken) &&
+    contextBytesPerToken > 0
+      ? contextBytesPerToken
+      : undefined;
+  const coldLoad = established
     ? modelBytes + 2 * GIB
-    : modelBytes * 2.5 + GIB;
-  const estimatedAdditional = coldLoad + contextTokens * 64 * 1024;
+    : knownContextBytes
+      ? modelBytes * 1.25 + GIB
+      : modelBytes * 2.5 + GIB;
+  const perToken = knownContextBytes ?? DEFAULT_CONTEXT_BYTES_PER_TOKEN;
+  const estimatedAdditional = coldLoad + contextTokens * perToken;
   // A measured peak, with 20 percent margin and any larger context, replaces
   // the file-size estimate only when it is smaller. Live pressure monitoring
   // still cancels generation if memory runs low.
   const measuredAdditional =
     measuredColdPeak && measuredColdPeak.bytes > 0
       ? measuredColdPeak.bytes * 1.2 +
-        Math.max(0, contextTokens - measuredColdPeak.contextTokens) * 64 * 1024
+        Math.max(0, contextTokens - measuredColdPeak.contextTokens) * perToken
       : Number.POSITIVE_INFINITY;
   const additional = resident
     ? REACTION_HEADROOM_BYTES
@@ -105,7 +166,7 @@ export const assertLocalModelMemoryCapacity = ({
         context -= 1024
       ) {
         if (
-          hasMemoryCapacity(available - coldLoad - context * 64 * 1024, total)
+          hasMemoryCapacity(available - coldLoad - context * perToken, total)
         ) {
           maxContextTokens = context;
           break;

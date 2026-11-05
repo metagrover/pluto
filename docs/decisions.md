@@ -1,3 +1,10 @@
+## 2026-11-04 - Size other local models by their real cache layout
+
+- **Status:** Accepted; covered by memory-admission and provider regressions. A packaged notes run on 16 GiB hardware has not yet confirmed the new margin.
+- **Supersedes:** "Keep the larger generic estimate for unknown artifacts" in "2026-10-20 - Bound Gemma admission using its observed runtime allocation", for artifacts whose attention layout Ollama reports. The Gemma rule, the reserve, the measured-peak rule from "2026-11-02 - Admit local loads from a measured cold peak and fall back when refused" and the live pressure cancellation are unchanged.
+- **Decision:** Before a cold load of a non-Gemma artifact, Pluto reads its `model_info` from Ollama `/api/show` once per digest and computes the f16 key/value cache per context token (layers × cache heads × key and value length × 2 bytes). When every dimension is known, admission charges 1.25 times the file size plus 1 GiB, plus that cache per token. When the metadata is missing or incomplete, the 2.5-times-file estimate and 64 KiB per token remain.
+- **Rationale:** On a 16 GiB Mac, phi4-mini (2.3 GiB file) allocated 2.8 GiB of weights, 0.5 GiB of cache at 4,096 tokens and 0.1 GiB of compute buffers, about 3.4 GiB in total. The generic rule charged about 7.5 GiB at a 16K notes context, so every notes run was refused below roughly 9 GiB free. Its recorded measured peak (6.0 GiB) came from the system-wide availability drop, which includes other apps, so it could not correct the estimate. The generic 64 KiB per token also under-counted this model's 128 KiB.
+
 ## 2026-11-04 - Stop drafting notes during meetings by default
 
 - **Status:** Accepted from code inspection. A packaged meeting has not yet confirmed zero reuse; the `[Notes timings]` log line (writer stages equal to `leaves`) can confirm it.

@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import {
   assertLocalModelMemoryCapacity,
   getEstablishedGemmaLoadOptions,
+  readContextBytesPerToken,
   readLocalModelMemory,
   watchLocalModelMemory,
 } from '../../electron/llm/localModelMemory';
@@ -726,4 +727,138 @@ it('admits from a measured cold-load peak only when it is smaller than the estim
       measuredColdPeak: { bytes: 12 * GIB, contextTokens: 8192 },
     }),
   ).not.toThrow();
+});
+
+// phi4-mini 3.8B as Ollama 0.40 reports it; its 4,096-token load allocated
+// 2,849 MiB of weights, 512 MiB of cache and 104 MiB of compute buffers.
+const PHI4_MINI_INFO = {
+  'general.architecture': 'phi3',
+  'phi3.block_count': 32,
+  'phi3.attention.head_count': 24,
+  'phi3.attention.head_count_kv': 8,
+  'phi3.embedding_length': 3072,
+};
+const PHI4_MINI_BYTES = 2_491_876_774;
+
+it.each([
+  { name: 'derived head length', info: PHI4_MINI_INFO, bytes: 128 * 1024 },
+  {
+    name: 'explicit key and value length',
+    info: {
+      'general.architecture': 'llama',
+      'llama.block_count': 28,
+      'llama.attention.head_count': 24,
+      'llama.attention.head_count_kv': 8,
+      'llama.attention.key_length': 128,
+      'llama.attention.value_length': 128,
+      'llama.embedding_length': 3072,
+    },
+    bytes: 112 * 1024,
+  },
+  {
+    name: 'per-layer cache heads',
+    info: {
+      'general.architecture': 'x',
+      'x.block_count': 3,
+      'x.attention.head_count_kv': [8, 1, 8],
+      'x.attention.key_length': 64,
+      'x.attention.value_length': 64,
+    },
+    bytes: 17 * 128 * 2,
+  },
+  { name: 'missing metadata', info: undefined, bytes: undefined },
+  {
+    name: 'unknown cache heads',
+    info: { ...PHI4_MINI_INFO, 'phi3.attention.head_count_kv': undefined },
+    bytes: undefined,
+  },
+  {
+    name: 'mismatched per-layer heads',
+    info: { ...PHI4_MINI_INFO, 'phi3.attention.head_count_kv': [8, 8] },
+    bytes: undefined,
+  },
+])(
+  'reads per-token cache bytes from model metadata ($name)',
+  ({ info, bytes }) => {
+    expect(readContextBytesPerToken(info)).toBe(bytes);
+  },
+);
+
+it('sizes a known-layout model by its weights and real cache, not 2.5x its file', () => {
+  const total = 16 * GIB;
+  const contextBytesPerToken = readContextBytesPerToken(PHI4_MINI_INFO);
+  const memory = {
+    total,
+    modelBytes: PHI4_MINI_BYTES,
+    modelDigest: 'phi4-mini-artifact',
+    resident: false,
+    contextTokens: 16384,
+    // Previously measured from the system-wide drop, inflated by other apps.
+    measuredColdPeak: { bytes: 6_012_954_214, contextTokens: 4096 },
+  };
+  const required =
+    PHI4_MINI_BYTES * 1.25 + GIB + 16384 * 128 * 1024 + total * 0.08;
+  // A 16 GiB Mac with about 7.5 GiB available was refused every notes load.
+  expect(() =>
+    assertLocalModelMemoryCapacity({ ...memory, available: 7.5 * GIB }),
+  ).toThrow('Not enough memory');
+  expect(() =>
+    assertLocalModelMemoryCapacity({
+      ...memory,
+      available: 7.5 * GIB,
+      contextBytesPerToken,
+    }),
+  ).not.toThrow();
+  expect(() =>
+    assertLocalModelMemoryCapacity({
+      ...memory,
+      available: required - 1,
+      contextBytesPerToken,
+    }),
+  ).toThrow('Not enough memory');
+  expect(() =>
+    assertLocalModelMemoryCapacity({
+      ...memory,
+      available: required + 1,
+      contextBytesPerToken,
+    }),
+  ).not.toThrow();
+});
+
+it('charges the real cache size when suggesting a smaller context', () => {
+  const total = 16 * GIB;
+  const contextBytesPerToken = 128 * 1024;
+  try {
+    assertLocalModelMemoryCapacity({
+      total,
+      modelBytes: PHI4_MINI_BYTES,
+      resident: false,
+      contextTokens: 16384,
+      contextBytesPerToken,
+      available:
+        PHI4_MINI_BYTES * 1.25 +
+        GIB +
+        8192 * contextBytesPerToken +
+        total * 0.08 +
+        1,
+    });
+    expect.fail('Expected a 16K context to be refused');
+  } catch (error) {
+    expect(error).toHaveProperty('maxContextTokens', 8192);
+  }
+});
+
+it('keeps the established Gemma estimate when cache metadata is supplied', () => {
+  const memory = {
+    available: 11 * GIB,
+    total: 16 * GIB,
+    contextTokens: 8192,
+    resident: false,
+    modelBytes: 7_556_508_396,
+    modelDigest:
+      '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c',
+    contextBytesPerToken: 1,
+  };
+  // The generic 1.25x rule would refuse; Gemma keeps weights plus 2 GiB.
+  expect(() => assertLocalModelMemoryCapacity(memory)).not.toThrow();
 });

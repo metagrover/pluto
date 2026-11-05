@@ -2455,6 +2455,8 @@ it.each(['recovered', 'pressure', 'cancelled'] as const)(
               },
             ],
           });
+        if (url.endsWith('/api/show'))
+          return new Response(null, { status: 404 });
         if (parseRequestBody(init).keep_alive === 0) {
           resident = false;
           unloaded = true;
@@ -2568,6 +2570,79 @@ it.each([
       expect(events).toEqual(unload ? ['unload', 'generate'] : ['generate']);
     } finally {
       vi.unstubAllGlobals();
+    }
+  },
+);
+
+it.each([
+  { name: 'metadata', show: true, bytes: 128 * 1024 },
+  { name: 'no metadata', show: false, bytes: undefined },
+])(
+  'passes the model cache size to cold admission when Ollama reports it ($name)',
+  async ({ show, bytes }) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    const transport = vi
+      .spyOn(ollamaTransport, 'ollamaHttpFetch')
+      .mockImplementation((input, init) => fetch(input, init));
+    const memory = vi
+      .spyOn(modelMemory, 'readLocalModelMemory')
+      .mockResolvedValue({ available: 1024 ** 3, total: 16 * 1024 ** 3 });
+    const capacity = vi.spyOn(modelMemory, 'assertLocalModelMemoryCapacity');
+    const digest = `cache-size-${show}`;
+    installFetchMock(
+      (url) => {
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [{ name: 'phi4-mini:3.8b', digest, size: 2 * 1024 ** 3 }],
+          });
+        if (url.endsWith('/api/show') && show)
+          return jsonResponse({
+            model_info: {
+              'general.architecture': 'phi3',
+              'phi3.block_count': 32,
+              'phi3.attention.head_count': 24,
+              'phi3.attention.head_count_kv': 8,
+              'phi3.embedding_length': 3072,
+            },
+          });
+        return new Response(null, { status: 404 });
+      },
+      () => jsonResponse({ models: [] }),
+    );
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
+      });
+      await expect(
+        provider.generateText({
+          prompt: 'Milo discussed access.',
+          task: 'notesWriter',
+          notesModel: 'phi4-mini:3.8b',
+          notesBudget: { contextTokens: 8192, outputTokens: 1024 },
+        }),
+      ).rejects.toThrow('Not enough memory');
+      expect(capacity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resident: false,
+          modelDigest: digest,
+          contextBytesPerToken: bytes,
+        }),
+      );
+    } finally {
+      memory.mockRestore();
+      capacity.mockRestore();
+      transport.mockRestore();
+      vi.unstubAllGlobals();
+      if (descriptor)
+        Object.defineProperty(process.versions, 'electron', descriptor);
+      else Reflect.deleteProperty(process.versions, 'electron');
     }
   },
 );

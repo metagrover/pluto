@@ -36,6 +36,7 @@ import {
   assertLocalModelMemoryCapacity,
   getEstablishedGemmaLoadOptions,
   isEstablishedGemmaArtifact,
+  readContextBytesPerToken,
   readLocalModelMemory,
   watchLocalModelMemory,
 } from './localModelMemory';
@@ -112,6 +113,8 @@ import {
 
 const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_RESIDENCY_TIMEOUT_MS = 10_000;
+// Attention metadata per installed artifact digest; artifacts are immutable.
+const ollamaContextBytesByDigest = new Map<string, number>();
 const OLLAMA_RESIDENCY_TOTAL_TIMEOUT_MS = 40_000;
 const OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS = 3 * 60_000;
 const OLLAMA_DREAMING_CAPACITY_TIMEOUT_MS = 5 * 60_000;
@@ -1990,6 +1993,39 @@ export class UnifiedLLMProvider implements LLMProvider {
       typeof entry?.digest === 'string' && entry.digest.trim()
         ? entry.digest
         : undefined;
+    // Exact per-token cache size lets admission size non-Gemma artifacts by
+    // their real attention layout; without it the conservative estimate stays.
+    let contextBytesPerToken: number | undefined;
+    if (
+      entry &&
+      allocationDigest &&
+      !isEstablishedGemmaArtifact(allocationDigest)
+    ) {
+      contextBytesPerToken = ollamaContextBytesByDigest.get(allocationDigest);
+      if (contextBytesPerToken === undefined) {
+        try {
+          const response = await this.ollamaFetch(
+            '/api/show',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model }),
+            },
+            OLLAMA_RESIDENCY_TIMEOUT_MS,
+            signal,
+          );
+          const payload = response.ok ? await response.json() : null;
+          contextBytesPerToken = readContextBytesPerToken(payload?.model_info);
+          if (contextBytesPerToken !== undefined)
+            ollamaContextBytesByDigest.set(
+              allocationDigest,
+              contextBytesPerToken,
+            );
+        } catch {
+          signal?.throwIfAborted();
+        }
+      }
+    }
     // Availability when a cold load was admitted, to learn its real peak.
     let availableAtColdAdmission: number | null = null;
     onOllamaArtifact?.(allocationDigest);
@@ -2098,6 +2134,7 @@ export class UnifiedLLMProvider implements LLMProvider {
               modelDigest: entry.digest,
               resident: isResident,
               contextTokens: num_ctx,
+              contextBytesPerToken,
               measuredColdPeak: getMeasuredColdPeak(
                 model,
                 allocationDigest,
