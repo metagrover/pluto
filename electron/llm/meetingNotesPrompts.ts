@@ -1,6 +1,7 @@
 import {
   notesContentGuidance,
   notesMultilingualGuidance,
+  notesPeopleGuidance,
   notesProseGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
@@ -72,7 +73,7 @@ const compactNotesDraftSchema = [
   'Field definitions (not output content):',
   'Select supporting sources first, then write only claims established by those sources.',
   `Title = {sources: 1 to ${MAX_NOTES_SUMMARY_SOURCE_SPANS} copied source descriptors, text: nonempty string}.`,
-  `Overview = {sources: 1 to ${MAX_NOTES_SUMMARY_SOURCE_SPANS} copied source descriptors, text: nonempty string}. After writing the sections, summarize their main topics and outcomes in 1-2 readable sentences. Do not infer approval, completion or dependencies from tasks being discussed together. Cite every supporting turn, including later turns; do not default to the first source labels. Use null when no trustworthy overview can be grounded.`,
+  `Overview = {sources: 1 to ${MAX_NOTES_SUMMARY_SOURCE_SPANS} copied source descriptors, text: nonempty string}. After writing the sections, summarize their main topics and outcomes in 1-2 readable sentences. Refer to people as the people rule requires ("you", names or "the other participant"), never bare labels like Me or Them. Do not infer approval, completion or dependencies from tasks being discussed together. Cite every supporting turn, including later turns; do not default to the first source labels. Use null when no trustworthy overview can be grounded.`,
   'Item = {sources: 1 to at most 3 copied source descriptors, kind: "point" | "action" | "decision" | "question", owner: string | null, due: string | null, text: nonempty string}.',
   'Use kind: "point" for discussion. Points and questions have null owner and due.',
   'For actions and decisions, owner and due must be source-supported, or null when unknown. First-person responsibilities use the recorded canonical speaker as owner. Use an unconfirmed introduced name only when the item cites both the standalone same-speaker introduction and its responsibility; otherwise keep the recorded label. Never rename Me or a confirmed recorded speaker. Explicitly named reported third-party owners remain valid independently of the speaker roster.',
@@ -130,6 +131,7 @@ export const buildNotesWriterPrompt = ({
     notesContentGuidance,
     notesMultilingualGuidance,
     notesProseGuidance,
+    notesPeopleGuidance,
     'Group useful sections by topic. Put each accepted responsibility in an action item rather than only the overview; code derives document rollups.',
     notesSourceGuidance,
     '',
@@ -155,6 +157,7 @@ export const buildCompactNotesWriterPrompt = ({
     notesContentGuidance,
     notesMultilingualGuidance,
     notesProseGuidance,
+    notesPeopleGuidance,
     'Group useful sections by topic. Preserve the topic’s status, requirements, risks and dependencies as point items alongside its decisions and actions. Attach a dependency to the outcome it actually constrains; a neighboring task does not inherit it. When a turn contains both a blocker or prerequisite on an outcome and an accepted task, record both the blocker on that outcome as a point item and the task as an action item. Put each accepted responsibility in an action item rather than only the overview.',
     notesSourceGuidance,
     '',

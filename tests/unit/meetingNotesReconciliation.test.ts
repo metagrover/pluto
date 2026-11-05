@@ -764,7 +764,7 @@ it('builds a short source-only prompt compatible with the exact-source wire code
   expect(prompt).toMatch(/personal.*interview.*brainstorm/i);
   expect(prompt).not.toContain('BEGIN DRAFT');
   // Includes the shared content policy and exact-source field contract.
-  expect(prompt.length - sourceText.length).toBeLessThan(3500);
+  expect(prompt.length - sourceText.length).toBeLessThan(3600);
   const wire = createNotesWireRequest(prompt, spans);
   const encoded = JSON.stringify({
     ...raw,
