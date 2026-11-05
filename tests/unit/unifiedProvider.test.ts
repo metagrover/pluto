@@ -36,6 +36,7 @@ import {
 } from '../../electron/llm/localInferenceProfile';
 import * as modelMemory from '../../electron/llm/localModelMemory';
 import { setLocalModelMemoryProbeReader } from '../../electron/llm/localModelMemoryProbe';
+import { estimateNotesTokens } from '../../electron/llm/meetingNotesBudget';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import * as ollamaTransport from '../../electron/llm/ollamaHttpTransport';
 import type { LLMSettings } from '../../electron/llm/provider';
@@ -1551,6 +1552,45 @@ describe('UnifiedLLMProvider', () => {
     await provider.extractEntities('Speaker A: status update');
 
     expect(selectedModels).toEqual(['gemma4:12b', 'gemma4:12b', 'gemma4:12b']);
+  });
+
+  it('fits long local entity prompts and refuses silent Ollama truncation', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    installFetchMock((url, init) => {
+      if (url.endsWith('/api/tags'))
+        return jsonResponse({ models: [{ name: 'gemma4:12b' }] });
+      bodies.push(parseRequestBody(init));
+      return jsonResponse({
+        response: JSON.stringify({
+          people: [],
+          topics: [],
+          projects: [],
+          relationships: [],
+        }),
+      });
+    });
+    const transcript = Array.from(
+      { length: 4_000 },
+      (_, index) => `Speaker ${index % 3}: we reviewed item ${index} together.`,
+    ).join('\n');
+    const provider = new UnifiedLLMProvider('ollama', {});
+    await provider.extractEntities(
+      transcript,
+      { summary: 'Avery owns the rollout.' },
+      { omitCommitments: true },
+    );
+    const body = bodies.find((entry) => entry.keep_alive !== 0)!;
+    const prompt = String(body.prompt);
+    expect(body.truncate).toBe(false);
+    expect(prompt.startsWith('You are an expert at extracting')).toBe(true);
+    expect(prompt).not.toContain('action_items');
+    expect(prompt).toContain('middle of the transcript omitted');
+    expect(estimateNotesTokens(prompt) + 2_500 + 512).toBeLessThanOrEqual(
+      16_384,
+    );
+    expect((body.options as { num_ctx: number }).num_ctx).toBeLessThanOrEqual(
+      16_384,
+    );
   });
 
   it.each(['fast', 'deep'] as const)(

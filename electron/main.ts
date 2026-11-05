@@ -1070,7 +1070,12 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
         summary: reviewedNotes,
         valueSignals: signals,
       },
-      { signal: input.signal, workClass: 'meeting_secondary' },
+      // Actions and decisions come from the published notes below.
+      {
+        signal: input.signal,
+        workClass: 'meeting_secondary',
+        omitCommitments: true,
+      },
     );
     if (!input.canCommit()) return;
     await extractAndProcessEntities(

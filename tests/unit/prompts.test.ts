@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { estimateNotesTokens } from '../../electron/llm/meetingNotesBudget';
 import {
+  fitEntitiesTranscript,
   getEntitiesPrompt,
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
@@ -482,5 +484,71 @@ describe('knowledge document prompts', () => {
     expect(personPrompt).toContain(
       'NEVER claim someone "is currently", "is actively"',
     );
+  });
+});
+
+describe('entity extraction cost', () => {
+  it('omits actions and decisions when the caller uses the notes', () => {
+    const full = getEntitiesPrompt('Avery Lane will send the plan.');
+    const lean = getEntitiesPrompt(
+      'Avery Lane will send the plan.',
+      undefined,
+      {
+        omitCommitments: true,
+      },
+    );
+    expect(full).toContain('"action_items"');
+    expect(full).toContain('"decisions"');
+    expect(lean).not.toContain('action_items');
+    expect(lean).not.toContain('"decisions"');
+    expect(lean).not.toContain('**Action Items**');
+    expect(lean).toContain('3. **Projects**');
+    expect(lean).toContain('4. **Relationships**');
+    expect(lean).toContain('"people"');
+    expect(lean).toContain('"relationships"');
+  });
+
+  it('keeps the instructions and both ends of a transcript that is too long', () => {
+    const turns = Array.from(
+      { length: 2_000 },
+      (_, index) => `Speaker ${index % 3}: we reviewed item ${index} together.`,
+    );
+    const transcript = turns.join('\n');
+    const build = (text: string) =>
+      getEntitiesPrompt(
+        text,
+        { summary: 'Avery owns the rollout.' },
+        {
+          omitCommitments: true,
+        },
+      );
+    const limit = 8_000;
+    expect(estimateNotesTokens(build(transcript))).toBeGreaterThan(limit);
+
+    const fitted = fitEntitiesTranscript(transcript, build, limit);
+    const prompt = build(fitted);
+    expect(estimateNotesTokens(prompt)).toBeLessThanOrEqual(limit);
+    expect(prompt.startsWith('You are an expert at extracting')).toBe(true);
+    expect(fitted.startsWith(turns[0]!)).toBe(true);
+    expect(fitted.endsWith(turns.at(-1)!)).toBe(true);
+    expect(fitted).toContain('middle of the transcript omitted');
+    // Whole turns only, so quoted evidence stays verbatim.
+    for (const line of fitted
+      .split('\n')
+      .filter((line) => !line.startsWith('[')))
+      expect(turns).toContain(line);
+    // Uses most of the room it has.
+    expect(estimateNotesTokens(prompt)).toBeGreaterThan(limit * 0.95);
+  });
+
+  it('leaves a transcript that already fits unchanged', () => {
+    const transcript = 'Speaker 1: short meeting.';
+    expect(
+      fitEntitiesTranscript(
+        transcript,
+        (text) => getEntitiesPrompt(text),
+        8_000,
+      ),
+    ).toBe(transcript);
   });
 });

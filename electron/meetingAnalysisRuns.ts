@@ -219,6 +219,7 @@ type NotesProvider = {
     options?: {
       signal?: AbortSignal;
       workClass?: import('./llm/llmWorkClass').LLMWorkClass;
+      omitCommitments?: boolean;
     },
   ): Promise<import('./llm/provider').ExtractedEntities>;
 };

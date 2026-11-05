@@ -1,3 +1,4 @@
+import { estimateNotesTokens } from './meetingNotesBudget';
 import {
   type MeetingNotesTemplate,
   type MeetingNotesTemplateInput,
@@ -211,7 +212,12 @@ export const getEntitiesPrompt = (
     valueSignals?: InternalSignalDocument;
     priorityHints?: ExtractionPriorityHints;
   },
+  options: {
+    /** The caller takes actions and decisions from the published notes. */
+    omitCommitments?: boolean;
+  } = {},
 ): string => {
+  const commitments = !options.omitCommitments;
   const valueSignals = context?.valueSignals;
   const priorityHints = context?.priorityHints;
   const hasSignals =
@@ -259,13 +265,17 @@ Analyze the following transcript and extract:
 
 1. **People**: Names of people mentioned or participating. Include a role only when the transcript explicitly states that person's job title or function.
 2. **Topics**: Main subjects discussed (rate importance as high/medium/low)
-3. **Action Items**: Tasks, follow-ups, or commitments made (include who is responsible and any deadline)
+${
+  commitments
+    ? `3. **Action Items**: Tasks, follow-ups, or commitments made (include who is responsible and any deadline)
 4. **Decisions**: Explicit decisions or conclusions reached (include rationale if given)
-5. **Projects**: Only independent initiatives with a distinct outcome spanning multiple actions or work packages. Routine fixes, configuration, testing, and follow-ups belong in Action Items or Topics unless the transcript establishes a broader independent initiative. A repeated mention, named noun, team, product, or general work stream is not sufficient.
+5. **Projects**:`
+    : '3. **Projects**:'
+} Only independent initiatives with a distinct outcome spanning multiple actions or work packages. Routine fixes, configuration, testing, and follow-ups belong in Action Items or Topics unless the transcript establishes a broader independent initiative. A repeated mention, named noun, team, product, or general work stream is not sufficient.
 - Each project must include qualification.kind = "initiative", a concise outcome, outcomeEvidenceQuote, and at least two distinct workItems with description and evidenceQuote. Quotes must be verbatim transcript phrases of at least 12 characters; work-item quotes must independently support different work. Do not invent scope, split one action into artificial steps, or infer scope from repetition. Omit projects with insufficient evidence.
 - Associate entities only through explicit, evidenced relationships; sharing a meeting does not establish project membership.
 
-6. **Relationships**: Connections between entities (e.g., "Person works on Project", "Decision impacts Topic")
+${commitments ? '6' : '4'}. **Relationships**: Connections between entities (e.g., "Person works on Project", "Decision impacts Topic")
 
 Rules:
 - Only include entities that are clearly mentioned or implied
@@ -277,9 +287,13 @@ Rules:
 - A person's role must be a job title or function, never another person's name, a team name, a relationship, or a nearby attendee
 - Include role only with role_evidence: an exact transcript quote that contains both the extracted person's name and the role phrase and explicitly connects them
 - If that exact evidence does not exist, omit both role and role_evidence; do not infer a role from proximity or conversation order
-- For action items, "assignee" should be a name if mentioned, otherwise omit
+${
+  commitments
+    ? `- For action items, "assignee" should be a name if mentioned, otherwise omit
 - For due dates, use the exact phrase from the transcript (e.g., "by Friday", "next week")
-- Be conservative - only extract what's clearly present, don't infer too much
+`
+    : ''
+}- Be conservative - only extract what's clearly present, don't infer too much
 - For relationships, include only high-confidence links where both source and target are identifiable entities in the transcript
 - Put a short evidence phrase in relationship "context" when available
 - Use belongs_to only for explicit task/topic/subproject membership in a qualified initiative; context must be a verbatim transcript quote of at least 12 characters supporting that membership. Use the exact extracted entity names.
@@ -289,14 +303,56 @@ Respond with valid JSON in this exact format:
 {
   "people": [{"name": "string", "role": "job title or function, or omit", "role_evidence": "exact transcript quote containing this name and role, or omit"}],
   "topics": [{"name": "string", "importance": "high|medium|low"}],
-  "action_items": [{"description": "string", "assignee": "string or omit", "due_date": "string or omit"}],
+${
+  commitments
+    ? `  "action_items": [{"description": "string", "assignee": "string or omit", "due_date": "string or omit"}],
   "decisions": [{"description": "string", "rationale": "string or omit"}],
-  "projects": [{"name": "string", "context": "string or omit", "qualification": {"kind": "initiative", "outcome": "string", "outcomeEvidenceQuote": "verbatim transcript phrase", "workItems": [{"description": "string", "evidenceQuote": "verbatim transcript phrase"}, {"description": "different work item", "evidenceQuote": "different verbatim transcript phrase"}]}}],
+`
+    : ''
+}  "projects": [{"name": "string", "context": "string or omit", "qualification": {"kind": "initiative", "outcome": "string", "outcomeEvidenceQuote": "verbatim transcript phrase", "workItems": [{"description": "string", "evidenceQuote": "verbatim transcript phrase"}, {"description": "different work item", "evidenceQuote": "different verbatim transcript phrase"}]}}],
   "relationships": [{"source": "string", "target": "string", "relationship": "string", "context": "string or omit"}]
 }
 
 ${contextBlock ? `${contextBlock}\n\n` : ''}Transcript:
 ${transcript}`;
+};
+
+const ENTITY_TRANSCRIPT_OMISSION =
+  '[… middle of the transcript omitted to fit; the summary covers the whole meeting …]';
+
+/**
+ * Shortens the transcript, keeping its opening and closing turns, until the
+ * whole prompt fits `maxInputTokens`. A local model that silently truncates an
+ * oversized prompt drops its instructions, which come first.
+ */
+export const fitEntitiesTranscript = (
+  transcript: string,
+  buildPrompt: (transcript: string) => string,
+  maxInputTokens: number,
+): string => {
+  const fits = (text: string) =>
+    estimateNotesTokens(buildPrompt(text)) <= maxInputTokens;
+  if (fits(transcript)) return transcript;
+  const shortened = (keep: number) => {
+    const half = Math.floor(keep / 2);
+    let head = transcript.slice(0, half);
+    let tail = transcript.slice(transcript.length - (keep - half));
+    // Prefer whole turns when the kept parts contain a turn boundary.
+    const headEnd = head.lastIndexOf('\n');
+    if (headEnd > 0) head = head.slice(0, headEnd);
+    const tailStart = tail.indexOf('\n');
+    if (tailStart >= 0 && tailStart < tail.length - 1)
+      tail = tail.slice(tailStart + 1);
+    return `${head}\n${ENTITY_TRANSCRIPT_OMISSION}\n${tail}`;
+  };
+  let low = 0;
+  let high = transcript.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (fits(shortened(mid))) low = mid;
+    else high = mid - 1;
+  }
+  return shortened(low);
 };
 
 type KnowledgePromptSourceMeeting = {

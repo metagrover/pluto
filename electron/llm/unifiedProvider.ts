@@ -80,6 +80,7 @@ import { createNotesWireRequest } from './meetingNotesWire';
 import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
 import { ollamaHttpFetch, ollamaHttpStream } from './ollamaHttpTransport';
 import {
+  fitEntitiesTranscript,
   getEntitiesPrompt,
   getSpeakerIdentityPrompt,
   getSummaryPrompt,
@@ -1468,9 +1469,28 @@ export class UnifiedLLMProvider implements LLMProvider {
   async extractEntities(
     transcript: string,
     context?: EntityExtractionContext,
-    options: { signal?: AbortSignal; workClass?: LLMWorkClass } = {},
+    options: {
+      signal?: AbortSignal;
+      workClass?: LLMWorkClass;
+      omitCommitments?: boolean;
+    } = {},
   ): Promise<ExtractedEntities> {
-    const prompt = getEntitiesPrompt(transcript, context);
+    const buildPrompt = (text: string) =>
+      getEntitiesPrompt(text, context, {
+        omitCommitments: options.omitCommitments,
+      });
+    const prompt =
+      this.providerType === 'ollama'
+        ? buildPrompt(
+            fitEntitiesTranscript(
+              transcript,
+              buildPrompt,
+              getOllamaContextCap('entities') -
+                calculateOllamaContextBudget('', 'entities').num_predict -
+                512,
+            ),
+          )
+        : buildPrompt(transcript);
 
     try {
       const raw = await this.generateResumableAnalysisText({
@@ -2232,6 +2252,8 @@ export class UnifiedLLMProvider implements LLMProvider {
       task === 'dreaming'
     )
       requestBody.think = false;
+    // An oversized prompt must fail visibly, never lose its leading instructions.
+    if (task === 'entities') requestBody.truncate = false;
     if (task === 'askPluto') requestBody.think = false;
     if (task === 'askPlutoDeep') {
       requestBody.think = false;
