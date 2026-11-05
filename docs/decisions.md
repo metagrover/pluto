@@ -1,3 +1,10 @@
+## 2026-11-04 - Let people retry notes refused for memory
+
+- **Status:** Accepted; covered by failure-presentation regressions.
+- **Refines:** "2026-11-02 - Admit local loads from a measured cold peak and fall back when refused" and the memory-refusal copy added in [PR #884](https://github.com/metagrover/pluto/pull/884). Admission estimates, reserve, live pressure cancellation and the absence of automatic retry are unchanged.
+- **Decision:** A notes run refused with `notes_memory_capacity` shows "Retry analysis" on the meeting page, and the regeneration error shows "Try again". Available memory changes from minute to minute, so a refusal is not final; a retry still goes through the same admission and is refused again if memory is still short.
+- **Evidence:** On a 16 GiB Mac, a meeting was refused at 55% free memory and the screen offered no way to retry. The next day the same Mac had 76% free. A cold Gemma 4 12B load with the 16 GiB placement (16 GPU layers, memory-mapped, 8,192-token context) dropped free memory from 76% to 25%, a peak of about 8.2 GiB against the 9.2 GiB estimate. A measured-peak rule with its 20% margin would charge 9.8 GiB, so it cannot loosen admission for this artifact. Relaxing admission alone would also fail: the 2 GiB loading reaction headroom stops generation if free memory falls below about 3.3 GiB, so a load needs roughly 11.5 GiB (72%) free either way.
+
 ## 2026-11-04 - Size other local models by their real cache layout
 
 - **Status:** Accepted; covered by memory-admission and provider regressions. A packaged notes run on 16 GiB hardware has not yet confirmed the new margin.

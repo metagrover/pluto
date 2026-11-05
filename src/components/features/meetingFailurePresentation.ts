@@ -116,7 +116,9 @@ export const resolveMeetingRegenerationFailurePresentation = (
         'Close other apps and try again when more memory is available.',
         input.hasExistingNotes,
       ),
-      canRetry: false,
+      // Available memory changes minute to minute; let the person retry
+      // once they have freed some. Admission still refuses if it is short.
+      canRetry: true,
     };
   }
   if (
@@ -256,7 +258,7 @@ export const resolveMeetingFailurePresentation = (
         title: 'Local model needs more memory',
         detail:
           'Your transcript is safe. Close other apps and try again when more memory is available.',
-        actionLabel: null,
+        actionLabel: 'Retry analysis',
       };
     }
     if (input.downstreamFailureCode === 'chatgpt_sign_in_required') {
