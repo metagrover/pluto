@@ -29,9 +29,22 @@ Decided against: every checkbox as a task. Checklists are what "Next time
 with …" and prep are built on; tasks stay `[task: …]` lines, labeled in the
 editor.
 
-Known limits: a note added to prep is copied at that moment, so later edits to
-the note do not follow; Ask Pluto and search read a meeting's notes as typed
-during it, not later additions.
+Second round (2026-11-04):
+
+- A note used for an upcoming meeting is linked to its prep, not copied; prep
+  shows it as it reads now, and the note's menu says "For …".
+- "Use your 'X' note for this meeting?" while recording, for a note edited in
+  the last day that is titled like the meeting or names someone in it.
+- Ask Pluto answers (finished meetings, person chat) offer "Add as to-do" and
+  "Add to Next time with …", each edited before adding.
+- Ask Pluto and search read notes added after a meeting.
+- "Came up in …" on Next-time items found in the latest meeting's transcript,
+  by word matching; hideable, and the item stays until ticked.
+
+Known limits: "Came up in" opens the meeting, not the moment; owner prefixes
+("Priya: send deck") are not parsed; live notes during recording are still a
+plain text box; Start 1:1 and "Use your note?" have not been tried with a real
+recording.
 
 ## How this was checked
 

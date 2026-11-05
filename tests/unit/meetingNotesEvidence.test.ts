@@ -36,6 +36,44 @@ describe('saved meeting evidence policy', () => {
 });
 
 describe('buildMeetingNotesEvidenceDocument', () => {
+  it('reads notes the user added after the meeting', () => {
+    const analysis = JSON.stringify({
+      analysis_schema_version: 3,
+      overview: 'Launch is on track.',
+      topics: [],
+      all_decisions: [],
+      all_action_items: [],
+      meeting_type: 'one_on_one',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    });
+    const typedDuring = buildMeetingNotesEvidenceDocument({
+      id: 'm1',
+      title: 'Launch',
+      user_notes: 'Ask about budget',
+      analysis_json: analysis,
+    });
+    expect(typedDuring.notesText).toContain('Ask about budget');
+    const addedLater = buildMeetingNotesEvidenceDocument({
+      id: 'm1',
+      title: 'Launch',
+      user_notes: 'Ask about budget',
+      user_edits_json: JSON.stringify({
+        user_notes: {
+          original: 'Ask about budget',
+          edited: 'Ask about budget\nLee owns the SSO rollout',
+          edited_at: '2026-11-04T10:00:00Z',
+        },
+      }),
+      analysis_json: analysis,
+    });
+    expect(addedLater.notesText).toContain('Lee owns the SSO rollout');
+  });
+
   it('projects canonical speaker labels for saved-note consumers', () => {
     const document = buildMeetingNotesEvidenceDocument(
       {

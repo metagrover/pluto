@@ -17,6 +17,9 @@ vi.mock('../../src/api/meetingPrep', () => api);
 const notesApi = vi.hoisted(() => ({
   getNotesForAttendees: vi.fn(),
   setNoteChecklistItem: vi.fn(),
+  getNote: vi.fn(),
+  openNoteInApp: vi.fn(),
+  subscribeNotesChanged: vi.fn(() => () => {}),
 }));
 vi.mock('../../src/api/notes', () => notesApi);
 import { PrepForMeeting } from '../../src/components/features/MeetingPrepEditor';
@@ -980,4 +983,54 @@ it('shows the prepared brief on a recorded meeting, and nothing without one', as
   expect(api.getPrepForMeeting).toHaveBeenLastCalledWith('m2');
   expect(host.querySelector('summary')?.textContent).toBe('Before the meeting');
   expect(host.textContent).toContain('Sam: confirm launch date');
+});
+
+it('shows a note used as prep from the note itself, and follows its edits', async () => {
+  let content = 'Questions:\n- [ ] Ask about data residency\n[task: Send deck]';
+  notesApi.getNote.mockImplementation(async () => ({
+    id: 'note-vendor',
+    title: 'Vendor eval',
+    content,
+    noteType: 'general',
+    pinned: false,
+    createdAt: event.start,
+    updatedAt: event.start,
+  }));
+  let notify = () => {};
+  notesApi.subscribeNotesChanged.mockImplementation((listener: () => void) => {
+    notify = listener;
+    return () => {};
+  });
+  api.getPrepForMeeting.mockResolvedValueOnce({
+    ...structuredClone(prep),
+    meetingId: 'm3',
+    noteIds: ['note-vendor'],
+  });
+  await act(async () => root.render(<PrepForMeeting meetingId="m3" />));
+  expect(host.querySelector('summary')?.textContent).toBe('Before the meeting');
+  expect(host.textContent).toContain('Vendor eval');
+  expect(host.textContent).toContain('Ask about data residency');
+  // No "no briefing" placeholder next to a note.
+  expect(host.textContent).not.toContain('No briefing was generated');
+  expect(host.textContent).not.toContain('- [ ]');
+  expect(host.textContent).toContain('To-do: Send deck');
+  const box = host.querySelector(
+    'section[aria-label="Notes for this meeting"] input[type="checkbox"]',
+  ) as HTMLInputElement;
+  notesApi.setNoteChecklistItem.mockResolvedValue({});
+  await act(async () => box.click());
+  expect(notesApi.setNoteChecklistItem).toHaveBeenCalledWith({
+    noteId: 'note-vendor',
+    lineIndex: 1,
+    text: 'Ask about data residency',
+    checked: true,
+  });
+  content = 'Questions:\n- [ ] Ask about data residency and SSO';
+  await act(async () => notify());
+  expect(host.textContent).toContain('and SSO');
+  const open = [...host.querySelectorAll('button')].find(
+    (b) => b.textContent === 'Vendor eval',
+  )!;
+  await act(async () => open.click());
+  expect(notesApi.openNoteInApp).toHaveBeenCalledWith('note-vendor');
 });

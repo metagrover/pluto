@@ -123,6 +123,15 @@ const sameEditableIdentity = (
  */
 export const MEETING_USER_NOTES_EDIT_PATH = 'user_notes';
 
+/** The user's notes on a meeting as they read now, including later edits. */
+export const meetingUserNotesWithEdits = (
+  userNotes: string | null | undefined,
+  edits: UserEditsMap | null | undefined,
+): string => {
+  const edited = edits?.[MEETING_USER_NOTES_EDIT_PATH]?.edited;
+  return typeof edited === 'string' ? edited : (userNotes ?? '');
+};
+
 export const rebaseMeetingNotesEdits = ({
   edits,
   previousBlocks,

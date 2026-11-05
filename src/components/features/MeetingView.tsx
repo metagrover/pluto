@@ -1336,6 +1336,16 @@ const SelectedMeetingView = ({
         (participant) => participant.personId === entity.id,
       ),
   );
+  // The one other person in the meeting, when there is exactly one.
+  const otherPeople = new Map<string, string>();
+  for (const participant of resolvedParticipants)
+    if (participant.personId && !participant.isSelf)
+      otherPeople.set(participant.personId, participant.name);
+  for (const person of addedPeople) otherPeople.set(person.id, person.name);
+  const onlyOtherPerson =
+    otherPeople.size === 1
+      ? [...otherPeople].map(([id, name]) => ({ id, name }))[0]
+      : null;
   const speakerToPersonIdMap = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of resolvedParticipants) {
@@ -2375,6 +2385,7 @@ const SelectedMeetingView = ({
           <MeetingAskPlutoDock
             key={selectedMeeting.id}
             meeting={selectedMeeting}
+            person={onlyOtherPerson}
             onOpenMeeting={onOpenMeeting}
           />
         </>

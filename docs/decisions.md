@@ -1,3 +1,13 @@
+## 2026-11-04 - Link notes as prep, offer notes when a meeting starts, act on answers, and mark what came up
+
+- **Status:** Accepted; covered by store, component and in-app checks.
+- **Notes as prep are links:** Supersedes "Note into prep" in "Carry what to raise with a person…" above. Choosing an upcoming meeting in a note's "Meeting" menu now links the note to that meeting's prep (`meeting_prep.note_ids_json`, migration `0021_prep_notes`) instead of copying its text. Prep shows the note as it reads now, with its checklists ticking the note, an "Open in Notes" title and a remove control; the menu shows "For …" and a check mark, and choosing the meeting again unlinks it. Starting that calendar meeting seeds the live notes from the prep notes followed by the linked notes. The prep's own notes are never changed.
+- **"Use your note?":** When a meeting is being recorded and a note edited in the last day is titled like the meeting or names one of its people (participants or calendar invitees), the recording rail asks "Use your 'X' note for this meeting?" with Use it / Not now. Use it adds the note's text after the live notes once. Running person notes are not offered; their open items are already in the Prep tab.
+- **Answer actions:** Ask Pluto answers on a finished meeting and in person chat offer "Add as to-do" and, when there is exactly one other known person (never on your own page), "Add to Next time with …". Each opens a short line prefilled from the answer's first list item or sentence for the user to edit; nothing is added without Add. A to-do with the same title already in Tasks is reused untouched.
+- **Later notes are read:** Notes added on a finished meeting (the `user_notes` edit) are now what Ask Pluto, note questions about a person's meetings, and search read, through the shared notes document and the search index. The `meetings.user_notes` column and the summary's inputs stay as typed during the meeting, so analysis is not rerun.
+- **"Came up in …":** An open "Next time with …" item gets a soft "Came up in [meeting] · date" line when its distinctive words appear within three consecutive transcript turns of the latest confirmed meeting with that person. This is word matching, not a model, and errs toward silence: items need two distinctive words, and notes edited after the meeting began are skipped because their items may have been written about it. The link opens the meeting; the item stays until ticked, and the mark can be hidden (remembered on this device).
+- **Not included:** The mark opens the meeting, not the exact moment. Owner prefixes ("Priya: send deck") and a single full editor for live notes remain future work.
+
 ## 2026-11-04 - Count people you add as meeting participants, and keep checklists separate from tasks
 
 - **Status:** Accepted; covered by database, component and in-app checks.
@@ -21,7 +31,7 @@
 - **Status:** Accepted; covered by notes document, edit rebase and in-app checks.
 - **Problem:** Once a summary existed, the meeting page filtered out the "Your notes" section, so notes typed during the meeting disappeared from view and nothing could be added except list items under generated sections. The editor was dropped in a styling pass, not by decision; it contradicts "Make meeting notes one editable document", which keeps the scratchpad as user-authored content.
 - **Decision:** The notes typed during the meeting continue the finished document as ordinary text at its end, with no heading or box, edited like any other block (markdown, lists, checklists). With none yet, a faint "Write anything…" line takes their place. Changes are saved as the `user_notes` edit over the original, so the notes given to the summary writer and the summary itself are never rewritten. Regeneration carries this edit through unchanged instead of treating it as a conflict. Authorship stays unlabeled, as before.
-- **Not yet included:** Ask Pluto and search still read the notes as typed during the meeting, not later additions.
+- **Not yet included:** Ask Pluto and search still read the notes as typed during the meeting, not later additions. (Since included; see the entry above.)
 
 ## 2026-11-03 - Keep note tasks and prep items tied to their own note
 

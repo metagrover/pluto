@@ -928,6 +928,11 @@ import {
 } from './meetingAnalysisRuns';
 import { reconcileSingletonManualParticipantIdentity } from './meetingParticipantIdentity';
 import {
+  type NextTimeItem,
+  findDiscussedItems,
+  transcriptSegments,
+} from './nextTimeDiscussed';
+import {
   PersonChatThreadArchivedError,
   createPersonChatStore,
 } from './personChatStore';
@@ -2186,6 +2191,9 @@ app.whenReady().then(async () => {
       throw new Error('Invalid meeting ID');
     return db.meetingPrepStore.forMeeting(id);
   });
+  ipcMain.handle('MEETING_PREP_FOR_NOTE', (_event, noteId) =>
+    db.meetingPrepStore.forNote(noteId),
+  );
   const buildCurrentLinkedMeetingBrief = (
     prep: import('./meetingPrep').MeetingPrep,
   ) =>
@@ -5218,6 +5226,47 @@ app.whenReady().then(async () => {
   ipcMain.handle('NOTES_FOR_ENTITY', (_event, entityId) =>
     db.notesStore.getNotesForEntity(entityId),
   );
+  // "Next time with …" items that came up in the latest meeting with them.
+  ipcMain.handle('NEXT_TIME_DISCUSSED', (_event, input) => {
+    const personId = input?.personId;
+    if (typeof personId !== 'string' || !personId || personId.length > 300)
+      return [];
+    const items = (Array.isArray(input?.items) ? input.items : [])
+      .slice(0, 200)
+      .filter(
+        (item: unknown): item is NextTimeItem =>
+          Boolean(item) &&
+          typeof (item as NextTimeItem).key === 'string' &&
+          typeof (item as NextTimeItem).noteId === 'string' &&
+          typeof (item as NextTimeItem).text === 'string',
+      );
+    if (!items.length) return [];
+    const latest = (db.getPersonBriefing(personId)?.meetings ?? []).find(
+      (meeting) => meeting.evidence === 'confirmed',
+    );
+    const meeting = latest
+      ? (db.getMeeting(latest.id) as db.PersistedMeeting | undefined)
+      : undefined;
+    if (!latest || !meeting) return [];
+    const noteUpdatedAt = Object.fromEntries(
+      db.notesStore
+        .getNotesForEntity(personId)
+        .map((note: { id: string; updatedAt: string }) => [
+          note.id,
+          note.updatedAt,
+        ]),
+    );
+    return findDiscussedItems({
+      items,
+      noteUpdatedAt,
+      meeting: {
+        id: String(meeting.id),
+        title: meeting.title || latest.title || 'Meeting',
+        startedAt: String(meeting.started_at || meeting.created_at || ''),
+        segments: transcriptSegments(meeting.transcript_json),
+      },
+    });
+  });
 
   ipcMain.handle('GET_ENTITY', (_event, id) => db.getEntity(id));
   ipcMain.handle('GET_ENTITIES_BY_TYPE', (_event, type) =>

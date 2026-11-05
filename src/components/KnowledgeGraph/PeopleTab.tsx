@@ -1778,6 +1778,7 @@ export const PersonDossier = ({
         <NextWithPerson
           person={currentDetail.person}
           notes={notesToDisplay}
+          onOpenMeeting={onOpenMeeting}
           onStartMeeting={
             onStartMeeting
               ? () => onStartMeeting(currentDetail.person)
@@ -2409,10 +2410,10 @@ export const PersonDossier = ({
             type="button"
             onClick={handleCreateOrOpenNote}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-pro-accent/10 hover:bg-pro-accent/20 text-pro-accent text-[12px] font-medium transition-colors cursor-pointer"
-            aria-label={`+ 1:1 Note for ${currentDetail.person.name}`}
+            aria-label={`New 1:1 note for ${currentDetail.person.name}`}
           >
             <Plus size={13} aria-hidden="true" />
-            <span>+ 1:1 Note</span>
+            <span>1:1 Note</span>
           </button>
         </div>
         {confirmedMeetings.length + notesToDisplay.length === 0 ? (
@@ -2653,6 +2654,7 @@ export const PeopleTab: React.FC<{
         <PersonChatDock
           personId={selectedDetail.person.id}
           personName={selectedDetail.person.name}
+          isSelf={Boolean(selectedDetail.isSelf)}
           onOpenMeeting={onOpenMeeting}
         />
       </>

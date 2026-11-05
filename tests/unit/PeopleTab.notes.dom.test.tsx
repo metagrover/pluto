@@ -132,7 +132,7 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
     });
 
     const addNoteBtn = container.querySelector(
-      'button[aria-label="+ 1:1 Note for Alice Smith"]',
+      'button[aria-label="New 1:1 note for Alice Smith"]',
     ) as HTMLButtonElement;
     expect(addNoteBtn).not.toBeNull();
 
@@ -161,7 +161,7 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
     expect(container.textContent).toContain('No meetings or notes yet');
 
     const addNoteBtn = container.querySelector(
-      'button[aria-label="+ 1:1 Note for Alice Smith"]',
+      'button[aria-label="New 1:1 note for Alice Smith"]',
     ) as HTMLButtonElement;
     expect(addNoteBtn).not.toBeNull();
 

@@ -1,7 +1,11 @@
-import { CalendarPlus, ChevronDown, Mic } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { CalendarPlus, Check, ChevronDown, Mic } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CalendarEvent } from '../../../../electron/calendar/types';
-import { openMeetingPrep, saveMeetingPrep } from '../../../api/meetingPrep';
+import {
+  getPrepsForNote,
+  openMeetingPrep,
+  saveMeetingPrep,
+} from '../../../api/meetingPrep';
 import type { MeetingStartContext } from '../../../types/meetingStart';
 import { DetailsMenu } from '../../ui/DetailsMenu';
 
@@ -32,24 +36,21 @@ export const upcomingForPrep = (
     .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
     .slice(0, 5);
 
-/** Adds a note's text to a meeting's prep notes, once. */
-export const prepNotesWith = (existing: string, noteText: string): string => {
-  const addition = noteText.trim();
-  if (!addition || existing.includes(addition)) return existing;
-  return existing.trim() ? `${existing.trimEnd()}\n\n${addition}` : addition;
-};
-
 /**
  * "Meeting" in a note's header: start a meeting with this note as its notes,
- * or put the note into the prep for an upcoming calendar meeting.
+ * or use the note as the prep for an upcoming calendar meeting. Prep links to
+ * the note, so later edits to the note show in the prep.
  */
 export const NoteMeetingMenu = ({
+  noteId,
   title,
   content,
   personName,
   events,
   onStartMeeting,
 }: {
+  /** The saved note; without it the note cannot be linked to prep yet. */
+  noteId?: string | null;
   title: string;
   content: string;
   personName: string | null;
@@ -60,27 +61,70 @@ export const NoteMeetingMenu = ({
   const menuRef = useRef<HTMLDetailsElement>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const upcoming = upcomingForPrep(events);
+  const [linkedKeys, setLinkedKeys] = useState<string[]>([]);
+  const upcoming = noteId ? upcomingForPrep(events) : [];
   useEffect(() => {
     if (!status) return;
     const timer = setTimeout(() => setStatus(null), 5000);
     return () => clearTimeout(timer);
   }, [status]);
 
+  const loadLinks = useCallback(() => {
+    if (!noteId) {
+      setLinkedKeys([]);
+      return;
+    }
+    void Promise.resolve(getPrepsForNote(noteId))
+      .then((preps) =>
+        setLinkedKeys(
+          Array.isArray(preps) ? preps.map((prep) => prep.occurrenceKey) : [],
+        ),
+      )
+      .catch(() => setLinkedKeys([]));
+  }, [noteId]);
+  useEffect(() => {
+    loadLinks();
+    const off = window.ipcRenderer?.on?.('meeting-prep:updated', loadLinks);
+    return () => {
+      if (typeof off === 'function') off();
+    };
+  }, [loadLinks]);
+
   if (!onStartMeeting && !upcoming.length) return null;
   const close = () => {
     if (menuRef.current) menuRef.current.open = false;
   };
+  const linkedUpcoming = upcoming.filter((event) =>
+    linkedKeys.includes(event.occurrenceKey),
+  );
 
-  const addToPrep = async (event: CalendarEvent) => {
+  const togglePrep = async (event: CalendarEvent) => {
+    if (!noteId) return;
+    const linked = linkedKeys.includes(event.occurrenceKey);
+    const name = event.title || 'the meeting';
     setBusy(true);
     try {
       const prep = await openMeetingPrep(event);
-      const notes = prepNotesWith(prep.notes || '', content);
-      if (notes !== (prep.notes || '')) await saveMeetingPrep(prep, { notes });
-      setStatus(`Added to the prep for ${event.title || 'the meeting'}`);
+      await saveMeetingPrep(
+        prep,
+        linked ? { removeNoteId: noteId } : { addNoteId: noteId },
+      );
+      setLinkedKeys((keys) =>
+        linked
+          ? keys.filter((key) => key !== event.occurrenceKey)
+          : [...keys, event.occurrenceKey],
+      );
+      setStatus(
+        linked
+          ? `No longer used for ${name}`
+          : `This note is now the prep for ${name}`,
+      );
     } catch {
-      setStatus('Could not add this note to the meeting’s prep.');
+      setStatus(
+        linked
+          ? 'Could not remove this note from the meeting’s prep.'
+          : 'Could not use this note for the meeting’s prep.',
+      );
     } finally {
       setBusy(false);
       close();
@@ -100,7 +144,11 @@ export const NoteMeetingMenu = ({
           aria-label="Use this note for a meeting"
         >
           <CalendarPlus size={14} aria-hidden="true" />
-          <span>Meeting</span>
+          <span className="max-w-48 truncate">
+            {linkedUpcoming.length
+              ? `For ${linkedUpcoming[0].title || 'a meeting'}${linkedUpcoming.length > 1 ? ` +${linkedUpcoming.length - 1}` : ''}`
+              : 'Meeting'}
+          </span>
           <ChevronDown size={12} aria-hidden="true" />
         </summary>
         <div className="absolute right-0 z-30 mt-1 w-72 rounded-lg border border-pro-border bg-pro-bg p-1 shadow-lg">
@@ -124,16 +172,23 @@ export const NoteMeetingMenu = ({
           {upcoming.length ? (
             <>
               <p className="px-3 pb-1 pt-2 text-[11px] font-medium text-pro-text-muted">
-                Add to the prep for
+                Use as prep for
               </p>
               {upcoming.map((event) => (
                 <button
                   key={event.occurrenceKey}
                   type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={linkedKeys.includes(event.occurrenceKey)}
                   disabled={busy}
                   className={itemClass}
-                  onClick={() => void addToPrep(event)}
+                  onClick={() => void togglePrep(event)}
                 >
+                  <span className="flex w-3.5 shrink-0 justify-center">
+                    {linkedKeys.includes(event.occurrenceKey) ? (
+                      <Check size={14} aria-hidden="true" />
+                    ) : null}
+                  </span>
                   <span className="min-w-0 flex-1 truncate">
                     {event.title || 'Untitled meeting'}
                   </span>

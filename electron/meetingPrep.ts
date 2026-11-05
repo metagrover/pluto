@@ -27,6 +27,8 @@ export interface MeetingPrep {
   notes: string;
   topics: PrepTopic[];
   meetings?: PrepMeetingReference[];
+  /** Notes used as this meeting's prep. They are linked, not copied. */
+  noteIds?: string[];
   briefing?: import('./preMeetingBrief').PreMeetingBrief | null;
   meetingId: string | null;
   recordingStarted: boolean;
@@ -88,6 +90,17 @@ export function prepStartBlocker(
   if (now >= end) return 'This calendar event has ended.';
   return null;
 }
+const MAX_PREP_NOTES = 10;
+const parseNoteIds = (value: unknown): string[] => {
+  try {
+    const parsed = JSON.parse(typeof value === 'string' ? value : '[]');
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+};
 export function createMeetingPrepStore(
   sql: Database.Database,
   deps: {
@@ -116,6 +129,7 @@ export function createMeetingPrepStore(
           notes: row.notes,
           topics: JSON.parse(row.topics_json),
           meetings: JSON.parse(row.meetings_json),
+          noteIds: parseNoteIds(row.note_ids_json),
           briefing: row.briefing_json ? JSON.parse(row.briefing_json) : null,
           meetingId: row.meeting_id,
           recordingStarted: !!row.recording_started,
@@ -156,6 +170,8 @@ export function createMeetingPrepStore(
               'removeMeetingId',
               'refreshMeetingId',
               'meetingIds',
+              'addNoteId',
+              'removeNoteId',
             ].includes(k),
         ) ||
         Object.keys(input).length !== 1
@@ -163,6 +179,22 @@ export function createMeetingPrepStore(
         throw new Error('Invalid prep update');
       let notes = current.notes;
       let meetings = current.meetings || [];
+      let noteIds = current.noteIds || [];
+      if ('addNoteId' in input || 'removeNoteId' in input) {
+        const noteId = key(input.addNoteId ?? input.removeNoteId);
+        if ('removeNoteId' in input)
+          noteIds = noteIds.filter((id) => id !== noteId);
+        else if (noteIds.includes(noteId)) return current;
+        else if (noteIds.length >= MAX_PREP_NOTES)
+          throw new Error(`Use up to ${MAX_PREP_NOTES} notes`);
+        else noteIds = [...noteIds, noteId];
+        sql
+          .prepare(
+            'UPDATE meeting_prep SET note_ids_json = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE occurrence_key = ?',
+          )
+          .run(JSON.stringify(noteIds), current.occurrenceKey);
+        return get(current.occurrenceKey)!;
+      }
       if ('notes' in input) {
         if (typeof input.notes !== 'string' || input.notes.length > 100_000)
           throw new Error('Preparation is too long');
@@ -238,6 +270,19 @@ export function createMeetingPrepStore(
       .get(meetingId) as { occurrence_key: string } | undefined;
     return row ? get(row.occurrence_key) : null;
   };
+  /** Preps that use this note, soonest meeting first. */
+  const forNote = (noteId: unknown): MeetingPrep[] => {
+    const id = key(noteId);
+    const rows = sql
+      .prepare(
+        "SELECT occurrence_key FROM meeting_prep WHERE EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(note_ids_json) THEN note_ids_json ELSE '[]' END) WHERE value = ?)",
+      )
+      .all(id) as Array<{ occurrence_key: string }>;
+    return rows
+      .map((row) => get(row.occurrence_key))
+      .filter((prep): prep is MeetingPrep => Boolean(prep))
+      .sort((a, b) => Date.parse(a.event.start) - Date.parse(b.event.start));
+  };
   const claimStart = (value: unknown, meetingId: string, now = Date.now()) =>
     sql.transaction(() => {
       const prep = get(value);
@@ -289,6 +334,7 @@ export function createMeetingPrepStore(
     open,
     save,
     forMeeting,
+    forNote,
     claimStart,
     markStarted,
     abortStart,

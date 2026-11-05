@@ -38,9 +38,12 @@ import {
 } from '../../utils/liveMeetingCommands';
 import { MEETING_ASK_PLUTO_LIMITS } from '../../utils/meetingAskPlutoRequest';
 import { Logo } from '../Brand/Logo';
+import { AnswerActions } from './AnswerActions';
 
 type MeetingAskPlutoDockProps = {
   onOpenMeeting?: (meetingId: string) => void;
+  /** The one other person in a finished meeting, for "Add to Next time". */
+  person?: { id: string; name: string } | null;
   conversation?: MeetingAskPlutoConversationMessage[];
   onConversationChange?: React.Dispatch<
     React.SetStateAction<MeetingAskPlutoConversationMessage[]>
@@ -146,6 +149,7 @@ const toTurns = (
 export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   meeting,
   liveContext,
+  person = null,
   conversation,
   onConversationChange,
   isMinimized: controlledIsMinimized,
@@ -510,6 +514,11 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                       <span className="meeting-ask-pluto-dock__interrupted">
                         Stopped
                       </span>
+                    ) : null}
+                    {!liveContext &&
+                    !message.interrupted &&
+                    message.content.trim() ? (
+                      <AnswerActions answer={message.content} person={person} />
                     ) : null}
                   </div>
                 </div>

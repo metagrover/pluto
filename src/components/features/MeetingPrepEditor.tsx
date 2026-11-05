@@ -23,6 +23,7 @@ import {
   formatPrepParticipants,
 } from '../../utils/meetingPrepPresentation';
 import { MeetingPrepBrief } from './MeetingPrepBrief';
+import { PrepLinkedNotes } from './PrepLinkedNotes';
 export interface MeetingPrepEditorHandle {
   flush: () => Promise<void>;
 }
@@ -250,6 +251,12 @@ export const MeetingPrepEditor = forwardRef<
 
           <AttendeeNoteChecklist event={prep.event} />
 
+          <PrepLinkedNotes
+            noteIds={record.noteIds}
+            disabled={busy}
+            onRemove={(noteId) => void mutateMeeting({ removeNoteId: noteId })}
+          />
+
           <textarea
             id={`prep-notes-${prep.occurrenceKey}`}
             aria-label="Preparation notes"
@@ -458,6 +465,7 @@ export function MeetingPrepReadOnly({
   return (
     <div className="space-y-8" aria-label="Preparation summary">
       <AttendeeNoteChecklist event={prep.event} />
+      <PrepLinkedNotes noteIds={prep.noteIds} />
       {prep.briefing?.synthesisStatus === 'ready' && (
         <MeetingPrepBrief
           prep={prep}
@@ -467,7 +475,8 @@ export function MeetingPrepReadOnly({
           readOnly
         />
       )}
-      {prep.briefing?.synthesisStatus !== 'ready' && <PrepBriefEmptyState />}
+      {prep.briefing?.synthesisStatus !== 'ready' &&
+        !(prep.noteIds || []).length && <PrepBriefEmptyState />}
     </div>
   );
 }
@@ -668,11 +677,10 @@ export function PrepForMeeting({
     };
   }, [meetingId]);
   // Matches when MeetingPrepBrief has something to show.
-  if (
-    prep?.briefing?.synthesisStatus !== 'ready' ||
-    !(prep.meetings || []).length
-  )
-    return null;
+  const hasBrief =
+    prep?.briefing?.synthesisStatus === 'ready' &&
+    (prep.meetings || []).length > 0;
+  if (!prep || (!hasBrief && !(prep.noteIds || []).length)) return null;
   return (
     <details className="group mt-4 rounded-lg border border-pro-border/70 px-4 py-3">
       <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">

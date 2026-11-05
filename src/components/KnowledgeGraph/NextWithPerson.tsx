@@ -1,6 +1,12 @@
-import { Mic } from 'lucide-react';
+import { Mic, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { saveNote, setNoteChecklistItem } from '../../api/notes';
+import {
+  type NextTimeDiscussedMark,
+  getNextTimeDiscussed,
+  getNotesForEntity,
+  saveNote,
+  setNoteChecklistItem,
+} from '../../api/notes';
 import type { Note } from '../../types/notes';
 
 export interface NextItem {
@@ -10,6 +16,26 @@ export interface NextItem {
   text: string;
   checked: boolean;
 }
+
+const HIDDEN_MARKS_KEY = 'pluto.next-time-hidden-marks';
+const readHiddenMarks = (): string[] => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HIDDEN_MARKS_KEY) || '[]');
+    return Array.isArray(parsed)
+      ? parsed.filter((v) => typeof v === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+};
+const markId = (item: { noteId: string; text: string }, meetingId: string) =>
+  `${item.noteId}\u0000${item.text}\u0000${meetingId}`;
+const shortDate = (value: string) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
 
 const CHECKLIST_LINE = /^[-*]\s+\[([ xX])\]\s+(.+)$/;
 
@@ -37,6 +63,40 @@ export const openItemsFromNotes = (notes: Note[]): NextItem[] =>
     );
 
 /**
+ * Adds an item to "Next time with …": a checklist line at the end of the
+ * person's latest note, or a new "1:1 with …" note when they have none.
+ */
+export const addToNextTime = async (
+  person: { id: string; name: string },
+  text: string,
+  knownNotes?: Note[],
+): Promise<void> => {
+  const item = text.replace(/\s+/g, ' ').trim();
+  if (!item) return;
+  const notes = knownNotes ?? (await getNotesForEntity(person.id)) ?? [];
+  const target = [...notes].sort(
+    (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+  )[0];
+  if (target) {
+    await saveNote({
+      id: target.id,
+      title: target.title,
+      content: `${target.content.trimEnd()}${target.content.trim() ? '\n' : ''}- [ ] ${item}`,
+      noteType: target.noteType,
+      targetId: target.targetId,
+      pinned: target.pinned,
+    });
+    return;
+  }
+  await saveNote({
+    title: `1:1 with ${person.name}`,
+    content: `- [ ] ${item}`,
+    noteType: 'person',
+    targetId: person.id,
+  });
+};
+
+/**
  * "Next time with …": what to raise with this person, kept in the notes linked
  * to them. The same items appear in the prep for a calendar meeting with them,
  * so there is one list whether or not a calendar is connected.
@@ -45,12 +105,47 @@ export const NextWithPerson = ({
   person,
   notes,
   onStartMeeting,
+  onOpenMeeting,
 }: {
   person: { id: string; name: string };
   notes: Note[];
   onStartMeeting?: () => void;
+  onOpenMeeting?: (meetingId: string) => void;
 }) => {
   const open = useMemo(() => openItemsFromNotes(notes), [notes]);
+  const [marks, setMarks] = useState<NextTimeDiscussedMark[]>([]);
+  const [hiddenMarks, setHiddenMarks] = useState<string[]>(readHiddenMarks);
+  const openKey = open.map((item) => `${item.key}:${item.text}`).join('\n');
+  // `openKey` stands in for `open`, which is a new array when notes reload.
+  useEffect(() => {
+    let current = true;
+    if (!open.length) {
+      setMarks([]);
+      return;
+    }
+    void getNextTimeDiscussed(
+      person.id,
+      open.map(({ key, noteId, text }) => ({ key, noteId, text })),
+    )
+      .then((next) => {
+        if (current) setMarks(next);
+      })
+      .catch(() => {
+        if (current) setMarks([]);
+      });
+    return () => {
+      current = false;
+    };
+  }, [person.id, openKey]);
+  const hideMark = (item: NextItem, mark: NextTimeDiscussedMark) => {
+    const next = [...hiddenMarks, markId(item, mark.meetingId)];
+    setHiddenMarks(next);
+    try {
+      localStorage.setItem(HIDDEN_MARKS_KEY, JSON.stringify(next.slice(-500)));
+    } catch {
+      // Hidden for this visit only.
+    }
+  };
   // Items ticked here stay visible, struck through, until the page changes.
   const [ticked, setTicked] = useState<NextItem[]>([]);
   const [draft, setDraft] = useState('');
@@ -98,26 +193,7 @@ export const NextWithPerson = ({
     setBusy('add');
     setError(null);
     try {
-      const target = [...notes].sort(
-        (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
-      )[0];
-      if (target) {
-        await saveNote({
-          id: target.id,
-          title: target.title,
-          content: `${target.content.trimEnd()}${target.content.trim() ? '\n' : ''}- [ ] ${text}`,
-          noteType: target.noteType,
-          targetId: target.targetId,
-          pinned: target.pinned,
-        });
-      } else {
-        await saveNote({
-          title: `1:1 with ${person.name}`,
-          content: `- [ ] ${text}`,
-          noteType: 'person',
-          targetId: person.id,
-        });
-      }
+      await addToNextTime(person, text, notes);
       setDraft('');
     } catch (cause) {
       setError(
@@ -150,22 +226,60 @@ export const NextWithPerson = ({
       </div>
       {items.length ? (
         <ul className="space-y-1.5">
-          {items.map((item) => (
-            <li key={item.key}>
-              <label className="flex items-start gap-2.5 text-[15px] leading-6 text-pro-text-main">
-                <input
-                  type="checkbox"
-                  className="mt-1.5"
-                  checked={item.checked}
-                  disabled={busy === item.key}
-                  onChange={() => void toggle(item)}
-                />
-                <span className={item.checked ? 'line-through opacity-60' : ''}>
-                  {item.text}
-                </span>
-              </label>
-            </li>
-          ))}
+          {items.map((item) => {
+            const mark = item.checked
+              ? undefined
+              : marks.find(
+                  (entry) =>
+                    entry.key === item.key &&
+                    !hiddenMarks.includes(markId(item, entry.meetingId)),
+                );
+            return (
+              <li key={item.key}>
+                <label className="flex items-start gap-2.5 text-[15px] leading-6 text-pro-text-main">
+                  <input
+                    type="checkbox"
+                    className="mt-1.5"
+                    checked={item.checked}
+                    disabled={busy === item.key}
+                    onChange={() => void toggle(item)}
+                  />
+                  <span
+                    className={item.checked ? 'line-through opacity-60' : ''}
+                  >
+                    {item.text}
+                  </span>
+                </label>
+                {mark ? (
+                  <p className="next-discussed">
+                    <span>Came up in</span>
+                    {onOpenMeeting ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenMeeting(mark.meetingId)}
+                      >
+                        {mark.meetingTitle}
+                        {shortDate(mark.startedAt)
+                          ? ` · ${shortDate(mark.startedAt)}`
+                          : ''}
+                      </button>
+                    ) : (
+                      <span>{mark.meetingTitle}</span>
+                    )}
+                    <button
+                      type="button"
+                      className="next-discussed__hide"
+                      aria-label={`Hide “came up” for ${item.text}`}
+                      title="It didn’t come up"
+                      onClick={() => hideMark(item, mark)}
+                    >
+                      <X size={12} aria-hidden="true" />
+                    </button>
+                  </p>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
       <form

@@ -198,7 +198,7 @@ describe('one-time database storage setup', () => {
         upgraded
           .prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations')
           .get(),
-      ).toEqual({ count: 21 });
+      ).toEqual({ count: 22 });
       expect(
         upgraded
           .prepare("SELECT title FROM meetings WHERE id = 'upgrade-example'")

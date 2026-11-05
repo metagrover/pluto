@@ -889,6 +889,40 @@
   .meeting-ask-pluto-dock__interrupted {
     @apply mt-1 block text-[10px] font-medium text-pro-text-muted;
   }
+  .next-discussed {
+    @apply ml-6 flex flex-wrap items-center gap-1 text-[12px] leading-5 text-pro-text-muted;
+  }
+  .next-discussed > button:not(.next-discussed__hide) {
+    @apply rounded text-pro-text-muted underline decoration-pro-border underline-offset-2 hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .next-discussed__hide {
+    @apply inline-flex h-5 w-5 items-center justify-center rounded text-pro-text-muted/70 hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .answer-actions {
+    @apply mt-2 flex flex-wrap items-center gap-1;
+  }
+  .answer-actions--editing {
+    @apply w-full flex-nowrap;
+  }
+  .answer-actions > button,
+  .answer-actions--editing button {
+    @apply inline-flex min-h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-40;
+  }
+  .answer-actions--editing button[type="submit"] {
+    @apply bg-pro-accent/10 text-pro-accent hover:bg-pro-accent/20 hover:text-pro-accent;
+  }
+  .answer-actions--editing input {
+    @apply h-8 w-80 min-w-0 max-w-full flex-1 rounded-md border border-pro-border bg-pro-bg px-2 text-[13px] text-pro-text-main outline-none focus:ring-2 focus:ring-pro-accent;
+  }
+  .prep-linked-note__task {
+    @apply text-pro-text-muted;
+  }
+  .answer-actions__done {
+    @apply inline-flex items-center gap-1 px-1 text-[11px] text-pro-text-muted;
+  }
+  .answer-actions__error {
+    @apply basis-full text-[11px] text-pro-warning;
+  }
   .meeting-ask-pluto-dock__loading {
     @apply flex items-center gap-2 px-3 py-2 text-xs font-bold text-pro-text-muted;
   }
@@ -2337,6 +2371,24 @@
   }
   .rail-notes textarea {
     @apply min-h-60 flex-1 resize-none border-0 bg-transparent p-0 text-[15px] leading-7 outline-none placeholder:text-pro-text-muted/65 focus-visible:ring-0;
+  }
+  .rail-note-suggestion {
+    @apply mb-3 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-lg border border-pro-border/70 bg-pro-surface/30 px-3 py-2 text-[13px] text-pro-text-main;
+  }
+  .rail-note-suggestion > svg {
+    @apply shrink-0 text-pro-text-muted;
+  }
+  .rail-note-suggestion p {
+    @apply min-w-0 flex-1;
+  }
+  .rail-note-suggestion__actions {
+    @apply flex shrink-0 items-center gap-1;
+  }
+  .rail-note-suggestion__actions button {
+    @apply min-h-8 rounded-md px-2.5 text-[12px] font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .rail-note-suggestion__actions .rail-note-suggestion__use {
+    @apply bg-pro-accent/10 text-pro-accent hover:bg-pro-accent/20 hover:text-pro-accent;
   }
   .recording-finalizing-view {
     @apply mx-auto w-full max-w-[920px] pb-20 pt-5;

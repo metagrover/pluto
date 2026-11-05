@@ -1346,6 +1346,9 @@ const createInvokeFallback =
       case 'MEETING_PREP_FOR_MEETING':
         result = null;
         break;
+      case 'MEETING_PREP_FOR_NOTE':
+        result = [];
+        break;
       case 'MEETING_PREP_BRIEF_BUILD':
       case 'MEETING_PREP_BRIEF_SYNTHESIZE': {
         const prep = JSON.parse(
@@ -1402,6 +1405,14 @@ const createInvokeFallback =
           throw new Error('Prep changed elsewhere. Reload before saving.');
         const patch = request.patch;
         if ('notes' in patch) prep.notes = patch.notes;
+        if (typeof patch.addNoteId === 'string')
+          prep.noteIds = [
+            ...new Set([...(prep.noteIds || []), patch.addNoteId]),
+          ];
+        if (typeof patch.removeNoteId === 'string')
+          prep.noteIds = (prep.noteIds || []).filter(
+            (id) => id !== patch.removeNoteId,
+          );
         if (Array.isArray(patch.meetingIds)) {
           prep.meetings = patch.meetingIds.map(
             (id: string) =>

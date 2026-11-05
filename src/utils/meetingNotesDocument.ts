@@ -6,6 +6,7 @@ import type {
 } from '../types';
 import { parseActionMetadata } from './actionCommitment';
 import { applyUserEdit } from './analysisDocument';
+import { meetingUserNotesWithEdits } from './meetingNotesEditRebase';
 import { projectMeetingNotesSpeakerReferences } from './meetingNotesSpeakerReferences';
 import {
   getAnonymousSpeakerDisplayLabel,
@@ -629,11 +630,14 @@ export const buildMeetingNotesDocument = ({
           },
         ];
   const scratchpad = sections.find((section) => section.kind === 'scratchpad');
-  if (scratchpad && userNotes.trim()) {
+  // Notes added on the finished meeting are an edit over what was typed
+  // during it; everything that reads this document sees the current text.
+  const currentUserNotes = meetingUserNotesWithEdits(userNotes, editsMap);
+  if (scratchpad && currentUserNotes.trim()) {
     scratchpad.blocks = [
       toBlock({
         id: 'scratchpad-content',
-        text: userNotes,
+        text: currentUserNotes,
         editsMap,
         authorship: 'human',
       }),

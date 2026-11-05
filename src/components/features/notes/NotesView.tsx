@@ -3037,6 +3037,7 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
               {/* Header Actions */}
               <div className="flex items-center gap-1 shrink-0">
                 <NoteMeetingMenu
+                  noteId={selectedNoteId}
                   title={getDisplayTitle({
                     title: editTitle,
                     content: editContent,

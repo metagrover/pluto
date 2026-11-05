@@ -6,6 +6,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const notesApi = vi.hoisted(() => ({
   saveNote: vi.fn(),
   setNoteChecklistItem: vi.fn(),
+  getNotesForEntity: vi.fn(async () => []),
+  getNextTimeDiscussed: vi.fn(async () => [] as unknown[]),
 }));
 vi.mock('../../src/api/notes', () => notesApi);
 
@@ -152,4 +154,45 @@ it('offers Start 1:1 only when recording can start', async () => {
   )!;
   await act(async () => button.click());
   expect(start).toHaveBeenCalled();
+});
+
+it('says softly when an item came up in the latest meeting, and can hide it', async () => {
+  localStorage.clear();
+  notesApi.getNextTimeDiscussed.mockResolvedValue([
+    {
+      key: 'n1:0',
+      meetingId: 'm1',
+      meetingTitle: 'Priya / me 1:1',
+      startedAt: '2026-11-03T10:00:00.000Z',
+      atSeconds: 42,
+    },
+  ]);
+  const openMeeting = vi.fn();
+  await act(async () =>
+    root.render(
+      <NextWithPerson
+        person={priya}
+        notes={[note({ content: '- [ ] Hiring plan for Q1\n- [ ] Offsite' })]}
+        onOpenMeeting={openMeeting}
+      />,
+    ),
+  );
+  expect(notesApi.getNextTimeDiscussed).toHaveBeenCalledWith('p1', [
+    { key: 'n1:0', noteId: 'n1', text: 'Hiring plan for Q1' },
+    { key: 'n1:1', noteId: 'n1', text: 'Offsite' },
+  ]);
+  expect(host.textContent).toContain('Came up in');
+  const link = [...host.querySelectorAll('button')].find((b) =>
+    b.textContent?.startsWith('Priya / me 1:1'),
+  )!;
+  await act(async () => link.click());
+  expect(openMeeting).toHaveBeenCalledWith('m1');
+  // The item itself stays until ticked.
+  expect(host.textContent).toContain('Hiring plan for Q1');
+  const hide = host.querySelector(
+    '[aria-label="Hide “came up” for Hiring plan for Q1"]',
+  ) as HTMLButtonElement;
+  await act(async () => hide.click());
+  expect(host.textContent).not.toContain('Came up in');
+  expect(host.textContent).toContain('Hiring plan for Q1');
 });

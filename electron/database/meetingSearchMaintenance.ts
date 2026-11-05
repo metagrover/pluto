@@ -1,4 +1,6 @@
 import type Database from 'better-sqlite3';
+import { parseUserEditsJson } from '../../src/utils/analysisDocument';
+import { meetingUserNotesWithEdits } from '../../src/utils/meetingNotesEditRebase';
 import type { PersistedMeeting } from '../db';
 import type { MidFrontmatter } from '../intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from '../intelligence/meetingNotesEvidence';
@@ -205,7 +207,10 @@ export const refreshMeetingFts = (
         meeting.title,
         transcriptText,
         projectedNotes || meeting.enhanced_notes || '',
-        meeting.user_notes || '',
+        meetingUserNotesWithEdits(
+          meeting.user_notes,
+          parseUserEditsJson(meeting.user_edits_json),
+        ),
         participants,
         topics,
         decisions,

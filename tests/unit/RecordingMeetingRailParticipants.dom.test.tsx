@@ -283,3 +283,78 @@ describe('RecordingMeetingRail Participants Dropdown', () => {
     expect(onRemoveParticipant).toHaveBeenCalledWith(1);
   });
 });
+
+describe('RecordingMeetingRail note suggestion', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    (window as unknown as { ipcRenderer: unknown }).ipcRenderer = {
+      invoke: vi.fn(async (channel: string) =>
+        channel === 'NOTES_LIST'
+          ? [
+              {
+                id: 'vendor',
+                title: 'Vendor eval',
+                content: '- [ ] Data residency',
+                noteType: 'general',
+                targetName: 'Dana Ortiz',
+                pinned: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+            ]
+          : [],
+      ),
+    };
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    document.body.innerHTML = '';
+    (window as unknown as { ipcRenderer?: unknown }).ipcRenderer = undefined;
+    vi.restoreAllMocks();
+  });
+
+  const render = (onNotesChange: (value: string) => void, notes = '') =>
+    act(async () => {
+      root.render(
+        <RecordingMeetingRail
+          title="Acme call"
+          onTitleChange={() => {}}
+          participants={['Dana Ortiz']}
+          onAddParticipant={() => {}}
+          onRemoveParticipant={() => {}}
+          notes={notes}
+          onNotesChange={onNotesChange}
+          people={[]}
+        />,
+      );
+    });
+
+  it('offers a recent note about someone in the meeting and uses it', async () => {
+    const onNotesChange = vi.fn();
+    await render(onNotesChange, 'Intro');
+    expect(container.textContent).toContain(
+      'Use your “Vendor eval” note for this meeting?',
+    );
+    const use = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Use it',
+    )!;
+    await act(async () => use.click());
+    expect(onNotesChange).toHaveBeenCalledWith('Intro\n\n- [ ] Data residency');
+    expect(container.textContent).not.toContain('Use your “Vendor eval”');
+  });
+
+  it('goes away with Not now', async () => {
+    const onNotesChange = vi.fn();
+    await render(onNotesChange);
+    const skip = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Not now',
+    )!;
+    await act(async () => skip.click());
+    expect(container.textContent).not.toContain('Use your');
+    expect(onNotesChange).not.toHaveBeenCalled();
+  });
+});

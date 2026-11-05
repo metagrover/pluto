@@ -6,6 +6,7 @@ import TextareaAutosize from 'react-textarea-autosize';
 import remarkGfm from 'remark-gfm';
 import { type Entity, getEntity } from '../../api/knowledgeGraph';
 import type { Meeting, TranscriptSegment } from '../../types';
+import { parseUserEditsJson } from '../../utils/analysisDocument';
 import type {
   MeetingNotesBlock,
   MeetingNotesDocumentModel,
@@ -16,7 +17,10 @@ import {
   findReminderNoteBlock,
   nativeContinuationEditPath,
 } from '../../utils/meetingNotesDocument';
-import { MEETING_USER_NOTES_EDIT_PATH } from '../../utils/meetingNotesEditRebase';
+import {
+  MEETING_USER_NOTES_EDIT_PATH,
+  meetingUserNotesWithEdits,
+} from '../../utils/meetingNotesEditRebase';
 import { meetingTimestamp } from '../../utils/meetingOrdering';
 import { getTranscriptSegmentStartTime } from '../../utils/transcript';
 import './notes/notes.css';
@@ -276,21 +280,11 @@ const isShownBlock = (block: MeetingNotesBlock): boolean =>
     block.originalText.trim()
   );
 
-const savedUserNotes = (meeting: Meeting): string => {
-  try {
-    const edits = meeting.user_edits_json
-      ? (JSON.parse(meeting.user_edits_json) as Record<
-          string,
-          { edited?: unknown }
-        >)
-      : {};
-    const edited = edits[MEETING_USER_NOTES_EDIT_PATH]?.edited;
-    if (typeof edited === 'string') return edited;
-  } catch {
-    // Unreadable edits fall back to the notes typed during the meeting.
-  }
-  return meeting.user_notes ?? '';
-};
+const savedUserNotes = (meeting: Meeting): string =>
+  meetingUserNotesWithEdits(
+    meeting.user_notes,
+    parseUserEditsJson(meeting.user_edits_json),
+  );
 
 const InlineEditableText = ({
   meetingId,

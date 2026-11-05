@@ -107,3 +107,31 @@ export const subscribeNoteAskPlutoDelta = (
   );
   return () => unsubscribe?.();
 };
+
+/** Asks the app to show a note in Notes, from wherever the user is. */
+export const OPEN_NOTE_EVENT = 'pluto:open-note';
+export const openNoteInApp = (noteId: string): void => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(OPEN_NOTE_EVENT, { detail: noteId }));
+};
+
+export interface NextTimeDiscussedMark {
+  key: string;
+  meetingId: string;
+  meetingTitle: string;
+  startedAt: string;
+  atSeconds: number | null;
+}
+
+/** Items on "Next time with …" that came up in the latest meeting with them. */
+export const getNextTimeDiscussed = async (
+  personId: string,
+  items: Array<{ key: string; noteId: string; text: string }>,
+): Promise<NextTimeDiscussedMark[]> => {
+  if (typeof window === 'undefined' || !window.ipcRenderer?.invoke) return [];
+  const marks = await window.ipcRenderer.invoke('NEXT_TIME_DISCUSSED', {
+    personId,
+    items,
+  });
+  return Array.isArray(marks) ? marks : [];
+};

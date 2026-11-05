@@ -145,6 +145,8 @@ import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
 import { SearchOverlay } from './components/overlays/SearchOverlay';
 import { buildSearchPlutoResults } from './components/overlays/searchPlutoModel';
 
+import { OPEN_NOTE_EVENT, getNote } from './api/notes';
+import { prepNotesText } from './components/features/PrepLinkedNotes';
 // Types
 import type { Meeting, MeetingSummary } from './types';
 import type { MeetingAskPlutoConversationMessage } from './types/askPluto';
@@ -1322,6 +1324,12 @@ function App() {
   const handleStartFromPrompt = useCallback(
     async (event: CalendarEvent) => {
       const prep = await openMeetingPrep(event);
+      // Notes linked as prep seed the live notes as they read now.
+      const linkedNotes = (
+        await Promise.all(
+          (prep?.noteIds || []).map((id) => getNote(id).catch(() => null)),
+        )
+      ).filter((note): note is NonNullable<typeof note> => Boolean(note));
       const previous = {
         event: activeCalendarEventRef.current,
         title: meetingTitle,
@@ -1340,8 +1348,7 @@ function App() {
         setParticipantInput('');
         setCurrentNotes(
           localStorage.getItem(`pluto.meeting-notes:${event.occurrenceKey}`) ??
-            prep?.notes ??
-            '',
+            prepNotesText(prep?.notes ?? '', linkedNotes),
         );
       });
       try {
@@ -1532,6 +1539,20 @@ function App() {
       if (pending.notes !== undefined) setCurrentNotes(pending.notes);
     }
   };
+
+  // "Open in Notes" from prep and other places outside Notes.
+  useEffect(() => {
+    const open = (event: Event) => {
+      const noteId = (event as CustomEvent<string>).detail;
+      if (typeof noteId !== 'string' || !noteId) return;
+      setPreMeetingBriefVisible(false);
+      setSelectedMeetingId(null);
+      setSelectedNoteId(noteId);
+      setActiveTab('notes');
+    };
+    window.addEventListener(OPEN_NOTE_EVENT, open);
+    return () => window.removeEventListener(OPEN_NOTE_EVENT, open);
+  }, []);
 
   const handleFinalizationStarted = (meeting: RecordingFinalizationPreview) => {
     setFinalizingMeeting(meeting);

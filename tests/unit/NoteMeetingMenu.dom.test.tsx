@@ -6,12 +6,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const prepApi = vi.hoisted(() => ({
   openMeetingPrep: vi.fn(),
   saveMeetingPrep: vi.fn(),
+  getPrepsForNote: vi.fn(async () => []),
 }));
 vi.mock('../../src/api/meetingPrep', () => prepApi);
 
+import { prepNotesWith } from '../../src/components/features/PrepLinkedNotes';
 import {
   NoteMeetingMenu,
-  prepNotesWith,
   upcomingForPrep,
 } from '../../src/components/features/notes/NoteMeetingMenu';
 
@@ -87,7 +88,7 @@ it('starts a meeting with the note as its notes and the linked person', async ()
   });
 });
 
-it('puts the note into an upcoming meeting’s prep and says so', async () => {
+it('links the note as an upcoming meeting’s prep, shows it, and can unlink it', async () => {
   const upcoming = event('acme', 1);
   upcoming.start = new Date(Date.now() + 3600e3).toISOString();
   upcoming.end = new Date(Date.now() + 7200e3).toISOString();
@@ -96,6 +97,7 @@ it('puts the note into an upcoming meeting’s prep and says so', async () => {
   await act(async () =>
     root.render(
       <NoteMeetingMenu
+        noteId="note-vendor"
         title="Vendor eval"
         content="Questions for Dana"
         personName={null}
@@ -103,15 +105,53 @@ it('puts the note into an upcoming meeting’s prep and says so', async () => {
       />,
     ),
   );
-  const button = [...host.querySelectorAll('button')].find((b) =>
-    b.textContent?.includes('Meeting acme'),
-  )!;
-  await act(async () => button.click());
+  const item = () =>
+    [...host.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Meeting acme'),
+    )!;
+  await act(async () => item().click());
+  // The prep points at the note; its own notes are left alone.
   expect(prepApi.saveMeetingPrep).toHaveBeenCalledWith(
     { notes: 'Agenda', revision: 1 },
-    { notes: 'Agenda\n\nQuestions for Dana' },
+    { addNoteId: 'note-vendor' },
   );
-  expect(host.textContent).toContain('Added to the prep for Meeting acme');
+  expect(host.textContent).toContain(
+    'This note is now the prep for Meeting acme',
+  );
+  expect(host.querySelector('summary')?.textContent).toContain(
+    'For Meeting acme',
+  );
+  expect(item().getAttribute('aria-checked')).toBe('true');
+  await act(async () => item().click());
+  expect(prepApi.saveMeetingPrep).toHaveBeenLastCalledWith(
+    { notes: 'Agenda', revision: 1 },
+    { removeNoteId: 'note-vendor' },
+  );
+  expect(host.querySelector('summary')?.textContent).toContain('Meeting');
+  expect(item().getAttribute('aria-checked')).toBe('false');
+});
+
+it('shows a link that already exists', async () => {
+  const upcoming = event('acme', 1);
+  upcoming.start = new Date(Date.now() + 3600e3).toISOString();
+  upcoming.end = new Date(Date.now() + 7200e3).toISOString();
+  prepApi.getPrepsForNote.mockResolvedValueOnce([
+    { occurrenceKey: 'acme' },
+  ] as never);
+  await act(async () =>
+    root.render(
+      <NoteMeetingMenu
+        noteId="note-vendor"
+        title="Vendor eval"
+        content="x"
+        personName={null}
+        events={[upcoming]}
+      />,
+    ),
+  );
+  expect(host.querySelector('summary')?.textContent).toContain(
+    'For Meeting acme',
+  );
 });
 
 it('hides itself when there is nothing it can do', async () => {
