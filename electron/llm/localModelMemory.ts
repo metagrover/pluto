@@ -75,6 +75,35 @@ const hasMemoryCapacity = (available: number, total: number): boolean =>
     totalMemoryBytes: total,
   }).admitted;
 
+// The quick chat model is small and loads in about a second, so admission
+// and the watchdog give it the same 1 GiB reaction margin that a verified
+// resident model gets, and a smaller fixed runtime allowance. Measured cold
+// loads of phi4-mini on a 16 GiB Mac: 3.0 GiB at 2K, 3.2-3.7 GiB at 4K and
+// 4.0 GiB at 8K, against estimates of 3.65, 3.9 and 4.4 GiB. Runtime buffers
+// grow with context (7.8 GiB at 32K), so larger contexts, unknown layouts and
+// the established Gemma keep their rules.
+const QUICK_MODEL_REACTION_HEADROOM_BYTES = GIB;
+const QUICK_MODEL_RUNTIME_BYTES = GIB / 2;
+const QUICK_MODEL_MAX_CONTEXT_TOKENS = 8192;
+
+export const usesQuickModelHeadroom = ({
+  quickModel,
+  modelDigest,
+  contextBytesPerToken,
+  contextTokens,
+}: {
+  quickModel?: boolean;
+  modelDigest?: string;
+  contextBytesPerToken?: number;
+  contextTokens: number;
+}): boolean =>
+  quickModel === true &&
+  contextTokens <= QUICK_MODEL_MAX_CONTEXT_TOKENS &&
+  !isEstablishedGemmaArtifact(modelDigest) &&
+  contextBytesPerToken !== undefined &&
+  Number.isFinite(contextBytesPerToken) &&
+  contextBytesPerToken > 0;
+
 export class LocalModelMemoryError extends Error {
   name = 'LocalModelMemoryError';
 
@@ -115,6 +144,7 @@ export const assertLocalModelMemoryCapacity = ({
   minimumContextTokens = 4096,
   contextBytesPerToken,
   measuredColdPeak,
+  quickModel,
 }: {
   available: number;
   total: number;
@@ -128,6 +158,8 @@ export const assertLocalModelMemoryCapacity = ({
   // Peak this Mac actually used for a cold load of the same artifact and
   // placement, and the context it loaded with.
   measuredColdPeak?: { bytes: number; contextTokens: number };
+  // The configured quick chat model; see usesQuickModelHeadroom.
+  quickModel?: boolean;
 }): void => {
   // Gemma's observed buffers need fixed sliding-window/runtime headroom.
   // Other artifacts with known attention metadata charge their weights plus
@@ -144,10 +176,21 @@ export const assertLocalModelMemoryCapacity = ({
     contextBytesPerToken > 0
       ? contextBytesPerToken
       : undefined;
+  const quick = usesQuickModelHeadroom({
+    quickModel,
+    modelDigest,
+    contextBytesPerToken,
+    contextTokens,
+  });
+  const reactionHeadroom = quick
+    ? QUICK_MODEL_REACTION_HEADROOM_BYTES
+    : REACTION_HEADROOM_BYTES;
   const coldLoad = established
     ? modelBytes + 2 * GIB
     : knownContextBytes
-      ? modelBytes * 1.25 + GIB + REACTION_HEADROOM_BYTES
+      ? modelBytes * 1.25 +
+        (quick ? QUICK_MODEL_RUNTIME_BYTES : GIB) +
+        reactionHeadroom
       : modelBytes * 2.5 + GIB;
   const perToken = knownContextBytes ?? DEFAULT_CONTEXT_BYTES_PER_TOKEN;
   const estimatedAdditional = coldLoad + contextTokens * perToken;
@@ -160,7 +203,7 @@ export const assertLocalModelMemoryCapacity = ({
         Math.max(0, contextTokens - measuredColdPeak.contextTokens) * perToken
       : Number.POSITIVE_INFINITY;
   const additional = resident
-    ? REACTION_HEADROOM_BYTES
+    ? reactionHeadroom
     : Math.min(estimatedAdditional, measuredAdditional);
   if (!hasMemoryCapacity(available - additional, total)) {
     let maxContextTokens: number | undefined;
@@ -184,6 +227,7 @@ export const assertLocalModelMemoryCapacity = ({
       additionalBytes: additional,
       contextTokens,
       resident,
+      quickModel: quick,
     });
     throw new LocalModelMemoryError(
       'Not enough memory to safely load the selected local model. Close other apps or choose a smaller local model in Settings.',
@@ -203,6 +247,7 @@ export const watchLocalModelMemory = () => {
   let residentCheckedAt = Number.NEGATIVE_INFINITY;
   let residentEpoch = 0;
   let residentPending: Promise<void> | undefined;
+  let reactionHeadroom = REACTION_HEADROOM_BYTES;
   const refreshResidency = (): Promise<void> | undefined => {
     if (disposed || !residentCheck || residentPending) return residentPending;
     const check = residentCheck;
@@ -252,7 +297,7 @@ export const watchLocalModelMemory = () => {
       if (
         !disposed &&
         !hasMemoryCapacity(
-          available - (verifiedResident ? GIB : REACTION_HEADROOM_BYTES),
+          available - (verifiedResident ? GIB : reactionHeadroom),
           total,
         )
       ) {
@@ -260,7 +305,7 @@ export const watchLocalModelMemory = () => {
           availableBytes: available,
           totalBytes: total,
           resident: verifiedResident,
-          reactionBytes: verifiedResident ? GIB : REACTION_HEADROOM_BYTES,
+          reactionBytes: verifiedResident ? GIB : reactionHeadroom,
         });
         controller.abort(
           new LocalModelMemoryError(
@@ -303,6 +348,12 @@ export const watchLocalModelMemory = () => {
         }, MEMORY_CHECK_INTERVAL_MS / 2);
         void refreshResidency();
       }
+    },
+    // Matches the margin admission charged; see usesQuickModelHeadroom.
+    setQuickModelHeadroom: (quick: boolean) => {
+      reactionHeadroom = quick
+        ? QUICK_MODEL_REACTION_HEADROOM_BYTES
+        : REACTION_HEADROOM_BYTES;
     },
     setResidentCheck: (modelDigest: unknown, check: () => Promise<boolean>) => {
       residentEpoch += 1;

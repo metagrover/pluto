@@ -29,9 +29,14 @@ export function getChatGPTAuth(): ChatGPTAuth {
   return auth;
 }
 
-export function assertChatGPTSelected() {
+/**
+ * ChatGPT runs only when it is the selected provider, or for one question the
+ * person chose to send after a local memory refusal. Cloud consent is always
+ * required.
+ */
+export function assertChatGPTSelected(memoryFallback = false) {
   if (!getSetting) throw new Error('chatgpt_runtime_not_initialized');
-  if (getSetting('llm_provider') !== 'chatgpt')
+  if (!memoryFallback && getSetting('llm_provider') !== 'chatgpt')
     throw new ChatGPTError('chatgpt_not_selected');
   if (getSetting('cloud_consent_chatgpt') !== CLOUD_CONSENT_VERSION)
     throw new ChatGPTError('chatgpt_cloud_consent_required');

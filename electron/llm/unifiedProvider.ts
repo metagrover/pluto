@@ -38,6 +38,7 @@ import {
   isEstablishedGemmaArtifact,
   readContextBytesPerToken,
   readLocalModelMemory,
+  usesQuickModelHeadroom,
   watchLocalModelMemory,
 } from './localModelMemory';
 
@@ -1783,6 +1784,10 @@ export class UnifiedLLMProvider implements LLMProvider {
         egress: {
           classification: 'selected_meeting_context' as const,
           userInitiated: task !== 'dreaming',
+          ...(provider === 'chatgpt' &&
+          this.settings.chatgpt_memory_fallback === true
+            ? { memoryFallback: true }
+            : {}),
         },
       };
       const result =
@@ -2132,6 +2137,13 @@ export class UnifiedLLMProvider implements LLMProvider {
       await this.requestOllamaUnload(model, signal);
       resident = false;
     }
+    // The configured quick chat model gets the smaller load margin in both
+    // admission and the watchdog, so an admitted load is not stopped at once.
+    const quickModel =
+      normalizeOllamaModelName(model) ===
+      normalizeOllamaModelName(
+        resolveConfiguredOllamaModel(this.settings, true),
+      );
     if (entry) {
       const checkCapacity = async (isResident: boolean) => {
         for (;;) {
@@ -2148,6 +2160,7 @@ export class UnifiedLLMProvider implements LLMProvider {
                 ? { minimumContextTokens: requiredContext }
                 : {}),
               contextBytesPerToken,
+              quickModel,
               measuredColdPeak: getMeasuredColdPeak(
                 model,
                 allocationDigest,
@@ -2232,6 +2245,15 @@ export class UnifiedLLMProvider implements LLMProvider {
             loaded.context_length === num_ctx,
         );
       });
+      // Set after admission so it matches the context that was admitted.
+      memory?.setQuickModelHeadroom?.(
+        usesQuickModelHeadroom({
+          quickModel,
+          modelDigest: entry.digest,
+          contextBytesPerToken,
+          contextTokens: num_ctx,
+        }),
+      );
       await memory?.start(signal);
     }
     ollamaMemoryReclaimDeadline = 0;

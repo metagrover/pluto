@@ -111,6 +111,8 @@ export interface AskPlutoQueryRequest {
   modeOverride?: 'auto' | 'fast' | 'deep';
   priorTurns?: AskPlutoConversationTurn[];
   conversationMemory?: AskPlutoConversationMemory;
+  /** The person chose ChatGPT for this question after a memory refusal. */
+  answerWith?: 'chatgpt';
 }
 
 export interface AskPlutoConversationContext {
@@ -212,6 +214,8 @@ export interface AskPlutoQueryResponse<Citation = unknown> {
     | 'invalid_response'
     | 'memory_pressure'
     | 'generation_failed';
+  /** Local memory refused the answer and ChatGPT is ready to answer instead. */
+  chatGPTFallback?: 'available';
   trustStatus?: 'grounded' | 'inferred' | 'needs_review';
   unsupportedClaimCount?: number;
   omissionRef?: string;

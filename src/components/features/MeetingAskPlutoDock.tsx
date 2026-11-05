@@ -80,6 +80,8 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     setError,
     ask,
     stop: stopAnswer,
+    canAnswerWithChatGPT,
+    answerWithChatGPT,
   } = useMeetingAskPluto({ liveContext, conversation, onConversationChange });
   const { anchorTurn, conversationRef: threadRef } =
     useChatTurnAnchor<HTMLDivElement>(messages.length);
@@ -233,6 +235,12 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                         Stopped
                       </span>
                     ) : null}
+                    {message.answeredBy === 'chatgpt' ? (
+                      <span className="meeting-ask-pluto-dock__interrupted">
+                        Answered by ChatGPT, since there wasn’t enough free
+                        memory for your local model.
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               ),
@@ -282,6 +290,14 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
         <p className="meeting-ask-pluto-dock__error" role="alert">
           {error}
         </p>
+      ) : null}
+      {showsConversation && canAnswerWithChatGPT ? (
+        <div className="meeting-ask-pluto-dock__fallback">
+          <button type="button" onClick={() => answerWithChatGPT()}>
+            Answer with ChatGPT
+          </button>
+          <span>Sends this question and the live notes, just this once.</span>
+        </div>
       ) : null}
 
       {showsCommands && (!isMinimized || !hasConversation) ? (

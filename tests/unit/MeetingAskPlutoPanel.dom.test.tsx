@@ -273,6 +273,58 @@ describe('MeetingAskPlutoPanel', () => {
     expect(container.textContent).not.toContain('Reading this meeting…');
   });
 
+  it('shows the memory message and offers ChatGPT for the refused question', async () => {
+    invoke.mockResolvedValueOnce({
+      ...response,
+      status: 'unavailable',
+      answer: 'I stopped answering to protect your Mac’s memory.',
+      citations: [],
+      claims: [],
+      chatGPTFallback: 'available',
+    });
+    await render();
+    await askQuestion('What did we decide?');
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain(
+      'I stopped answering to protect your Mac’s memory.',
+    );
+    expect(alert?.textContent).toContain('just this once');
+    const button = [...container.querySelectorAll('button')].find(
+      (candidate) => candidate.textContent === 'Answer with ChatGPT',
+    );
+    expect(button).toBeDefined();
+
+    await act(async () => {
+      button?.click();
+      await flushPromises();
+    });
+    expect(invoke).toHaveBeenLastCalledWith('intelligence:meeting-chat', {
+      requestId: expect.stringMatching(/^ask-pluto-/),
+      query: 'What did we decide?',
+      scope: { type: 'meeting', meetingId: 'meeting-1' },
+      turns: [],
+      answerWith: 'chatgpt',
+    });
+    // The question is asked once, answered, and labelled.
+    expect(
+      container.querySelectorAll('.note-ask-panel__question'),
+    ).toHaveLength(1);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).toContain('Answered by ChatGPT');
+  });
+
+  it('does not offer ChatGPT when the main process does not', async () => {
+    invoke.mockResolvedValueOnce({
+      ...response,
+      status: 'unavailable',
+      answer: 'I stopped answering to protect your Mac’s memory.',
+    });
+    await render();
+    await askQuestion('What did we decide?');
+    expect(container.textContent).not.toContain('Answer with ChatGPT');
+  });
+
   it('sends bounded prior meeting turns for follow-up questions', async () => {
     await render();
     await askQuestion('What did we decide?');

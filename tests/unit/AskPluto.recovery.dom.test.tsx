@@ -153,3 +153,51 @@ it('restores the composer even when cancellation IPC rejects', async () => {
     container.querySelector('button[aria-label="Send message"]'),
   ).not.toBeNull();
 });
+it('offers ChatGPT after a memory refusal and sends that question there once', async () => {
+  const answers = [
+    {
+      status: 'unavailable',
+      answer: 'Pluto stopped this answer to protect system memory.',
+      citations: [],
+      failureReason: 'memory_pressure',
+      chatGPTFallback: 'available',
+    },
+    { status: 'answered', answer: 'Lee Chen owns the review.', citations: [] },
+  ];
+  const invoke = vi.fn(async (channel: string) =>
+    channel === 'intelligence:query'
+      ? answers.shift()
+      : channel === 'intelligence:workspace-chat:create-thread'
+        ? { id: 'thread-1' }
+        : [],
+  );
+  Object.defineProperty(window, 'ipcRenderer', {
+    configurable: true,
+    value: { invoke, on: vi.fn(() => () => {}) },
+  });
+  await act(async () => {
+    root.render(<AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />);
+  });
+  await submit("What's assigned to Lee Chen?");
+  const offer = () =>
+    [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Answer with ChatGPT',
+    );
+  expect(container.textContent).toContain('just this once');
+  await act(async () => {
+    offer()?.click();
+  });
+  const queries = invoke.mock.calls.filter(
+    ([channel]) => channel === 'intelligence:query',
+  );
+  expect(queries).toHaveLength(2);
+  expect(queries[0][1]).not.toHaveProperty('answerWith');
+  expect(queries[1][1]).toMatchObject({
+    query: "What's assigned to Lee Chen?",
+    answerWith: 'chatgpt',
+    priorTurns: [],
+  });
+  expect(container.textContent).toContain('Lee Chen owns the review.');
+  expect(container.textContent).toContain('Answered by ChatGPT');
+  expect(offer()).toBeUndefined();
+});

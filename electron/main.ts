@@ -148,6 +148,12 @@ import {
   isTaskChatRequest,
   prepareTaskChatReply,
 } from './intelligence/taskChatTools';
+import {
+  CHATGPT_FALLBACK_UNAVAILABLE_MESSAGE,
+  canOfferChatGPTMemoryFallback,
+  chatGPTMemoryFallbackSettings,
+  isLocalMemoryRefusal,
+} from './llm/chatGPTMemoryFallback';
 import { LocalModelMemoryError } from './llm/localModelMemory';
 import { checkOllamaReadiness } from './llm/ollamaReadiness';
 import { resolveConfiguredProviderModel } from './llm/providerCatalog';
@@ -7758,14 +7764,35 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           new DOMException('Ask Pluto owner destroyed', 'AbortError'),
         );
       event.sender.once('destroyed', abortForDestroyedOwner);
+      // Set once settings load; offers ChatGPT after a local memory refusal.
+      let offerChatGPT: (reason: string) => { chatGPTFallback?: 'available' } =
+        () => ({});
       try {
         const settingsStartedAt = Date.now();
-        const settings = await runAskPlutoWithDeadline(
+        const storedSettings = await runAskPlutoWithDeadline(
           getAllSettings(db),
           controller,
           15_000,
         );
         controller.signal.throwIfAborted();
+        // The person chose ChatGPT for this one question after a memory refusal.
+        const answerWithChatGPT =
+          typeof input !== 'string' && input?.answerWith === 'chatgpt';
+        if (answerWithChatGPT && !canOfferChatGPTMemoryFallback(storedSettings))
+          return {
+            status: 'unavailable' as const,
+            answer: CHATGPT_FALLBACK_UNAVAILABLE_MESSAGE,
+            citations: [],
+            failureReason: 'provider_unavailable' as const,
+          };
+        const settings = answerWithChatGPT
+          ? chatGPTMemoryFallbackSettings(storedSettings)
+          : storedSettings;
+        offerChatGPT = (reason) =>
+          reason === 'memory_pressure' &&
+          canOfferChatGPTMemoryFallback(settings)
+            ? { chatGPTFallback: 'available' as const }
+            : {};
         const settingsCompletedAt = Date.now();
         const isLocalProvider =
           !settings.llm_provider || settings.llm_provider === 'ollama';
@@ -10422,6 +10449,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               citations: lastValidatedPresentation.citations,
               currentMeeting: currentMeetingStatus,
               failureReason: failure.reason,
+              ...offerChatGPT(failure.reason),
               outcome: 'partial' as const,
               trustStatus: lastValidatedPresentation.trustStatus,
               unsupportedClaimCount:
@@ -10437,6 +10465,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             citations: [],
             currentMeeting: currentMeetingStatus,
             failureReason: failure.reason,
+            ...offerChatGPT(failure.reason),
             ...(conversationAnchor ? { conversationAnchor } : {}),
             performance: buildPerformanceDiagnostics(),
           };
@@ -10465,6 +10494,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           answer: failure.answer,
           citations: [],
           failureReason: failure.reason,
+          ...offerChatGPT(failure.reason),
         };
       } finally {
         scheduleIdleOllamaModelRelease(CHAT_MODEL_WARM_MS, () => {
@@ -10766,7 +10796,22 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           return preparedResponse;
         }
 
-        const settings = await getAllSettings(db);
+        const storedSettings = await getAllSettings(db);
+        // The person chose ChatGPT for this one question after a memory refusal.
+        if (
+          request.answerWith === 'chatgpt' &&
+          !canOfferChatGPTMemoryFallback(storedSettings)
+        )
+          return buildMeetingAskPlutoProviderUnavailableResponse({
+            scope: context.scope,
+            query,
+            error: new Error(CHATGPT_FALLBACK_UNAVAILABLE_MESSAGE),
+            answer: CHATGPT_FALLBACK_UNAVAILABLE_MESSAGE,
+          });
+        const settings =
+          request.answerWith === 'chatgpt'
+            ? chatGPTMemoryFallbackSettings(storedSettings)
+            : storedSettings;
         const provider = await getProvider(settings);
         const directAssistanceRoute = routeMeetingAskPlutoAssistance(query);
         const assistanceRoute =
@@ -10852,11 +10897,17 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             `[Pluto][Ask Pluto][main] provider unavailable (${requestId}) after ${Date.now() - startTime}ms:`,
             providerError,
           );
-          return buildMeetingAskPlutoProviderUnavailableResponse({
-            scope: context.scope,
-            query,
-            error: providerError,
-          });
+          return {
+            ...buildMeetingAskPlutoProviderUnavailableResponse({
+              scope: context.scope,
+              query,
+              error: providerError,
+            }),
+            ...(isLocalMemoryRefusal(providerError) &&
+            canOfferChatGPTMemoryFallback(settings)
+              ? { chatGPTFallback: 'available' as const }
+              : {}),
+          };
         } finally {
           visibleStream.flush();
         }
@@ -11002,8 +11053,24 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
         controller.abort(new DOMException('Owner destroyed', 'AbortError'));
       event.sender.once('destroyed', abortForDestroyedOwner);
 
+      let canOfferChatGPT = false;
       try {
-        const settings = await getAllSettings(db);
+        const storedSettings = await getAllSettings(db);
+        // The person chose ChatGPT for this one question after a memory refusal.
+        if (
+          request.answerWith === 'chatgpt' &&
+          !canOfferChatGPTMemoryFallback(storedSettings)
+        )
+          return {
+            status: 'unavailable' as const,
+            answer: '',
+            error: CHATGPT_FALLBACK_UNAVAILABLE_MESSAGE,
+          };
+        const settings =
+          request.answerWith === 'chatgpt'
+            ? chatGPTMemoryFallbackSettings(storedSettings)
+            : storedSettings;
+        canOfferChatGPT = canOfferChatGPTMemoryFallback(settings);
         const provider = await getProvider(settings);
         // A note about a person can draw on recent meetings with them, each
         // named in the prompt so answers say which meeting they came from.
@@ -11104,6 +11171,9 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           status: 'unavailable' as const,
           answer: '',
           ...describeNoteAskPlutoFailure(error),
+          ...(canOfferChatGPT && isLocalMemoryRefusal(error)
+            ? { chatGPTFallback: 'available' as const }
+            : {}),
         };
       } finally {
         event.sender.removeListener('destroyed', abortForDestroyedOwner);

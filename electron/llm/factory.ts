@@ -21,7 +21,7 @@ function getSettingsHash(settings: LLMSettings): string {
     ],
     gemini: [settings.gemini_model, settings.gemini_api_key],
     openai: [settings.openai_model, settings.openai_api_key],
-    chatgpt: [settings.chatgpt_model],
+    chatgpt: [settings.chatgpt_model, settings.chatgpt_memory_fallback],
     openrouter: [settings.openrouter_model, settings.openrouter_api_key],
     claude: [settings.claude_model, settings.claude_api_key],
   }[type];

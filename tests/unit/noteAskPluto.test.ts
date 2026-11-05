@@ -17,6 +17,16 @@ const valid = {
 };
 
 describe('parseNoteAskPlutoRequest', () => {
+  it('keeps only ChatGPT as a one-question answer choice', () => {
+    const chosen = parseNoteAskPlutoRequest({
+      ...valid,
+      answerWith: 'chatgpt',
+    });
+    expect(chosen.ok && chosen.request.answerWith).toBe('chatgpt');
+    const other = parseNoteAskPlutoRequest({ ...valid, answerWith: 'gemini' });
+    expect(other.ok && 'answerWith' in other.request).toBe(false);
+  });
+
   it('accepts a well-formed request and trims the query', () => {
     const result = parseNoteAskPlutoRequest({ ...valid, query: '  Why?  ' });
     expect(result).toEqual({

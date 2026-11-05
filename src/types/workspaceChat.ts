@@ -37,6 +37,8 @@ export interface WorkspaceChatMessagePayload {
   actionProposal?: AskPlutoQueryResponse['actionProposal'];
   actionState?: 'saving' | 'completed' | 'failed';
   actionTaskId?: string;
+  /** The person sent this question to ChatGPT after a memory refusal. */
+  answeredBy?: 'chatgpt';
 }
 
 export interface WorkspaceChatMessage {

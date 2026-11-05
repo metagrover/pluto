@@ -484,3 +484,31 @@ it('routes semantic scope through the foreground usage gate and reuses exact sco
   ).rejects.toMatchObject({ code: 'chatgpt_daily_limit' });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+it('answers one memory-fallback question through ChatGPT while Ollama stays selected', async () => {
+  selection = { llm_provider: 'ollama', cloud_consent_chatgpt: '1' };
+  const fetcher = vi.fn(async () => response('Answer.'));
+  vi.stubGlobal('fetch', fetcher);
+  const stored = {
+    llm_provider: 'ollama' as const,
+    chatgpt_model: 'account-model',
+    cloud_consents: { chatgpt: '1' },
+  };
+  const fallback = await getProvider({
+    ...stored,
+    llm_provider: 'chatgpt',
+    chatgpt_memory_fallback: true,
+  });
+  await expect(fallback.answerAskPluto('Fictional question')).resolves.toBe(
+    'Answer.',
+  );
+  expect(fetcher).toHaveBeenCalledOnce();
+
+  // A cached ordinary ChatGPT provider is not reused for, or mistaken as, one.
+  const ordinary = await getProvider({ ...stored, llm_provider: 'chatgpt' });
+  expect(ordinary).not.toBe(fallback);
+  await expect(
+    ordinary.answerAskPluto('Fictional question'),
+  ).rejects.toMatchObject({ code: 'chatgpt_not_selected' });
+  expect(fetcher).toHaveBeenCalledOnce();
+});

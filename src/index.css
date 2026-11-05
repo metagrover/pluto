@@ -931,6 +931,12 @@
   .meeting-ask-pluto-dock__error {
     @apply px-2 text-xs font-semibold text-red-600;
   }
+  .meeting-ask-pluto-dock__fallback {
+    @apply flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2 text-[11px] text-pro-text-muted;
+  }
+  .meeting-ask-pluto-dock__fallback button {
+    @apply text-xs font-semibold text-pro-accent hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
   .meeting-ask-pluto-dock__commands {
     @apply flex flex-col gap-0.5 rounded-lg bg-pro-surface p-1;
   }
