@@ -2987,13 +2987,17 @@
   background: transparent;
 }
 
+/* Inset, rounded thumb so a scrollbar beside a panel border does not read
+   as a second divider. */
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--pro-text-muted) / 0.15);
-  border-radius: 0px;
+  background-color: hsl(var(--pro-text-muted) / 0.2);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--pro-text-muted) / 0.25);
+  background-color: hsl(var(--pro-text-muted) / 0.32);
 }
 
 /* Interactivity */
@@ -3144,6 +3148,31 @@
   position: sticky;
   top: 0;
   height: calc(100dvh - 3rem);
+}
+/* Side panels run the full window height beside the top bar and content.
+   The header shares the top bar's row and drags the window like it. */
+.app-side-panel-slot {
+  display: flex;
+  flex-shrink: 0;
+  min-height: 0;
+}
+.app-side-panel-slot:empty {
+  display: none;
+}
+.app-side-panel-slot > .note-ask-panel {
+  height: 100%;
+}
+.app-side-panel-slot .note-ask-panel__header {
+  min-height: 3rem;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  -webkit-app-region: drag;
+}
+.app-side-panel-slot .note-ask-panel__header button {
+  -webkit-app-region: no-drag;
+}
+.app-side-panel-slot .note-ask-panel__thread {
+  padding-top: 18px;
 }
 .meeting-notes-section--scratchpad {
   min-height: 8rem;

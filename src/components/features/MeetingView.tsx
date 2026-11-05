@@ -74,6 +74,7 @@ import {
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
 import { Logo } from '../Brand/Logo';
+import { SidePanelPortal } from '../layout/SidePanelSlot';
 import { DetailsMenu } from '../ui/DetailsMenu';
 import { SearchSelect } from '../ui/SearchSelect';
 import { MeetingAskPlutoPanel } from './MeetingAskPlutoPanel';
@@ -2440,14 +2441,16 @@ const SelectedMeetingView = ({
         />
       </div>
       {canAsk && askOpen ? (
-        <MeetingAskPlutoPanel
-          key={selectedMeeting.id}
-          meeting={selectedMeeting}
-          person={onlyOtherPerson}
-          conversation={askConversation}
-          onConversationChange={setAskConversation}
-          onClose={closeAsk}
-        />
+        <SidePanelPortal>
+          <MeetingAskPlutoPanel
+            key={selectedMeeting.id}
+            meeting={selectedMeeting}
+            person={onlyOtherPerson}
+            conversation={askConversation}
+            onConversationChange={setAskConversation}
+            onClose={closeAsk}
+          />
+        </SidePanelPortal>
       ) : null}
     </div>
   );
