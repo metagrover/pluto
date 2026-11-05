@@ -758,6 +758,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  padding-top: 28px;
   border-left: 1px solid hsl(var(--pro-border) / 0.8);
   background: hsl(var(--pro-bg));
   animation: noteAskEnter 220ms cubic-bezier(0.16, 1, 0.3, 1);

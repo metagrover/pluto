@@ -2973,7 +2973,10 @@
 
 /* Scrollbar Refinement */
 
-::-webkit-scrollbar {
+/* Content beside the Ask Pluto panel keeps the native macOS scrollbar,
+   which stays hidden until scrolling, so it never draws a second line
+   next to the panel border. */
+:where(:not(.meeting-app-scroll, .notes-workspace *))::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
@@ -2983,20 +2986,22 @@
   height: 4px;
 }
 
-::-webkit-scrollbar-track {
+:where(:not(.meeting-app-scroll, .notes-workspace *))::-webkit-scrollbar-track {
   background: transparent;
 }
 
 /* Inset, rounded thumb so a scrollbar beside a panel border does not read
    as a second divider. */
-::-webkit-scrollbar-thumb {
+:where(:not(.meeting-app-scroll, .notes-workspace *))::-webkit-scrollbar-thumb {
   background-color: hsl(var(--pro-text-muted) / 0.2);
   background-clip: padding-box;
   border: 2px solid transparent;
   border-radius: 9999px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+:where(
+    :not(.meeting-app-scroll, .notes-workspace *)
+  )::-webkit-scrollbar-thumb:hover {
   background-color: hsl(var(--pro-text-muted) / 0.32);
 }
 
@@ -3150,7 +3155,7 @@
   height: calc(100dvh - 3rem);
 }
 /* Side panels run the full window height beside the top bar and content.
-   The header shares the top bar's row and drags the window like it. */
+   The header drags the window like the top bar. */
 .app-side-panel-slot {
   display: flex;
   flex-shrink: 0;
@@ -3163,16 +3168,15 @@
   height: 100%;
 }
 .app-side-panel-slot .note-ask-panel__header {
-  min-height: 3rem;
-  padding-top: 8px;
-  padding-bottom: 8px;
+  padding-top: 16px;
+  padding-bottom: 12px;
   -webkit-app-region: drag;
 }
 .app-side-panel-slot .note-ask-panel__header button {
   -webkit-app-region: no-drag;
 }
 .app-side-panel-slot .note-ask-panel__thread {
-  padding-top: 18px;
+  padding-top: 12px;
 }
 .meeting-notes-section--scratchpad {
   min-height: 8rem;
