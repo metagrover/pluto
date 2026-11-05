@@ -359,6 +359,67 @@ describe('MeetingView Navigation and Participants', () => {
     expect(onOpenPerson).toHaveBeenCalledWith('person-avery');
   });
 
+  it('shows three added people and expands the rest when a meeting has ten', async () => {
+    const names = [
+      'Priya Shah',
+      'Lee Chen',
+      'Sam Ortiz',
+      'Ana Ruiz',
+      'Kai Moore',
+      'Noor Ali',
+      'Jo Park',
+      'Ravi Iyer',
+      'Mia Stone',
+      'Tom Hale',
+    ];
+    const meeting = {
+      ...mockMeeting,
+      meeting_entities: names.map((name, index) => ({
+        id: `person-added-${index}`,
+        name,
+        type: 'person',
+        context: 'Manual participant',
+      })),
+    } as unknown as Meeting;
+
+    await act(async () => {
+      root.render(
+        <MeetingView
+          selectedMeeting={meeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={meeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={true}
+          setTranscriptVisible={vi.fn()}
+          onOpenPerson={vi.fn()}
+        />,
+      );
+    });
+
+    const meta = container.querySelector('.meeting-document-meta');
+    expect(meta?.textContent).toContain(
+      'Priya Shah,Lee Chen,Sam Ortiz,+7 more',
+    );
+    expect(meta?.textContent).not.toContain('Ana Ruiz');
+    const more = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Show 7 more people"]',
+    );
+    expect(more?.textContent).toBe('+7 more');
+
+    await act(async () => more?.click());
+
+    expect(meta?.textContent).toContain('Mia Stone,Tom Hale');
+    expect(
+      container.querySelector('[aria-label="Show 7 more people"]'),
+    ).toBeNull();
+  });
+
   it('allows clicking identified speaker name in transcript turns to open their profile', async () => {
     const onOpenPerson = vi.fn();
 
