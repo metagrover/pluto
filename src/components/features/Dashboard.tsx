@@ -29,6 +29,7 @@ import type {
 
 import relaxedEmptyIllustration from '../../assets/illustrations/dashboard-relaxed-empty.webp';
 
+import { EmptyCanvas } from '../ui/EmptyCanvas';
 import { UpcomingMeetings } from './UpcomingMeetings';
 import type {
   DashboardActionInsightItem,
@@ -44,6 +45,7 @@ interface DashboardProps {
   date?: Date;
   loading: boolean;
   isRecording: boolean;
+  onStartRecording?: () => void;
   setSelectedMeetingId: (id: string | number | null) => void;
   setActiveTab: (
     tab: 'hub' | 'tasks' | 'people' | 'projects' | 'meetings' | 'chat',
@@ -499,6 +501,7 @@ export const Dashboard = ({
   date = new Date(),
   loading,
   isRecording,
+  onStartRecording,
   setSelectedMeetingId,
   updatingTaskIds,
   actionError,
@@ -879,6 +882,25 @@ export const Dashboard = ({
           </span>
         ) : null}
       </header>
+      {!dashboardError &&
+        !isRecording &&
+        model.latestMeeting.state === 'empty' &&
+        onStartRecording && (
+          <EmptyCanvas
+            kind="recording"
+            compact
+            title="It starts with a conversation"
+            description="Record your first meeting to give Pluto something to take notes on and help you follow up."
+          >
+            <button
+              type="button"
+              className="empty-canvas-action"
+              onClick={onStartRecording}
+            >
+              Start recording
+            </button>
+          </EmptyCanvas>
+        )}
       <div className="grid gap-6 pt-8 lg:grid-cols-[minmax(0,1.3fr)_minmax(330px,0.9fr)] lg:gap-8">
         <section
           id="todays-focus"

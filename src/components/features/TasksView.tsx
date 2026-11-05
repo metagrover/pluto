@@ -4,7 +4,6 @@ import {
   CheckCheck,
   CheckCircle2,
   Circle,
-  ListTodo,
   Loader2,
   Plus,
   RotateCcw,
@@ -30,6 +29,7 @@ import {
   subscribeTasksChanged,
 } from '../../api/tasks';
 import type { PersonalTask, TaskTag, TasksSnapshot } from '../../types/tasks';
+import { EmptyCanvas } from '../ui/EmptyCanvas';
 import { SearchSelect } from '../ui/SearchSelect';
 import { getDashboardDateKey } from './dashboardModel';
 import './tasks.css';
@@ -610,7 +610,7 @@ export function TasksView({
               ))}
             </ul>
           ) : (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="flex flex-col items-center justify-center py-10 text-center">
               {filtered ? (
                 <>
                   <div className="task-empty-badge" aria-hidden="true">
@@ -680,18 +680,19 @@ export function TasksView({
                   </p>
                 </>
               ) : (
-                <>
-                  <div className="task-empty-badge" aria-hidden="true">
-                    <ListTodo size={20} strokeWidth={1.5} />
-                  </div>
-                  <h2 className="mt-4 font-serif text-[19px] font-medium text-pro-text-main">
-                    Make room for what’s next
-                  </h2>
-                  <p className="mx-auto mt-2 max-w-sm text-[13px] leading-6 text-pro-text-muted">
-                    Commitments from your meetings and notes will appear here
-                    automatically.
-                  </p>
-                </>
+                <EmptyCanvas
+                  kind="tasks"
+                  title="Make room for what’s next"
+                  description="Jot down something you want to do, or keep track of commitments from your meetings."
+                >
+                  <button
+                    type="button"
+                    className="empty-canvas-action"
+                    onClick={() => newTaskRef.current?.focus()}
+                  >
+                    Write a task
+                  </button>
+                </EmptyCanvas>
               )}
             </div>
           )}

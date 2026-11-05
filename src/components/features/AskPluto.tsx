@@ -52,6 +52,7 @@ import type {
   WorkspaceChatThread,
 } from '../../types/workspaceChat';
 import { Logo } from '../Brand/Logo';
+import { EmptyCanvasArt } from '../ui/EmptyCanvas';
 import type { CitationChain } from './CitationCard';
 
 interface AskPlutoProps {
@@ -1160,14 +1161,15 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         >
           {messages.length === 0 ? (
             <div className="flex flex-1 flex-col items-start justify-center space-y-8">
-              {/* Greeting — serif, left-aligned to match input */}
-              <div>
-                <h1 className="font-serif text-[36px] font-medium tracking-[-0.01em] text-pro-text-main leading-tight">
-                  Hello, I'm Pluto.
-                </h1>
-                <p className="text-[16px] text-pro-text-muted/70 font-medium mt-2 leading-relaxed">
-                  Ask me about your past meetings, decisions, or action items.
-                </p>
+              <div className="empty-canvas-layout ask-pluto-welcome">
+                <div className="min-w-0">
+                  <h1 className="empty-canvas-title">Hello, I'm Pluto.</h1>
+                  <p className="empty-canvas-copy">
+                    Pick up a thread from a meeting, revisit a decision, or find
+                    out what you promised to do.
+                  </p>
+                </div>
+                <EmptyCanvasArt kind="chat" />
               </div>
 
               {/* Suggested queries */}
@@ -1178,10 +1180,6 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                     <div className="h-9 w-56 rounded-full bg-black/5 dark:bg-white/5 animate-pulse" />
                     <div className="h-9 w-40 rounded-full bg-black/5 dark:bg-white/5 animate-pulse" />
                   </>
-                ) : dynamicQueries.length === 0 ? (
-                  <p className="text-pro-text-muted/50 text-[13px] font-medium">
-                    No suggestions right now. Ask a question below.
-                  </p>
                 ) : (
                   dynamicQueries.map((sq) => (
                     <button

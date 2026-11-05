@@ -171,7 +171,10 @@ import {
 } from './localArtifacts';
 import { createLogger } from './logger';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
-import { buildMeetingNotesIdentityProjection } from './meetingParticipantIdentity';
+import {
+  MANUAL_PARTICIPANT_CONTEXT,
+  buildMeetingNotesIdentityProjection,
+} from './meetingParticipantIdentity';
 import type { PrepMeetingOption } from './meetingPrep';
 import { createMeetingPrepStore, findCalendarInviteeName } from './meetingPrep';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
@@ -3325,10 +3328,13 @@ export const listMeetingAnalysisRunMetrics = (input: {
   );
   const rows = db
     .prepare(
-      `SELECT run_id, meeting_id, reason, status, error_code, metrics_json, started_at, completed_at
-       FROM meeting_analysis_run_history
-       WHERE completed_at IS NOT NULL
-       ORDER BY completed_at DESC, rowid DESC
+      `SELECT h.run_id, h.meeting_id, h.reason, h.status, h.error_code,
+         h.metrics_json, h.started_at, h.completed_at,
+         m.ended_at AS meeting_ended_at
+       FROM meeting_analysis_run_history h
+       LEFT JOIN meetings m ON m.id = h.meeting_id
+       WHERE h.completed_at IS NOT NULL
+       ORDER BY h.completed_at DESC, h.rowid DESC
        LIMIT ?`,
     )
     .all(limit) as Array<{
@@ -3340,8 +3346,10 @@ export const listMeetingAnalysisRunMetrics = (input: {
     metrics_json: string;
     started_at: string;
     completed_at: string;
+    meeting_ended_at: string | null;
   }>;
   return rows.map((row) => ({
+    meetingEndedAt: row.meeting_ended_at,
     runId: row.run_id,
     meetingId: row.meeting_id,
     reason: row.reason,
@@ -9861,11 +9869,31 @@ export const getPersonBriefing = (
     )
     .all(canonicalId, canonicalId) as Array<{ meeting_id: string }>;
   for (const row of capturedRows) confirmedIds.add(row.meeting_id);
+  // Adding someone as a participant (while recording, from their page, or
+  // with "Who was this with?") is the user confirming they took part. It says
+  // nothing about who spoke.
+  const contextParts = (context: string | null | undefined) =>
+    (context ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+  for (const meeting of mentionedMeetings)
+    if (contextParts(meeting.context).includes(MANUAL_PARTICIPANT_CONTEXT))
+      confirmedIds.add(meeting.id);
+  const displayContext = (context: string | null | undefined) =>
+    contextParts(context)
+      .filter((part) => part !== MANUAL_PARTICIPANT_CONTEXT)
+      .join(', ') || null;
 
   const confirmed = [...confirmedIds].flatMap((meetingId) => {
     const meeting = getPersonMeetingRecord(meetingId);
     return meeting
-      ? [{ ...meeting, context: mentionedById.get(meetingId)?.context ?? null }]
+      ? [
+          {
+            ...meeting,
+            context: displayContext(mentionedById.get(meetingId)?.context),
+          },
+        ]
       : [];
   });
 

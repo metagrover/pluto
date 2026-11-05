@@ -36,6 +36,7 @@ import {
   assertLocalModelMemoryCapacity,
   getEstablishedGemmaLoadOptions,
   isEstablishedGemmaArtifact,
+  readContextBytesPerToken,
   readLocalModelMemory,
   watchLocalModelMemory,
 } from './localModelMemory';
@@ -80,6 +81,7 @@ import { createNotesWireRequest } from './meetingNotesWire';
 import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
 import { ollamaHttpFetch, ollamaHttpStream } from './ollamaHttpTransport';
 import {
+  fitEntitiesTranscript,
   getEntitiesPrompt,
   getSpeakerIdentityPrompt,
   getSummaryPrompt,
@@ -111,6 +113,8 @@ import {
 
 const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_RESIDENCY_TIMEOUT_MS = 10_000;
+// Attention metadata per installed artifact digest; artifacts are immutable.
+const ollamaContextBytesByDigest = new Map<string, number>();
 const OLLAMA_RESIDENCY_TOTAL_TIMEOUT_MS = 40_000;
 const OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS = 3 * 60_000;
 const OLLAMA_DREAMING_CAPACITY_TIMEOUT_MS = 5 * 60_000;
@@ -122,6 +126,8 @@ const OLLAMA_ACTIVE_GENERATION_MIN_TIMEOUT_MS = 6 * 60_000;
 const OLLAMA_ACTIVE_GENERATION_MAX_TIMEOUT_MS = 20 * 60_000;
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
 const OLLAMA_EDITORIAL_OUTPUT_TOKENS = 2_048;
+/** The largest allocation Pluto itself requests; larger external loads are not reused. */
+const OLLAMA_MAX_REUSED_CONTEXT_TOKENS = OLLAMA_EDITORIAL_CONTEXT_TOKENS;
 export const STRUCTURED_ANALYSIS_PROMPT_VERSION = NOTES_PROMPT_VERSION;
 
 const reportsNotesInputOverflow = (value: unknown): boolean =>
@@ -1466,9 +1472,28 @@ export class UnifiedLLMProvider implements LLMProvider {
   async extractEntities(
     transcript: string,
     context?: EntityExtractionContext,
-    options: { signal?: AbortSignal; workClass?: LLMWorkClass } = {},
+    options: {
+      signal?: AbortSignal;
+      workClass?: LLMWorkClass;
+      omitCommitments?: boolean;
+    } = {},
   ): Promise<ExtractedEntities> {
-    const prompt = getEntitiesPrompt(transcript, context);
+    const buildPrompt = (text: string) =>
+      getEntitiesPrompt(text, context, {
+        omitCommitments: options.omitCommitments,
+      });
+    const prompt =
+      this.providerType === 'ollama'
+        ? buildPrompt(
+            fitEntitiesTranscript(
+              transcript,
+              buildPrompt,
+              getOllamaContextCap('entities') -
+                calculateOllamaContextBudget('', 'entities').num_predict -
+                512,
+            ),
+          )
+        : buildPrompt(transcript);
 
     try {
       const raw = await this.generateResumableAnalysisText({
@@ -1968,6 +1993,39 @@ export class UnifiedLLMProvider implements LLMProvider {
       typeof entry?.digest === 'string' && entry.digest.trim()
         ? entry.digest
         : undefined;
+    // Exact per-token cache size lets admission size non-Gemma artifacts by
+    // their real attention layout; without it the conservative estimate stays.
+    let contextBytesPerToken: number | undefined;
+    if (
+      entry &&
+      allocationDigest &&
+      !isEstablishedGemmaArtifact(allocationDigest)
+    ) {
+      contextBytesPerToken = ollamaContextBytesByDigest.get(allocationDigest);
+      if (contextBytesPerToken === undefined) {
+        try {
+          const response = await this.ollamaFetch(
+            '/api/show',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model }),
+            },
+            OLLAMA_RESIDENCY_TIMEOUT_MS,
+            signal,
+          );
+          const payload = response.ok ? await response.json() : null;
+          contextBytesPerToken = readContextBytesPerToken(payload?.model_info);
+          if (contextBytesPerToken !== undefined)
+            ollamaContextBytesByDigest.set(
+              allocationDigest,
+              contextBytesPerToken,
+            );
+        } catch {
+          signal?.throwIfAborted();
+        }
+      }
+    }
     // Availability when a cold load was admitted, to learn its real peak.
     let availableAtColdAdmission: number | null = null;
     onOllamaArtifact?.(allocationDigest);
@@ -2035,14 +2093,13 @@ export class UnifiedLLMProvider implements LLMProvider {
     );
     if (notesBudget && requiredContext > budget.num_ctx)
       throw new MeetingNotesError('notes_input_overflow');
+    // Shrinking a sufficient resident allocation only reloads the weights.
+    // Memory admission below still releases it under pressure.
     let num_ctx =
       resident &&
       residency.contextTokens !== undefined &&
       residency.contextTokens >= requiredContext &&
-      residency.contextTokens <=
-        (notesBudget || !boundedGemmaArtifact
-          ? budget.num_ctx
-          : getOllamaContextCap(task))
+      residency.contextTokens <= OLLAMA_MAX_REUSED_CONTEXT_TOKENS
         ? residency.contextTokens
         : requiredContext;
     if (entry)
@@ -2077,6 +2134,7 @@ export class UnifiedLLMProvider implements LLMProvider {
               modelDigest: entry.digest,
               resident: isResident,
               contextTokens: num_ctx,
+              contextBytesPerToken,
               measuredColdPeak: getMeasuredColdPeak(
                 model,
                 allocationDigest,
@@ -2231,6 +2289,8 @@ export class UnifiedLLMProvider implements LLMProvider {
       task === 'dreaming'
     )
       requestBody.think = false;
+    // An oversized prompt must fail visibly, never lose its leading instructions.
+    if (task === 'entities') requestBody.truncate = false;
     if (task === 'askPluto') requestBody.think = false;
     if (task === 'askPlutoDeep') {
       requestBody.think = false;

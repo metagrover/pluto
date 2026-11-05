@@ -296,3 +296,55 @@ export const parseMeetingNotesRunMetric = (
 export const serializeMeetingNotesRunMetric = (
   metric: MeetingNotesRunMetric,
 ): string => JSON.stringify(parseMeetingNotesRunMetric(metric));
+
+const msBetween = (from: string | null | undefined, to: string) => {
+  const start = from ? Date.parse(from) : Number.NaN;
+  const end = Date.parse(to);
+  return Number.isFinite(start) && Number.isFinite(end) && end >= start
+    ? Math.round(end - start)
+    : null;
+};
+
+/**
+ * One log line of numbers for a finished notes run: no meeting text, titles or
+ * ids beyond a short run prefix. Error codes keep only their app-owned prefix.
+ */
+export const formatMeetingNotesRunTimings = (input: {
+  runId: string;
+  reason: 'automatic' | 'manual';
+  status: string;
+  errorCode?: string | null;
+  metrics: MeetingNotesRunMetric | null;
+  completedAt: string;
+  meetingEndedAt?: string | null;
+}): string =>
+  JSON.stringify({
+    run: input.runId.slice(0, 8),
+    completedAt: input.completedAt,
+    reason: input.reason,
+    status: input.status,
+    error: input.errorCode ? input.errorCode.split(':')[0] : null,
+    meetingEndToDoneMs: msBetween(input.meetingEndedAt, input.completedAt),
+    ...(input.metrics
+      ? {
+          totalMs: input.metrics.totalMs,
+          queueMs: input.metrics.queueMs,
+          modelMs: input.metrics.modelMs,
+          chars: input.metrics.sourceCharacterCount,
+          segments: input.metrics.sourceSegmentCount,
+          leaves: input.metrics.plannedLeafCount,
+          nodes: input.metrics.generatedNodeCount,
+          repairs: input.metrics.repairCount,
+          repartitions: input.metrics.repartitionCount,
+          // [task, outcome, queueWaitMs, modelMs, inputTokens, outputTokens]
+          stages: input.metrics.stages.map((stage) => [
+            stage.task,
+            stage.outcome,
+            stage.queueWaitMs,
+            stage.modelMs,
+            stage.inputTokens,
+            stage.outputTokens,
+          ]),
+        }
+      : {}),
+  });

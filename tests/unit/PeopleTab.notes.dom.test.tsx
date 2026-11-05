@@ -83,7 +83,7 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
     vi.clearAllMocks();
   });
 
-  it('displays Running 1:1 Notes with note title and snippet in PersonDossier', async () => {
+  it('lists 1:1 notes with title and snippet in the person timeline', async () => {
     const onOpenNote = vi.fn();
 
     await act(async () => {
@@ -98,10 +98,10 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
       );
     });
 
-    expect(container.textContent).toContain('Running 1:1 Notes');
+    expect(container.textContent).toContain('Meetings and notes');
     expect(container.textContent).toContain('1:1 with Alice');
     expect(container.textContent).toContain(
-      'Review quarterly performance Plan hiring goals',
+      'Note · Review quarterly performance · Plan hiring goals',
     );
 
     const openBtn = container.querySelector(
@@ -114,6 +114,65 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
     });
 
     expect(onOpenNote).toHaveBeenCalledWith('note-alice-1');
+  });
+
+  it('lists other notes that "@" the person, without taking them as theirs', async () => {
+    const mentioning: Note = {
+      id: 'note-standup',
+      title: 'Standup',
+      content: '@Alice Smith will check the rollout',
+      noteType: 'general',
+      pinned: false,
+      targetId: null,
+      targetName: null,
+      createdAt: '2026-10-26T10:00:00.000Z',
+      updatedAt: '2026-10-26T10:00:00.000Z',
+    };
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'NOTES_MENTIONING_PERSON')
+        return payload === 'person-alice' ? [mentioning, sampleNotes[0]] : [];
+      return null;
+    });
+    const onOpenNote = vi.fn();
+    await act(async () => {
+      root.render(
+        <PersonDossier
+          detail={personDetail}
+          personNotes={sampleNotes}
+          onBack={() => {}}
+          onOpenMeeting={() => {}}
+          onOpenNote={onOpenNote}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain(
+      'Mentioned in note · @Alice Smith will check the rollout',
+    );
+    // Listed once, as their own note.
+    expect(
+      container.querySelectorAll(
+        'button[aria-label="Open note 1:1 with Alice"]',
+      ),
+    ).toHaveLength(1);
+    await act(async () => {
+      (
+        container.querySelector(
+          'button[aria-label="Open note Standup"]',
+        ) as HTMLButtonElement
+      ).click();
+    });
+    expect(onOpenNote).toHaveBeenCalledWith('note-standup');
+
+    // "+ 1:1 Note" still opens their own note.
+    await act(async () => {
+      (
+        container.querySelector(
+          'button[aria-label="New 1:1 note for Alice Smith"]',
+        ) as HTMLButtonElement
+      ).click();
+    });
+    expect(onOpenNote).toHaveBeenLastCalledWith('note-alice-1');
   });
 
   it('calls onOpenNote with existing note when "+ 1:1 Note" is clicked and notes exist', async () => {
@@ -132,7 +191,7 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
     });
 
     const addNoteBtn = container.querySelector(
-      'button[aria-label="+ 1:1 Note for Alice Smith"]',
+      'button[aria-label="New 1:1 note for Alice Smith"]',
     ) as HTMLButtonElement;
     expect(addNoteBtn).not.toBeNull();
 
@@ -158,10 +217,10 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
       );
     });
 
-    expect(container.textContent).toContain('No running 1:1 notes yet');
+    expect(container.textContent).toContain('No meetings or notes yet');
 
     const addNoteBtn = container.querySelector(
-      'button[aria-label="+ 1:1 Note for Alice Smith"]',
+      'button[aria-label="New 1:1 note for Alice Smith"]',
     ) as HTMLButtonElement;
     expect(addNoteBtn).not.toBeNull();
 
@@ -177,5 +236,47 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
       }),
     );
     expect(onOpenNote).toHaveBeenCalledWith('note-alice-new');
+  });
+
+  it('interleaves meetings and notes newest first', async () => {
+    await act(async () => {
+      root.render(
+        <PersonDossier
+          detail={{
+            ...personDetail,
+            meetings: [
+              {
+                id: 'm-new',
+                title: 'Alice / me 1:1',
+                started_at: '2026-10-30T10:00:00.000Z',
+                created_at: null,
+                duration_seconds: 1800,
+                context: null,
+                evidence: 'confirmed',
+              },
+              {
+                id: 'm-old',
+                title: 'Kickoff',
+                started_at: '2026-10-01T10:00:00.000Z',
+                created_at: null,
+                duration_seconds: 1800,
+                context: null,
+                evidence: 'confirmed',
+              },
+            ],
+          }}
+          personNotes={sampleNotes}
+          onBack={() => {}}
+          onOpenMeeting={() => {}}
+          onOpenNote={() => {}}
+        />,
+      );
+    });
+    const rows = [
+      ...container.querySelectorAll(
+        '#person-meetings .person-dossier__meetings > button',
+      ),
+    ].map((row) => row.querySelector('strong')?.textContent);
+    expect(rows).toEqual(['Alice / me 1:1', '1:1 with Alice', 'Kickoff']);
   });
 });

@@ -14,16 +14,19 @@ import {
   sortMeetingsByStartTime,
 } from '../../utils/meetingOrdering';
 import { canDeleteMeeting } from '../../utils/recordingFinalization';
+import { EmptyCanvas } from '../ui/EmptyCanvas';
 import { PageHeader } from '../ui/PageHeader';
 
 interface AllMeetingsTabProps {
   meetings: Meeting[];
+  onStartRecording?: () => void;
   onOpenMeeting: (id: string | number) => void;
   handleDeleteMeeting: (id: string | number) => void;
 }
 
 export const AllMeetingsTab = ({
   meetings,
+  onStartRecording,
   onOpenMeeting,
   handleDeleteMeeting,
 }: AllMeetingsTabProps) => {
@@ -83,16 +86,25 @@ export const AllMeetingsTab = ({
     return (
       <section
         data-meetings-index="true"
-        className="meetings-index meetings-index--empty"
-        aria-labelledby="meetings-empty-title"
+        className="meetings-index"
+        aria-label="Meetings"
       >
-        <div className="meetings-index__empty">
-          <span className="meetings-index__empty-icon" aria-hidden="true">
-            <Clock size={22} strokeWidth={1.75} />
-          </span>
-          <h2 id="meetings-empty-title">Your meetings will appear here</h2>
-          <p>Record a conversation to start building your meeting history.</p>
-        </div>
+        <PageHeader title="Meetings" className="meetings-index__header" />
+        <EmptyCanvas
+          kind="recording"
+          title="Keep the conversation"
+          description="Record a conversation and come back to the notes, transcript, and moments you want to remember."
+        >
+          {onStartRecording && (
+            <button
+              type="button"
+              className="empty-canvas-action"
+              onClick={onStartRecording}
+            >
+              Start recording
+            </button>
+          )}
+        </EmptyCanvas>
       </section>
     );
   }

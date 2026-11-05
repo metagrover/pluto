@@ -43,6 +43,10 @@ import {
   validateInheritedItems,
 } from './meetingNotesHierarchy';
 import {
+  createNotesSourcePromptEstimator,
+  serializeNotesSourceRow,
+} from './meetingNotesPromptEstimate';
+import {
   type NotesKnownTerm,
   buildCompactNotesWriterPrompt,
   buildNotesAuditPrompt,
@@ -185,21 +189,55 @@ const serializeSource = (
           end: segment.text.length,
         }));
   return selected
-    .map((span) => {
-      const indexed = input.source.segments[span.segment];
-      const segment =
-        indexed?.index === span.segment
-          ? indexed
-          : input.source.segments.find((entry) => entry.index === span.segment);
-      if (!segment) throw new MeetingNotesError('invalid_source_span');
-      return JSON.stringify({
-        descriptor: span,
-        speaker: segment.speaker,
-        text: segment.text.slice(span.start, span.end),
-      });
-    })
+    .map((span) => serializeNotesSourceRow(input.source, span))
     .join('\n');
 };
+
+/** Leaf planners check thousands of candidate packets; estimate them incrementally. */
+const sourcePromptEstimator = (
+  input: GenerateMeetingNotesInput,
+  buildPrompt: (sourceText: string) => string,
+  wire = false,
+) =>
+  createNotesSourcePromptEstimator({
+    source: input.source,
+    buildPrompt,
+    ...(wire
+      ? {
+          wire: {
+            compactSourceSpeakers: input.compactSourceSpeakers,
+            sourceParagraphs: input.sourceParagraphs,
+          },
+        }
+      : {}),
+  });
+
+/** Writer and review envelopes for the full (non-compact) hierarchy leaves. */
+const hierarchyLeafEstimators = (
+  input: GenerateMeetingNotesInput,
+  knownTerms: NotesKnownTerm[],
+) => ({
+  writer: sourcePromptEstimator(
+    input,
+    (sourceText) =>
+      `${buildNotesWriterPrompt({
+        sourceText,
+        userNotes: input.context.userNotes,
+        knownTerms,
+        template: input.context.template,
+      })}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+  ),
+  review: sourcePromptEstimator(
+    input,
+    (sourceText) =>
+      `${reviewPrompt(input, {
+        sourceText,
+        draft: {},
+        userNotes: input.context.userNotes,
+        knownTerms,
+      })}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+  ),
+});
 
 const knownTermsFor = (input: GenerateMeetingNotesInput): NotesKnownTerm[] => [
   ...input.context.trustedUserTerms.map((text) => ({
@@ -1453,35 +1491,20 @@ export const precomputeNextMeetingNotesLeaf = async (
   }
   const leaves = compactEditor
     ? planBoundedCompactLeaves(input, knownTerms)
-    : planNotesLeaves(input.source, (_packet, spans = []) => {
-        const sourceText = serializeSource(input, spans);
-        const writerPrompt = buildNotesWriterPrompt({
-          sourceText,
-          userNotes: input.context.userNotes,
-          knownTerms,
-          template: input.context.template,
-        });
-        const auditPrompt = reviewPrompt(input, {
-          sourceText,
-          draft: {},
-          userNotes: input.context.userNotes,
-          knownTerms,
-        });
-        return (
-          fits(
-            input,
-            `${writerPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
-            WRITER_OUTPUT_TOKENS,
-          ) &&
-          estimateNotesTokens(
-            `${auditPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
-          ) +
-            WRITER_OUTPUT_TOKENS +
-            reviewOutputTokens(input) +
-            SAFETY_TOKENS <=
-            input.contextTokens
+    : (() => {
+        const estimate = hierarchyLeafEstimators(input, knownTerms);
+        return planNotesLeaves(
+          input.source,
+          (_packet, spans = []) =>
+            estimate.writer(spans) + WRITER_OUTPUT_TOKENS + SAFETY_TOKENS <=
+              input.contextTokens &&
+            estimate.review(spans) +
+              WRITER_OUTPUT_TOKENS +
+              reviewOutputTokens(input) +
+              SAFETY_TOKENS <=
+              input.contextTokens,
         );
-      });
+      })();
   if (compactEditor && leaves.length > MAX_BOUNDED_COMPACT_LEAVES)
     return 'discarded';
   // The final leaf is still growing. Cache only closed leaves whose exact
@@ -1549,34 +1572,17 @@ const runHierarchy = async (
   const deterministicOnly =
     input.hierarchyAuditStrategy === 'deterministic_only';
   const skipsIntermediateAudits = finalAuditOnly || deterministicOnly;
+  const estimate = hierarchyLeafEstimators(input, knownTerms);
   const leaves = planNotesLeaves(input.source, (_packet, spans = []) => {
-    const sourceText = serializeSource(input, spans);
-    const writerPrompt = buildNotesWriterPrompt({
-      sourceText,
-      userNotes: input.context.userNotes,
-      knownTerms,
-      template: input.context.template,
-    });
     if (
-      !fits(
-        capacityInput,
-        `${writerPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
-        WRITER_OUTPUT_TOKENS,
-      )
+      estimate.writer(spans) + WRITER_OUTPUT_TOKENS + SAFETY_TOKENS >
+      capacityInput.contextTokens
     ) {
       return false;
     }
     if (skipsIntermediateAudits) return true;
-    const auditPrompt = reviewPrompt(input, {
-      sourceText,
-      draft: {},
-      userNotes: input.context.userNotes,
-      knownTerms,
-    });
     return (
-      estimateNotesTokens(
-        `${auditPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
-      ) +
+      estimate.review(spans) +
         WRITER_OUTPUT_TOKENS +
         reviewOutputTokens(input) +
         SAFETY_TOKENS <=
@@ -1999,8 +2005,32 @@ const runHierarchy = async (
 const planBoundedCompactLeaves = (
   input: GenerateMeetingNotesInput,
   knownTerms: NotesKnownTerm[],
-) =>
-  planNotesLeaves(input.source, (_packet, spans = []) => {
+) => {
+  const writerTokens = sourcePromptEstimator(
+    input,
+    (sourceText) =>
+      buildCompactNotesWriterPrompt({
+        sourceText,
+        userNotes: input.context.userNotes,
+        knownTerms,
+        template: input.context.template,
+      }),
+    true,
+  );
+  const editorTokens = sourcePromptEstimator(
+    input,
+    (sourceText) =>
+      buildNotesEditorPrompt({
+        sourceText,
+        draft: {},
+        userNotes: input.context.userNotes,
+        knownTerms,
+        template: input.context.template,
+        compactDraft: true,
+      }),
+    true,
+  );
+  return planNotesLeaves(input.source, (_packet, spans = []) => {
     if (
       sourceCharacterCount(spans) >
       ((NOTES_EXPERIMENTS_ENABLED
@@ -2009,14 +2039,10 @@ const planBoundedCompactLeaves = (
     ) {
       return false;
     }
-    const sourceText = serializeSource(input, spans);
-    const writerPrompt = buildCompactNotesWriterPrompt({
-      sourceText,
-      userNotes: input.context.userNotes,
-      knownTerms,
-      template: input.context.template,
-    });
-    if (!fits(input, writerPrompt, COMPACT_WRITER_OUTPUT_TOKENS, spans))
+    if (
+      writerTokens(spans) + COMPACT_WRITER_OUTPUT_TOKENS + SAFETY_TOKENS >
+      input.contextTokens
+    )
       return false;
     // No model editor is requested in this mode, so reserve only the writer's
     // actual context/output allowance rather than an unused editor envelope.
@@ -2025,23 +2051,8 @@ const planBoundedCompactLeaves = (
       input.reviewSourceLedNotes
     )
       return true;
-    const editorPrompt = buildNotesEditorPrompt({
-      sourceText,
-      draft: {},
-      userNotes: input.context.userNotes,
-      knownTerms,
-      template: input.context.template,
-      compactDraft: true,
-    });
     return (
-      estimateNotesTokens(
-        createNotesWireRequest(
-          editorPrompt,
-          spans,
-          input.compactSourceSpeakers,
-          input.sourceParagraphs,
-        ).prompt,
-      ) +
+      editorTokens(spans) +
         // The empty draft above measures the fixed editor envelope. Reserve a
         // full compact draft for both its JSON body and wire-label expansion.
         2 * COMPACT_WRITER_OUTPUT_TOKENS +
@@ -2050,6 +2061,7 @@ const planBoundedCompactLeaves = (
       input.contextTokens
     );
   });
+};
 
 const runBoundedCompactNotes = async (
   input: GenerateMeetingNotesInput,

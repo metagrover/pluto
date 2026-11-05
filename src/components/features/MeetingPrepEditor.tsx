@@ -1,12 +1,4 @@
-import {
-  BookOpen,
-  Check,
-  ChevronDown,
-  Plus,
-  RefreshCw,
-  Sparkles,
-  X,
-} from 'lucide-react';
+import { BookOpen, ChevronDown, Plus, RefreshCw, X } from 'lucide-react';
 import {
   forwardRef,
   useEffect,
@@ -20,16 +12,18 @@ import type {
 } from '../../../electron/meetingPrep';
 import {
   getMeetingPrep,
+  getPrepForMeeting,
   listPrepMeetings,
   saveMeetingPrep,
 } from '../../api/meetingPrep';
-import { getNotesForAttendees } from '../../api/notes';
+import { getNotesForAttendees, setNoteChecklistItem } from '../../api/notes';
 import type { NoteAgendaItem } from '../../types/notes';
 import {
   formatPrepDate,
   formatPrepParticipants,
 } from '../../utils/meetingPrepPresentation';
 import { MeetingPrepBrief } from './MeetingPrepBrief';
+import { PrepLinkedNotes } from './PrepLinkedNotes';
 export interface MeetingPrepEditorHandle {
   flush: () => Promise<void>;
 }
@@ -58,56 +52,6 @@ export const MeetingPrepEditor = forwardRef<
   const [meetings, setMeetings] = useState<PrepMeetingOption[]>([]);
   const [loadingMeetings, setLoadingMeetings] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [attendeeNoteItems, setAttendeeNoteItems] = useState<NoteAgendaItem[]>(
-    [],
-  );
-  const [addedNoteItemIds, setAddedNoteItemIds] = useState<Set<string>>(
-    new Set(),
-  );
-
-  useEffect(() => {
-    const attendees = prep.event?.attendees || [];
-    const emails = attendees.map((a) => a.email).filter(Boolean) as string[];
-    const names = attendees.map((a) => a.name).filter(Boolean) as string[];
-
-    if (emails.length > 0 || names.length > 0) {
-      void getNotesForAttendees(emails, names)
-        .then((items) => setAttendeeNoteItems(items.filter((i) => !i.checked)))
-        .catch(() => setAttendeeNoteItems([]));
-    }
-  }, [prep.event]);
-
-  const handleImportSingleItem = (id: string, text: string) => {
-    setAddedNoteItemIds((prev) => new Set([...prev, id]));
-    const next = notesRef.current
-      ? `${notesRef.current.trimEnd()}\n- [ ] ${text}\n`
-      : `- [ ] ${text}\n`;
-    notesRef.current = next;
-    setNotes(next);
-    setStatus('Unsaved changes');
-    try {
-      localStorage.setItem(draftKey, next);
-    } catch {}
-  };
-
-  const handleImportAllNoteItems = () => {
-    if (attendeeNoteItems.length === 0) return;
-    const unadded = attendeeNoteItems.filter(
-      (i) => !addedNoteItemIds.has(i.id),
-    );
-    if (unadded.length === 0) return;
-    setAddedNoteItemIds(new Set(attendeeNoteItems.map((i) => i.id)));
-    const added = unadded.map((item) => `- [ ] ${item.text}`).join('\n');
-    const next = notesRef.current
-      ? `${notesRef.current.trimEnd()}\n${added}\n`
-      : `${added}\n`;
-    notesRef.current = next;
-    setNotes(next);
-    setStatus('Unsaved changes');
-    try {
-      localStorage.setItem(draftKey, next);
-    } catch {}
-  };
   useEffect(() => {
     if (!picker) return;
     const onEscape = (event: KeyboardEvent) => {
@@ -305,62 +249,13 @@ export const MeetingPrepEditor = forwardRef<
             </span>
           </div>
 
-          {attendeeNoteItems.length > 0 && (
-            <div className="rounded-lg border border-pro-accent/30 bg-pro-accent/[0.04] p-3 text-xs mb-3 select-none">
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-medium text-pro-text-main flex items-center gap-1.5">
-                  <Sparkles size={13} className="text-pro-accent" />
-                  From your running notes with attendees:
-                </span>
-                {attendeeNoteItems.every((i) => addedNoteItemIds.has(i.id)) ? (
-                  <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                    <Check size={12} /> All added
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleImportAllNoteItems}
-                    className="text-pro-accent hover:underline font-medium cursor-pointer"
-                  >
-                    + Add all to agenda
-                  </button>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                {attendeeNoteItems.map((item) => {
-                  const isAdded = addedNoteItemIds.has(item.id);
-                  return (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between gap-2 text-pro-text-muted"
-                    >
-                      <span className="truncate">
-                        • {item.text}{' '}
-                        <span className="opacity-60 text-[11px]">
-                          ({item.targetName || item.noteTitle})
-                        </span>
-                      </span>
-                      {isAdded ? (
-                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-0.5 shrink-0">
-                          <Check size={11} /> Added
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleImportSingleItem(item.id, item.text)
-                          }
-                          className="text-[11px] text-pro-accent hover:underline shrink-0 cursor-pointer font-medium"
-                        >
-                          + Add
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <AttendeeNoteChecklist event={prep.event} />
+
+          <PrepLinkedNotes
+            noteIds={record.noteIds}
+            disabled={busy}
+            onRemove={(noteId) => void mutateMeeting({ removeNoteId: noteId })}
+          />
 
           <textarea
             id={`prep-notes-${prep.occurrenceKey}`}
@@ -569,6 +464,8 @@ export function MeetingPrepReadOnly({
 }: { prep: MeetingPrep; onOpenMeeting?: (id: string) => void }) {
   return (
     <div className="space-y-8" aria-label="Preparation summary">
+      <AttendeeNoteChecklist event={prep.event} />
+      <PrepLinkedNotes noteIds={prep.noteIds} />
       {prep.briefing?.synthesisStatus === 'ready' && (
         <MeetingPrepBrief
           prep={prep}
@@ -578,7 +475,8 @@ export function MeetingPrepReadOnly({
           readOnly
         />
       )}
-      {prep.briefing?.synthesisStatus !== 'ready' && <PrepBriefEmptyState />}
+      {prep.briefing?.synthesisStatus !== 'ready' &&
+        !(prep.noteIds || []).length && <PrepBriefEmptyState />}
     </div>
   );
 }
@@ -649,5 +547,153 @@ export function SavedMeetingPrep({
     </p>
   ) : (
     <PrepBriefEmptyState />
+  );
+}
+
+/**
+ * Open checklist items from notes linked to the meeting's invitees. These are
+ * the note's own lines, not copies: ticking one here ticks it in the note.
+ */
+export function AttendeeNoteChecklist({
+  event,
+}: {
+  event?: {
+    attendees?: Array<{ name?: string | null; email?: string | null }>;
+  } | null;
+}) {
+  const [items, setItems] = useState<NoteAgendaItem[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const attendees = event?.attendees || [];
+  const emails = attendees.map((a) => a.email).filter(Boolean) as string[];
+  const names = attendees.map((a) => a.name).filter(Boolean) as string[];
+  const key = [...emails, '|', ...names].join('\u0000');
+  // `key` stands in for the attendee lists, which are new arrays each render.
+  useEffect(() => {
+    let current = true;
+    if (!emails.length && !names.length) {
+      setItems([]);
+      return;
+    }
+    void getNotesForAttendees(emails, names)
+      .then((next) => {
+        if (current) setItems(next.filter((item) => !item.checked));
+      })
+      .catch(() => {
+        if (current) setItems([]);
+      });
+    return () => {
+      current = false;
+    };
+  }, [key]);
+  if (!items.length) return null;
+  const toggle = async (item: NoteAgendaItem) => {
+    setBusyId(item.id);
+    setError(null);
+    try {
+      const updated = await setNoteChecklistItem({
+        noteId: item.noteId,
+        lineIndex: item.lineIndex ?? -1,
+        text: item.text,
+        checked: !item.checked,
+      });
+      setItems((previous) =>
+        previous.map((entry) =>
+          entry.id === item.id ? { ...updated, id: item.id } : entry,
+        ),
+      );
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : 'Could not update the note.',
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+  return (
+    <section
+      aria-label="From your notes"
+      className="rounded-lg border border-pro-border/70 bg-pro-surface/25 p-3 text-sm mb-3"
+    >
+      <h3 className="text-[13px] font-medium text-pro-text-main">
+        From your notes
+      </h3>
+      <p className="mt-0.5 text-xs text-pro-text-muted">
+        Open items from notes linked to people in this meeting. Ticking one here
+        ticks it in its note.
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {items.map((item) => (
+          <li key={item.id}>
+            <label className="flex items-start gap-2 text-pro-text-main">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={item.checked}
+                disabled={busyId === item.id}
+                onChange={() => void toggle(item)}
+              />
+              <span className={item.checked ? 'line-through opacity-60' : ''}>
+                {item.text}{' '}
+                <span className="text-xs text-pro-text-muted">
+                  · {item.targetName || item.noteTitle || 'Note'}
+                </span>
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      {error && (
+        <p role="alert" className="mt-2 text-xs text-pro-warning">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The brief a recorded meeting was prepared with, collapsed under the meeting
+ * header. Shows nothing when the meeting had no prepared brief.
+ */
+export function PrepForMeeting({
+  meetingId,
+  onOpenMeeting,
+}: {
+  meetingId: string;
+  onOpenMeeting?: (id: string) => void;
+}) {
+  const [prep, setPrep] = useState<MeetingPrep | null>(null);
+  useEffect(() => {
+    let current = true;
+    setPrep(null);
+    void getPrepForMeeting(meetingId)
+      .then((value) => {
+        if (current) setPrep(value ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [meetingId]);
+  // Matches when MeetingPrepBrief has something to show.
+  const hasBrief =
+    prep?.briefing?.synthesisStatus === 'ready' &&
+    (prep.meetings || []).length > 0;
+  if (!prep || (!hasBrief && !(prep.noteIds || []).length)) return null;
+  return (
+    <details className="group mt-4 rounded-lg border border-pro-border/70 px-4 py-3">
+      <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden">
+        Before the meeting
+        <ChevronDown
+          size={16}
+          aria-hidden="true"
+          className="text-pro-text-muted transition-transform group-open:rotate-180 motion-reduce:transition-none"
+        />
+      </summary>
+      <div className="pt-4">
+        <MeetingPrepReadOnly prep={prep} onOpenMeeting={onOpenMeeting} />
+      </div>
+    </details>
   );
 }

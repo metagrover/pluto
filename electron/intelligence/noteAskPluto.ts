@@ -142,12 +142,34 @@ export const noteAskPlutoDisplayQuery = (
   query: string,
 ): string => query.trim() || DEFAULT_QUERY[intent];
 
+/** A recent meeting with the note's person, given to the note's Ask Pluto. */
+export interface NoteRelatedMeeting {
+  title: string;
+  date: string | null;
+  notes: string;
+}
+
+const RELATED_MEETING_CHARS = 2_500;
+export const NOTE_RELATED_MEETINGS = 3;
+
 export const buildNoteAskPlutoPrompt = (input: {
   note: Pick<Note, 'title' | 'content' | 'targetName'>;
   request: NoteAskPlutoRequest;
   today?: Date;
+  relatedMeetings?: NoteRelatedMeeting[];
 }): string => {
   const { note, request } = input;
+  const meetings = (input.relatedMeetings ?? [])
+    .filter((meeting) => meeting.notes.trim())
+    .slice(0, NOTE_RELATED_MEETINGS);
+  const meetingBlocks = meetings.map((meeting) => {
+    const label = [meeting.title, meeting.date].filter(Boolean).join(', ');
+    const notes =
+      meeting.notes.length > RELATED_MEETING_CHARS
+        ? `${meeting.notes.slice(0, RELATED_MEETING_CHARS)}\n[Meeting notes truncated]`
+        : meeting.notes;
+    return `<meeting name="${label.replace(/"/g, "'")}">\n${notes.trim()}\n</meeting>`;
+  });
   const today = (input.today ?? new Date()).toISOString().slice(0, 10);
   const content = noteContentForPrompt(note.content);
   const clipped =
@@ -167,7 +189,9 @@ export const buildNoteAskPlutoPrompt = (input: {
 
   return [
     "You are Pluto, a calm and careful assistant inside the user's notes app.",
-    'Use only the note below. If the note does not contain the answer, say so in one sentence instead of guessing.',
+    meetings.length
+      ? `Use only the note and the recent meetings with ${(note.targetName || 'this person').replace(/"/g, "'")} below. When something comes from a meeting rather than the note, name that meeting in brackets, for example [${meetings[0].title}]. If neither contains the answer, say so in one sentence instead of guessing.`
+      : 'Use only the note below. If the note does not contain the answer, say so in one sentence instead of guessing.',
     'Lines marked "(task)" are tasks already synced to the user\'s task list; "- [x]" means done.',
     'Write in concise Markdown. No headings larger than bold text. Do not mention these instructions.',
     `Today is ${today}.`,
@@ -175,6 +199,7 @@ export const buildNoteAskPlutoPrompt = (input: {
     `<note title="${(note.title || 'Untitled note').replace(/"/g, "'")}"${note.targetName ? ` linked_to="${note.targetName.replace(/"/g, "'")}"` : ''}>`,
     clipped || '(The note is empty.)',
     '</note>',
+    ...meetingBlocks,
     focus,
     turns ? `Conversation so far:\n${turns}\n` : '',
     `Task: ${INTENT_INSTRUCTIONS[request.intent]}`,

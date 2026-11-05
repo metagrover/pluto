@@ -113,6 +113,7 @@ import {
   loadSelectedMeetingDetail,
   mergeMeetingStatus,
 } from './services/selectedMeetingDetail';
+import type { MeetingStartContext } from './types/meetingStart';
 import type { AppTheme } from './types/theme';
 import { calendarAgendaWindow } from './utils/calendarAgenda';
 import { getCalendarRosterNames } from './utils/calendarRoster';
@@ -144,6 +145,8 @@ import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
 import { SearchOverlay } from './components/overlays/SearchOverlay';
 import { buildSearchPlutoResults } from './components/overlays/searchPlutoModel';
 
+import { OPEN_NOTE_EVENT, getNote } from './api/notes';
+import { prepNotesText } from './components/features/PrepLinkedNotes';
 // Types
 import type { Meeting, MeetingSummary } from './types';
 import type { MeetingAskPlutoConversationMessage } from './types/askPluto';
@@ -430,7 +433,7 @@ function App() {
   const [reportProblemOpen, setReportProblemOpen] = useState(false);
   const [calendarAutoNameEnabled, setCalendarAutoNameEnabled] = useState(true);
   const [calendarPromptEnabled, setCalendarPromptEnabled] = useState(true);
-  const [fasterNotesEnabled, setFasterNotesEnabled] = useState(true);
+  const [fasterNotesEnabled, setFasterNotesEnabled] = useState(false);
   const [transcriptionLanguage, setTranscriptionLanguage] =
     useState<TranscriptionLanguage>('en');
   const [meetingNotesTemplateSettings, setMeetingNotesTemplateSettings] =
@@ -486,6 +489,7 @@ function App() {
   const startSessionRef = useRef<
     ((event?: CalendarEvent) => Promise<CaptureStartResult>) | null
   >(null);
+  const pendingStartRef = useRef<MeetingStartContext | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptSegment[]>(
     [],
   );
@@ -1057,7 +1061,7 @@ function App() {
     window.ipcRenderer
       .invoke('GET_SETTING', 'faster_notes_enabled')
       .then((val) => {
-        if (val !== null) setFasterNotesEnabled(val !== 'false');
+        setFasterNotesEnabled(val === 'true');
       });
     window.ipcRenderer
       .invoke('GET_SETTING', 'transcription_language')
@@ -1320,6 +1324,12 @@ function App() {
   const handleStartFromPrompt = useCallback(
     async (event: CalendarEvent) => {
       const prep = await openMeetingPrep(event);
+      // Notes linked as prep seed the live notes as they read now.
+      const linkedNotes = (
+        await Promise.all(
+          (prep?.noteIds || []).map((id) => getNote(id).catch(() => null)),
+        )
+      ).filter((note): note is NonNullable<typeof note> => Boolean(note));
       const previous = {
         event: activeCalendarEventRef.current,
         title: meetingTitle,
@@ -1338,8 +1348,7 @@ function App() {
         setParticipantInput('');
         setCurrentNotes(
           localStorage.getItem(`pluto.meeting-notes:${event.occurrenceKey}`) ??
-            prep?.notes ??
-            '',
+            prepNotesText(prep?.notes ?? '', linkedNotes),
         );
       });
       try {
@@ -1466,7 +1475,11 @@ function App() {
       setZenVisible(true);
       setMeetingAskPlutoConversation([]);
       setSelectedMeetingId(null);
-      if (!meetingTitle && !activeCalendarEventRef.current) {
+      if (
+        !meetingTitle &&
+        !activeCalendarEventRef.current &&
+        !meetingTitleEditedRef.current
+      ) {
         setMeetingTitle('');
         setMeetingParticipants([]);
         setParticipantInput('');
@@ -1512,12 +1525,34 @@ function App() {
       return;
     }
 
+    // A meeting started from a person or a note carries its own title,
+    // people and notes; anything else starts blank.
+    const pending = pendingStartRef.current;
+    pendingStartRef.current = null;
     activeCalendarEventRef.current = null;
     setActiveCalendarEvent(null);
-    setMeetingTitle('');
-    setMeetingParticipants([]);
+    setMeetingTitle(pending?.title ?? '');
+    setMeetingParticipants(pending?.participants ?? []);
     setParticipantInput('');
+    if (pending) {
+      meetingTitleEditedRef.current = true;
+      if (pending.notes !== undefined) setCurrentNotes(pending.notes);
+    }
   };
+
+  // "Open in Notes" from prep and other places outside Notes.
+  useEffect(() => {
+    const open = (event: Event) => {
+      const noteId = (event as CustomEvent<string>).detail;
+      if (typeof noteId !== 'string' || !noteId) return;
+      setPreMeetingBriefVisible(false);
+      setSelectedMeetingId(null);
+      setSelectedNoteId(noteId);
+      setActiveTab('notes');
+    };
+    window.addEventListener(OPEN_NOTE_EVENT, open);
+    return () => window.removeEventListener(OPEN_NOTE_EVENT, open);
+  }, []);
 
   const handleFinalizationStarted = (meeting: RecordingFinalizationPreview) => {
     setFinalizingMeeting(meeting);
@@ -1542,6 +1577,23 @@ function App() {
   const handleStartRecording = () => {
     if (startSessionRef.current) void startSessionRef.current();
   };
+  // Starts a meeting from a person ("Start 1:1") or a note ("Record now").
+  const handleStartMeetingWith = async (start: MeetingStartContext) => {
+    if (!startSessionRef.current || captureAction.command !== 'start') return;
+    pendingStartRef.current = start;
+    activeCalendarEventRef.current = null;
+    try {
+      const result = await startSessionRef.current();
+      if (!result.admitted) pendingStartRef.current = null;
+    } catch (error) {
+      pendingStartRef.current = null;
+      console.error('[Recording] Could not start the meeting', error);
+    }
+  };
+  const startRecordingFromEmptyState =
+    captureAction.enabled && captureAction.command === 'start'
+      ? handleStartRecording
+      : undefined;
   const handleReturnToRecording = () => {
     if (finalizingMeeting) {
       setZenVisible(false);
@@ -2582,6 +2634,9 @@ function App() {
                 onBack={handleBack}
                 backLabel={currentBackLabel}
                 onOpenPerson={handleOpenPerson}
+                onOpenMeeting={(meetingId) =>
+                  handleOpenMeeting(meetingId, { label: 'Back to meeting' })
+                }
               />
             ) : activeTab === 'hub' ? (
               <>
@@ -2602,6 +2657,7 @@ function App() {
                 <Dashboard
                   model={dashboardHome.model}
                   loading={dashboardHome.loading}
+                  onStartRecording={startRecordingFromEmptyState}
                   isRecording={isRecording}
                   setSelectedMeetingId={(id) => {
                     if (id != null) {
@@ -2637,6 +2693,11 @@ function App() {
             ) : activeTab === 'notes' ? (
               <NotesView
                 initialNoteId={selectedNoteId}
+                onStartMeeting={
+                  captureAction.command === 'start' && captureAction.enabled
+                    ? (start) => void handleStartMeetingWith(start)
+                    : undefined
+                }
                 onOpenTask={(id) => {
                   setSelectedTaskId(id);
                   setActiveTab('tasks');
@@ -2644,6 +2705,11 @@ function App() {
                 onOpenMeeting={(id) =>
                   handleOpenMeeting(id, { label: 'Back to Notes' })
                 }
+                onOpenPerson={(id, fromNoteId) => {
+                  // Back returns to this note.
+                  if (fromNoteId) setSelectedNoteId(fromNoteId);
+                  handleOpenPerson(id, { label: 'Back to Notes' });
+                }}
               />
             ) : activeTab === 'tasks' ? (
               <TasksView
@@ -2661,6 +2727,15 @@ function App() {
                     setSelectedNoteId(noteId);
                     setActiveTab('notes');
                   }}
+                  onStartMeeting={
+                    captureAction.command === 'start' && captureAction.enabled
+                      ? (person) =>
+                          void handleStartMeetingWith({
+                            title: `1:1 with ${person.name}`,
+                            participants: [person.name],
+                          })
+                      : undefined
+                  }
                   onOpenMeeting={(meetingId, personContext) =>
                     handleOpenMeeting(meetingId, {
                       personId: selectedPersonId,
@@ -2696,6 +2771,7 @@ function App() {
             ) : activeTab === 'meetings' ? (
               <AllMeetingsTab
                 meetings={safeMeetings}
+                onStartRecording={startRecordingFromEmptyState}
                 onOpenMeeting={(meetingId) =>
                   handleOpenMeeting(meetingId, { label: 'All meetings' })
                 }

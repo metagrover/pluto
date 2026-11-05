@@ -29,6 +29,7 @@ function setup() {
   sql.exec(fs.readFileSync('drizzle/0014_meeting_prep.sql', 'utf8'));
   sql.exec(fs.readFileSync('drizzle/0015_prep_past_meetings.sql', 'utf8'));
   sql.exec(fs.readFileSync('drizzle/0016_prep_briefing.sql', 'utf8'));
+  sql.exec(fs.readFileSync('drizzle/0021_prep_notes.sql', 'utf8'));
   let cached: CalendarEvent | null = event;
   let meeting:
     | import('../../electron/meetingPrep').PrepMeetingReference
@@ -281,4 +282,33 @@ it('persists briefings without changing personal notes, rejects stale generation
   expect(prep.briefing).toBeNull();
   expect(store.saveBrief(prep.occurrenceKey, fingerprint, brief)).toBe(false);
   expect(store.get(prep.occurrenceKey)?.notes).toBe('My own question');
+});
+
+it('links notes to prep without copying them, and finds preps by note', () => {
+  const { store } = setup();
+  let prep = store.open(event);
+  prep = store.save(prep.occurrenceKey, prep.revision, {
+    notes: 'My own prep',
+  });
+  prep = store.save(prep.occurrenceKey, prep.revision, {
+    addNoteId: 'note-vendor',
+  });
+  expect(prep.noteIds).toEqual(['note-vendor']);
+  expect(prep.notes).toBe('My own prep');
+  // Linking twice keeps one link.
+  expect(
+    store.save(prep.occurrenceKey, prep.revision, { addNoteId: 'note-vendor' })
+      .noteIds,
+  ).toEqual(['note-vendor']);
+  expect(store.forNote('note-vendor').map((p) => p.occurrenceKey)).toEqual([
+    event.occurrenceKey,
+  ]);
+  expect(store.forNote('note-other')).toEqual([]);
+  prep = store.get(event.occurrenceKey)!;
+  prep = store.save(prep.occurrenceKey, prep.revision, {
+    removeNoteId: 'note-vendor',
+  });
+  expect(prep.noteIds).toEqual([]);
+  expect(prep.notes).toBe('My own prep');
+  expect(store.forNote('note-vendor')).toEqual([]);
 });

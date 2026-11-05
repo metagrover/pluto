@@ -5,6 +5,7 @@ import type {
   NoteAskPlutoRequest,
   NoteAskPlutoResponse,
   SaveNoteInput,
+  SetNoteChecklistItemInput,
 } from '../types/notes';
 
 const mutate = async <T>(channel: string, payload: unknown): Promise<T> => {
@@ -49,11 +50,37 @@ export const getNotesForAttendees = (
   ).then((items) => (Array.isArray(items) ? items : []));
 };
 
+export const setNoteChecklistItem = (
+  input: SetNoteChecklistItemInput,
+): Promise<NoteAgendaItem> => mutate('NOTES_SET_CHECKLIST_ITEM', input);
+
 export const getNotesForEntity = (entityId: string): Promise<Note[]> => {
   if (typeof window === 'undefined' || !window.ipcRenderer?.invoke) {
     return Promise.resolve([]);
   }
   return window.ipcRenderer.invoke('NOTES_FOR_ENTITY', entityId);
+};
+
+/** Notes linked to someone else, or no one, that "@Name" this person. */
+export const getNotesMentioningPerson = (personId: string): Promise<Note[]> => {
+  if (typeof window === 'undefined' || !window.ipcRenderer?.invoke) {
+    return Promise.resolve([]);
+  }
+  return Promise.resolve(
+    window.ipcRenderer.invoke('NOTES_MENTIONING_PERSON', personId),
+  ).then((notes) => (Array.isArray(notes) ? notes : []));
+};
+
+/** Checklist lines like "Priya: send deck" in notes not linked to the person. */
+export const getOwnedNoteItems = (
+  personId: string,
+): Promise<NoteAgendaItem[]> => {
+  if (typeof window === 'undefined' || !window.ipcRenderer?.invoke) {
+    return Promise.resolve([]);
+  }
+  return Promise.resolve(
+    window.ipcRenderer.invoke('NOTES_OWNED_ITEMS', personId),
+  ).then((items) => (Array.isArray(items) ? items : []));
 };
 
 export const subscribeNotesChanged = (listener: () => void): (() => void) => {
@@ -101,4 +128,32 @@ export const subscribeNoteAskPlutoDelta = (
     (_event: unknown, packet: NoteAskPlutoDelta) => listener(packet),
   );
   return () => unsubscribe?.();
+};
+
+/** Asks the app to show a note in Notes, from wherever the user is. */
+export const OPEN_NOTE_EVENT = 'pluto:open-note';
+export const openNoteInApp = (noteId: string): void => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(OPEN_NOTE_EVENT, { detail: noteId }));
+};
+
+export interface NextTimeDiscussedMark {
+  key: string;
+  meetingId: string;
+  meetingTitle: string;
+  startedAt: string;
+  atSeconds: number | null;
+}
+
+/** Items on "Next time with …" that came up in the latest meeting with them. */
+export const getNextTimeDiscussed = async (
+  personId: string,
+  items: Array<{ key: string; noteId: string; text: string }>,
+): Promise<NextTimeDiscussedMark[]> => {
+  if (typeof window === 'undefined' || !window.ipcRenderer?.invoke) return [];
+  const marks = await window.ipcRenderer.invoke('NEXT_TIME_DISCUSSED', {
+    personId,
+    items,
+  });
+  return Array.isArray(marks) ? marks : [];
 };
