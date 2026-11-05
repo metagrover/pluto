@@ -131,6 +131,9 @@ export const assertLocalModelMemoryCapacity = ({
   // Other artifacts with known attention metadata charge their weights plus
   // a CPU-side copy margin and fixed runtime headroom, and their exact cache
   // per token. Unknown artifacts retain the conservative 2.5x cold estimate.
+  // The known-layout estimate is close to the real allocation, so it also
+  // keeps the watchdog's reaction headroom: without it, a load can be
+  // admitted that the watchdog stops as soon as the weights are in memory.
   const established = isEstablishedGemmaArtifact(modelDigest);
   const knownContextBytes =
     !established &&
@@ -142,7 +145,7 @@ export const assertLocalModelMemoryCapacity = ({
   const coldLoad = established
     ? modelBytes + 2 * GIB
     : knownContextBytes
-      ? modelBytes * 1.25 + GIB
+      ? modelBytes * 1.25 + GIB + REACTION_HEADROOM_BYTES
       : modelBytes * 2.5 + GIB;
   const perToken = knownContextBytes ?? DEFAULT_CONTEXT_BYTES_PER_TOKEN;
   const estimatedAdditional = coldLoad + contextTokens * perToken;
