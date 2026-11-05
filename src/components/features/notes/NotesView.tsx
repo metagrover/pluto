@@ -115,6 +115,10 @@ export const INITIAL_SLASH_MENU: SlashMenuState = {
   mode: 'root',
 };
 
+/** The line without the "/command" typed to open the slash menu. */
+export const stripSlashQuery = (text: string): string =>
+  text.replace(/^\/\S*\s?/, '');
+
 export function isValidTaskTitle(title: string): boolean {
   const clean = title.trim();
   return Boolean(
@@ -1756,7 +1760,7 @@ export const NotesView = ({
       if (!block) return;
 
       if (commandId === 'task') {
-        const queryText = block.text.replace(/^\/task\s*/i, '').trim();
+        const queryText = stripSlashQuery(block.text).trim();
         const isValid = isValidTaskTitle(queryText);
         const next = [...blocks];
         next[blockIndex] = {
@@ -1777,9 +1781,7 @@ export const NotesView = ({
         setSlashMenu(INITIAL_SLASH_MENU);
         requestFocus(blockIndex, 'end');
       } else if (commandId === 'todo') {
-        const queryText = block.text
-          .replace(/^\/(todo|checklist)\s*/i, '')
-          .trim();
+        const queryText = stripSlashQuery(block.text).trim();
         const next = [...blocks];
         next[blockIndex] = {
           ...block,
@@ -1790,20 +1792,24 @@ export const NotesView = ({
         updateBlocks(next);
         setSlashMenu(INITIAL_SLASH_MENU);
         requestFocus(blockIndex, 'end');
-      } else if (commandId === 'person') {
-        setSlashMenu((prev) => ({
-          ...prev,
-          mode: 'person',
+      } else if (commandId === 'person' || commandId === 'project') {
+        // Swap "/person" for "@" (or "#") so further typing filters the list.
+        const sigil = commandId === 'person' ? '@' : '#';
+        const next = [...blocks];
+        next[blockIndex] = {
+          ...block,
+          text: `${sigil}${stripSlashQuery(block.text)}`,
+        };
+        updateBlocks(next);
+        setSlashMenu({
+          isOpen: true,
+          blockIndex,
           query: '',
           selectedIndex: 0,
-        }));
-      } else if (commandId === 'project') {
-        setSlashMenu((prev) => ({
-          ...prev,
-          mode: 'project',
-          query: '',
-          selectedIndex: 0,
-        }));
+          mode: commandId,
+          mentionStart: 0,
+        });
+        requestFocus(blockIndex, 1);
       } else if (commandId === 'divider') {
         const next = [...blocks];
         next[blockIndex] = { ...block, type: 'divider', text: '' };
@@ -1828,7 +1834,7 @@ export const NotesView = ({
         next[blockIndex] = {
           ...block,
           type: commandId as NoteBlock['type'],
-          text: block.text.replace(/^\/\S*\s*/i, ''),
+          text: stripSlashQuery(block.text),
         };
         updateBlocks(next);
         setSlashMenu(INITIAL_SLASH_MENU);
@@ -1927,9 +1933,7 @@ export const NotesView = ({
         requestFocus(blockIndex, start + insert.length);
         return;
       }
-      const cleanText = block.text
-        .replace(/^\/(person|people)(\s.*)?$/i, '')
-        .trim();
+      const cleanText = stripSlashQuery(block.text).trim();
       next[blockIndex] = {
         ...block,
         text: cleanText ? `${cleanText} ${insert}` : insert,
@@ -1952,8 +1956,25 @@ export const NotesView = ({
       const block = blocks[blockIndex];
       if (!block) return;
       const next = [...blocks];
-      const cleanText = block.text.replace(/^\/project(\s.*)?$/i, '').trim();
       const insert = `#${project.name} `;
+      const typed = `#${slashMenu.query}`;
+      const start =
+        slashMenu.mentionStart === undefined
+          ? -1
+          : block.text.lastIndexOf(typed, slashMenu.mentionStart);
+      if (start !== -1) {
+        // Typed "#query": replace it with the name, keeping the text around it.
+        const after = block.text.slice(start + typed.length).replace(/^ /, '');
+        next[blockIndex] = {
+          ...block,
+          text: `${block.text.slice(0, start)}${insert}${after}`,
+        };
+        updateBlocks(next);
+        setSlashMenu(INITIAL_SLASH_MENU);
+        requestFocus(blockIndex, start + insert.length);
+        return;
+      }
+      const cleanText = stripSlashQuery(block.text).trim();
       next[blockIndex] = {
         ...block,
         text: cleanText ? `${cleanText} ${insert}` : insert,
@@ -1962,7 +1983,13 @@ export const NotesView = ({
       setSlashMenu(INITIAL_SLASH_MENU);
       requestFocus(blockIndex, 'end');
     },
-    [blocks, updateBlocks, editTargetId, triggerAutoSave],
+    [
+      blocks,
+      updateBlocks,
+      requestFocus,
+      slashMenu.mentionStart,
+      slashMenu.query,
+    ],
   );
 
   useEffect(() => {
@@ -2112,6 +2139,25 @@ export const NotesView = ({
           selectedIndex: 0,
           mode: 'root',
         });
+      } else if (
+        slashMenu.isOpen &&
+        slashMenu.mode === 'project' &&
+        slashMenu.blockIndex === index &&
+        slashMenu.mentionStart !== undefined
+      ) {
+        // Typing after the "#" a Project pick put in filters the projects.
+        const field = document.getElementById(`note-block-${index}`);
+        const caret =
+          field instanceof HTMLTextAreaElement && field.value === val
+            ? field.selectionStart
+            : val.length;
+        const start = slashMenu.mentionStart;
+        const query = val.slice(start + 1, caret);
+        if (val[start] === '#' && caret > start && !/[\n#]/.test(query)) {
+          setSlashMenu((prev) => ({ ...prev, query, selectedIndex: 0 }));
+        } else {
+          setSlashMenu(INITIAL_SLASH_MENU);
+        }
       } else {
         // "@query" just before the caret opens the person menu.
         const field = document.getElementById(`note-block-${index}`);

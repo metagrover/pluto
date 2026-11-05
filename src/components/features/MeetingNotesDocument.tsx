@@ -744,7 +744,9 @@ const InlineEditableText = ({
     draftRef.current = nextVal;
     setSlashMenu(INITIAL_SLASH_MENU);
     requestAnimationFrame(() => {
-      const newPos = lineStart + replacement.length;
+      // A task's title goes inside "[task: ]", before the "]".
+      const newPos =
+        lineStart + replacement.length - (cmdId === 'task' ? 1 : 0);
       ta.focus();
       ta.setSelectionRange(newPos, newPos);
     });

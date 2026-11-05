@@ -13,3 +13,8 @@
 - **Why:** Group-meeting notes assign things to people, and those items were only visible inside the note; live notes showed raw `- [ ]` text.
 - **Notes:** A first name counts only when no other known person shares it. Tasks still have no owner.
 
+### Slash commands clear what you typed
+
+- **Changed:** Picking any slash command in Notes removes the typed "/…", even a partial one like "/per"; Person and Project swap it for "@" or "#" so typing filters the list. In meeting notes, Task puts the caret inside "[task: ]".
+- **Why:** A leftover "/" stayed in the line after choosing Person, Project, Task or Checklist from a partly typed or bare "/".
+

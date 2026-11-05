@@ -757,6 +757,89 @@ describe('NotesView workspace', () => {
     expect(onOpenPerson).toHaveBeenCalledWith('person-1', 'note-scratchpad');
   });
 
+  describe('slash commands leave no "/" behind', () => {
+    const block = () =>
+      container.querySelector('#note-block-0') as HTMLTextAreaElement;
+    const type = async (value: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype,
+          'value',
+        )?.set?.call(block(), value);
+        block().setSelectionRange(value.length, value.length);
+        block().dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    const press = async (key: string) => {
+      await act(async () => {
+        block().dispatchEvent(
+          new KeyboardEvent('keydown', { key, bubbles: true }),
+        );
+      });
+    };
+    const menu = () => container.querySelector('[aria-label="Slash commands"]');
+
+    beforeEach(async () => {
+      await act(async () => {
+        root.render(<NotesView initialNoteId="note-scratchpad" />);
+      });
+    });
+
+    it('Person swaps "/" for "@" and typing filters people', async () => {
+      await type('/');
+      const person = Array.from(
+        menu()?.querySelectorAll('[role="menuitem"]') ?? [],
+      ).find((item) => item.textContent?.includes('Person')) as HTMLElement;
+      await act(async () => {
+        person.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      });
+      expect(block().value).toBe('@');
+      expect(menu()?.textContent).toContain('Sarah Connor');
+
+      await type('@Sar');
+      await press('Enter');
+      expect(block().value).toBe('@Sarah Connor ');
+      expect(menu()).toBeNull();
+    });
+
+    it('a partly typed "/per" is removed too', async () => {
+      await type('/per');
+      await press('Enter');
+      expect(block().value).toBe('@');
+      await press('Enter');
+      expect(block().value).toBe('@Sarah Connor ');
+    });
+
+    it('Project swaps "/" for "#" and typing filters projects', async () => {
+      await type('/proj');
+      await press('Enter');
+      expect(block().value).toBe('#');
+      expect(menu()?.textContent).toContain('Pluto App');
+      await type('#Plu');
+      expect(menu()?.textContent).toContain('Pluto App');
+      await press('Enter');
+      expect(block().value).toBe('#Pluto App ');
+      expect(menu()).toBeNull();
+    });
+
+    it.each([
+      ['/check', 'todo'],
+      ['/hea', 'h1'],
+      ['/bul', 'bullet'],
+      ['/quo', 'quote'],
+      ['/num', 'numbered'],
+      ['/ta', 'task'],
+    ])('"%s" then Enter leaves an empty %s line', async (typed, type_) => {
+      await type(typed);
+      await press('Enter');
+      expect(menu()).toBeNull();
+      expect(
+        container.querySelector(`[data-block-type="${type_}"]`),
+      ).not.toBeNull();
+      expect(block().value).toBe('');
+    });
+  });
+
   it('inserts the name in the right place when a shortcut strips a prefix', async () => {
     await act(async () => {
       root.render(<NotesView initialNoteId="note-scratchpad" />);

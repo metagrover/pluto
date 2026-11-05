@@ -517,6 +517,28 @@ describe('MeetingNotesDocument', () => {
     expect(textarea?.value).toBe('Use docs as code.\n1. ');
   });
 
+  it('puts the caret inside "[task: ]" after picking Task', async () => {
+    await act(async () => renderDocument());
+    const textarea = await openBlockEditor('Use docs as code.');
+    await changeTextarea(textarea!, 'Use docs as code.\n/task');
+    await act(async () => {
+      textarea?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await act(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+
+    expect(textarea?.value).toBe('Use docs as code.\n[task: ]');
+    expect(textarea?.selectionStart).toBe('Use docs as code.\n[task: '.length);
+  });
+
   it('offers a keyboard-reachable edit action with native spellcheck', async () => {
     await act(async () => renderDocument());
     const edit = container.querySelector<HTMLButtonElement>(
