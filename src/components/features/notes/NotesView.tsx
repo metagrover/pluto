@@ -419,7 +419,10 @@ export const NotesView = ({ initialNoteId }: Props) => {
     scrollSelectedMenuItemIntoView(slashMenuRef.current);
   }, [slashMenu.isOpen, slashMenu.selectedIndex, slashMenu.mode]);
 
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingSaveRef = useRef<{
+    noteId: string;
+    timeout: NodeJS.Timeout;
+  } | null>(null);
   // Which note the edit buffers were loaded from, and the content of our
   // recent saves, so refresh echoes of our own saves are ignored.
   const loadedNoteIdRef = useRef<string | null>(null);
@@ -524,7 +527,7 @@ export const NotesView = ({ initialNoteId }: Props) => {
     const note = notes.find((n) => n.id === selectedNoteId);
     if (note && loadedNoteIdRef.current === selectedNoteId) {
       const isOwnSave = sentContentsRef.current.includes(note.content);
-      const isSaving = saveTimeoutRef.current !== null;
+      const isSaving = pendingSaveRef.current?.noteId === selectedNoteId;
       if (isOwnSave || isSaving) return;
       // A genuine outside change (e.g. a task completed in Tasks): merge it in
       // while keeping block ids so focused editors stay mounted.
@@ -722,11 +725,11 @@ export const NotesView = ({ initialNoteId }: Props) => {
   const triggerAutoSave = useCallback(
     (updates: Partial<SaveNoteInput>, immediate = false) => {
       if (!selectedNoteId) return;
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = null;
+      if (pendingSaveRef.current) clearTimeout(pendingSaveRef.current.timeout);
+      pendingSaveRef.current = null;
 
       const performSave = async () => {
-        saveTimeoutRef.current = null;
+        pendingSaveRef.current = null;
         try {
           const contentToSave =
             updates.content !== undefined ? updates.content : editContent;
@@ -759,7 +762,10 @@ export const NotesView = ({ initialNoteId }: Props) => {
       if (immediate) {
         void performSave();
       } else {
-        saveTimeoutRef.current = setTimeout(performSave, 400);
+        pendingSaveRef.current = {
+          noteId: selectedNoteId,
+          timeout: setTimeout(performSave, 400),
+        };
       }
     },
     [
@@ -2469,6 +2475,10 @@ export const NotesView = ({ initialNoteId }: Props) => {
     e?.stopPropagation();
     try {
       await deleteNote(id);
+      if (pendingSaveRef.current?.noteId === id) {
+        clearTimeout(pendingSaveRef.current.timeout);
+        pendingSaveRef.current = null;
+      }
       setConfirmDeleteId(null);
       setIsConfirmingDeleteHeader(false);
       if (selectedNoteId === id) {

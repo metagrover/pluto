@@ -444,6 +444,49 @@ describe('NotesView workspace', () => {
     expect(invoke).toHaveBeenCalledWith('NOTES_DELETE', 'note-person');
   });
 
+  it('keeps Notes empty after deleting the last note with an autosave pending', async () => {
+    notes = notes.filter((note) => note.id === 'note-scratchpad');
+    vi.useFakeTimers();
+    try {
+      await act(async () => root.render(<NotesView />));
+
+      const title = container.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="Note title"]',
+      )!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype,
+          'value',
+        )?.set?.call(title, 'Pending title');
+        title.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(title.value).toBe('Pending title');
+
+      await act(async () => {
+        container
+          .querySelector<HTMLButtonElement>(
+            'button[aria-label="Delete note Daily Scratchpad"]',
+          )!
+          .click();
+      });
+      await act(async () => {
+        container
+          .querySelector<HTMLButtonElement>(
+            'button[aria-label="Confirm delete note"]',
+          )!
+          .click();
+        await vi.advanceTimersByTimeAsync(450);
+      });
+
+      expect(invoke).toHaveBeenCalledWith('NOTES_DELETE', 'note-scratchpad');
+      expect(invoke).not.toHaveBeenCalledWith('NOTES_SAVE', expect.anything());
+      expect(notes).toEqual([]);
+      expect(container.textContent).toContain('Create Note');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('triggers new note creation via Cmd+N keyboard shortcut', async () => {
     await act(async () => {
       root.render(<NotesView />);

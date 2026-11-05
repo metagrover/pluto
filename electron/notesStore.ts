@@ -92,32 +92,6 @@ export function createNotesStore(db: Database.Database): NotesStore {
       updatedAt: string;
     }>;
 
-    if (rows.length === 0) {
-      // Initialize an empty scratchpad so the user has an immediate surface
-      const initialId = randomUUID();
-      const initialTitle = 'Daily Scratchpad';
-      const initialContent =
-        'Jot down thoughts, agendas, and ideas.\n\n- [ ] Review upcoming priorities\n- [ ] Type `@` to link people or `#` for projects\n';
-      db.prepare(`
-        INSERT INTO notes (id, title, content, note_type, pinned, created_at, updated_at)
-        VALUES (?, ?, ?, 'scratchpad', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `).run(initialId, initialTitle, initialContent);
-
-      return [
-        {
-          id: initialId,
-          title: initialTitle,
-          content: initialContent,
-          noteType: 'scratchpad',
-          targetId: null,
-          targetName: null,
-          pinned: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      ];
-    }
-
     return rows.map(mapNoteRow);
   };
 
@@ -214,19 +188,6 @@ export function createNotesStore(db: Database.Database): NotesStore {
   };
 
   const deleteNote = (id: string): boolean => {
-    const existing = getNote(id);
-    if (!existing) return false;
-
-    // Preserve primary scratchpad anchor if it's the only scratchpad
-    if (existing.noteType === 'scratchpad' && existing.pinned) {
-      db.prepare(`
-        UPDATE notes 
-        SET content = '', title = 'Daily Scratchpad', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(id);
-      return true;
-    }
-
     const res = db.prepare('DELETE FROM notes WHERE id = ?').run(id);
     return res.changes > 0;
   };

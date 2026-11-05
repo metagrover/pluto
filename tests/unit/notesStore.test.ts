@@ -38,13 +38,10 @@ describe('notesStore', () => {
     db.exec(notesMigration);
   });
 
-  it('initializes default Daily Scratchpad if no notes exist', () => {
+  it('lists an empty workspace without inserting a note', () => {
     const store = createNotesStore(db);
-    const notes = store.listNotes();
-    expect(notes.length).toBe(1);
-    expect(notes[0].noteType).toBe('scratchpad');
-    expect(notes[0].title).toBe('Daily Scratchpad');
-    expect(notes[0].pinned).toBe(true);
+    expect(store.listNotes()).toEqual([]);
+    expect(db.prepare('SELECT id FROM notes').all()).toEqual([]);
   });
 
   it('creates and retrieves a new note with target entity', () => {
@@ -93,7 +90,7 @@ describe('notesStore', () => {
     expect(updated.content).toContain('Drizzle');
   });
 
-  it('deletes general notes, and clears scratchpad without destroying it', () => {
+  it('deletes general notes and the last pinned scratchpad', () => {
     const store = createNotesStore(db);
     const general = store.saveNote({
       title: 'Temporary Note',
@@ -104,14 +101,16 @@ describe('notesStore', () => {
     expect(store.deleteNote(general.id)).toBe(true);
     expect(store.getNote(general.id)).toBeNull();
 
-    // Now test scratchpad
-    const scratchpad = store
-      .listNotes()
-      .find((n) => n.noteType === 'scratchpad')!;
+    const scratchpad = store.saveNote({
+      title: 'Daily Scratchpad',
+      content: 'Scratchpad text',
+      noteType: 'scratchpad',
+      pinned: true,
+    });
     expect(store.deleteNote(scratchpad.id)).toBe(true);
-    const reloaded = store.getNote(scratchpad.id);
-    expect(reloaded).not.toBeNull();
-    expect(reloaded?.content).toBe('');
+    expect(store.getNote(scratchpad.id)).toBeNull();
+    expect(store.deleteNote(scratchpad.id)).toBe(false);
+    expect(createNotesStore(db).listNotes()).toEqual([]);
   });
 
   it('finds open agenda items from notes for matching meeting attendees', () => {

@@ -5190,6 +5190,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('NOTES_LIST', () => db.notesStore.listNotes());
   ipcMain.handle('NOTES_GET', (_event, id) => db.notesStore.getNote(id));
   ipcMain.handle('NOTES_SAVE', (_event, input) => {
+    if (input.id && !db.notesStore.getNote(input.id)) {
+      throw new Error('This note no longer exists.');
+    }
     const result = db.notesStore.saveNote(input);
     for (const window of BrowserWindow.getAllWindows())
       window.webContents.send('NOTES_CHANGED');
