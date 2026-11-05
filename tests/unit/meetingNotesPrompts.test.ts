@@ -328,7 +328,7 @@ it('uses field definitions and empty arrays instead of copyable content illustra
     expect(prompt).toContain(
       'never invent references, offsets or object paths',
     );
-    expect(prompt).toContain('Keep source labels out of prose');
+    expect(prompt).toContain('Keep source descriptors out of prose');
     expect(prompt).toContain('Cite all claims, antecedents and conditions');
     expect(prompt).toContain('[]');
   }

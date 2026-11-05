@@ -23,7 +23,10 @@ import {
   hasOmittedSubjectCondition,
   hasUnsupportedNotesCondition,
 } from './meetingNotesGuardrails';
-import { notesStateGuidance } from './meetingNotesGuidance';
+import {
+  notesPeopleGuidance,
+  notesStateGuidance,
+} from './meetingNotesGuidance';
 import {
   hasDirectFirstPersonNotesText,
   hasUnfinishedNotesText,
@@ -47,7 +50,7 @@ export const REVIEW_RETRY_INSTRUCTIONS = {
   win_ownership:
     'Use only source-supported completed-event ownership and its required owner metadata.',
   unfinished_prose:
-    'Write complete third-person prose, not first-person speech or unfinished fragments.',
+    'Write complete third-person prose ("you" only for an unnamed Me), not first-person speech or unfinished fragments.',
   quantity_scope:
     'Preserve only the quantities and quantity scope stated in this case’s source.',
   unsupported_condition:
@@ -393,7 +396,7 @@ export const reviewSourceBoundNotes = async (
           : []),
         'Classification: an explicit promise, accepted assignment or confirmed concrete unfinished responsibility is accepted_action, including conditional undertakings. Capability, preference, suggestion, request, tentative arrangement or unclear speech alone is discussion, not acceptance. A defined promised follow-up is an action; routine social closings are not. An explicit settled choice is a decision. Completed work, reported status and scope clarifications are points. A question must remain unresolved in the supported final state; missing information alone does not establish an open issue.',
         'Attribution: use the source-backed actor or deciding person, never automatically the requester, recipient or speaker reporting someone else’s work. A first-person undertaking belongs to its recorded speaker. Keep exact supported names and distinct speaker labels, including Me and numbered speakers; never expand a name or invent an identity. Undifferentiated speakers and collective or unassigned ownership stay null. An accepted group responsibility can remain an action with owner null.',
-        'Personal references: name source-backed actors directly. Use gendered pronouns only when the source explicitly supplies them for that person, never from names. Preserve explicit experience, feelings and reasons without inferring another person’s reaction.',
+        `Personal references: ${notesPeopleGuidance} Use gendered pronouns only when the source explicitly supplies them for that person, never from names. Preserve explicit experience, feelings and reasons without inferring another person’s reaction.`,
         `Meaning and wording: return complete, readable standalone prose, not fragments, placeholders, speaker-prefixed quotations or disfluent speech. Actions use task verb phrases; points and decisions use third-person prose. Preserve each claim’s certainty, scope, negation, quantities and conditions. A preference is not a decision, expected approval is not confirmed approval, and an estimate is not a promise. Keep requirements, risks and deferred work even without an immediate task. ${notesStateGuidance}`,
         'Timing: keep the complete accepted responsibility in action text itself: all supported operations, recipients, prerequisites and timing, including conditions stated in another supplied passage. Mentioning work in a point, overview or discussion does not preserve its scope in the action record. Keep an estimate tied to its stated starting point and endpoint; never add another wait or invent a year. Copy an accepted calendar deadline exactly into due, even when the responsibility has a prerequisite, and retain both in text. Event-relative or vague timing stays in text without an invented calendar deadline. Unknown, proposed or superseded owner and due values are null. Ordinary points, questions and recentWinImpact have owner, due and discussion null; recentWin follows its own role contract. Discussion preserves distinct supported context about the same subject without duplicating the action.',
         'Evidence: each case contains exact supplied speech and bounds [segment,start,end], including its cited turn window and limited preceding context for bare task references. Keep different speakers distinct. An adjacent request and acceptance may establish responsibility. Resolve a pronoun, task, recipient or condition only when those passages establish its antecedent; otherwise keep the uncertainty explicit without inventing a referent. Context supports the subject, not unrelated facts to add. Do not strengthen an ambiguous statement into an action or approval. Never borrow another case’s evidence except for an eligible duplicate keeper.',

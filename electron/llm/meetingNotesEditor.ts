@@ -8,6 +8,7 @@ import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
 import {
   notesContentGuidance,
   notesMultilingualGuidance,
+  notesPeopleGuidance,
   notesProseGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
@@ -92,6 +93,7 @@ export const buildNotesEditorPrompt = ({
         ]
       : []),
     notesProseGuidance,
+    notesPeopleGuidance,
     notesMultilingualGuidance,
     notesSourceGuidance,
     getTemplateGuidance(template),
