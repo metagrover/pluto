@@ -1,6 +1,7 @@
 import os from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
 import {
+  LocalModelMemoryError,
   assertLocalModelMemoryCapacity,
   getEstablishedGemmaLoadOptions,
   readContextBytesPerToken,
@@ -797,18 +798,8 @@ it('sizes a known-layout model by its weights and real cache, not 2.5x its file'
     measuredColdPeak: { bytes: 6_012_954_214, contextTokens: 4096 },
   };
   const required =
-    PHI4_MINI_BYTES * 1.25 + GIB + 16384 * 128 * 1024 + total * 0.08;
-  // A 16 GiB Mac with about 7.5 GiB available was refused every notes load.
-  expect(() =>
-    assertLocalModelMemoryCapacity({ ...memory, available: 7.5 * GIB }),
-  ).toThrow('Not enough memory');
-  expect(() =>
-    assertLocalModelMemoryCapacity({
-      ...memory,
-      available: 7.5 * GIB,
-      contextBytesPerToken,
-    }),
-  ).not.toThrow();
+    PHI4_MINI_BYTES * 1.25 + 3 * GIB + 16384 * 128 * 1024 + total * 0.08;
+  // Admission is exact at the real layout plus the watchdog's headroom.
   expect(() =>
     assertLocalModelMemoryCapacity({
       ...memory,
@@ -825,6 +816,31 @@ it('sizes a known-layout model by its weights and real cache, not 2.5x its file'
   ).not.toThrow();
 });
 
+it('keeps the watchdog headroom after a known-layout cold load', () => {
+  // Measured on a 16 GiB Mac: phi4-mini at 32K dropped availability from
+  // about 10.2 GiB to 2.4 GiB, below the watchdog's 2 GiB + 8% stop line.
+  const total = 16 * GIB;
+  const contextBytesPerToken = readContextBytesPerToken(PHI4_MINI_INFO);
+  try {
+    assertLocalModelMemoryCapacity({
+      total,
+      available: 10.24 * GIB,
+      modelBytes: PHI4_MINI_BYTES,
+      modelDigest: 'phi4-mini-artifact',
+      resident: false,
+      contextTokens: 32768,
+      contextBytesPerToken,
+    });
+    expect.fail('Expected a 32K load the watchdog would stop to be refused');
+  } catch (error) {
+    expect(error).toBeInstanceOf(LocalModelMemoryError);
+    // A smaller context that leaves the headroom is still offered.
+    expect(
+      (error as LocalModelMemoryError).maxContextTokens,
+    ).toBeGreaterThanOrEqual(16384);
+  }
+});
+
 it('charges the real cache size when suggesting a smaller context', () => {
   const total = 16 * GIB;
   const contextBytesPerToken = 128 * 1024;
@@ -837,7 +853,7 @@ it('charges the real cache size when suggesting a smaller context', () => {
       contextBytesPerToken,
       available:
         PHI4_MINI_BYTES * 1.25 +
-        GIB +
+        3 * GIB +
         8192 * contextBytesPerToken +
         total * 0.08 +
         1,
