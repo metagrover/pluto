@@ -61,6 +61,18 @@ export const getNotesForEntity = (entityId: string): Promise<Note[]> => {
   return window.ipcRenderer.invoke('NOTES_FOR_ENTITY', entityId);
 };
 
+/** Checklist lines like "Priya: send deck" in notes not linked to the person. */
+export const getOwnedNoteItems = (
+  personId: string,
+): Promise<NoteAgendaItem[]> => {
+  if (typeof window === 'undefined' || !window.ipcRenderer?.invoke) {
+    return Promise.resolve([]);
+  }
+  return Promise.resolve(
+    window.ipcRenderer.invoke('NOTES_OWNED_ITEMS', personId),
+  ).then((items) => (Array.isArray(items) ? items : []));
+};
+
 export const subscribeNotesChanged = (listener: () => void): (() => void) => {
   if (typeof window === 'undefined') return () => {};
   window.addEventListener('pluto:notes-changed', listener);

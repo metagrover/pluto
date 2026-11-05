@@ -352,4 +352,57 @@ describe('notesStore', () => {
     expect(store.getNote(note.id)?.content).toBe('Remember the roadmap');
     expect(store.searchNotes('roadmap').map((n) => n.id)).toEqual([note.id]);
   });
+  it('lists "Priya: …" lines from other notes as Priya\'s, in prep too', () => {
+    const store = createNotesStore(db);
+    const person = db.prepare(
+      'INSERT INTO entities (id, type, name, normalized_name) VALUES (?, ?, ?, ?)',
+    );
+    person.run('priya', 'person', 'Priya Shah', 'priya shah');
+    person.run('sam', 'person', 'Sam Rivera', 'sam rivera');
+    person.run('sam2', 'person', 'Sam Lee', 'sam lee');
+    const group = store.saveNote({
+      title: 'Acme sync',
+      content: [
+        '- [ ] Priya: send deck',
+        '- [ ] @Priya Shah: confirm budget',
+        '- [x] Priya: book room',
+        '- [ ] Ask Priya about pricing',
+        '- [ ] Sam: share notes',
+        '- [ ] Sam Lee: draft brief',
+      ].join('\n'),
+      noteType: 'general',
+    });
+    store.saveNote({
+      title: '1:1 with Priya',
+      content: '- [ ] Priya: already hers',
+      noteType: 'person',
+      targetId: 'priya',
+    });
+
+    const owned = store.getOwnedNoteItems('priya');
+    expect(owned.map((item) => [item.text, item.checked])).toEqual([
+      ['Priya: send deck', false],
+      ['@Priya Shah: confirm budget', false],
+      ['Priya: book room', true],
+    ]);
+    expect(owned[0]).toMatchObject({
+      noteId: group.id,
+      noteTitle: 'Acme sync',
+      lineIndex: 0,
+    });
+    // "Sam" is two people, so only a full name counts.
+    expect(store.getOwnedNoteItems('sam').map((item) => item.text)).toEqual([]);
+    expect(store.getOwnedNoteItems('sam2').map((item) => item.text)).toEqual([
+      'Sam Lee: draft brief',
+    ]);
+    // Prep for a meeting with Priya lists her own note and her lines elsewhere.
+    expect(
+      store.getNotesForAttendees([], ['Priya Shah']).map((item) => item.text),
+    ).toEqual([
+      'Priya: already hers',
+      'Priya: send deck',
+      '@Priya Shah: confirm budget',
+      'Priya: book room',
+    ]);
+  });
 });

@@ -12,6 +12,16 @@ import type {
   LiveTranscriptSegment,
 } from '../../src/components/features/recordingWorkspaceModel';
 
+/** What the live notes show, one line per block, as the user reads them. */
+const liveNotesText = (container: HTMLElement) =>
+  [
+    ...container.querySelectorAll<HTMLTextAreaElement>(
+      '.live-notes-editor textarea',
+    ),
+  ]
+    .map((area) => area.value)
+    .join('\n');
+
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 let recordingCompleted = false;
@@ -370,9 +380,7 @@ describe('App recording navigation', () => {
         'button[aria-label="Edit meeting title: Customer launch review"]',
       )?.textContent,
     ).toBe('Customer launch review');
-    expect(
-      container.querySelector<HTMLTextAreaElement>('#recording-notes')?.value,
-    ).toBe('Ask about the launch checklist');
+    expect(liveNotesText(container)).toBe('Ask about the launch checklist');
     await act(async () => root.unmount());
   });
 
@@ -435,9 +443,11 @@ describe('App recording navigation', () => {
         'button[aria-label="Edit meeting title: Vendor eval"]',
       ),
     ).not.toBeNull();
+    expect(liveNotesText(container)).toBe('Data residency');
+    // The prep item is a checkbox in the live notes, as in Notes.
     expect(
-      container.querySelector<HTMLTextAreaElement>('#recording-notes')?.value,
-    ).toBe('- [ ] Data residency');
+      container.querySelector('.live-notes-editor .notion-todo-checkbox'),
+    ).not.toBeNull();
     expect(
       container.querySelector('.rail-participants')?.textContent,
     ).toContain('Dana Ortiz');
@@ -502,9 +512,7 @@ describe('App recording navigation', () => {
         await flushPromises();
       });
       expect(notesAtCalendarStart).toBe(existingNotes || null);
-      expect(
-        container.querySelector<HTMLTextAreaElement>('#recording-notes')?.value,
-      ).toBe(existingNotes);
+      expect(liveNotesText(container)).toBe(existingNotes);
       await act(async () => root.unmount());
     },
   );

@@ -12,6 +12,7 @@ import type { Note } from '../../types/notes';
 import { suggestNoteForMeeting } from '../../utils/meetingNoteSuggestion';
 import { isGenericSpeakerLabel } from '../../utils/speakerReview';
 import { SearchSelect, type SearchSelectOption } from '../ui/SearchSelect';
+import { LiveNotesEditor } from './LiveNotesEditor';
 import { AttendeeNoteChecklist, SavedMeetingPrep } from './MeetingPrepEditor';
 import { prepNotesWith } from './PrepLinkedNotes';
 import {
@@ -326,7 +327,7 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
             </div>
           </header>
           <section className="rail-notes" aria-label="Meeting notes and prep">
-            <label className="sr-only" htmlFor="recording-notes">
+            <label className="sr-only" htmlFor="recording-notes-0">
               Meeting notes
             </label>
             <div
@@ -398,11 +399,11 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
                   </div>
                 </div>
               ) : null}
-              <textarea
-                id="recording-notes"
+              <LiveNotesEditor
+                idPrefix="recording-notes-"
                 value={notes}
-                onChange={(event) => onNotesChange(event.target.value)}
-                placeholder="Start typing. Pluto will preserve your words and enrich them after the meeting."
+                onChange={onNotesChange}
+                placeholder="Start typing. [] makes a checkbox. Pluto keeps your words and adds to them after the meeting."
               />
             </div>
             {notesTab === 'prep' && (

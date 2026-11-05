@@ -1,3 +1,10 @@
+## 2026-11-04 - Read "Priya: …" lines as Priya's, and edit live notes like notes
+
+- **Status:** Accepted; covered by store, component, app-flow and in-app checks.
+- **Owner lines:** A checklist line that starts with a person's name and a colon ("Priya: send deck", "@Priya Shah: …") is that person's, wherever the note is. It is listed on their "Next time with …" (name dropped, with "From [note]" opening the note; ticking it ticks the line) and in prep for meetings with them, and the editor shows "On Priya's list" beside it. The full name always counts; a first name only when no other known person shares it, so ambiguous lines stay unassigned. Lines in a note already linked to that person are not listed twice. This only routes the line; it does not create a task or set an owner in Tasks, which has no owner field.
+- **Live notes editor:** The recording rail's notes are edited block by block with the same row component as Notes: "[] " makes a checkbox, "- " a bullet, "# " a heading, Enter continues a list and Enter on an empty item ends it, Backspace at the start of a list item turns it back into text, and pasted lines become separate blocks. The notes are still stored as the same markdown, so analysis, prep seeding and "Use it" are unchanged. Slash commands and the full Notes toolbar are not in the rail.
+- **Supersedes:** The "Not included" note on owner prefixes and live notes in the entry below.
+
 ## 2026-11-04 - Link notes as prep, offer notes when a meeting starts, act on answers, and mark what came up
 
 - **Status:** Accepted; covered by store, component and in-app checks.
@@ -6,7 +13,7 @@
 - **Answer actions:** Ask Pluto answers on a finished meeting and in person chat offer "Add as to-do" and, when there is exactly one other known person (never on your own page), "Add to Next time with …". Each opens a short line prefilled from the answer's first list item or sentence for the user to edit; nothing is added without Add. A to-do with the same title already in Tasks is reused untouched.
 - **Later notes are read:** Notes added on a finished meeting (the `user_notes` edit) are now what Ask Pluto, note questions about a person's meetings, and search read, through the shared notes document and the search index. The `meetings.user_notes` column and the summary's inputs stay as typed during the meeting, so analysis is not rerun.
 - **"Came up in …":** An open "Next time with …" item gets a soft "Came up in [meeting] · date" line when its distinctive words appear within three consecutive transcript turns of the latest confirmed meeting with that person. This is word matching, not a model, and errs toward silence: items need two distinctive words, and notes edited after the meeting began are skipped because their items may have been written about it. The link opens the meeting; the item stays until ticked, and the mark can be hidden (remembered on this device).
-- **Not included:** The mark opens the meeting, not the exact moment. Owner prefixes ("Priya: send deck") and a single full editor for live notes remain future work.
+- **Not included:** The mark opens the meeting, not the exact moment. Owner prefixes and the live notes editor followed in the entry above.
 
 ## 2026-11-04 - Count people you add as meeting participants, and keep checklists separate from tasks
 

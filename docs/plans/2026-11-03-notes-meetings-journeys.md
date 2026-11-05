@@ -41,10 +41,17 @@ Second round (2026-11-04):
 - "Came up in …" on Next-time items found in the latest meeting's transcript,
   by word matching; hideable, and the item stays until ticked.
 
-Known limits: "Came up in" opens the meeting, not the moment; owner prefixes
-("Priya: send deck") are not parsed; live notes during recording are still a
-plain text box; Start 1:1 and "Use your note?" have not been tried with a real
-recording.
+Third round (2026-11-04):
+
+- "Priya: send deck" lines in any note show on Priya's "Next time with …" and
+  in prep with her, and the editor says "On Priya's list".
+- Live notes while recording are edited like Notes (checkboxes, bullets,
+  headings, list continuation), still stored as the same markdown.
+
+Known limits: "Came up in" opens the meeting, not the moment; owner lines do not
+create tasks or set an owner in Tasks; live notes have no slash commands;
+"Use your note?" has not been tried with a real recording (Start 1:1 has, with
+a fake microphone).
 
 ## How this was checked
 

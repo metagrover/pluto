@@ -895,6 +895,15 @@
   .next-discussed > button:not(.next-discussed__hide) {
     @apply rounded text-pro-text-muted underline decoration-pro-border underline-offset-2 hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
+  .next-from-note {
+    @apply ml-6 flex items-center gap-1 text-[12px] leading-5 text-pro-text-muted;
+  }
+  .next-from-note > button {
+    @apply truncate rounded text-pro-text-muted underline decoration-pro-border underline-offset-2 hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .note-owner-label {
+    @apply shrink-0 select-none pt-1 text-[11px] text-pro-text-muted/70;
+  }
   .next-discussed__hide {
     @apply inline-flex h-5 w-5 items-center justify-center rounded text-pro-text-muted/70 hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
@@ -2371,6 +2380,15 @@
   }
   .rail-notes textarea {
     @apply min-h-60 flex-1 resize-none border-0 bg-transparent p-0 text-[15px] leading-7 outline-none placeholder:text-pro-text-muted/65 focus-visible:ring-0;
+  }
+  .live-notes-editor {
+    @apply min-h-60 flex-1 cursor-text text-[15px] leading-7;
+  }
+  .rail-notes .live-notes-editor textarea {
+    @apply min-h-0 flex-none leading-7;
+  }
+  .live-notes-editor .notion-gutter-container {
+    @apply hidden;
   }
   .rail-note-suggestion {
     @apply mb-3 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-lg border border-pro-border/70 bg-pro-surface/30 px-3 py-2 text-[13px] text-pro-text-main;

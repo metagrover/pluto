@@ -1197,7 +1197,7 @@ const invokeNotesFallback = (channel: string, payload: unknown) => {
     saveStoredNotes(filtered);
     return true;
   }
-  if (channel === 'NOTES_FOR_ATTENDEES') {
+  if (channel === 'NOTES_FOR_ATTENDEES' || channel === 'NOTES_OWNED_ITEMS') {
     return [];
   }
   if (channel === 'NOTES_FOR_ENTITY') {

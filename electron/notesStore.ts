@@ -7,6 +7,7 @@ import type {
   SaveNoteInput,
   SetNoteChecklistItemInput,
 } from '../src/types/notes';
+import { lineOwnedBy, ownerLabelsFor } from '../src/utils/noteOwner';
 
 export interface NotesStore {
   listNotes: () => Note[];
@@ -17,6 +18,8 @@ export interface NotesStore {
   searchNotes: (query: string, limit?: number) => Note[];
   getNotesForEntity: (entityId: string) => Note[];
   setChecklistItem: (input: SetNoteChecklistItemInput) => NoteAgendaItem;
+  /** Checklist lines like "Priya: send deck" in notes not linked to them. */
+  getOwnedNoteItems: (personId: string) => NoteAgendaItem[];
 }
 
 const CHECKLIST_LINE = /^(\s*[-*]\s+\[)([ xX])(\]\s+)(.+?)\s*$/;
@@ -196,6 +199,52 @@ export function createNotesStore(db: Database.Database): NotesStore {
     return res.changes > 0;
   };
 
+  const getOwnedNoteItems = (personId: string): NoteAgendaItem[] => {
+    if (!personId) return [];
+    const people = db
+      .prepare(`SELECT id, name FROM entities WHERE type = 'person'`)
+      .all() as Array<{ id: string; name: string }>;
+    const person = people.find((entry) => entry.id === personId);
+    if (!person) return [];
+    const labels = ownerLabelsFor(person, people);
+    if (!labels.length) return [];
+    const notes = db
+      .prepare(`
+      SELECT n.id, n.title, n.content, e.name as targetName
+      FROM notes n
+      LEFT JOIN entities e ON n.target_id = e.id
+      WHERE n.target_id IS NULL OR n.target_id != ?
+      ORDER BY datetime(n.updated_at) DESC
+    `)
+      .all(personId) as Array<{
+      id: string;
+      title: string;
+      content: string;
+      targetName: string | null;
+    }>;
+    const items: NoteAgendaItem[] = [];
+    for (const note of notes) {
+      const lowered = note.content.toLowerCase();
+      if (!labels.some((label) => lowered.includes(label))) continue;
+      note.content.split('\n').forEach((raw, lineIndex) => {
+        const match = raw.trim().match(/^[-*]\s+\[([ xX])\]\s+(.+)$/);
+        if (!match) return;
+        const text = match[2].trim();
+        if (lineOwnedBy(text, labels) === null) return;
+        items.push({
+          id: `${note.id}-line-${lineIndex}`,
+          noteId: note.id,
+          noteTitle: note.title,
+          targetName: note.targetName,
+          text,
+          checked: match[1].toLowerCase() === 'x',
+          lineIndex,
+        });
+      });
+    }
+    return items;
+  };
+
   const getNotesForAttendees = (
     emails: string[],
     names: string[],
@@ -291,6 +340,16 @@ export function createNotesStore(db: Database.Database): NotesStore {
             lineIndex: i,
           });
         }
+      }
+    }
+
+    // Lines like "Priya: send deck" in other notes are Priya's too.
+    const seen = new Set(items.map((item) => item.id));
+    for (const personId of matchedPersonIds) {
+      for (const item of getOwnedNoteItems(personId)) {
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
+        items.push(item);
       }
     }
 
@@ -502,5 +561,6 @@ export function createNotesStore(db: Database.Database): NotesStore {
     searchNotes,
     getNotesForEntity,
     setChecklistItem,
+    getOwnedNoteItems,
   };
 }

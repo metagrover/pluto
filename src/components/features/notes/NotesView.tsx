@@ -46,6 +46,7 @@ import {
 } from '../../../api/tasks';
 import type { MeetingStartContext } from '../../../types/meetingStart';
 import type { Note, NoteType, SaveNoteInput } from '../../../types/notes';
+import { ownerOfLine } from '../../../utils/noteOwner';
 import { Logo } from '../../Brand/Logo';
 import { EmptyCanvas } from '../../ui/EmptyCanvas';
 import {
@@ -489,6 +490,10 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
   );
   const [searchQuery, setSearchQuery] = useState('');
   const [entities, setEntities] = useState<EntityOption[]>([]);
+  const ownerPeople = useMemo(
+    () => entities.filter((entity) => entity.type === 'person'),
+    [entities],
+  );
   const [calendarEvents, setCalendarEvents] = useState<
     Array<{
       title: string;
@@ -3776,6 +3781,26 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
                                         : 'text-pro-text-main'
                                     }`}
                                   />
+                                  {(() => {
+                                    if (block.checked) return null;
+                                    const owner = ownerOfLine(
+                                      block.text,
+                                      ownerPeople,
+                                    );
+                                    if (!owner || owner.id === editTargetId)
+                                      return null;
+                                    const first = owner.name
+                                      .trim()
+                                      .split(/\s+/)[0];
+                                    return (
+                                      <span
+                                        className="note-owner-label"
+                                        title={`Also listed under “Next time with ${owner.name}” and in prep for meetings with them`}
+                                      >
+                                        On {first}’s list
+                                      </span>
+                                    );
+                                  })()}
                                 </li>
                               ) : block.type === 'divider' ? (
                                 <div

@@ -5226,6 +5226,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('NOTES_FOR_ENTITY', (_event, entityId) =>
     db.notesStore.getNotesForEntity(entityId),
   );
+  ipcMain.handle('NOTES_OWNED_ITEMS', (_event, personId) =>
+    typeof personId === 'string' && personId.length <= 300
+      ? db.notesStore.getOwnedNoteItems(personId)
+      : [],
+  );
   // "Next time with …" items that came up in the latest meeting with them.
   ipcMain.handle('NEXT_TIME_DISCUSSED', (_event, input) => {
     const personId = input?.personId;
@@ -5248,7 +5253,7 @@ app.whenReady().then(async () => {
       ? (db.getMeeting(latest.id) as db.PersistedMeeting | undefined)
       : undefined;
     if (!latest || !meeting) return [];
-    const noteUpdatedAt = Object.fromEntries(
+    const noteUpdatedAt: Record<string, string> = Object.fromEntries(
       db.notesStore
         .getNotesForEntity(personId)
         .map((note: { id: string; updatedAt: string }) => [
@@ -5256,6 +5261,14 @@ app.whenReady().then(async () => {
           note.updatedAt,
         ]),
     );
+    // Items can also come from other notes ("Priya: send deck").
+    for (const noteId of new Set<string>(
+      items.map((item: NextTimeItem) => item.noteId),
+    )) {
+      if (noteUpdatedAt[noteId]) continue;
+      const note = db.notesStore.getNote(noteId);
+      if (note) noteUpdatedAt[noteId] = note.updatedAt;
+    }
     return findDiscussedItems({
       items,
       noteUpdatedAt,

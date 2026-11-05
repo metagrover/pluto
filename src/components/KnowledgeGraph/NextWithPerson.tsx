@@ -4,10 +4,14 @@ import {
   type NextTimeDiscussedMark,
   getNextTimeDiscussed,
   getNotesForEntity,
+  getOwnedNoteItems,
+  openNoteInApp,
   saveNote,
   setNoteChecklistItem,
+  subscribeNotesChanged,
 } from '../../api/notes';
-import type { Note } from '../../types/notes';
+import type { Note, NoteAgendaItem } from '../../types/notes';
+import { splitOwnerPrefix } from '../../utils/noteOwner';
 
 export interface NextItem {
   key: string;
@@ -15,7 +19,29 @@ export interface NextItem {
   lineIndex: number;
   text: string;
   checked: boolean;
+  /** For a line like "Priya: send deck" in another note: that note's title. */
+  fromNoteTitle?: string;
 }
+
+/** Shown without the person's name, which the heading already gives. */
+const itemLabel = (item: NextItem) => {
+  if (!item.fromNoteTitle) return item.text;
+  const rest = splitOwnerPrefix(item.text)?.rest ?? item.text;
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+};
+
+/** Open "Priya: …" lines from other notes, as Next-time items. */
+export const ownedNextItems = (items: NoteAgendaItem[]): NextItem[] =>
+  items
+    .filter((item) => !item.checked && typeof item.lineIndex === 'number')
+    .map((item) => ({
+      key: `${item.noteId}:${item.lineIndex}`,
+      noteId: item.noteId,
+      lineIndex: item.lineIndex as number,
+      text: item.text,
+      checked: false,
+      fromNoteTitle: item.noteTitle || 'Untitled note',
+    }));
 
 const HIDDEN_MARKS_KEY = 'pluto.next-time-hidden-marks';
 const readHiddenMarks = (): string[] => {
@@ -112,7 +138,28 @@ export const NextWithPerson = ({
   onStartMeeting?: () => void;
   onOpenMeeting?: (meetingId: string) => void;
 }) => {
-  const open = useMemo(() => openItemsFromNotes(notes), [notes]);
+  const [owned, setOwned] = useState<NextItem[]>([]);
+  useEffect(() => {
+    let current = true;
+    const load = () =>
+      void getOwnedNoteItems(person.id)
+        .then((items) => {
+          if (current) setOwned(ownedNextItems(items));
+        })
+        .catch(() => {
+          if (current) setOwned([]);
+        });
+    load();
+    const unsubscribe = subscribeNotesChanged(load);
+    return () => {
+      current = false;
+      unsubscribe();
+    };
+  }, [person.id]);
+  const open = useMemo(
+    () => [...openItemsFromNotes(notes), ...owned],
+    [notes, owned],
+  );
   const [marks, setMarks] = useState<NextTimeDiscussedMark[]>([]);
   const [hiddenMarks, setHiddenMarks] = useState<string[]>(readHiddenMarks);
   const openKey = open.map((item) => `${item.key}:${item.text}`).join('\n');
@@ -125,7 +172,11 @@ export const NextWithPerson = ({
     }
     void getNextTimeDiscussed(
       person.id,
-      open.map(({ key, noteId, text }) => ({ key, noteId, text })),
+      open.map((item) => ({
+        key: item.key,
+        noteId: item.noteId,
+        text: itemLabel(item),
+      })),
     )
       .then((next) => {
         if (current) setMarks(next);
@@ -247,9 +298,20 @@ export const NextWithPerson = ({
                   <span
                     className={item.checked ? 'line-through opacity-60' : ''}
                   >
-                    {item.text}
+                    {itemLabel(item)}
                   </span>
                 </label>
+                {item.fromNoteTitle ? (
+                  <p className="next-from-note">
+                    <span>From</span>
+                    <button
+                      type="button"
+                      onClick={() => openNoteInApp(item.noteId)}
+                    >
+                      {item.fromNoteTitle}
+                    </button>
+                  </p>
+                ) : null}
                 {mark ? (
                   <p className="next-discussed">
                     <span>Came up in</span>
@@ -269,7 +331,7 @@ export const NextWithPerson = ({
                     <button
                       type="button"
                       className="next-discussed__hide"
-                      aria-label={`Hide “came up” for ${item.text}`}
+                      aria-label={`Hide “came up” for ${itemLabel(item)}`}
                       title="It didn’t come up"
                       onClick={() => hideMark(item, mark)}
                     >

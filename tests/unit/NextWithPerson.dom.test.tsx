@@ -8,6 +8,9 @@ const notesApi = vi.hoisted(() => ({
   setNoteChecklistItem: vi.fn(),
   getNotesForEntity: vi.fn(async () => []),
   getNextTimeDiscussed: vi.fn(async () => [] as unknown[]),
+  getOwnedNoteItems: vi.fn(async () => [] as unknown[]),
+  openNoteInApp: vi.fn(),
+  subscribeNotesChanged: vi.fn(() => () => {}),
 }));
 vi.mock('../../src/api/notes', () => notesApi);
 
@@ -195,4 +198,45 @@ it('says softly when an item came up in the latest meeting, and can hide it', as
   await act(async () => hide.click());
   expect(host.textContent).not.toContain('Came up in');
   expect(host.textContent).toContain('Hiring plan for Q1');
+});
+
+it('lists "Priya: …" lines from other notes without her name, with where they are', async () => {
+  notesApi.getOwnedNoteItems.mockResolvedValue([
+    {
+      id: 'g-line-2',
+      noteId: 'g',
+      noteTitle: 'Acme sync',
+      text: 'Priya: send deck',
+      checked: false,
+      lineIndex: 2,
+    },
+    {
+      id: 'g-line-3',
+      noteId: 'g',
+      noteTitle: 'Acme sync',
+      text: 'Priya: book room',
+      checked: true,
+      lineIndex: 3,
+    },
+  ]);
+  await act(async () =>
+    root.render(<NextWithPerson person={priya} notes={[]} />),
+  );
+  expect(notesApi.getOwnedNoteItems).toHaveBeenCalledWith('p1');
+  expect(host.textContent).toContain('Send deck');
+  expect(host.textContent).not.toContain('Priya: send deck');
+  expect(host.textContent).not.toContain('book room');
+  const from = [...host.querySelectorAll('button')].find(
+    (b) => b.textContent === 'Acme sync',
+  )!;
+  await act(async () => from.click());
+  expect(notesApi.openNoteInApp).toHaveBeenCalledWith('g');
+  const box = host.querySelector('input[type="checkbox"]') as HTMLInputElement;
+  await act(async () => box.click());
+  expect(notesApi.setNoteChecklistItem).toHaveBeenCalledWith({
+    noteId: 'g',
+    lineIndex: 2,
+    text: 'Priya: send deck',
+    checked: true,
+  });
 });
