@@ -622,6 +622,7 @@ describe('meeting analysis run coordinator', () => {
 
   it('persists one content-free terminal metric from provider stage events', async () => {
     const upsertMeetingAnalysisRunMetric = vi.fn();
+    const onRunMetric = vi.fn();
     const knowledgePause = { acquire: vi.fn(), release: vi.fn() };
     const generateStructuredAnalysis = vi.fn(
       async (
@@ -673,6 +674,7 @@ describe('meeting analysis run coordinator', () => {
           transcript_status: 'validated',
           transcript_integrity_json: JSON.stringify({ verified: true }),
           user_notes: '',
+          ended_at: '2026-11-04T10:00:00.000Z',
         }),
         getMeetingAnalysisPublicationRevisions: () => ({
           sourceRevision: 'metric-source',
@@ -695,6 +697,7 @@ describe('meeting analysis run coordinator', () => {
       }),
       knowledgeSynthesisPause: knowledgePause,
       createRunId: () => 'metric-run-id',
+      onRunMetric,
     });
 
     await coordinator.generateAndPublishMeetingNotes({
@@ -745,6 +748,19 @@ describe('meeting analysis run coordinator', () => {
     expect(
       upsertMeetingAnalysisRunMetric.mock.calls[0]![0].metrics.queueMs,
     ).toBeGreaterThanOrEqual(25);
+    // The same metric reaches the log hook with the meeting's end time.
+    expect(onRunMetric).toHaveBeenCalledTimes(1);
+    expect(onRunMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 'metric-run-id',
+        status: 'published',
+        meetingEndedAt: '2026-11-04T10:00:00.000Z',
+        metrics: upsertMeetingAnalysisRunMetric.mock.calls[0]![0].metrics,
+      }),
+    );
+    expect(JSON.stringify(onRunMetric.mock.calls)).not.toContain(
+      'We agreed to ship.',
+    );
   });
 
   it('does not let terminal metric persistence failure replace a deletion cancellation', async () => {

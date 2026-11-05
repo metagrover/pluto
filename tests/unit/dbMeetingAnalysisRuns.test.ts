@@ -1247,6 +1247,10 @@ describe('meeting analysis run publication', () => {
       status: 'failed',
       errorCode: 'notes_context_exhausted',
     });
+    // The meeting's end time comes along so logs can show end-to-notes delay.
+    expect(listMeetingAnalysisRunMetrics({ limit: 1 })[0]).toHaveProperty(
+      'meetingEndedAt',
+    );
   });
 
   it.each(['current', 'renamed', 'stale', 'invalid'])(

@@ -238,6 +238,7 @@ const plutoLog = createLogger('Pluto');
 const captureLog = createLogger('Capture');
 const audioCapLog = createLogger('AudioCap');
 const llmLog = createLogger('LLM');
+const notesTimingLog = createLogger('Notes timings');
 
 const ffprobePath = resolveUnpackedExecutablePath(ffprobeStatic.path);
 
@@ -899,6 +900,7 @@ import {
   resolveLocalThroughput,
 } from './llm/localInferenceProfile';
 import { notesWriterPolicy } from './llm/meetingNotesBudget';
+import { formatMeetingNotesRunTimings } from './llm/meetingNotesRunMetrics';
 import { createNotesSource } from './llm/meetingNotesSource';
 import {
   MEETING_NOTES_DEFAULT_TEMPLATE_SETTING,
@@ -1003,6 +1005,8 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   getSettings: () => getAllSettings(db),
   getProvider,
   knowledgeSynthesisPause,
+  onRunMetric: (record) =>
+    notesTimingLog.info(formatMeetingNotesRunTimings(record)),
   onUpdated: (meetingId) => {
     invalidateDreamingCatalog();
     for (const win of BrowserWindow.getAllWindows()) {
@@ -1460,6 +1464,13 @@ app.whenReady().then(async () => {
   );
   app.on('before-quit', () => chatGPTAuth.cancelSignIn());
   registerBugReportHandlers(db.getSetting);
+  try {
+    // Recent saved runs, oldest first, so timings from before this build are readable.
+    for (const run of db.listMeetingAnalysisRunMetrics({ limit: 20 }).reverse())
+      notesTimingLog.info(`history ${formatMeetingNotesRunTimings(run)}`);
+  } catch (error) {
+    notesTimingLog.warn('history unavailable', error);
+  }
   const requestedEncryptionRollout = process.env[ENCRYPTION_ROLLOUT_ENV];
   const encryptionRollout = resolveEncryptionRolloutPolicy({
     isPackaged: app.isPackaged,
