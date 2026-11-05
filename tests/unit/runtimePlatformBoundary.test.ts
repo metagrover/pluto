@@ -11,14 +11,15 @@ describe('renderer runtime platform boundary', () => {
   });
 
   it('installs a browser-safe descriptor before the IPC fallback', () => {
-    const fallback = readFileSync('src/utils/browserIpcFallback.ts', 'utf8');
-    const platformPosition = fallback.indexOf('window.plutoRuntimePlatform =');
-    const ipcGuardPosition = fallback.indexOf(
-      'if (window.ipcRenderer) return;',
-    );
+    const runtime = readFileSync('src/utils/runtimeEnvironment.ts', 'utf8');
+    const platformPosition = runtime.indexOf('window.plutoRuntimePlatform =');
+    const ipcGuardPosition = runtime.indexOf('return !window.ipcRenderer;');
 
     expect(platformPosition).toBeGreaterThan(-1);
     expect(platformPosition).toBeLessThan(ipcGuardPosition);
-    expect(fallback).toContain("arch: 'unknown'");
+    expect(runtime).toContain("arch: 'unknown'");
+
+    const fallback = readFileSync('src/utils/browserIpcFallback.ts', 'utf8');
+    expect(fallback).toContain('if (!prepareRuntimeEnvironment()) return;');
   });
 });
