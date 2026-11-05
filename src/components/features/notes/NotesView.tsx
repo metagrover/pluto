@@ -581,7 +581,19 @@ export const NotesView = ({
   const pendingSaveRef = useRef<{
     noteId: string;
     timeout: NodeJS.Timeout;
+    save: () => Promise<void>;
   } | null>(null);
+  // Leaving the workspace saves a pending edit now rather than on a timer
+  // that outlives the editor.
+  useEffect(
+    () => () => {
+      const pending = pendingSaveRef.current;
+      if (!pending) return;
+      clearTimeout(pending.timeout);
+      void pending.save();
+    },
+    [],
+  );
   // Which note the edit buffers were loaded from, and the content of our
   // recent saves, so refresh echoes of our own saves are ignored.
   const loadedNoteIdRef = useRef<string | null>(null);
@@ -935,6 +947,7 @@ export const NotesView = ({
         pendingSaveRef.current = {
           noteId: selectedNoteId,
           timeout: setTimeout(performSave, 400),
+          save: performSave,
         };
       }
     },

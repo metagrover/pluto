@@ -306,6 +306,51 @@ describe('NotesView workspace', () => {
     }
   });
 
+  it('saves a pending edit when the workspace closes instead of on a later timer', async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        root.render(<NotesView initialNoteId="note-scratchpad" />);
+      });
+      const editBtn = container.querySelector(
+        'button[aria-label="Edit note content"]',
+      ) as HTMLButtonElement | null;
+      if (editBtn) {
+        await act(async () => {
+          editBtn.click();
+        });
+      }
+      const textarea = container.querySelector(
+        '#note-textarea-editor',
+      ) as HTMLTextAreaElement;
+      invoke.mockClear();
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype,
+          'value',
+        )?.set?.call(textarea, '# Daily Scratchpad\n\nLeaving now');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(invoke).not.toHaveBeenCalledWith('NOTES_SAVE', expect.anything());
+
+      await act(async () => root.unmount());
+      expect(invoke).toHaveBeenCalledWith(
+        'NOTES_SAVE',
+        expect.objectContaining({
+          id: 'note-scratchpad',
+          content: expect.stringContaining('Leaving now'),
+        }),
+      );
+      // The debounce timer no longer fires into whatever runs next.
+      invoke.mockClear();
+      await vi.advanceTimersByTimeAsync(650);
+      expect(invoke).not.toHaveBeenCalledWith('NOTES_SAVE', expect.anything());
+      root = createRoot(container);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('automatically syncs completed status to Tasks when toggling an explicit task item', async () => {
     await act(async () => {
       root.render(<NotesView initialNoteId="note-person" />);
