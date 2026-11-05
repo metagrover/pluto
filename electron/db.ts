@@ -1620,6 +1620,7 @@ const saveMeetingRecord = (incomingMeeting: PersistedMeeting) => {
     payloadLifecycleStatus = null;
   }
   const trustRecord = parseIntegrityRecord(meeting.transcript_integrity_json);
+  noteTranscriptValidationRetryLease(readRetryLease(trustRecord)?.deadlineAt);
   if (trustRecord.schemaVersion === 2) {
     const parsedTrust = parseTranscriptTrustEnvelope(
       meeting.transcript_integrity_json,
@@ -2602,7 +2603,7 @@ export const claimMeetingTranscriptValidationRetry = (
       current.transcript_json,
       'validating',
     );
-    return (
+    const claimed =
       db
         .prepare(
           `UPDATE meetings
@@ -2615,8 +2616,9 @@ export const claimMeetingTranscriptValidationRetry = (
           JSON.stringify(nextIntegrity),
           nextTranscriptJson,
           String(meetingId),
-        ).changes === 1
-    );
+        ).changes === 1;
+    if (claimed) noteTranscriptValidationRetryLease(lease.deadlineAt);
+    return claimed;
   })();
 
 export const updateMeetingTranscriptValidationRetryStage = (
@@ -2673,8 +2675,30 @@ export const failMeetingTranscriptValidationRetry = (
     );
   })();
 
-export const recoverExpiredTranscriptValidationRetries = (nowMs = Date.now()) =>
-  db.transaction(() => {
+// List reads used to sweep every meeting for expired validation-retry leases.
+// The sweep now runs only when the earliest known lease can have expired, and
+// at least once a minute as a backstop for any lease written another way.
+const TRANSCRIPT_RETRY_RECOVERY_MAX_INTERVAL_MS = 60_000;
+let transcriptRetryRecoveryDueAtMs = 0;
+
+const noteTranscriptValidationRetryLease = (deadlineAt: string | undefined) => {
+  if (deadlineAt === undefined) return;
+  const deadlineMs = Date.parse(deadlineAt);
+  transcriptRetryRecoveryDueAtMs = Number.isFinite(deadlineMs)
+    ? Math.min(transcriptRetryRecoveryDueAtMs, deadlineMs)
+    : 0;
+};
+
+const recoverExpiredTranscriptValidationRetriesIfDue = () => {
+  if (Date.now() < transcriptRetryRecoveryDueAtMs) return;
+  recoverExpiredTranscriptValidationRetries();
+};
+
+export const recoverExpiredTranscriptValidationRetries = (
+  nowMs = Date.now(),
+) => {
+  let nextDueAtMs = nowMs + TRANSCRIPT_RETRY_RECOVERY_MAX_INTERVAL_MS;
+  const recovered = db.transaction(() => {
     const rows = db
       .prepare(
         `SELECT id, transcript_status, transcript_integrity_json, transcript_json
@@ -2694,6 +2718,7 @@ export const recoverExpiredTranscriptValidationRetries = (nowMs = Date.now()) =>
       const lease = readRetryLease(integrity);
       if (!lease) continue;
       if (Date.parse(lease.deadlineAt) > nowMs) {
+        nextDueAtMs = Math.min(nextDueAtMs, Date.parse(lease.deadlineAt));
         if (row.transcript_status === 'validating') {
           const nextTranscriptJson = withTranscriptLifecycleStatus(
             row.transcript_json,
@@ -2744,9 +2769,12 @@ export const recoverExpiredTranscriptValidationRetries = (nowMs = Date.now()) =>
     }
     return recovered;
   })();
+  transcriptRetryRecoveryDueAtMs = nextDueAtMs;
+  return recovered;
+};
 
 export const getMeetings = () => {
-  recoverExpiredTranscriptValidationRetries();
+  recoverExpiredTranscriptValidationRetriesIfDue();
   return db
     .prepare(
       'SELECT * FROM meetings ORDER BY COALESCE(started_at, created_at) DESC',
@@ -2792,7 +2820,7 @@ export const getAskPlutoMeeting = (
 export const getMeetingSummaries = (
   meetingId?: string | number,
 ): MeetingSummary[] => {
-  recoverExpiredTranscriptValidationRetries();
+  recoverExpiredTranscriptValidationRetriesIfDue();
   const statement = db.prepare(
     `SELECT
          m.id,

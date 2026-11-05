@@ -3,42 +3,42 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(./Inter-Regular.ttf) format('truetype');
+  src: url(./Inter-Regular.woff2) format('woff2');
 }
 @font-face {
   font-family: 'Inter';
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url(./Inter-Medium.ttf) format('truetype');
+  src: url(./Inter-Medium.woff2) format('woff2');
 }
 @font-face {
   font-family: 'Inter';
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url(./Inter-SemiBold.ttf) format('truetype');
+  src: url(./Inter-SemiBold.woff2) format('woff2');
 }
 @font-face {
   font-family: 'Lora';
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(./Lora-Italic.ttf) format('truetype');
+  src: url(./Lora-Italic.woff2) format('woff2');
 }
 @font-face {
   font-family: 'Lora';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(./Lora-Regular.ttf) format('truetype');
+  src: url(./Lora-Regular.woff2) format('woff2');
 }
 @font-face {
   font-family: 'Lora';
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url(./Lora-SemiBold.ttf) format('truetype');
+  src: url(./Lora-SemiBold.woff2) format('woff2');
 }
 
 @font-face {
@@ -46,5 +46,5 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url(./JetBrainsMono.ttf) format('truetype');
+  src: url(./JetBrainsMono.woff2) format('woff2');
 }

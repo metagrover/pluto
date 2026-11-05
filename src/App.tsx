@@ -1,5 +1,12 @@
 import { PanelLeft, Plus } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { flushSync } from 'react-dom';
 import { openMeetingPrep } from './api/meetingPrep';
 import { SidePanelSlotContext } from './components/layout/SidePanelSlot';
@@ -46,7 +53,7 @@ import {
 import { updateAlertStatus } from './api/intelligence';
 import type { Entity } from './api/knowledgeGraph';
 import { CalendarStartPromptBanner } from './components/alerts/CalendarStartPromptBanner';
-import { AskPluto, type AskPlutoMessage } from './components/features/AskPluto';
+import type { AskPlutoMessage } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
 import { IdentityProfileInvitation } from './components/features/IdentityProfileInvitation';
@@ -55,7 +62,6 @@ import { NotesConnectionsNotice } from './components/features/NotesConnectionsNo
 import { PreMeetingBriefSheet } from './components/features/PreMeetingBriefSheet';
 import { RecordingFinalizingView } from './components/features/RecordingFinalizingView';
 import { RECORDING_SCRATCHPAD_STORAGE_KEY } from './components/features/RecordingMeetingRail';
-import { TasksView } from './components/features/TasksView';
 import { ZenMode } from './components/features/ZenMode';
 import {
   DASHBOARD_ACTION_COMPLETION_ERROR,
@@ -73,7 +79,6 @@ import type {
   MeetingRetryKind,
   MeetingRetryOperation,
 } from './components/features/meetingFailurePresentation';
-import { NotesView } from './components/features/notes/NotesView';
 import { ProjectCommitments } from './components/features/projects/ProjectCommitments';
 import type {
   CaptureHealthState,
@@ -129,17 +134,21 @@ import {
   updateEntityStatus,
   upsertEntity,
 } from './api/knowledgeGraph';
-// Knowledge Graph
-import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
-import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecutionTab';
-import { AllMeetingsTab } from './components/features/AllMeetingsTab';
-import { LocalSourcesTab } from './components/features/LocalSourcesTab';
 import { ReportProblemDialog } from './components/features/ReportProblemButton';
-
+// Knowledge Graph
 import {
+  AllMeetingsTab,
+  AskPluto,
+  LocalSourcesTab,
+  NotesView,
+  PeopleTab,
+  ProjectsExecutionTab,
   SettingsTab,
-  type SettingsTabId,
-} from './components/features/SettingsTab';
+  TasksView,
+  preloadLazyViews,
+} from './lazyViews';
+
+import type { SettingsTabId } from './components/features/SettingsTab';
 // Overlays
 import { DatabaseRecoveryOverlay } from './components/overlays/DatabaseRecoveryOverlay';
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
@@ -151,12 +160,12 @@ import { prepNotesText } from './components/features/PrepLinkedNotes';
 // Types
 import type { Meeting, MeetingSummary } from './types';
 import type { MeetingAskPlutoConversationMessage } from './types/askPluto';
-import { previewMeeting } from './utils/browserIpcFallback';
 import {
   isGrantedStatus,
   refreshRecordingPermissions,
   shouldRunBootPermissionProbe,
 } from './utils/permissions';
+import { previewMeeting } from './utils/previewMeeting';
 import {
   type TranscriptionLanguage,
   resolveTranscriptionLanguage,
@@ -460,6 +469,14 @@ function App() {
   const [calendarSuggestionError, setCalendarSuggestionError] = useState<
     string | null
   >(null);
+
+  useEffect(() => {
+    // Warm the secondary tabs after first paint so navigation stays instant.
+    const idle =
+      window.requestIdleCallback ?? ((run) => window.setTimeout(run, 1));
+    const handle = idle(() => void preloadLazyViews());
+    return () => (window.cancelIdleCallback ?? window.clearTimeout)(handle);
+  }, []);
 
   useEffect(() => {
     if (!window.ipcRenderer?.on || !window.ipcRenderer?.send) return;
@@ -2577,342 +2594,357 @@ function App() {
                       />
                     </div>
                   )}
-                {preMeetingBriefVisible ? (
-                  <PreMeetingBriefSheet
-                    visible={preMeetingBriefVisible}
-                    event={preMeetingBriefEvent}
-                    onStartMeeting={handleStartFromPrompt}
-                    recordingBusy={activeRecording}
-                    onClose={() => setPreMeetingBriefVisible(false)}
-                    onOpenMeeting={(meetingId) => {
-                      setPreMeetingBriefVisible(false);
-                      handleOpenMeeting(meetingId, {
-                        label: 'Back to Dashboard',
-                      });
-                    }}
-                  />
-                ) : finalizingMeeting ? (
-                  <RecordingFinalizingView meeting={finalizingMeeting} />
-                ) : selectedMeetingId ? (
-                  <MeetingView
-                    key={selectedMeeting?.id}
-                    reminderEntityId={
-                      reminderContext?.meetingId === String(selectedMeetingId)
-                        ? reminderContext.entityId
-                        : undefined
-                    }
-                    onDismissReminder={() => setReminderContext(null)}
-                    selectedMeeting={selectedMeeting}
-                    isLoadingDetail={
-                      selectedMeetingId != null &&
-                      (!selectedMeetingDetail ||
-                        String(selectedMeetingDetail.id) !==
-                          String(selectedMeetingId))
-                    }
-                    citationTarget={
-                      askPlutoCitationTarget?.meetingId ===
-                      String(selectedMeeting?.id)
-                        ? askPlutoCitationTarget
-                        : undefined
-                    }
-                    editingTitle={editingTitle}
-                    setEditingTitle={setEditingTitle}
-                    titleValue={titleValue}
-                    setTitleValue={setTitleValue}
-                    fetchMeetings={refreshSelectedMeetingState}
-                    handleCopySummary={handleCopySummary}
-                    copySuccess={copySuccess}
-                    handleDeleteMeeting={handleDeleteMeeting}
-                    highlightEntities={highlightEntities}
-                    transcriptVisible={transcriptVisible}
-                    setTranscriptVisible={setTranscriptVisible}
-                    onRetryTranscriptValidation={(kind) => {
-                      void handleRetryTranscriptValidation(undefined, kind);
-                    }}
-                    transcriptValidationRetryOperation={
-                      transcriptValidationRetryOperation
-                    }
-                    calendarContext={meetingCalendarContext}
-                    exportIncludeTranscript={exportIncludeTranscript}
-                    meetingNotesDefaultTemplate={
-                      meetingNotesTemplateSettings.defaultTemplateId
-                    }
-                    onBack={handleBack}
-                    backLabel={currentBackLabel}
-                    onOpenPerson={handleOpenPerson}
-                    onOpenMeeting={(meetingId) =>
-                      handleOpenMeeting(meetingId, { label: 'Back to meeting' })
-                    }
-                  />
-                ) : activeTab === 'hub' ? (
-                  <>
-                    <NotesConnectionsNotice
-                      onOpenSettings={() => {
-                        setSettingsInitialTab('advanced');
-                        setSettingsNavigationToken((token) => token + 1);
-                        setSelectedMeetingId(null);
-                        setActiveTab('settings');
+                <Suspense fallback={null}>
+                  {preMeetingBriefVisible ? (
+                    <PreMeetingBriefSheet
+                      visible={preMeetingBriefVisible}
+                      event={preMeetingBriefEvent}
+                      onStartMeeting={handleStartFromPrompt}
+                      recordingBusy={activeRecording}
+                      onClose={() => setPreMeetingBriefVisible(false)}
+                      onOpenMeeting={(meetingId) => {
+                        setPreMeetingBriefVisible(false);
+                        handleOpenMeeting(meetingId, {
+                          label: 'Back to Dashboard',
+                        });
                       }}
                     />
-                    <IdentityProfileInvitation
-                      onOpenSettings={() => {
-                        setActiveTab('settings');
-                        setSelectedMeetingId(null);
+                  ) : finalizingMeeting ? (
+                    <RecordingFinalizingView meeting={finalizingMeeting} />
+                  ) : selectedMeetingId ? (
+                    <MeetingView
+                      key={selectedMeeting?.id}
+                      reminderEntityId={
+                        reminderContext?.meetingId === String(selectedMeetingId)
+                          ? reminderContext.entityId
+                          : undefined
+                      }
+                      onDismissReminder={() => setReminderContext(null)}
+                      selectedMeeting={selectedMeeting}
+                      isLoadingDetail={
+                        selectedMeetingId != null &&
+                        (!selectedMeetingDetail ||
+                          String(selectedMeetingDetail.id) !==
+                            String(selectedMeetingId))
+                      }
+                      citationTarget={
+                        askPlutoCitationTarget?.meetingId ===
+                        String(selectedMeeting?.id)
+                          ? askPlutoCitationTarget
+                          : undefined
+                      }
+                      editingTitle={editingTitle}
+                      setEditingTitle={setEditingTitle}
+                      titleValue={titleValue}
+                      setTitleValue={setTitleValue}
+                      fetchMeetings={refreshSelectedMeetingState}
+                      handleCopySummary={handleCopySummary}
+                      copySuccess={copySuccess}
+                      handleDeleteMeeting={handleDeleteMeeting}
+                      highlightEntities={highlightEntities}
+                      transcriptVisible={transcriptVisible}
+                      setTranscriptVisible={setTranscriptVisible}
+                      onRetryTranscriptValidation={(kind) => {
+                        void handleRetryTranscriptValidation(undefined, kind);
                       }}
+                      transcriptValidationRetryOperation={
+                        transcriptValidationRetryOperation
+                      }
+                      calendarContext={meetingCalendarContext}
+                      exportIncludeTranscript={exportIncludeTranscript}
+                      meetingNotesDefaultTemplate={
+                        meetingNotesTemplateSettings.defaultTemplateId
+                      }
+                      onBack={handleBack}
+                      backLabel={currentBackLabel}
+                      onOpenPerson={handleOpenPerson}
+                      onOpenMeeting={(meetingId) =>
+                        handleOpenMeeting(meetingId, {
+                          label: 'Back to meeting',
+                        })
+                      }
                     />
-                    <Dashboard
-                      model={dashboardHome.model}
-                      loading={dashboardHome.loading}
-                      onStartRecording={startRecordingFromEmptyState}
-                      isRecording={isRecording}
-                      setSelectedMeetingId={(id) => {
-                        if (id != null) {
-                          handleOpenMeeting(id, { label: 'Back to Dashboard' });
-                        } else {
+                  ) : activeTab === 'hub' ? (
+                    <>
+                      <NotesConnectionsNotice
+                        onOpenSettings={() => {
+                          setSettingsInitialTab('advanced');
+                          setSettingsNavigationToken((token) => token + 1);
                           setSelectedMeetingId(null);
+                          setActiveTab('settings');
+                        }}
+                      />
+                      <IdentityProfileInvitation
+                        onOpenSettings={() => {
+                          setActiveTab('settings');
+                          setSelectedMeetingId(null);
+                        }}
+                      />
+                      <Dashboard
+                        model={dashboardHome.model}
+                        loading={dashboardHome.loading}
+                        onStartRecording={startRecordingFromEmptyState}
+                        isRecording={isRecording}
+                        setSelectedMeetingId={(id) => {
+                          if (id != null) {
+                            handleOpenMeeting(id, {
+                              label: 'Back to Dashboard',
+                            });
+                          } else {
+                            setSelectedMeetingId(null);
+                          }
+                        }}
+                        setActiveTab={setActiveTab}
+                        updatingTaskIds={updatingDashboardTaskIds}
+                        actionError={dashboardActionError}
+                        dashboardError={dashboardHome.error}
+                        onRetryDashboard={dashboardHome.refresh}
+                        handleCompleteTask={handleCompleteTask}
+                        handleReviewCommitment={handleReviewDashboardCommitment}
+                        handleCreateCommitment={handleCreateDashboardCommitment}
+                        handleEditCommitment={handleEditDashboardCommitment}
+                        handleSetDailyCommitments={
+                          handleSetDashboardDailyCommitments
                         }
-                      }}
-                      setActiveTab={setActiveTab}
-                      updatingTaskIds={updatingDashboardTaskIds}
-                      actionError={dashboardActionError}
-                      dashboardError={dashboardHome.error}
-                      onRetryDashboard={dashboardHome.refresh}
-                      handleCompleteTask={handleCompleteTask}
-                      handleReviewCommitment={handleReviewDashboardCommitment}
-                      handleCreateCommitment={handleCreateDashboardCommitment}
-                      handleEditCommitment={handleEditDashboardCommitment}
-                      handleSetDailyCommitments={
-                        handleSetDashboardDailyCommitments
-                      }
-                      handleUpdateAttentionStatus={
-                        handleUpdateDashboardAttentionStatus
-                      }
-                      calendarSnapshot={calendarSnapshot}
-                      calendarEvents={calendarEvents}
-                      calendarLoading={calendarLoading}
-                      onCalendarConnect={handleCalendarConnect}
-                      onCalendarSelect={handleCalendarSelect}
-                      onCalendarSelectCalendars={handleCalendarSelectCalendars}
-                      onCalendarRefresh={handleCalendarRefresh}
-                      onCalendarOpenSettings={handleCalendarOpenSettings}
-                      onPrepareMeeting={handlePrepareMeeting}
-                    />
-                  </>
-                ) : activeTab === 'notes' ? (
-                  <NotesView
-                    initialNoteId={selectedNoteId}
-                    onStartMeeting={
-                      captureAction.command === 'start' && captureAction.enabled
-                        ? (start) => void handleStartMeetingWith(start)
-                        : undefined
-                    }
-                    onOpenTask={(id) => {
-                      setSelectedTaskId(id);
-                      setActiveTab('tasks');
-                    }}
-                    onOpenMeeting={(id) =>
-                      handleOpenMeeting(id, { label: 'Back to Notes' })
-                    }
-                    onOpenPerson={(id, fromNoteId) => {
-                      // Back returns to this note.
-                      if (fromNoteId) setSelectedNoteId(fromNoteId);
-                      handleOpenPerson(id, { label: 'Back to Notes' });
-                    }}
-                  />
-                ) : activeTab === 'tasks' ? (
-                  <TasksView
-                    initialTaskId={selectedTaskId}
-                    onOpenMeeting={(id) =>
-                      handleOpenMeeting(id, { label: 'Back to Tasks' })
-                    }
-                  />
-                ) : activeTab === 'people' ? (
-                  <div className="mx-auto w-full max-w-[1180px] animate-in pb-20">
-                    <PeopleTab
-                      selectedPersonId={selectedPersonId}
-                      onSelectPerson={setSelectedPersonId}
-                      onOpenNote={(noteId) => {
-                        setSelectedNoteId(noteId);
-                        setActiveTab('notes');
-                      }}
+                        handleUpdateAttentionStatus={
+                          handleUpdateDashboardAttentionStatus
+                        }
+                        calendarSnapshot={calendarSnapshot}
+                        calendarEvents={calendarEvents}
+                        calendarLoading={calendarLoading}
+                        onCalendarConnect={handleCalendarConnect}
+                        onCalendarSelect={handleCalendarSelect}
+                        onCalendarSelectCalendars={
+                          handleCalendarSelectCalendars
+                        }
+                        onCalendarRefresh={handleCalendarRefresh}
+                        onCalendarOpenSettings={handleCalendarOpenSettings}
+                        onPrepareMeeting={handlePrepareMeeting}
+                      />
+                    </>
+                  ) : activeTab === 'notes' ? (
+                    <NotesView
+                      initialNoteId={selectedNoteId}
                       onStartMeeting={
                         captureAction.command === 'start' &&
                         captureAction.enabled
-                          ? (person) =>
-                              void handleStartMeetingWith({
-                                title: `1:1 with ${person.name}`,
-                                participants: [person.name],
-                              })
+                          ? (start) => void handleStartMeetingWith(start)
                           : undefined
                       }
-                      onOpenMeeting={(meetingId, personContext) =>
-                        handleOpenMeeting(meetingId, {
-                          personId: selectedPersonId,
-                          personName: personContext?.name,
-                        })
-                      }
-                      backLabel={
-                        navHistory.length > 0 &&
-                        navHistory[navHistory.length - 1].meetingId != null
-                          ? currentBackLabel
-                          : undefined
-                      }
-                      onBack={
-                        navHistory.length > 0 &&
-                        navHistory[navHistory.length - 1].meetingId != null
-                          ? handleBack
-                          : undefined
-                      }
-                    />
-                  </div>
-                ) : activeTab === 'projects' ? (
-                  <div className="max-w-5xl mx-auto w-full space-y-12 animate-in pb-20">
-                    <ProjectsExecutionTab
-                      selectedProjectId={selectedProjectId}
-                      onOpenMeeting={(meetingId) =>
-                        handleOpenMeeting(meetingId, {
-                          projectId: selectedProjectId,
-                        })
-                      }
-                      onOpenPerson={(personId) => handleOpenPerson(personId)}
-                    />
-                  </div>
-                ) : activeTab === 'meetings' ? (
-                  <AllMeetingsTab
-                    meetings={safeMeetings}
-                    onStartRecording={startRecordingFromEmptyState}
-                    onOpenMeeting={(meetingId) =>
-                      handleOpenMeeting(meetingId, { label: 'All meetings' })
-                    }
-                    handleDeleteMeeting={handleDeleteMeeting}
-                  />
-                ) : SOURCES_ENABLED && activeTab === 'sources' ? (
-                  <LocalSourcesTab selectedSourceId={selectedSourceId} />
-                ) : activeTab === 'chat' ? (
-                  <div className="min-h-full w-full flex flex-col">
-                    <AskPluto
                       onOpenTask={(id) => {
                         setSelectedTaskId(id);
-                        setSelectedMeetingId(null);
                         setActiveTab('tasks');
                       }}
-                      visible={true}
-                      messages={askPlutoConversation}
-                      setMessages={setAskPlutoConversation}
-                      onClose={() => setActiveTab('hub')}
-                      onOpenSettings={(tab) => {
-                        setSettingsInitialTab(tab);
-                        setSettingsNavigationToken((token) => token + 1);
-                        setSelectedMeetingId(null);
-                        setActiveTab('settings');
+                      onOpenMeeting={(id) =>
+                        handleOpenMeeting(id, { label: 'Back to Notes' })
+                      }
+                      onOpenPerson={(id, fromNoteId) => {
+                        // Back returns to this note.
+                        if (fromNoteId) setSelectedNoteId(fromNoteId);
+                        handleOpenPerson(id, { label: 'Back to Notes' });
                       }}
-                      onOpenMeeting={(meetingId, target) => {
-                        setAskPlutoCitationTarget({ meetingId, ...target });
-                        handleOpenMeeting(meetingId, { label: 'Back to Chat' });
-                      }}
-                      onOpenArtifact={(artifactId) => {
-                        if (!SOURCES_ENABLED) return;
-                        setSelectedSourceId(artifactId);
-                        setActiveTab('sources');
-                      }}
-                      activeMeetingSnapshot={
-                        captureLifecycle.state === 'recording' &&
-                        captureLifecycle.meetingId
-                          ? {
-                              meetingId: captureLifecycle.meetingId,
-                              title: meetingTitle.trim() || 'Meeting',
-                              participants: meetingParticipants,
-                              notes: currentNotes,
-                              transcript: liveTranscript,
-                              interimText: interimTranscript,
-                              capturedAt: new Date().toISOString(),
-                            }
-                          : undefined
+                    />
+                  ) : activeTab === 'tasks' ? (
+                    <TasksView
+                      initialTaskId={selectedTaskId}
+                      onOpenMeeting={(id) =>
+                        handleOpenMeeting(id, { label: 'Back to Tasks' })
                       }
                     />
-                  </div>
-                ) : activeTab === 'settings' ? (
-                  <SettingsTab
-                    key={settingsNavigationToken}
-                    llmProvider={llmProvider}
-                    setLlmProvider={setLlmProvider}
-                    ollamaModel={ollamaModel}
-                    setOllamaModel={setOllamaModel}
-                    autoEndEnabled={autoEndEnabled}
-                    setAutoEndEnabled={setAutoEndEnabled}
-                    fetchMeetings={fetchMeetings}
-                    setSelectedMeetingId={setSelectedMeetingId}
-                    theme={theme}
-                    initialTab={settingsInitialTab}
-                    calendarSnapshot={calendarSnapshot}
-                    onCalendarSnapshotChange={(snapshot) => {
-                      void loadCalendarAgenda(snapshot);
-                    }}
-                    setTheme={(newTheme) => {
-                      setTheme(newTheme);
-                      window.ipcRenderer.invoke('SET_SETTING', {
-                        key: 'theme',
-                        value: newTheme,
-                      });
-                    }}
-                    exportIncludeTranscript={exportIncludeTranscript}
-                    setExportIncludeTranscript={setExportIncludeTranscript}
-                    calendarAutoNameEnabled={calendarAutoNameEnabled}
-                    setCalendarAutoNameEnabled={handleCalendarAutoNameToggle}
-                    calendarPromptEnabled={calendarPromptEnabled}
-                    setCalendarPromptEnabled={handleCalendarPromptToggle}
-                    fasterNotesEnabled={fasterNotesEnabled}
-                    setFasterNotesEnabled={setFasterNotesEnabled}
-                    transcriptionLanguage={transcriptionLanguage}
-                    setTranscriptionLanguage={setTranscriptionLanguage}
-                    meetingNotesTemplateSettings={meetingNotesTemplateSettings}
-                    onMeetingNotesTemplateSettingsChange={
-                      setMeetingNotesTemplateSettings
-                    }
-                  />
-                ) : (
-                  <div className="max-w-4xl mx-auto w-full space-y-24 animate-in duration-1000 text-center py-40 relative">
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pro-accent/5 rounded-full blur-[120px] pointer-events-none" />
-                    <div className="w-32 h-32 rounded-lg bg-pro-surface border border-pro-border flex items-center justify-center text-5xl mx-auto mb-10 shadow-sm  group">
-                      <span className="group-hover:rotate-12 transition-transform duration-500">
-                        {(activeTab as string) === 'people'
-                          ? '👤'
-                          : (activeTab as string) === 'projects'
-                            ? '📁'
-                            : '🎯'}
-                      </span>
-                    </div>
-                    <div className="space-y-6 relative z-10">
-                      <h2 className="text-5xl font-semibold heading-premiumer italic opacity-10">
-                        {activeTab} Terminal
-                      </h2>
-                      <h2 className="text-4xl font-semibolder">
-                        Your {activeTab} space is{' '}
-                        <span className="gradient-text">awaiting context.</span>
-                      </h2>
-                      <p className="text-lg text-pro-text-muted/60 font-medium max-w-xl mx-auto leading-relaxed">
-                        The extraction engine is indexing your local nebula.
-                        Record a session to populate this space with
-                        interconnected insights.
-                      </p>
-                    </div>
-                    <div className="pt-10 flex flex-col items-center gap-6 relative z-10">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (startSessionRef.current)
-                            void startSessionRef.current();
+                  ) : activeTab === 'people' ? (
+                    <div className="mx-auto w-full max-w-[1180px] animate-in pb-20">
+                      <PeopleTab
+                        selectedPersonId={selectedPersonId}
+                        onSelectPerson={setSelectedPersonId}
+                        onOpenNote={(noteId) => {
+                          setSelectedNoteId(noteId);
+                          setActiveTab('notes');
                         }}
-                        className="h-16 px-12 rounded-lg bg-pro-text-main dark:bg-pro-accent text-white font-semibold text-xs font-medium shadow-2xl hover:bg-pro-accent hover:scale-[1.02] transition-all "
-                      >
-                        Initialize Capture
-                      </button>
-                      <p className="text-[10px] font-semibold text-pro-text-muted/30 font-medium">
-                        Ready for M-Series Deployment
-                      </p>
+                        onStartMeeting={
+                          captureAction.command === 'start' &&
+                          captureAction.enabled
+                            ? (person) =>
+                                void handleStartMeetingWith({
+                                  title: `1:1 with ${person.name}`,
+                                  participants: [person.name],
+                                })
+                            : undefined
+                        }
+                        onOpenMeeting={(meetingId, personContext) =>
+                          handleOpenMeeting(meetingId, {
+                            personId: selectedPersonId,
+                            personName: personContext?.name,
+                          })
+                        }
+                        backLabel={
+                          navHistory.length > 0 &&
+                          navHistory[navHistory.length - 1].meetingId != null
+                            ? currentBackLabel
+                            : undefined
+                        }
+                        onBack={
+                          navHistory.length > 0 &&
+                          navHistory[navHistory.length - 1].meetingId != null
+                            ? handleBack
+                            : undefined
+                        }
+                      />
                     </div>
-                  </div>
-                )}
+                  ) : activeTab === 'projects' ? (
+                    <div className="max-w-5xl mx-auto w-full space-y-12 animate-in pb-20">
+                      <ProjectsExecutionTab
+                        selectedProjectId={selectedProjectId}
+                        onOpenMeeting={(meetingId) =>
+                          handleOpenMeeting(meetingId, {
+                            projectId: selectedProjectId,
+                          })
+                        }
+                        onOpenPerson={(personId) => handleOpenPerson(personId)}
+                      />
+                    </div>
+                  ) : activeTab === 'meetings' ? (
+                    <AllMeetingsTab
+                      meetings={safeMeetings}
+                      onStartRecording={startRecordingFromEmptyState}
+                      onOpenMeeting={(meetingId) =>
+                        handleOpenMeeting(meetingId, { label: 'All meetings' })
+                      }
+                      handleDeleteMeeting={handleDeleteMeeting}
+                    />
+                  ) : SOURCES_ENABLED && activeTab === 'sources' ? (
+                    <LocalSourcesTab selectedSourceId={selectedSourceId} />
+                  ) : activeTab === 'chat' ? (
+                    <div className="min-h-full w-full flex flex-col">
+                      <AskPluto
+                        onOpenTask={(id) => {
+                          setSelectedTaskId(id);
+                          setSelectedMeetingId(null);
+                          setActiveTab('tasks');
+                        }}
+                        visible={true}
+                        messages={askPlutoConversation}
+                        setMessages={setAskPlutoConversation}
+                        onClose={() => setActiveTab('hub')}
+                        onOpenSettings={(tab) => {
+                          setSettingsInitialTab(tab);
+                          setSettingsNavigationToken((token) => token + 1);
+                          setSelectedMeetingId(null);
+                          setActiveTab('settings');
+                        }}
+                        onOpenMeeting={(meetingId, target) => {
+                          setAskPlutoCitationTarget({ meetingId, ...target });
+                          handleOpenMeeting(meetingId, {
+                            label: 'Back to Chat',
+                          });
+                        }}
+                        onOpenArtifact={(artifactId) => {
+                          if (!SOURCES_ENABLED) return;
+                          setSelectedSourceId(artifactId);
+                          setActiveTab('sources');
+                        }}
+                        activeMeetingSnapshot={
+                          captureLifecycle.state === 'recording' &&
+                          captureLifecycle.meetingId
+                            ? {
+                                meetingId: captureLifecycle.meetingId,
+                                title: meetingTitle.trim() || 'Meeting',
+                                participants: meetingParticipants,
+                                notes: currentNotes,
+                                transcript: liveTranscript,
+                                interimText: interimTranscript,
+                                capturedAt: new Date().toISOString(),
+                              }
+                            : undefined
+                        }
+                      />
+                    </div>
+                  ) : activeTab === 'settings' ? (
+                    <SettingsTab
+                      key={settingsNavigationToken}
+                      llmProvider={llmProvider}
+                      setLlmProvider={setLlmProvider}
+                      ollamaModel={ollamaModel}
+                      setOllamaModel={setOllamaModel}
+                      autoEndEnabled={autoEndEnabled}
+                      setAutoEndEnabled={setAutoEndEnabled}
+                      fetchMeetings={fetchMeetings}
+                      setSelectedMeetingId={setSelectedMeetingId}
+                      theme={theme}
+                      initialTab={settingsInitialTab}
+                      calendarSnapshot={calendarSnapshot}
+                      onCalendarSnapshotChange={(snapshot) => {
+                        void loadCalendarAgenda(snapshot);
+                      }}
+                      setTheme={(newTheme) => {
+                        setTheme(newTheme);
+                        window.ipcRenderer.invoke('SET_SETTING', {
+                          key: 'theme',
+                          value: newTheme,
+                        });
+                      }}
+                      exportIncludeTranscript={exportIncludeTranscript}
+                      setExportIncludeTranscript={setExportIncludeTranscript}
+                      calendarAutoNameEnabled={calendarAutoNameEnabled}
+                      setCalendarAutoNameEnabled={handleCalendarAutoNameToggle}
+                      calendarPromptEnabled={calendarPromptEnabled}
+                      setCalendarPromptEnabled={handleCalendarPromptToggle}
+                      fasterNotesEnabled={fasterNotesEnabled}
+                      setFasterNotesEnabled={setFasterNotesEnabled}
+                      transcriptionLanguage={transcriptionLanguage}
+                      setTranscriptionLanguage={setTranscriptionLanguage}
+                      meetingNotesTemplateSettings={
+                        meetingNotesTemplateSettings
+                      }
+                      onMeetingNotesTemplateSettingsChange={
+                        setMeetingNotesTemplateSettings
+                      }
+                    />
+                  ) : (
+                    <div className="max-w-4xl mx-auto w-full space-y-24 animate-in duration-1000 text-center py-40 relative">
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pro-accent/5 rounded-full blur-[120px] pointer-events-none" />
+                      <div className="w-32 h-32 rounded-lg bg-pro-surface border border-pro-border flex items-center justify-center text-5xl mx-auto mb-10 shadow-sm  group">
+                        <span className="group-hover:rotate-12 transition-transform duration-500">
+                          {(activeTab as string) === 'people'
+                            ? '👤'
+                            : (activeTab as string) === 'projects'
+                              ? '📁'
+                              : '🎯'}
+                        </span>
+                      </div>
+                      <div className="space-y-6 relative z-10">
+                        <h2 className="text-5xl font-semibold heading-premiumer italic opacity-10">
+                          {activeTab} Terminal
+                        </h2>
+                        <h2 className="text-4xl font-semibolder">
+                          Your {activeTab} space is{' '}
+                          <span className="gradient-text">
+                            awaiting context.
+                          </span>
+                        </h2>
+                        <p className="text-lg text-pro-text-muted/60 font-medium max-w-xl mx-auto leading-relaxed">
+                          The extraction engine is indexing your local nebula.
+                          Record a session to populate this space with
+                          interconnected insights.
+                        </p>
+                      </div>
+                      <div className="pt-10 flex flex-col items-center gap-6 relative z-10">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (startSessionRef.current)
+                              void startSessionRef.current();
+                          }}
+                          className="h-16 px-12 rounded-lg bg-pro-text-main dark:bg-pro-accent text-white font-semibold text-xs font-medium shadow-2xl hover:bg-pro-accent hover:scale-[1.02] transition-all "
+                        >
+                          Initialize Capture
+                        </button>
+                        <p className="text-[10px] font-semibold text-pro-text-muted/30 font-medium">
+                          Ready for M-Series Deployment
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </Suspense>
               </div>
             </div>
             {/* Side panels (Ask Pluto) render here at full window height. */}

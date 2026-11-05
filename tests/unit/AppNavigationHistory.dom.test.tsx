@@ -305,10 +305,14 @@ describe('App Navigation History', () => {
         openSettingsFromMenu?.();
         await flush();
       });
-      expect(
-        container.querySelector('[data-testid="meeting-view"]'),
-      ).toBeNull();
-      expect(container.textContent).toContain('Personal');
+      // Settings is a lazily loaded tab; wait for its chunk to resolve.
+      await vi.waitFor(async () => {
+        await act(flush);
+        expect(
+          container.querySelector('[data-testid="meeting-view"]'),
+        ).toBeNull();
+        expect(container.textContent).toContain('Personal');
+      });
     } finally {
       act(() => root.unmount());
       container.remove();

@@ -10,6 +10,7 @@ vi.mock('electron', () => ({
 }));
 
 import {
+  claimMeetingTranscriptValidationRetry,
   db as database,
   getMeeting,
   getMeetingDashboardPreviews,
@@ -37,6 +38,90 @@ const detailOnlyFields = [
 ];
 
 describe('meeting summary read model', () => {
+  describe('retry recovery on list reads', () => {
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const statusOf = (id: string) =>
+      getMeetingSummaries(id)[0].transcript_status;
+    const countSweeps = () => {
+      const original = database.prepare.bind(database);
+      const sweeps = { count: 0 };
+      const spy = vi.spyOn(database, 'prepare').mockImplementation((sql) => {
+        if (sql.includes("transcript_status IN ('validating', 'validated')"))
+          sweeps.count += 1;
+        return original(sql);
+      });
+      return { sweeps, restore: () => spy.mockRestore() };
+    };
+
+    it('skips the sweep until a claimed lease can have expired', () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const start = Date.now();
+      vi.setSystemTime(start);
+      const id = 'gated-claimed-retry';
+      try {
+        saveMeeting({ id, title: 'Fictional claimed retry' });
+        recoverExpiredTranscriptValidationRetries();
+        expect(
+          claimMeetingTranscriptValidationRetry(id, {
+            runId: 'claimed',
+            startedAt: iso(start),
+            deadlineAt: iso(start + 5_000),
+            stage: 'saving',
+          }),
+        ).toBe(true);
+
+        const spy = countSweeps();
+        try {
+          vi.setSystemTime(start + 1_000);
+          expect(statusOf(id)).toBe('validating');
+          getMeetingSummaries();
+          expect(spy.sweeps.count).toBe(0);
+        } finally {
+          spy.restore();
+        }
+
+        vi.setSystemTime(start + 5_001);
+        expect(statusOf(id)).toBe('needs_attention');
+      } finally {
+        vi.useRealTimers();
+        database.prepare('DELETE FROM meetings WHERE id = ?').run(id);
+      }
+    });
+
+    it('still recovers a lease written outside the tracked paths within a minute', () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const start = Date.now();
+      vi.setSystemTime(start);
+      const id = 'gated-untracked-retry';
+      try {
+        saveMeeting({ id, title: 'Fictional untracked retry' });
+        recoverExpiredTranscriptValidationRetries();
+        database
+          .prepare(
+            'UPDATE meetings SET transcript_status = ?, transcript_integrity_json = ? WHERE id = ?',
+          )
+          .run(
+            'validating',
+            JSON.stringify({
+              retry: {
+                runId: 'untracked',
+                startedAt: iso(start - 2_000),
+                deadlineAt: iso(start - 1_000),
+                stage: 'saving',
+              },
+            }),
+            id,
+          );
+        expect(statusOf(id)).toBe('validating');
+        vi.setSystemTime(start + 60_001);
+        expect(statusOf(id)).toBe('needs_attention');
+      } finally {
+        vi.useRealTimers();
+        database.prepare('DELETE FROM meetings WHERE id = ?').run(id);
+      }
+    });
+  });
+
   it('reads saved detail without running recovery or changing an expired retry', () => {
     const id = 'read-only-detail';
     saveMeeting({
@@ -44,6 +129,8 @@ describe('meeting summary read model', () => {
       title: 'Saved notes',
       enhanced_notes: 'Keep these notes.',
     });
+    // Start from a known recovery gate regardless of earlier tests.
+    recoverExpiredTranscriptValidationRetries();
     const integrity = JSON.stringify({
       retry: {
         runId: 'expired',
@@ -67,6 +154,9 @@ describe('meeting summary read model', () => {
       expect(prepare).toHaveBeenCalledTimes(1);
       prepare.mockRestore();
       // List refresh still performs recovery; opening notes is a pure read.
+      // A lease written by raw SQL is found by the one-minute backstop.
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(Date.now() + 60_001);
       expect(getMeetingSummaries(id)[0].transcript_status).toBe(
         'needs_attention',
       );
@@ -74,6 +164,7 @@ describe('meeting summary read model', () => {
         enhanced_notes: 'Keep these notes.',
       });
     } finally {
+      vi.useRealTimers();
       prepare.mockRestore();
       database.prepare('DELETE FROM meetings WHERE id = ?').run(id);
     }

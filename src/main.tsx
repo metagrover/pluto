@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
-import { installBrowserIpcFallback } from './utils/browserIpcFallback.ts';
+import { prepareRuntimeEnvironment } from './utils/runtimeEnvironment.ts';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -17,7 +17,13 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 async function renderApp() {
   try {
-    installBrowserIpcFallback();
+    if (prepareRuntimeEnvironment()) {
+      // Browser preview only: the desktop app never loads this preview data.
+      const { installBrowserIpcFallback } = await import(
+        './utils/browserIpcFallback.ts'
+      );
+      installBrowserIpcFallback();
+    }
     // Load bundled faces before the first paint so text never swaps from fallback.
     await Promise.allSettled([...document.fonts].map((font) => font.load()));
     root.render(
