@@ -74,6 +74,7 @@ import {
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
 import { Logo } from '../Brand/Logo';
+import { SidePanelPortal } from '../layout/SidePanelSlot';
 import { DetailsMenu } from '../ui/DetailsMenu';
 import { SearchSelect } from '../ui/SearchSelect';
 import { MeetingAskPlutoPanel } from './MeetingAskPlutoPanel';
@@ -885,6 +886,7 @@ const SelectedMeetingView = ({
   }
 
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
+  const [showAllAddedPeople, setShowAllAddedPeople] = useState(false);
   const participantsTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const deleteRecordingAudio = async () => {
@@ -1333,6 +1335,12 @@ const SelectedMeetingView = ({
         (participant) => participant.personId === entity.id,
       ),
   );
+  // Long "With" lists show three names and a "+N more" that expands them;
+  // four names stay inline rather than hiding just one.
+  const addedPeopleLimit =
+    showAllAddedPeople || addedPeople.length <= 4 ? addedPeople.length : 3;
+  const visibleAddedPeople = addedPeople.slice(0, addedPeopleLimit);
+  const hiddenAddedPeopleCount = addedPeople.length - addedPeopleLimit;
   // The one other person in the meeting, when there is exactly one.
   const otherPeople = new Map<string, string>();
   for (const participant of resolvedParticipants)
@@ -1709,19 +1717,32 @@ const SelectedMeetingView = ({
                   </div>
                 ) : null}
                 {addedPeople.length ? (
-                  <span className="inline-flex flex-wrap items-center gap-1">
+                  <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
                     With
-                    {addedPeople.map((person, index) => (
+                    {visibleAddedPeople.map((person, index) => (
                       <button
                         key={person.id}
                         type="button"
-                        className="font-medium text-pro-text-main hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent rounded"
+                        className="max-w-[16rem] truncate font-medium text-pro-text-main hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent rounded"
                         onClick={() => onOpenPerson?.(person.id)}
                       >
                         {person.name}
-                        {index < addedPeople.length - 1 ? ',' : ''}
+                        {index < visibleAddedPeople.length - 1 ||
+                        hiddenAddedPeopleCount > 0
+                          ? ','
+                          : ''}
                       </button>
                     ))}
+                    {hiddenAddedPeopleCount > 0 ? (
+                      <button
+                        type="button"
+                        className="rounded text-pro-text-muted hover:text-pro-text-main hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                        aria-label={`Show ${hiddenAddedPeopleCount} more people`}
+                        onClick={() => setShowAllAddedPeople(true)}
+                      >
+                        +{hiddenAddedPeopleCount} more
+                      </button>
+                    ) : null}
                   </span>
                 ) : !calendarContext &&
                   notesDocument.hasAnalysis &&
@@ -2440,14 +2461,16 @@ const SelectedMeetingView = ({
         />
       </div>
       {canAsk && askOpen ? (
-        <MeetingAskPlutoPanel
-          key={selectedMeeting.id}
-          meeting={selectedMeeting}
-          person={onlyOtherPerson}
-          conversation={askConversation}
-          onConversationChange={setAskConversation}
-          onClose={closeAsk}
-        />
+        <SidePanelPortal>
+          <MeetingAskPlutoPanel
+            key={selectedMeeting.id}
+            meeting={selectedMeeting}
+            person={onlyOtherPerson}
+            conversation={askConversation}
+            onConversationChange={setAskConversation}
+            onClose={closeAsk}
+          />
+        </SidePanelPortal>
       ) : null}
     </div>
   );
