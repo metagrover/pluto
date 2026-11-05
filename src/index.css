@@ -876,16 +876,6 @@
   .meeting-ask-pluto-dock__message--assistant pre code {
     @apply bg-transparent p-0;
   }
-  .meeting-ask-pluto-dock__evidence {
-    @apply mt-2 text-sm leading-5 text-pro-text-muted;
-    overflow-wrap: anywhere;
-  }
-  .meeting-ask-pluto-dock__evidence summary {
-    @apply w-fit cursor-pointer rounded-sm hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent;
-  }
-  .meeting-ask-pluto-dock__evidence-note {
-    @apply mt-2 block text-xs leading-5 text-pro-text-muted;
-  }
   .meeting-ask-pluto-dock__interrupted {
     @apply mt-1 block text-[10px] font-medium text-pro-text-muted;
   }
@@ -3136,9 +3126,24 @@
 .meeting-notes-section:not(:focus-within) .meeting-notes-add-item {
   display: none;
 }
-/* Room for the Ask Pluto composer so it never covers the end of the page. */
-.meeting-ask-dock-spacer {
-  height: 6.5rem;
+/* A finished meeting with Ask Pluto open: the notes and the panel sit side by
+   side, and the panel stays in view while the notes scroll. */
+.meeting-page {
+  display: flex;
+  align-items: flex-start;
+  flex: 1 0 auto;
+  width: 100%;
+  min-height: 100%;
+}
+.meeting-page > .meeting-document {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+}
+.meeting-page > .note-ask-panel {
+  position: sticky;
+  top: 0;
+  height: calc(100dvh - 3rem);
 }
 .meeting-notes-section--scratchpad {
   min-height: 8rem;

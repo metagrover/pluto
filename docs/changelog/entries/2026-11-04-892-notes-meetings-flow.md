@@ -18,3 +18,9 @@
 - **Changed:** Picking any slash command in Notes removes the typed "/…", even a partial one like "/per"; Person and Project swap it for "@" or "#" so typing filters the list. In meeting notes, Task puts the caret inside "[task: ]".
 - **Why:** A leftover "/" stayed in the line after choosing Person, Project, Task or Checklist from a partly typed or bare "/".
 
+### Ask about a finished meeting in the side panel
+
+- **Changed:** "Ask Pluto" in a finished meeting's header, or ⌘J, opens the same right-hand panel Notes uses, beside the notes. Answers stream, cited excerpts fold under "View evidence", and "Add as to-do" and "Add to Next time with …" stay.
+- **Why:** The floating "Ask about this meeting" box covered the end of the notes.
+- **Replaced:** The floating composer on finished meetings. The recording dock keeps it and shares the request logic (`useMeetingAskPluto`).
+

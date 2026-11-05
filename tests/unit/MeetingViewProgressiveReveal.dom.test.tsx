@@ -1554,10 +1554,103 @@ describe('MeetingView progressive reveal', () => {
     );
   });
 
-  it('offers meeting-scoped Ask Pluto on a finished meeting', async () => {
+  it('opens Ask Pluto beside a finished meeting and asks about it', async () => {
+    const invoke = vi.fn(async (channel: string) =>
+      channel === 'intelligence:meeting-chat'
+        ? {
+            status: 'answered',
+            answer: 'Fix the invite step first.',
+            scope: { type: 'meeting', meetingId: analyzedMeeting.id },
+            trustStatus: 'grounded',
+            claims: [],
+            citations: [],
+          }
+        : null,
+    );
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => {}) },
+    });
     await act(async () => renderMeeting(analyzedMeeting));
 
-    expect(container.querySelector('[aria-label="Ask Pluto"]')).not.toBeNull();
+    // No floating composer over the notes; the panel opens from the header.
+    expect(container.querySelector('.meeting-ask-pluto-dock')).toBeNull();
+    expect(
+      container.querySelector('[aria-label="Ask Pluto about this meeting"]'),
+    ).not.toBeNull();
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Ask Pluto about this meeting"]',
+    )!;
+    expect(trigger.getAttribute('aria-pressed')).toBe('false');
+    expect(container.querySelector('aside.note-ask-panel')).toBeNull();
+
+    await act(async () => trigger.click());
+    const panel = container.querySelector<HTMLElement>(
+      'aside[aria-label="Ask Pluto about this meeting"]',
+    );
+    expect(panel).not.toBeNull();
+    expect(panel!.parentElement?.className).toContain('meeting-page');
+    expect(trigger.getAttribute('aria-pressed')).toBe('true');
+    const input = panel!.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Ask about this meeting"]',
+    )!;
+    expect(document.activeElement).toBe(input);
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set?.call(input, 'What do we fix first?');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith('intelligence:meeting-chat', {
+      requestId: expect.any(String),
+      query: 'What do we fix first?',
+      scope: { type: 'meeting', meetingId: analyzedMeeting.id },
+      turns: [],
+    });
+    expect(panel!.textContent).toContain('What do we fix first?');
+    expect(panel!.textContent).toContain('Fix the invite step first.');
+    expect(panel!.textContent).toContain('Add as to-do');
+
+    // ⌘J closes it and keeps the conversation for next time.
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'j', metaKey: true }),
+      );
+    });
+    expect(container.querySelector('aside.note-ask-panel')).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'j', metaKey: true }),
+      );
+    });
+    expect(
+      container.querySelector('aside.note-ask-panel')?.textContent,
+    ).toContain('Fix the invite step first.');
+  });
+
+  it('does not offer Ask Pluto before a meeting has notes', async () => {
+    await act(async () => renderMeeting(baseMeeting));
+    expect(
+      container.querySelector(
+        'button[aria-label="Ask Pluto about this meeting"]',
+      ),
+    ).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'j', metaKey: true }),
+      );
+    });
+    expect(container.querySelector('aside.note-ask-panel')).toBeNull();
   });
 
   it('displays unidentified speakers in header metadata and opens identification modal', async () => {

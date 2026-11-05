@@ -727,6 +727,8 @@
   border-radius: 7px;
   font-size: 12.5px;
   font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
   color: hsl(var(--pro-text-main) / 0.8);
   cursor: pointer;
   transition: background-color 140ms ease-out, color 140ms ease-out;
@@ -960,6 +962,39 @@
   line-height: 16px;
   font-size: 11.5px;
   color: hsl(var(--pro-text-muted));
+}
+
+/* Meeting answers: the transcript excerpts an answer cites, folded away. */
+.note-ask-panel__evidence {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: hsl(var(--pro-text-muted));
+  overflow-wrap: anywhere;
+}
+
+.note-ask-panel__evidence summary {
+  width: fit-content;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.note-ask-panel__evidence summary:hover {
+  color: hsl(var(--pro-text-main));
+}
+
+.note-ask-panel__evidence summary:focus-visible {
+  outline: 2px solid hsl(var(--pro-accent) / 0.6);
+  outline-offset: 1px;
+}
+
+.note-ask-panel__evidence p {
+  margin-top: 6px;
+}
+
+.note-ask-panel__evidence blockquote {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid hsl(var(--pro-border));
 }
 
 .note-ask-panel__suggestions-lead {

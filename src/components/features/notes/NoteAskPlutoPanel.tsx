@@ -1,19 +1,16 @@
 import {
   AlignLeft,
-  ArrowUp,
   Check,
   CircleDashed,
   Copy,
   CornerDownLeft,
   ListTodo,
   Mail,
-  Square,
   X,
 } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import TextareaAutosize from 'react-textarea-autosize';
 import remarkGfm from 'remark-gfm';
 import {
   askPlutoAboutNote,
@@ -24,7 +21,7 @@ import type {
   NoteAskPlutoIntent,
   NoteAskPlutoTurn,
 } from '../../../types/notes';
-import { Logo } from '../../Brand/Logo';
+import { AskPlutoSidebar } from '../AskPlutoSidebar';
 
 export interface NoteAskPlutoSelection {
   text: string;
@@ -103,13 +100,7 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
     intent: NoteAskPlutoIntent;
     query: string;
   } | null>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
-  const threadRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(true);
-
-  useEffect(() => {
-    composerRef.current?.focus();
-  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -128,12 +119,6 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
       }
     };
   }, []);
-
-  // Keep the newest turn in view.
-  useEffect(() => {
-    const thread = threadRef.current;
-    if (thread) thread.scrollTop = thread.scrollHeight;
-  }, [messages, streaming, pending]);
 
   const ask = useCallback(
     async (intent: NoteAskPlutoIntent, rawQuery: string) => {
@@ -271,220 +256,28 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
   const isEmpty = messages.length === 0 && !pending;
 
   return (
-    <aside className="note-ask-panel" aria-label="Ask Pluto about this note">
-      <header className="note-ask-panel__header">
-        <span className="note-ask-panel__mark" aria-hidden="true">
-          <Logo size={16} variant="default" />
-        </span>
-        <div className="note-ask-panel__heading">
-          <span>Ask Pluto</span>
-          <span>
-            {personName
-              ? `About this note and your meetings with ${personName}`
-              : 'About this note'}
-          </span>
-        </div>
-        <button
-          type="button"
-          className="note-ask-panel__icon-button"
-          onClick={onClose}
-          aria-label="Close Ask Pluto"
-          title="Close (Esc)"
-        >
-          <X size={14} />
-        </button>
-      </header>
-
-      <div
-        ref={threadRef}
-        className="note-ask-panel__thread"
-        role="log"
-        aria-live="polite"
-      >
-        {isEmpty ? (
-          <div className="note-ask-panel__intro">
-            <p>Ask anything about this note, or start with one of these.</p>
-            <div className="note-ask-panel__starters">
-              {STARTERS.map(({ intent, label, icon: Icon }) => (
-                <button
-                  key={intent}
-                  type="button"
-                  className="note-ask-panel__starter"
-                  onClick={() => void ask(intent, '')}
-                >
-                  <Icon size={14} aria-hidden="true" />
-                  <span>{label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {messages.map((message) =>
-          message.role === 'user' ? (
-            <div key={message.id} className="note-ask-panel__question">
-              {message.content}
-            </div>
-          ) : (
-            <div key={message.id} className="note-ask-panel__answer">
-              {message.suggestedTasks?.length ? (
-                <div className="note-ask-panel__suggestions">
-                  <p className="note-ask-panel__suggestions-lead">
-                    Suggested tasks
-                  </p>
-                  <ul>
-                    {message.suggestedTasks.map((title) => {
-                      const chosen = (taskChoices[message.id] ?? []).includes(
-                        title,
-                      );
-                      return (
-                        <li key={title}>
-                          <label>
-                            <input
-                              type="checkbox"
-                              className="notion-task-checkbox"
-                              checked={chosen}
-                              disabled={message.addedTasks}
-                              onChange={() =>
-                                toggleTaskChoice(message.id, title)
-                              }
-                            />
-                            <span>{title}</span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  {message.addedTasks ? (
-                    <p className="note-ask-panel__done">
-                      <Check size={13} aria-hidden="true" />
-                      Added to the note and your Tasks list
-                    </p>
-                  ) : (
-                    <button
-                      type="button"
-                      className="note-ask-panel__primary"
-                      disabled={!(taskChoices[message.id] ?? []).length}
-                      onClick={() => {
-                        onAddTasks(taskChoices[message.id] ?? []);
-                        markMessage(message.id, { addedTasks: true });
-                      }}
-                    >
-                      {(() => {
-                        const count = (taskChoices[message.id] ?? []).length;
-                        return count === 1
-                          ? 'Add 1 task to note'
-                          : `Add ${count} tasks to note`;
-                      })()}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="note-ask-panel__markdown">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      a: ({ children }) => <span>{children}</span>,
-                    }}
-                  >
-                    {message.content}
-                  </ReactMarkdown>
-                </div>
-              )}
-              {message.stopped ? (
-                <span className="note-ask-panel__meta">Stopped</span>
-              ) : null}
-              {message.fallbackModel ? (
-                <span className="note-ask-panel__meta">
-                  Answered by the smaller {message.fallbackModel} model, since
-                  there wasn’t enough free memory for your main model.
-                </span>
-              ) : null}
-              {!message.suggestedTasks?.length ? (
-                <div className="note-ask-panel__actions">
-                  <button
-                    type="button"
-                    disabled={message.inserted}
-                    onClick={() => {
-                      onInsertMarkdown(message.content);
-                      markMessage(message.id, { inserted: true });
-                    }}
-                  >
-                    {message.inserted ? (
-                      <Check size={12} aria-hidden="true" />
-                    ) : (
-                      <CornerDownLeft size={12} aria-hidden="true" />
-                    )}
-                    {message.inserted ? 'Inserted' : 'Insert into note'}
-                  </button>
-                  <button type="button" onClick={() => void copy(message)}>
-                    {copiedId === message.id ? (
-                      <Check size={12} aria-hidden="true" />
-                    ) : (
-                      <Copy size={12} aria-hidden="true" />
-                    )}
-                    {copiedId === message.id ? 'Copied' : 'Copy'}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ),
-        )}
-
-        {pending ? (
-          <div className="note-ask-panel__answer">
-            {streaming ? (
-              <div className="note-ask-panel__markdown">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {streaming}
-                </ReactMarkdown>
-              </div>
-            ) : (
-              <output className="note-ask-panel__reading">
-                <span className="note-ask-panel__pulse" aria-hidden="true" />
-                Reading this note…
-              </output>
-            )}
-          </div>
-        ) : null}
-
-        {error ? (
-          <div className="note-ask-panel__error" role="alert">
-            <div className="note-ask-panel__error-copy">
-              <span>{error}</span>
-              {errorDetail ? (
-                <details>
-                  <summary>Details</summary>
-                  <code>{errorDetail}</code>
-                </details>
-              ) : null}
-            </div>
-            {lastRequestRef.current ? (
-              <button
-                type="button"
-                onClick={() => {
-                  const last = lastRequestRef.current;
-                  if (!last) return;
-                  // Drop the failed question so the retry isn't duplicated.
-                  setMessages((current) => current.slice(0, -1));
-                  void ask(last.intent, last.query);
-                }}
-              >
-                Try again
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-
-      <form
-        className="note-ask-panel__composer"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void ask('ask', query);
-        }}
-      >
-        {selection ? (
+    <AskPlutoSidebar
+      label="Ask Pluto about this note"
+      subtitle={
+        personName
+          ? `About this note and your meetings with ${personName}`
+          : 'About this note'
+      }
+      onClose={onClose}
+      followKey={`${messages.length}:${streaming.length}:${pending ?? ''}`}
+      query={query}
+      onQueryChange={setQuery}
+      onSubmit={() => void ask('ask', query)}
+      pending={Boolean(pending)}
+      onStop={stop}
+      inputLabel="Ask about this note"
+      placeholder={
+        selection ? 'Ask about the selection…' : 'Ask about this note…'
+      }
+      maxLength={2_000}
+      footnote="Answers use only this note."
+      composerAccessory={
+        selection ? (
           <div className="note-ask-panel__selection">
             <span className="note-ask-panel__selection-label">
               {selection.blockCount && selection.blockCount > 1
@@ -504,57 +297,181 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
               <X size={12} />
             </button>
           </div>
-        ) : null}
-        <div className="note-ask-panel__field">
-          <TextareaAutosize
-            ref={composerRef}
-            value={query}
-            minRows={1}
-            maxRows={6}
-            maxLength={2_000}
-            aria-label="Ask about this note"
-            placeholder={
-              selection ? 'Ask about the selection…' : 'Ask about this note…'
-            }
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.nativeEvent.isComposing) return;
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                if (pending) stop();
-                else onClose();
-                return;
-              }
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                void ask('ask', query);
-              }
-            }}
-          />
-          {pending ? (
-            <button
-              type="button"
-              className="note-ask-panel__send"
-              onClick={stop}
-              aria-label="Stop answer"
-              title="Stop"
-            >
-              <Square size={11} fill="currentColor" />
-            </button>
+        ) : null
+      }
+    >
+      {isEmpty ? (
+        <div className="note-ask-panel__intro">
+          <p>Ask anything about this note, or start with one of these.</p>
+          <div className="note-ask-panel__starters">
+            {STARTERS.map(({ intent, label, icon: Icon }) => (
+              <button
+                key={intent}
+                type="button"
+                className="note-ask-panel__starter"
+                onClick={() => void ask(intent, '')}
+              >
+                <Icon size={14} aria-hidden="true" />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {messages.map((message) =>
+        message.role === 'user' ? (
+          <div key={message.id} className="note-ask-panel__question">
+            {message.content}
+          </div>
+        ) : (
+          <div key={message.id} className="note-ask-panel__answer">
+            {message.suggestedTasks?.length ? (
+              <div className="note-ask-panel__suggestions">
+                <p className="note-ask-panel__suggestions-lead">
+                  Suggested tasks
+                </p>
+                <ul>
+                  {message.suggestedTasks.map((title) => {
+                    const chosen = (taskChoices[message.id] ?? []).includes(
+                      title,
+                    );
+                    return (
+                      <li key={title}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            className="notion-task-checkbox"
+                            checked={chosen}
+                            disabled={message.addedTasks}
+                            onChange={() => toggleTaskChoice(message.id, title)}
+                          />
+                          <span>{title}</span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {message.addedTasks ? (
+                  <p className="note-ask-panel__done">
+                    <Check size={13} aria-hidden="true" />
+                    Added to the note and your Tasks list
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    className="note-ask-panel__primary"
+                    disabled={!(taskChoices[message.id] ?? []).length}
+                    onClick={() => {
+                      onAddTasks(taskChoices[message.id] ?? []);
+                      markMessage(message.id, { addedTasks: true });
+                    }}
+                  >
+                    {(() => {
+                      const count = (taskChoices[message.id] ?? []).length;
+                      return count === 1
+                        ? 'Add 1 task to note'
+                        : `Add ${count} tasks to note`;
+                    })()}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="note-ask-panel__markdown">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ children }) => <span>{children}</span>,
+                  }}
+                >
+                  {message.content}
+                </ReactMarkdown>
+              </div>
+            )}
+            {message.stopped ? (
+              <span className="note-ask-panel__meta">Stopped</span>
+            ) : null}
+            {message.fallbackModel ? (
+              <span className="note-ask-panel__meta">
+                Answered by the smaller {message.fallbackModel} model, since
+                there wasn’t enough free memory for your main model.
+              </span>
+            ) : null}
+            {!message.suggestedTasks?.length ? (
+              <div className="note-ask-panel__actions">
+                <button
+                  type="button"
+                  disabled={message.inserted}
+                  onClick={() => {
+                    onInsertMarkdown(message.content);
+                    markMessage(message.id, { inserted: true });
+                  }}
+                >
+                  {message.inserted ? (
+                    <Check size={12} aria-hidden="true" />
+                  ) : (
+                    <CornerDownLeft size={12} aria-hidden="true" />
+                  )}
+                  {message.inserted ? 'Inserted' : 'Insert into note'}
+                </button>
+                <button type="button" onClick={() => void copy(message)}>
+                  {copiedId === message.id ? (
+                    <Check size={12} aria-hidden="true" />
+                  ) : (
+                    <Copy size={12} aria-hidden="true" />
+                  )}
+                  {copiedId === message.id ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ),
+      )}
+
+      {pending ? (
+        <div className="note-ask-panel__answer">
+          {streaming ? (
+            <div className="note-ask-panel__markdown">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {streaming}
+              </ReactMarkdown>
+            </div>
           ) : (
-            <button
-              type="submit"
-              className="note-ask-panel__send"
-              disabled={!query.trim()}
-              aria-label="Send question"
-              title="Send (Enter)"
-            >
-              <ArrowUp size={14} />
-            </button>
+            <output className="note-ask-panel__reading">
+              <span className="note-ask-panel__pulse" aria-hidden="true" />
+              Reading this note…
+            </output>
           )}
         </div>
-        <p className="note-ask-panel__footnote">Answers use only this note.</p>
-      </form>
-    </aside>
+      ) : null}
+
+      {error ? (
+        <div className="note-ask-panel__error" role="alert">
+          <div className="note-ask-panel__error-copy">
+            <span>{error}</span>
+            {errorDetail ? (
+              <details>
+                <summary>Details</summary>
+                <code>{errorDetail}</code>
+              </details>
+            ) : null}
+          </div>
+          {lastRequestRef.current ? (
+            <button
+              type="button"
+              onClick={() => {
+                const last = lastRequestRef.current;
+                if (!last) return;
+                // Drop the failed question so the retry isn't duplicated.
+                setMessages((current) => current.slice(0, -1));
+                void ask(last.intent, last.query);
+              }}
+            >
+              Try again
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </AskPlutoSidebar>
   );
 };

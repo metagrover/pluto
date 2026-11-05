@@ -6,7 +6,6 @@ import { act } from 'react-dom/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MeetingAskPlutoDock } from '../../src/components/features/MeetingAskPlutoDock';
-import type { Meeting } from '../../src/types';
 import type {
   MeetingAskPlutoAnswerDelta,
   MeetingAskPlutoConversationMessage,
@@ -21,19 +20,6 @@ const flushPromises = async () => {
   await Promise.resolve();
   await Promise.resolve();
 };
-
-const makeMeeting = (overrides: Partial<Meeting> = {}): Meeting => ({
-  id: 'meeting-1',
-  title: 'Architecture Review',
-  created_at: '2026-08-18T10:00:00.000Z',
-  started_at: '2026-08-18T10:00:00.000Z',
-  transcript_json: JSON.stringify({
-    segments: [{ speaker: 'Avery', text: 'We decided to use GraphQL.' }],
-  }),
-  transcript_status: 'validated',
-  finalization_status: 'finalized',
-  ...overrides,
-});
 
 const liveContext: MeetingAskPlutoLiveContext = {
   title: 'Launch review',
@@ -217,75 +203,6 @@ describe('MeetingAskPlutoDock', () => {
       'Shortcuts are unavailable in this beta',
     );
     expect(invoke).not.toHaveBeenCalled();
-    await act(async () => root.unmount());
-  });
-
-  it('keeps the live beta label out of saved meeting chat', async () => {
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(<MeetingAskPlutoDock meeting={makeMeeting()} />);
-    });
-    const input = container.querySelector('textarea')!;
-    expect(input.placeholder).not.toContain('beta');
-    await typeInto(input, '/');
-    expect(container.querySelector('[role="listbox"]')).toBeNull();
-    await act(async () => root.unmount());
-  });
-
-  it('submits a meeting-scoped question with collapsed supporting evidence', async () => {
-    const root = createRoot(container);
-
-    await act(async () => {
-      root.render(
-        <MeetingAskPlutoDock
-          meeting={makeMeeting()}
-          onOpenMeeting={() => {}}
-        />,
-      );
-      await flushPromises();
-    });
-
-    const input = container.querySelector<HTMLTextAreaElement>('textarea');
-    expect(input).not.toBeNull();
-
-    await typeInto(input!, 'What did we decide?');
-    await act(async () => {
-      input!.form?.dispatchEvent(
-        new Event('submit', { bubbles: true, cancelable: true }),
-      );
-      await flushPromises();
-    });
-
-    expect(invoke).toHaveBeenCalledWith('intelligence:meeting-chat', {
-      requestId: expect.stringMatching(/^ask-pluto-/),
-      query: 'What did we decide?',
-      scope: {
-        type: 'meeting',
-        meetingId: 'meeting-1',
-      },
-      turns: [],
-    });
-    expect(container.textContent).toContain(
-      'The team decided to use GraphQL for the API layer.',
-    );
-    expect(
-      container.querySelector('.meeting-ask-pluto-dock__pluto-mark'),
-    ).not.toBeNull();
-    expect(
-      container.querySelector('.meeting-ask-pluto-dock__message--assistant'),
-    ).not.toBeNull();
-    expect(container.textContent).toContain('Architecture Review');
-    expect(container.textContent).not.toContain('Grounded');
-    const evidence = container.querySelector<HTMLDetailsElement>('details');
-    expect(evidence).not.toBeNull();
-    expect(evidence!.open).toBe(false);
-    expect(evidence!.querySelector('summary')?.textContent).toBe(
-      'View evidence',
-    );
-    expect(evidence!.textContent).toContain('We decided to use GraphQL.');
-    evidence!.open = true;
-    expect(evidence!.open).toBe(true);
-
     await act(async () => root.unmount());
   });
 
@@ -1061,7 +978,7 @@ describe('MeetingAskPlutoDock', () => {
     await act(async () => root.unmount());
   });
 
-  it('opens a minimized meeting conversation at its latest message', async () => {
+  it('opens a minimized live conversation at its latest message', async () => {
     const originalScrollHeight = Object.getOwnPropertyDescriptor(
       Element.prototype,
       'scrollHeight',
@@ -1076,7 +993,7 @@ describe('MeetingAskPlutoDock', () => {
       await act(async () => {
         root.render(
           <MeetingAskPlutoDock
-            meeting={makeMeeting()}
+            liveContext={liveContext}
             conversation={[
               { id: 'user-1', role: 'user', content: 'First question' },
               { id: 'assistant-1', role: 'assistant', content: 'First answer' },
@@ -1185,116 +1102,6 @@ describe('MeetingAskPlutoDock', () => {
       await flushPromises();
     });
     expect(scrollIntoView).not.toHaveBeenCalled();
-
-    await act(async () => root.unmount());
-  });
-
-  it('sends bounded prior meeting turns for follow-up questions', async () => {
-    const root = createRoot(container);
-
-    await act(async () => {
-      root.render(
-        <MeetingAskPlutoDock
-          meeting={makeMeeting()}
-          onOpenMeeting={() => {}}
-        />,
-      );
-      await flushPromises();
-    });
-
-    const input = container.querySelector<HTMLTextAreaElement>('textarea');
-    expect(input).not.toBeNull();
-
-    await typeInto(input!, 'What did we decide?');
-    await act(async () => {
-      input!.form?.dispatchEvent(
-        new Event('submit', { bubbles: true, cancelable: true }),
-      );
-      await flushPromises();
-    });
-
-    await typeInto(input!, 'Why?');
-    await act(async () => {
-      input!.form?.dispatchEvent(
-        new Event('submit', { bubbles: true, cancelable: true }),
-      );
-      await flushPromises();
-    });
-
-    expect(invoke).toHaveBeenLastCalledWith('intelligence:meeting-chat', {
-      requestId: expect.stringMatching(/^ask-pluto-/),
-      query: 'Why?',
-      scope: {
-        type: 'meeting',
-        meetingId: 'meeting-1',
-      },
-      turns: [
-        {
-          role: 'user',
-          content: 'What did we decide?',
-        },
-        {
-          role: 'assistant',
-          content: 'The team decided to use GraphQL for the API layer.',
-          citationIds: ['citation-1'],
-          evidenceHints: ['We decided to use GraphQL.'],
-        },
-      ],
-    });
-
-    await act(async () => root.unmount());
-  });
-
-  it('bounds long conversation history before crossing IPC', async () => {
-    const root = createRoot(container);
-    const conversation: MeetingAskPlutoConversationMessage[] = Array.from(
-      { length: 8 },
-      (_, index) =>
-        index % 2 === 0
-          ? {
-              id: `user-${index}`,
-              role: 'user' as const,
-              content: `question-${index}`,
-            }
-          : {
-              id: `assistant-${index}`,
-              role: 'assistant' as const,
-              content: `answer-${index}`,
-              packet: response,
-            },
-    );
-
-    await act(async () => {
-      root.render(
-        <MeetingAskPlutoDock
-          meeting={makeMeeting()}
-          conversation={conversation}
-          onConversationChange={() => {}}
-          onOpenMeeting={() => {}}
-        />,
-      );
-      await flushPromises();
-    });
-
-    const input = container.querySelector<HTMLTextAreaElement>('textarea');
-    await typeInto(input!, 'Why?');
-    await act(async () => {
-      input!.form?.dispatchEvent(
-        new Event('submit', { bubbles: true, cancelable: true }),
-      );
-      await flushPromises();
-    });
-
-    const request = invoke.mock.calls
-      .filter(([channel]) => channel === 'intelligence:meeting-chat')
-      .at(-1)?.[1];
-    expect(request.turns).toHaveLength(MEETING_ASK_PLUTO_LIMITS.turns);
-    expect(request.turns[0]).toMatchObject({ content: 'question-2' });
-    expect(request.turns.at(-1)).toMatchObject({
-      content: 'answer-7',
-      evidenceHints: ['We decided to use GraphQL.'],
-    });
-    expect(request.turns[1]).not.toHaveProperty('evidenceHints');
 
     await act(async () => root.unmount());
   });
