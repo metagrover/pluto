@@ -122,6 +122,8 @@ const OLLAMA_ACTIVE_GENERATION_MIN_TIMEOUT_MS = 6 * 60_000;
 const OLLAMA_ACTIVE_GENERATION_MAX_TIMEOUT_MS = 20 * 60_000;
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
 const OLLAMA_EDITORIAL_OUTPUT_TOKENS = 2_048;
+/** The largest allocation Pluto itself requests; larger external loads are not reused. */
+const OLLAMA_MAX_REUSED_CONTEXT_TOKENS = OLLAMA_EDITORIAL_CONTEXT_TOKENS;
 export const STRUCTURED_ANALYSIS_PROMPT_VERSION = NOTES_PROMPT_VERSION;
 
 const reportsNotesInputOverflow = (value: unknown): boolean =>
@@ -2035,14 +2037,13 @@ export class UnifiedLLMProvider implements LLMProvider {
     );
     if (notesBudget && requiredContext > budget.num_ctx)
       throw new MeetingNotesError('notes_input_overflow');
+    // Shrinking a sufficient resident allocation only reloads the weights.
+    // Memory admission below still releases it under pressure.
     let num_ctx =
       resident &&
       residency.contextTokens !== undefined &&
       residency.contextTokens >= requiredContext &&
-      residency.contextTokens <=
-        (notesBudget || !boundedGemmaArtifact
-          ? budget.num_ctx
-          : getOllamaContextCap(task))
+      residency.contextTokens <= OLLAMA_MAX_REUSED_CONTEXT_TOKENS
         ? residency.contextTokens
         : requiredContext;
     if (entry)

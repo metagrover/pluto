@@ -1,3 +1,10 @@
+## 2026-11-04 - Keep a sufficient resident Ollama context instead of shrinking it
+
+- **Status:** Accepted for correctness; covered by provider regressions. Memory use on 16 GiB hardware still needs a packaged run.
+- **Supersedes:** The "without exceeding the request's context cap" clause of "2026-10-20 - Reuse bounded resident Ollama contexts between stages" and "reuse sufficient residency within the task cap" in "2026-10-20 - Keep Gemma allocations bounded across downstream tasks". Completes "2026-10-25 - Size reclaimed local allocations for the current request", which already keeps a compatible larger context while it passes admission.
+- **Decision:** A request reuses the resident allocation when its context covers the complete estimated input, output and safety margin, up to 32,768 tokens (the largest context Pluto requests). The per-task cap no longer forces an unload. Previously a 32K knowledge-document allocation followed by an Ask question, or a 16K notes allocation followed by live Ask, unloaded and reloaded the same weights only to get a smaller context. Warm reuse still passes memory admission; under pressure the allocation is unloaded, confirmed absent and cold-loaded at the size the request needs. Larger external allocations, changed artifacts and unknown context metadata still unload. Notes input limits, output budgets, reserves and the watchdog are unchanged.
+- **Not included:** Cold loads still size to the current request, so a later, larger notes leaf can still trigger one reload. Loading the whole notes budget up front would avoid that but needs memory qualification first.
+
 ## 2026-11-04 - Read "Priya: …" lines as Priya's, and edit live notes like notes
 
 - **Status:** Accepted; covered by store, component, app-flow and in-app checks.

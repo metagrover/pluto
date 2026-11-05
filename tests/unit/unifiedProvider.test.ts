@@ -2476,11 +2476,15 @@ it.each(['recovered', 'pressure', 'cancelled'] as const)(
 
 it.each([
   { residentContext: 8192, expectedContext: 8192, unload: false },
-  { residentContext: 16384, expectedContext: 2048, unload: true },
+  // Larger than this request's cap, but shrinking it would only reload weights.
+  { residentContext: 16384, expectedContext: 16384, unload: false },
+  // A knowledge-document allocation serves the next smaller request too.
+  { residentContext: 32768, expectedContext: 32768, unload: false },
+  { residentContext: 40000, expectedContext: 2048, unload: true },
   { residentContext: 1024, expectedContext: 2048, unload: true },
   { residentContext: undefined, expectedContext: 2048, unload: false },
 ])(
-  'reuses only a resident context within the request cap: $residentContext',
+  'reuses a sufficient resident context up to Pluto allocations: $residentContext',
   async ({ residentContext, expectedContext, unload }) => {
     let resident = residentContext !== undefined;
     const events: string[] = [];
@@ -2859,8 +2863,16 @@ it.each([
     unload: true,
   },
   {
+    // A larger admitted resident is kept: shrinking it would reload the weights.
     task: 'title' as const,
     residentContext: 20000,
+    expectedContext: 20000,
+    output: 64,
+    unload: false,
+  },
+  {
+    task: 'title' as const,
+    residentContext: 40000,
     expectedContext: 2048,
     output: 64,
     unload: true,
