@@ -116,6 +116,65 @@ describe('PeopleTab Running 1:1 Notes Integration', () => {
     expect(onOpenNote).toHaveBeenCalledWith('note-alice-1');
   });
 
+  it('lists other notes that "@" the person, without taking them as theirs', async () => {
+    const mentioning: Note = {
+      id: 'note-standup',
+      title: 'Standup',
+      content: '@Alice Smith will check the rollout',
+      noteType: 'general',
+      pinned: false,
+      targetId: null,
+      targetName: null,
+      createdAt: '2026-10-26T10:00:00.000Z',
+      updatedAt: '2026-10-26T10:00:00.000Z',
+    };
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'NOTES_MENTIONING_PERSON')
+        return payload === 'person-alice' ? [mentioning, sampleNotes[0]] : [];
+      return null;
+    });
+    const onOpenNote = vi.fn();
+    await act(async () => {
+      root.render(
+        <PersonDossier
+          detail={personDetail}
+          personNotes={sampleNotes}
+          onBack={() => {}}
+          onOpenMeeting={() => {}}
+          onOpenNote={onOpenNote}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain(
+      'Mentioned in note · @Alice Smith will check the rollout',
+    );
+    // Listed once, as their own note.
+    expect(
+      container.querySelectorAll(
+        'button[aria-label="Open note 1:1 with Alice"]',
+      ),
+    ).toHaveLength(1);
+    await act(async () => {
+      (
+        container.querySelector(
+          'button[aria-label="Open note Standup"]',
+        ) as HTMLButtonElement
+      ).click();
+    });
+    expect(onOpenNote).toHaveBeenCalledWith('note-standup');
+
+    // "+ 1:1 Note" still opens their own note.
+    await act(async () => {
+      (
+        container.querySelector(
+          'button[aria-label="New 1:1 note for Alice Smith"]',
+        ) as HTMLButtonElement
+      ).click();
+    });
+    expect(onOpenNote).toHaveBeenLastCalledWith('note-alice-1');
+  });
+
   it('calls onOpenNote with existing note when "+ 1:1 Note" is clicked and notes exist', async () => {
     const onOpenNote = vi.fn();
 

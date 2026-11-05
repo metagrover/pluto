@@ -20,6 +20,7 @@ import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
 import type { LocalArtifact } from '../api/localArtifacts';
 import type { Meeting } from '../types';
 import type { Note, SaveNoteInput } from '../types/notes';
+import { findMentions } from './noteMentions';
 import { hasVerifiedSpeakerAttribution } from './speakerAttributionTrust';
 import { invokeTaskPreview } from './taskPreview';
 
@@ -1203,6 +1204,16 @@ const invokeNotesFallback = (channel: string, payload: unknown) => {
   if (channel === 'NOTES_FOR_ENTITY') {
     const entityId = payload as string;
     return notes.filter((n) => n.targetId === entityId);
+  }
+  if (channel === 'NOTES_MENTIONING_PERSON') {
+    const personId = payload as string;
+    return notes.filter(
+      (n) =>
+        n.targetId !== personId &&
+        findMentions(n.content, previewPeople).some(
+          (mention) => mention.person.id === personId,
+        ),
+    );
   }
   return null;
 };

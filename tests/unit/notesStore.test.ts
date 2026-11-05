@@ -405,4 +405,44 @@ describe('notesStore', () => {
       'Priya: book room',
     ]);
   });
+
+  it('lists notes that "@Name" a person, apart from their own notes', () => {
+    const addPerson = db.prepare(
+      'INSERT INTO entities (id, type, name) VALUES (?, ?, ?)',
+    );
+    addPerson.run('priya', 'person', 'Priya Shah');
+    addPerson.run('sam', 'person', 'Sam');
+    addPerson.run('sam-rivera', 'person', 'Sam Rivera');
+    const store = createNotesStore(db);
+    const oneOnOne = store.saveNote({
+      title: '1:1 with Priya',
+      content: '@Sam Rivera mentioned the increment',
+      noteType: 'person',
+      targetId: 'priya',
+    });
+    store.saveNote({
+      title: 'Sam Rivera notes',
+      content: 'Own note, @Sam Rivera',
+      noteType: 'person',
+      targetId: 'sam-rivera',
+    });
+    const loose = store.saveNote({
+      title: 'Standup',
+      content: 'Ask @sam about it. Email sam@rivera.com',
+      noteType: 'general',
+    });
+
+    expect(
+      store.getNotesMentioningPerson('sam-rivera').map((n) => n.id),
+    ).toEqual([oneOnOne.id]);
+    // "@Sam Rivera" is Sam Rivera's, not Sam's.
+    expect(store.getNotesMentioningPerson('sam').map((n) => n.id)).toEqual([
+      loose.id,
+    ]);
+    expect(store.getNotesMentioningPerson('priya')).toEqual([]);
+    // Their own notes stay as they were.
+    expect(store.getNotesForEntity('sam-rivera').map((n) => n.title)).toEqual([
+      'Sam Rivera notes',
+    ]);
+  });
 });

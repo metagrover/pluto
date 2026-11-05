@@ -61,6 +61,16 @@ export const getNotesForEntity = (entityId: string): Promise<Note[]> => {
   return window.ipcRenderer.invoke('NOTES_FOR_ENTITY', entityId);
 };
 
+/** Notes linked to someone else, or no one, that "@Name" this person. */
+export const getNotesMentioningPerson = (personId: string): Promise<Note[]> => {
+  if (typeof window === 'undefined' || !window.ipcRenderer?.invoke) {
+    return Promise.resolve([]);
+  }
+  return Promise.resolve(
+    window.ipcRenderer.invoke('NOTES_MENTIONING_PERSON', personId),
+  ).then((notes) => (Array.isArray(notes) ? notes : []));
+};
+
 /** Checklist lines like "Priya: send deck" in notes not linked to the person. */
 export const getOwnedNoteItems = (
   personId: string,

@@ -535,6 +535,50 @@
   text-decoration-color: hsl(var(--pro-text-muted) / 0.45);
 }
 
+/* "@Name" mentions. The textarea keeps the text; a copy laid over it with the
+   same classes shows only the tags, which take clicks. */
+.note-mention-field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.note-mention-overlay {
+  position: absolute;
+  inset: 0;
+  height: auto !important;
+  color: transparent !important;
+  text-decoration: none !important;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  pointer-events: none;
+  user-select: none;
+}
+
+.note-mention {
+  /* Drawn over the textarea's copy of the name, so the name takes this color. */
+  color: rgb(2 132 199);
+  background: rgb(14 165 233 / 0.1);
+  border-radius: 4px;
+  /* A shadow, not padding, so the tag doesn't move the text. */
+  box-shadow: 0 0 0 2px rgb(14 165 233 / 0.1);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.note-mention:hover {
+  background: rgb(14 165 233 / 0.18);
+  box-shadow: 0 0 0 2px rgb(14 165 233 / 0.18);
+}
+
+.dark .note-mention {
+  color: rgb(56 189 248);
+}
+
 /* Tasks sync to the Tasks list. A faint wash groups a run of tasks; it
    bleeds into the margin so task text stays aligned with the paragraphs. */
 .note-task-group {

@@ -5244,6 +5244,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('NOTES_FOR_ENTITY', (_event, entityId) =>
     db.notesStore.getNotesForEntity(entityId),
   );
+  ipcMain.handle('NOTES_MENTIONING_PERSON', (_event, personId) =>
+    typeof personId === 'string' && personId.length <= 300
+      ? db.notesStore.getNotesMentioningPerson(personId)
+      : [],
+  );
   ipcMain.handle('NOTES_OWNED_ITEMS', (_event, personId) =>
     typeof personId === 'string' && personId.length <= 300
       ? db.notesStore.getOwnedNoteItems(personId)

@@ -716,6 +716,110 @@ describe('NotesView workspace', () => {
     ).toBe(false);
   });
 
+  it('opens the people menu on "@", inserts the name, and shows it as a tag', async () => {
+    const onOpenPerson = vi.fn();
+    await act(async () => {
+      root.render(
+        <NotesView
+          initialNoteId="note-scratchpad"
+          onOpenPerson={onOpenPerson}
+        />,
+      );
+    });
+    const block = () =>
+      container.querySelector('#note-block-0') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype,
+      'value',
+    )?.set;
+
+    await act(async () => {
+      setter?.call(block(), 'Ping @Sar');
+      block().setSelectionRange(9, 9);
+      block().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const menu = container.querySelector('[aria-label="Slash commands"]');
+    expect(menu?.textContent).toContain('Sarah Connor');
+
+    await act(async () => {
+      block().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    expect(block().value).toBe('Ping @Sarah Connor ');
+    expect(container.querySelector('[aria-label="Slash commands"]')).toBeNull();
+
+    const tag = container.querySelector('.note-mention') as HTMLElement;
+    expect(tag?.textContent).toBe('@Sarah Connor');
+    await act(async () => {
+      tag.click();
+    });
+    expect(onOpenPerson).toHaveBeenCalledWith('person-1', 'note-scratchpad');
+  });
+
+  it('inserts the name in the right place when a shortcut strips a prefix', async () => {
+    await act(async () => {
+      root.render(<NotesView initialNoteId="note-scratchpad" />);
+    });
+    const block = () =>
+      container.querySelector('#note-block-0') as HTMLTextAreaElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value',
+      )?.set?.call(block(), '[] Send @Sar');
+      block().setSelectionRange(12, 12);
+      block().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      block().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    expect(block().value).toBe('Send @Sarah Connor ');
+    expect(
+      container.querySelector('[data-block-type="todo"] .note-mention')
+        ?.textContent,
+    ).toBe('@Sarah Connor');
+  });
+
+  it('leaves "@" plain text when no one matches or the menu is closed', async () => {
+    await act(async () => {
+      root.render(<NotesView initialNoteId="note-scratchpad" />);
+    });
+    const block = () =>
+      container.querySelector('#note-block-0') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype,
+      'value',
+    )?.set;
+    const type = async (value: string) => {
+      await act(async () => {
+        setter?.call(block(), value);
+        block().setSelectionRange(value.length, value.length);
+        block().dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    const menuOpen = () =>
+      container.querySelector('[aria-label="Slash commands"]') !== null;
+
+    await type('mail me@Sar');
+    expect(menuOpen()).toBe(false);
+    await type('@Zed');
+    expect(menuOpen()).toBe(false);
+
+    await type('@S');
+    expect(menuOpen()).toBe(true);
+    await act(async () => {
+      block().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+    expect(menuOpen()).toBe(false);
+    await type('@Sa');
+    expect(menuOpen()).toBe(false);
+  });
+
   it('offers to link a note that mentions someone in an upcoming meeting', async () => {
     notes[0].content = 'Ideas for @Sarah Connor';
     const baseInvoke = invoke.getMockImplementation()!;

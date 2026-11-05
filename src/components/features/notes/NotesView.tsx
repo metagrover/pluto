@@ -46,6 +46,7 @@ import {
 } from '../../../api/tasks';
 import type { MeetingStartContext } from '../../../types/meetingStart';
 import type { Note, NoteType, SaveNoteInput } from '../../../types/notes';
+import { activeMentionQuery, matchPeople } from '../../../utils/noteMentions';
 import { ownerOfLine } from '../../../utils/noteOwner';
 import { Logo } from '../../Brand/Logo';
 import { EmptyCanvas } from '../../ui/EmptyCanvas';
@@ -76,6 +77,7 @@ import {
   splitPasteIntoBlocks,
   taskRunPosition,
 } from './editor';
+import { MentionTextarea } from './editor/MentionTextarea';
 import './notes.css';
 
 export interface NoteBlock {
@@ -101,6 +103,8 @@ export interface SlashMenuState {
   query: string;
   selectedIndex: number;
   mode: 'root' | 'person' | 'project' | 'task';
+  /** Where the "@" is, when the person menu was opened by typing "@". */
+  mentionStart?: number;
 }
 
 export const INITIAL_SLASH_MENU: SlashMenuState = {
@@ -273,6 +277,8 @@ interface Props {
   onOpenMeeting?: (meetingId: string) => void;
   /** Starts a meeting with this note as its notes; absent while recording. */
   onStartMeeting?: (start: MeetingStartContext) => void;
+  /** Opens a person's page from an "@Name" tag in the open note. */
+  onOpenPerson?: (personId: string, fromNoteId: string | null) => void;
 }
 
 export const getDisplayTitle = (note: {
@@ -483,7 +489,11 @@ export function extractNoteTitleAndBlocks(
   };
 }
 
-export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
+export const NotesView = ({
+  initialNoteId,
+  onStartMeeting,
+  onOpenPerson,
+}: Props) => {
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(
     initialNoteId || null,
@@ -493,6 +503,13 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
   const ownerPeople = useMemo(
     () => entities.filter((entity) => entity.type === 'person'),
     [entities],
+  );
+  const openMentionedPerson = useMemo(
+    () =>
+      onOpenPerson
+        ? (personId: string) => onOpenPerson(personId, selectedNoteId)
+        : undefined,
+    [onOpenPerson, selectedNoteId],
   );
   const [calendarEvents, setCalendarEvents] = useState<
     Array<{
@@ -1709,11 +1726,8 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
 
   const filteredPeople = useMemo(() => {
     if (!slashMenu.isOpen || slashMenu.mode !== 'person') return [];
-    const q = slashMenu.query.toLowerCase().trim();
-    const all = entities.filter((e) => e.type === 'person');
-    if (!q) return all;
-    return all.filter((p) => p.name.toLowerCase().includes(q));
-  }, [slashMenu.isOpen, slashMenu.mode, slashMenu.query, entities]);
+    return matchPeople(ownerPeople, slashMenu.query);
+  }, [slashMenu.isOpen, slashMenu.mode, slashMenu.query, ownerPeople]);
 
   const filteredProjects = useMemo(() => {
     if (!slashMenu.isOpen || slashMenu.mode !== 'project') return [];
@@ -1892,10 +1906,30 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
       const block = blocks[blockIndex];
       if (!block) return;
       const next = [...blocks];
+      const insert = `@${person.name} `;
+      const typed = `@${slashMenu.query}`;
+      // Find the typed "@query" again: a shortcut like "[] " may have
+      // stripped a prefix since the menu opened, moving it left.
+      const start =
+        slashMenu.mentionStart === undefined
+          ? -1
+          : block.text.lastIndexOf(typed, slashMenu.mentionStart);
+      if (start !== -1) {
+        // Typed "@query": replace it with the name, keeping the text around it.
+        const end = start + typed.length;
+        const after = block.text.slice(end).replace(/^ /, '');
+        next[blockIndex] = {
+          ...block,
+          text: `${block.text.slice(0, start)}${insert}${after}`,
+        };
+        updateBlocks(next);
+        setSlashMenu(INITIAL_SLASH_MENU);
+        requestFocus(blockIndex, start + insert.length);
+        return;
+      }
       const cleanText = block.text
         .replace(/^\/(person|people)(\s.*)?$/i, '')
         .trim();
-      const insert = `@${person.name} `;
       next[blockIndex] = {
         ...block,
         text: cleanText ? `${cleanText} ${insert}` : insert,
@@ -1904,7 +1938,13 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
       setSlashMenu(INITIAL_SLASH_MENU);
       requestFocus(blockIndex, 'end');
     },
-    [blocks, updateBlocks, editTargetId, triggerAutoSave],
+    [
+      blocks,
+      updateBlocks,
+      requestFocus,
+      slashMenu.mentionStart,
+      slashMenu.query,
+    ],
   );
 
   const selectProjectFromSlash = useCallback(
@@ -1936,6 +1976,11 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
     window.addEventListener('mousedown', handleOutsideClick);
     return () => window.removeEventListener('mousedown', handleOutsideClick);
   }, [slashMenu.isOpen]);
+
+  // An "@" whose menu was closed with Esc stays plain text.
+  const dismissedMentionRef = useRef<{ index: number; start: number } | null>(
+    null,
+  );
 
   const handleBlockTextChange = useCallback(
     (index: number, val: string) => {
@@ -2068,9 +2113,30 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
           mode: 'root',
         });
       } else {
-        if (slashMenu.isOpen && slashMenu.blockIndex === index) {
+        // "@query" just before the caret opens the person menu.
+        const field = document.getElementById(`note-block-${index}`);
+        const mention =
+          field instanceof HTMLTextAreaElement && field.value === val
+            ? activeMentionQuery(val, field.selectionStart)
+            : null;
+        const dismissed = dismissedMentionRef.current;
+        if (
+          mention &&
+          !(dismissed?.index === index && dismissed.start === mention.start) &&
+          matchPeople(ownerPeople, mention.query).length > 0
+        ) {
+          setSlashMenu({
+            isOpen: true,
+            blockIndex: index,
+            query: mention.query,
+            selectedIndex: 0,
+            mode: 'person',
+            mentionStart: mention.start,
+          });
+        } else if (slashMenu.isOpen && slashMenu.blockIndex === index) {
           setSlashMenu(INITIAL_SLASH_MENU);
         }
+        if (!mention) dismissedMentionRef.current = null;
       }
 
       setBlocks((prev) => {
@@ -2139,7 +2205,14 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
         return next;
       });
     },
-    [triggerAutoSave, entities, editTargetId, slashMenu, requestFocus],
+    [
+      triggerAutoSave,
+      entities,
+      ownerPeople,
+      editTargetId,
+      slashMenu,
+      requestFocus,
+    ],
   );
 
   const handleToggleBlockChecked = useCallback(
@@ -2257,6 +2330,11 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
       }
       if (e.key === 'Escape') {
         e.preventDefault();
+        if (slashMenu.mentionStart !== undefined)
+          dismissedMentionRef.current = {
+            index,
+            start: slashMenu.mentionStart,
+          };
         setSlashMenu(INITIAL_SLASH_MENU);
         return;
       }
@@ -3579,7 +3657,9 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
 
                             <div className="flex-1 min-w-0">
                               {block.type === 'h1' ? (
-                                <TextareaAutosize
+                                <MentionTextarea
+                                  people={ownerPeople}
+                                  onOpenPerson={openMentionedPerson}
                                   id={`note-block-${index}`}
                                   value={block.text}
                                   onFocus={() => setFocusedBlockIndex(index)}
@@ -3604,7 +3684,9 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
                                   className="notion-block-textarea note-block-text text-pro-text-main placeholder:text-pro-text-muted/30"
                                 />
                               ) : block.type === 'h2' ? (
-                                <TextareaAutosize
+                                <MentionTextarea
+                                  people={ownerPeople}
+                                  onOpenPerson={openMentionedPerson}
                                   id={`note-block-${index}`}
                                   value={block.text}
                                   onFocus={() => setFocusedBlockIndex(index)}
@@ -3629,7 +3711,9 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
                                   className="notion-block-textarea note-block-text text-pro-text-main placeholder:text-pro-text-muted/30"
                                 />
                               ) : block.type === 'h3' ? (
-                                <TextareaAutosize
+                                <MentionTextarea
+                                  people={ownerPeople}
+                                  onOpenPerson={openMentionedPerson}
                                   id={`note-block-${index}`}
                                   value={block.text}
                                   onFocus={() => setFocusedBlockIndex(index)}
@@ -3655,7 +3739,9 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
                                 />
                               ) : block.type === 'quote' ? (
                                 <div className="note-quote">
-                                  <TextareaAutosize
+                                  <MentionTextarea
+                                    people={ownerPeople}
+                                    onOpenPerson={openMentionedPerson}
                                     id={`note-block-${index}`}
                                     value={block.text}
                                     onFocus={() => setFocusedBlockIndex(index)}
@@ -3700,7 +3786,9 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
                                     className="notion-task-checkbox rounded-full shrink-0 cursor-pointer"
                                   />
                                   <div className="flex-1 min-w-0 flex items-start justify-between gap-2">
-                                    <TextareaAutosize
+                                    <MentionTextarea
+                                      people={ownerPeople}
+                                      onOpenPerson={openMentionedPerson}
                                       id={`note-block-${index}`}
                                       value={block.text}
                                       onFocus={() =>
@@ -3750,7 +3838,9 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
                                     }
                                     className="notion-todo-checkbox rounded-[4px] shrink-0 cursor-pointer"
                                   />
-                                  <TextareaAutosize
+                                  <MentionTextarea
+                                    people={ownerPeople}
+                                    onOpenPerson={openMentionedPerson}
                                     id={`note-block-${index}`}
                                     value={block.text}
                                     onFocus={() => setFocusedBlockIndex(index)}
@@ -3820,7 +3910,9 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
                                   <span className="note-list-marker note-list-marker--number">
                                     {numberedListIndex(blocks, index)}.
                                   </span>
-                                  <TextareaAutosize
+                                  <MentionTextarea
+                                    people={ownerPeople}
+                                    onOpenPerson={openMentionedPerson}
                                     id={`note-block-${index}`}
                                     value={block.text}
                                     onFocus={() => setFocusedBlockIndex(index)}
@@ -3854,7 +3946,9 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
                                     className="note-list-marker note-list-marker--bullet"
                                     aria-hidden="true"
                                   />
-                                  <TextareaAutosize
+                                  <MentionTextarea
+                                    people={ownerPeople}
+                                    onOpenPerson={openMentionedPerson}
                                     id={`note-block-${index}`}
                                     value={block.text}
                                     onFocus={() => setFocusedBlockIndex(index)}
@@ -3883,7 +3977,9 @@ export const NotesView = ({ initialNoteId, onStartMeeting }: Props) => {
                                   />
                                 </li>
                               ) : (
-                                <TextareaAutosize
+                                <MentionTextarea
+                                  people={ownerPeople}
+                                  onOpenPerson={openMentionedPerson}
                                   id={`note-block-${index}`}
                                   value={block.text}
                                   onFocus={() => setFocusedBlockIndex(index)}

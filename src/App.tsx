@@ -2705,6 +2705,11 @@ function App() {
                 onOpenMeeting={(id) =>
                   handleOpenMeeting(id, { label: 'Back to Notes' })
                 }
+                onOpenPerson={(id, fromNoteId) => {
+                  // Back returns to this note.
+                  if (fromNoteId) setSelectedNoteId(fromNoteId);
+                  handleOpenPerson(id, { label: 'Back to Notes' });
+                }}
               />
             ) : activeTab === 'tasks' ? (
               <TasksView

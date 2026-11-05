@@ -36,6 +36,7 @@ import {
 } from '../../api/knowledgeGraph';
 import {
   getNotesForEntity,
+  getNotesMentioningPerson,
   saveNote,
   subscribeNotesChanged,
 } from '../../api/notes';
@@ -677,12 +678,15 @@ const PersonTimeline = ({
   meetings,
   notes,
   fallbackNoteTitle,
+  mentionedNoteIds,
   onOpenMeeting,
   onOpenNote,
 }: {
   meetings: PersonBriefingMeeting[];
   notes: Note[];
   fallbackNoteTitle: string;
+  /** Notes that "@Name" the person without being linked to them. */
+  mentionedNoteIds?: ReadonlySet<string>;
   onOpenMeeting: (meetingId: string) => void;
   onOpenNote?: (noteId: string) => void;
 }) => {
@@ -730,7 +734,9 @@ const PersonTimeline = ({
             <span>
               <strong>{row.note.title || fallbackNoteTitle}</strong>
               <small className="line-clamp-1">
-                Note
+                {mentionedNoteIds?.has(row.note.id)
+                  ? 'Mentioned in note'
+                  : 'Note'}
                 {noteSnippet(row.note.content)
                   ? ` · ${noteSnippet(row.note.content)}`
                   : ''}
@@ -825,6 +831,36 @@ export const PersonDossier = ({
   }, [detail.person.id, personNotes]);
 
   const notesToDisplay = personNotes ?? fetchedNotes;
+
+  // Other notes that "@Name" this person, listed with their own notes.
+  const [mentionedNotes, setMentionedNotes] = useState<Note[]>(EMPTY_NOTES);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchMentions = async () => {
+      try {
+        const loaded = await getNotesMentioningPerson(detail.person.id);
+        if (!cancelled) setMentionedNotes(loaded);
+      } catch (err) {
+        console.error('Failed to fetch notes mentioning person:', err);
+      }
+    };
+    void fetchMentions();
+    const unsub = subscribeNotesChanged(() => {
+      void fetchMentions();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [detail.person.id]);
+  const { timelineNotes, mentionedNoteIds } = useMemo(() => {
+    const linked = new Set(notesToDisplay.map((note) => note.id));
+    const mentioned = mentionedNotes.filter((note) => !linked.has(note.id));
+    return {
+      timelineNotes: [...notesToDisplay, ...mentioned],
+      mentionedNoteIds: new Set(mentioned.map((note) => note.id)),
+    };
+  }, [notesToDisplay, mentionedNotes]);
 
   const handleCreateOrOpenNote = async () => {
     if (notesToDisplay.length > 0) {
@@ -2404,7 +2440,7 @@ export const PersonDossier = ({
         <div className="person-dossier__major-heading">
           <div>
             <h2>Meetings and notes</h2>
-            <span>{confirmedMeetings.length + notesToDisplay.length}</span>
+            <span>{confirmedMeetings.length + timelineNotes.length}</span>
           </div>
           <button
             type="button"
@@ -2416,14 +2452,15 @@ export const PersonDossier = ({
             <span>1:1 Note</span>
           </button>
         </div>
-        {confirmedMeetings.length + notesToDisplay.length === 0 ? (
+        {confirmedMeetings.length + timelineNotes.length === 0 ? (
           <p className="person-dossier__section-empty">
             No meetings or notes yet.
           </p>
         ) : (
           <PersonTimeline
             meetings={confirmedMeetings}
-            notes={notesToDisplay}
+            notes={timelineNotes}
+            mentionedNoteIds={mentionedNoteIds}
             fallbackNoteTitle={`Notes with ${currentDetail.person.name}`}
             onOpenMeeting={onOpenMeeting}
             onOpenNote={onOpenNote}

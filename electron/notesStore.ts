@@ -7,6 +7,7 @@ import type {
   SaveNoteInput,
   SetNoteChecklistItemInput,
 } from '../src/types/notes';
+import { findMentions } from '../src/utils/noteMentions';
 import { lineOwnedBy, ownerLabelsFor } from '../src/utils/noteOwner';
 
 export interface NotesStore {
@@ -17,6 +18,8 @@ export interface NotesStore {
   getNotesForAttendees: (emails: string[], names: string[]) => NoteAgendaItem[];
   searchNotes: (query: string, limit?: number) => Note[];
   getNotesForEntity: (entityId: string) => Note[];
+  /** Notes linked to someone else, or no one, that "@Name" this person. */
+  getNotesMentioningPerson: (personId: string) => Note[];
   setChecklistItem: (input: SetNoteChecklistItemInput) => NoteAgendaItem;
   /** Checklist lines like "Priya: send deck" in notes not linked to them. */
   getOwnedNoteItems: (personId: string) => NoteAgendaItem[];
@@ -494,6 +497,52 @@ export function createNotesStore(db: Database.Database): NotesStore {
     return rows.map(mapNoteRow);
   };
 
+  const getNotesMentioningPerson = (personId: string): Note[] => {
+    if (!personId) return [];
+    // Everyone, so "@Sam Rivera" counts for Sam Rivera and not for "Sam".
+    const people = db
+      .prepare(`SELECT id, name FROM entities WHERE type = 'person'`)
+      .all() as Array<{ id: string; name: string }>;
+    if (!people.some((person) => person.id === personId)) return [];
+    // LIKE narrows to notes with an "@"; the check below is exact.
+    const rows = db
+      .prepare(`
+      SELECT
+        n.id,
+        n.title,
+        n.content,
+        n.note_type as noteType,
+        n.target_id as targetId,
+        e.name as targetName,
+        n.pinned,
+        n.created_at as createdAt,
+        n.updated_at as updatedAt
+      FROM notes n
+      LEFT JOIN entities e ON n.target_id = e.id
+      WHERE (n.target_id IS NULL OR n.target_id != ?)
+        AND n.content LIKE '%@%'
+      ORDER BY n.pinned DESC, datetime(n.updated_at) DESC
+    `)
+      .all(personId) as Array<{
+      id: string;
+      title: string;
+      content: string;
+      noteType: NoteType;
+      targetId: string | null;
+      targetName: string | null;
+      pinned: number;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    return rows
+      .filter((row) =>
+        findMentions(row.content, people).some(
+          (mention) => mention.person.id === personId,
+        ),
+      )
+      .map(mapNoteRow);
+  };
+
   // Ticks one checklist line in a note, in place, so the item shown in meeting
   // prep and the line in the note stay one item. If the note was edited and the
   // line moved, the item is found by its text when that text is unique.
@@ -560,6 +609,7 @@ export function createNotesStore(db: Database.Database): NotesStore {
     getNotesForAttendees,
     searchNotes,
     getNotesForEntity,
+    getNotesMentioningPerson,
     setChecklistItem,
     getOwnedNoteItems,
   };
