@@ -37,6 +37,7 @@ import type {
   PersonChatThread,
 } from '../../types/personChat';
 import { Logo } from '../Brand/Logo';
+import { AnswerActions } from './AnswerActions';
 
 const starterPrompts = (name: string) => [
   `Catch me up on ${name}`,
@@ -101,8 +102,10 @@ const SourceList = ({
 export const PersonChatDock: React.FC<{
   personId: string;
   personName: string;
+  /** Your own page: answers can become to-dos, not "Next time" items. */
+  isSelf?: boolean;
   onOpenMeeting: (meetingId: string) => void;
-}> = ({ personId, personName, onOpenMeeting }) => {
+}> = ({ personId, personName, isSelf = false, onOpenMeeting }) => {
   const [enabled, setEnabled] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [threads, setThreads] = useState<PersonChatThread[]>([]);
@@ -612,6 +615,15 @@ export const PersonChatDock: React.FC<{
                       citations={message.citations}
                       onOpenMeeting={onOpenMeeting}
                     />
+                    {message.status !== 'interrupted' &&
+                    message.content.trim() ? (
+                      <AnswerActions
+                        answer={message.content}
+                        person={
+                          isSelf ? null : { id: personId, name: personName }
+                        }
+                      />
+                    ) : null}
                   </div>
                 </div>
               ),

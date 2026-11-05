@@ -46,6 +46,7 @@ import {
 import { isFeatureEnabled } from '../../config/featureFlags';
 import { canImproveHistoricalSpeakerLabels } from '../../services/postMeetingProcessingCoordinator';
 import type { Meeting, TranscriptSegment } from '../../types';
+import type { MeetingAskPlutoConversationMessage } from '../../types/askPluto';
 import {
   parseAnalysisEditConflictsJson,
   parseUserEditsJson,
@@ -72,8 +73,10 @@ import {
   canUseTranscriptTrustState,
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
+import { Logo } from '../Brand/Logo';
 import { DetailsMenu } from '../ui/DetailsMenu';
 import { SearchSelect } from '../ui/SearchSelect';
+import { MeetingAskPlutoPanel } from './MeetingAskPlutoPanel';
 import { MeetingAttachmentsBar } from './MeetingAttachmentsBar';
 import { MeetingCalendarContext } from './MeetingCalendarContext';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
@@ -85,6 +88,8 @@ import {
   MeetingParticipantsPopover,
   resolveMeetingParticipants,
 } from './MeetingParticipants';
+import { PrepForMeeting } from './MeetingPrepEditor';
+import { MeetingWhoWasThere } from './MeetingWhoWasThere';
 import { SpeakerIdentificationModal } from './SpeakerIdentificationModal';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';
@@ -187,6 +192,7 @@ interface MeetingViewProps {
   onBack?: () => void;
   backLabel?: string;
   onOpenPerson?: (personId: string) => void;
+  onOpenMeeting?: (meetingId: string) => void;
 }
 
 export const TranscriptIntegrityPanel = ({
@@ -800,11 +806,17 @@ const SelectedMeetingView = ({
   onBack,
   backLabel,
   onOpenPerson,
+  onOpenMeeting,
   isLoadingDetail = false,
 }: Omit<MeetingViewProps, 'selectedMeeting'> & {
   selectedMeeting: Meeting;
 }) => {
   const [isRegeneratingNotes, setIsRegeneratingNotes] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  const [askConversation, setAskConversation] = useState<
+    MeetingAskPlutoConversationMessage[]
+  >([]);
+  const askTriggerRef = useRef<HTMLButtonElement>(null);
   const [isRestoringNotes, setIsRestoringNotes] = useState(false);
   const [isDeletingAudio, setIsDeletingAudio] = useState(false);
   const [notesTemplate, setNotesTemplate] = useState<MeetingNotesTemplate>(
@@ -925,6 +937,12 @@ const SelectedMeetingView = ({
     cancelled: false,
     saving: false,
   });
+
+  // A conversation belongs to one meeting.
+  useEffect(() => {
+    setAskOpen(false);
+    setAskConversation([]);
+  }, [selectedMeeting.id]);
 
   useEffect(() => {
     setLatestTitle(selectedMeeting.title);
@@ -1305,6 +1323,26 @@ const SelectedMeetingView = ({
     ],
   );
   const participantCount = resolvedParticipants.length;
+  // People the user added (while recording, from their page, or with "Who
+  // was this with?") who are not already identified as a speaker.
+  const addedPeople = meetingEntities.filter(
+    (entity) =>
+      entity.type === 'person' &&
+      (entity.context ?? '').split(',').includes('Manual participant') &&
+      !resolvedParticipants.some(
+        (participant) => participant.personId === entity.id,
+      ),
+  );
+  // The one other person in the meeting, when there is exactly one.
+  const otherPeople = new Map<string, string>();
+  for (const participant of resolvedParticipants)
+    if (participant.personId && !participant.isSelf)
+      otherPeople.set(participant.personId, participant.name);
+  for (const person of addedPeople) otherPeople.set(person.id, person.name);
+  const onlyOtherPerson =
+    otherPeople.size === 1
+      ? [...otherPeople].map(([id, name]) => ({ id, name }))[0]
+      : null;
   const speakerToPersonIdMap = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of resolvedParticipants) {
@@ -1338,6 +1376,26 @@ const SelectedMeetingView = ({
       }),
     [v2, v3, selectedMeeting.user_notes, editsMap, displayNames],
   );
+  const canAsk = notesDocument.hasAnalysis;
+  const closeAsk = useCallback(() => {
+    setAskOpen(false);
+    askTriggerRef.current?.focus();
+  }, []);
+
+  // ⌘J opens and closes Ask Pluto, as it does in Notes.
+  useEffect(() => {
+    if (!canAsk) return;
+    const toggleAsk = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'j')
+        return;
+      event.preventDefault();
+      if (askOpen) closeAsk();
+      else setAskOpen(true);
+    };
+    window.addEventListener('keydown', toggleAsk);
+    return () => window.removeEventListener('keydown', toggleAsk);
+  }, [askOpen, canAsk, closeAsk]);
+
   const draftPreview = !notesDocument.hasAnalysis
     ? currentNotesPreview(selectedMeeting)
     : null;
@@ -1422,494 +1480,475 @@ const SelectedMeetingView = ({
   };
 
   return (
-    <div
-      key={selectedMeeting.id}
-      data-meeting-page
-      className={`meeting-document w-full ${
-        transcriptVisible ? '' : 'meeting-document--transcript-collapsed'
-      } ${isMeetingProcessing ? 'meeting-document--processing' : ''}`}
-    >
+    <div className="meeting-page">
       <div
-        className="meeting-notes-surface relative"
-        aria-label="Notes"
-        onDragOver={
-          SOURCES_ENABLED
-            ? (e) => {
-                e.preventDefault();
-                if (!isDraggingOverMeeting) setIsDraggingOverMeeting(true);
-              }
-            : undefined
-        }
-        onDragLeave={
-          SOURCES_ENABLED
-            ? (e) => {
-                e.preventDefault();
-                if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-                setIsDraggingOverMeeting(false);
-              }
-            : undefined
-        }
-        onDrop={
-          SOURCES_ENABLED
-            ? async (e) => {
-                e.preventDefault();
-                setIsDraggingOverMeeting(false);
-                const files = e.dataTransfer.files;
-                const paths: string[] = [];
-                for (let i = 0; i < files.length; i++) {
-                  const file = files[i] as unknown as { path?: string };
-                  if (file.path) paths.push(file.path);
-                }
-                if (paths.length === 0 || !selectedMeeting) return;
-                try {
-                  const imported = await importAndAttachMeetingArtifactPaths(
-                    selectedMeeting.id,
-                    paths,
-                  );
-                  if (imported.length > 0) {
-                    setAttachmentsRefreshKey((k) => k + 1);
-                  }
-                } catch (err) {
-                  console.error('Failed to import dropped files:', err);
-                }
-              }
-            : undefined
-        }
+        key={selectedMeeting.id}
+        data-meeting-page
+        className={`meeting-document w-full ${
+          transcriptVisible ? '' : 'meeting-document--transcript-collapsed'
+        } ${isMeetingProcessing ? 'meeting-document--processing' : ''}`}
       >
-        {SOURCES_ENABLED && isDraggingOverMeeting && (
-          <div className="pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center bg-pro-bg/85 backdrop-blur-xs">
-            <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-pro-accent/60 bg-pro-accent/[0.05] p-8 text-center shadow-lg">
-              <Paperclip className="mb-2.5 h-8 w-8 text-pro-accent animate-bounce" />
-              <p className="text-[14px] font-semibold text-pro-text-main">
-                Drop document to attach to this meeting
-              </p>
-              <p className="mt-1 text-[12px] text-pro-text-muted">
-                Word, Pages, PDF, or text files will ground notes synthesis
-              </p>
-            </div>
-          </div>
-        )}
-        {onBack && (
-          <div className="meeting-document-topline">
-            <button
-              type="button"
-              className="meeting-document-back"
-              onClick={onBack}
-              aria-label={backLabel || 'Back'}
-            >
-              <ArrowLeft aria-hidden="true" size={15} />
-              <span>{backLabel || 'Back'}</span>
-            </button>
-          </div>
-        )}
-        <header
-          className={`meeting-document-header ${
-            onBack ? 'meeting-document-header--has-back' : ''
-          }`}
+        <div
+          className="meeting-notes-surface relative"
+          aria-label="Notes"
+          onDragOver={
+            SOURCES_ENABLED
+              ? (e) => {
+                  e.preventDefault();
+                  if (!isDraggingOverMeeting) setIsDraggingOverMeeting(true);
+                }
+              : undefined
+          }
+          onDragLeave={
+            SOURCES_ENABLED
+              ? (e) => {
+                  e.preventDefault();
+                  if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                  setIsDraggingOverMeeting(false);
+                }
+              : undefined
+          }
+          onDrop={
+            SOURCES_ENABLED
+              ? async (e) => {
+                  e.preventDefault();
+                  setIsDraggingOverMeeting(false);
+                  const files = e.dataTransfer.files;
+                  const paths: string[] = [];
+                  for (let i = 0; i < files.length; i++) {
+                    const file = files[i] as unknown as { path?: string };
+                    if (file.path) paths.push(file.path);
+                  }
+                  if (paths.length === 0 || !selectedMeeting) return;
+                  try {
+                    const imported = await importAndAttachMeetingArtifactPaths(
+                      selectedMeeting.id,
+                      paths,
+                    );
+                    if (imported.length > 0) {
+                      setAttachmentsRefreshKey((k) => k + 1);
+                    }
+                  } catch (err) {
+                    console.error('Failed to import dropped files:', err);
+                  }
+                }
+              : undefined
+          }
         >
-          <TextareaAutosize
-            value={
-              editingTitle || titleSaveError || isSavingTitle
-                ? titleValue
-                : latestTitle || 'Untitled Session'
-            }
-            onFocus={() => {
-              titleEdit.current.cancelled = false;
-              if (editingTitle || titleSaveError) return;
-              titleEdit.current.expectedTitle = latestTitle;
-              setEditingTitle(true);
-              setTitleValue(latestTitle || 'Untitled Session');
-            }}
-            onChange={(e) => setTitleValue(e.target.value)}
-            onBlur={() => {
-              if (titleEdit.current.cancelled) {
-                titleEdit.current.cancelled = false;
-                return;
-              }
-              if (!titleSaveError) void saveTitle();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                e.currentTarget.blur();
-              }
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                if (titleEdit.current.saving) return;
-                titleEdit.current.cancelled = true;
-                setTitleValue(latestTitle || 'Untitled Session');
-                setTitleSaveError(null);
-                setEditingTitle(false);
-                e.currentTarget.blur();
-              }
-            }}
-            className="meeting-document-title w-full bg-transparent outline-none resize-none mb-0 p-0 block overflow-hidden"
-            spellCheck={false}
-            aria-label="Meeting title"
-            aria-describedby={
-              titleSaveError ? 'meeting-title-save-error' : undefined
-            }
-            aria-busy={isSavingTitle}
-            readOnly={isSavingTitle}
-          />
-          {titleSaveError ? (
-            <output
-              id="meeting-title-save-error"
-              data-meeting-title-save-error
-              className="mb-3 block text-xs leading-5 text-pro-text-muted"
-            >
-              <span className="block">
-                {titleSaveError === 'conflict'
-                  ? `Title not saved. The current title is “${latestTitle}”. Your edit is still here.`
-                  : titleSaveError === 'missing'
-                    ? 'Title not saved. This meeting is no longer available. Your edit is still here to copy.'
-                    : 'Title not saved. Your edit is still here.'}
-              </span>
-              {titleSaveError !== 'missing' ? (
-                <button
-                  type="button"
-                  disabled={isSavingTitle}
-                  onClick={() =>
-                    void saveTitle(
-                      titleSaveError === 'conflict'
-                        ? latestTitle
-                        : titleEdit.current.expectedTitle,
-                    )
-                  }
-                  className="rounded px-1.5 py-1 text-xs font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-50"
-                >
-                  {isSavingTitle
-                    ? 'Saving…'
-                    : titleSaveError === 'conflict'
-                      ? 'Save my title instead'
-                      : 'Try again'}
-                </button>
-              ) : null}
-            </output>
-          ) : null}
-          <div className="meeting-document-meta-row">
-            <div className="meeting-document-meta min-w-0">
-              <span>
-                {new Date(
-                  selectedMeeting
-                    ? meetingTimestamp(selectedMeeting)
-                    : Date.now(),
-                ).toLocaleString([], {
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                  hour: 'numeric',
-                  minute: '2-digit',
-                })}
-              </span>
-              {participantCount > 0 ? (
-                <div className="relative inline-flex items-center">
-                  <button
-                    type="button"
-                    ref={participantsTriggerRef}
-                    data-meeting-participants-trigger
-                    onClick={() => setIsParticipantsOpen((prev) => !prev)}
-                    className="meeting-participants-trigger inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent group"
-                    aria-expanded={isParticipantsOpen}
-                    aria-haspopup="dialog"
-                    aria-label={`View ${participantCount} meeting participants`}
-                  >
-                    <Users
-                      size={12}
-                      className="opacity-75 group-hover:text-pro-text-main transition-colors"
-                    />
-                    <span className="font-medium text-pro-text-main/90">
-                      {participantCount}{' '}
-                      {participantCount === 1 ? 'participant' : 'participants'}
-                    </span>
-                    <ChevronDown
-                      size={11}
-                      className={`opacity-60 transition-transform duration-150 ${
-                        isParticipantsOpen ? 'rotate-180' : ''
-                      }`}
-                    />
-                  </button>
-
-                  {isParticipantsOpen && (
-                    <MeetingParticipantsPopover
-                      participants={resolvedParticipants}
-                      onClose={() => setIsParticipantsOpen(false)}
-                      onOpenPerson={(personId) => {
-                        setIsParticipantsOpen(false);
-                        onOpenPerson?.(personId);
-                      }}
-                      onIdentifySpeaker={(speakerKey) => {
-                        setIsParticipantsOpen(false);
-                        setSelectedSpeakerForModal(speakerKey);
-                        setIsSpeakerModalOpen(true);
-                      }}
-                    />
-                  )}
-                </div>
-              ) : selectedMeeting.duration_seconds ? (
-                <span>
-                  {selectedMeeting.duration_seconds < 60
-                    ? '< 1 min'
-                    : `${Math.floor(selectedMeeting.duration_seconds / 60)} min`}
-                </span>
-              ) : null}
-              {tentativeVoiceMatches
-                .slice(0, 1)
-                .map(({ speaker, suggestion }) => (
-                  <button
-                    key={`${speaker}:${suggestion.candidateDigest}`}
-                    type="button"
-                    data-tentative-speaker-match={speaker}
-                    aria-label={`Review tentative speaker match: maybe ${suggestion.suggestedPersonName}`}
-                    onClick={() => {
-                      setSelectedSpeakerForModal(speaker);
-                      setIsSpeakerModalOpen(true);
-                    }}
-                    className="inline-flex items-center gap-1 rounded border border-pro-accent/25 bg-pro-accent/[0.06] px-1.5 py-0.5 text-xs text-pro-text-main transition-colors hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                  >
-                    <Sparkles size={11} className="text-pro-accent" />
-                    <span>Maybe {suggestion.suggestedPersonName}</span>
-                  </button>
-                ))}
-              {tentativeVoiceMatches.length === 0 &&
-              unidentifiedWithoutSuggestionCount > 0 ? (
-                <button
-                  type="button"
-                  id="meeting-header-speaker-review-trigger"
-                  onClick={() => {
-                    setSelectedSpeakerForModal(null);
-                    setIsSpeakerModalOpen(true);
-                  }}
-                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                >
-                  <Users size={12} className="opacity-70" />
-                  <span>
-                    {tentativeVoiceMatches.length > 0
-                      ? `${unidentifiedWithoutSuggestionCount} more ${
-                          unidentifiedWithoutSuggestionCount === 1
-                            ? 'speaker'
-                            : 'speakers'
-                        } to identify`
-                      : `${unidentifiedWithoutSuggestionCount} unidentified ${
-                          unidentifiedWithoutSuggestionCount === 1
-                            ? 'speaker'
-                            : 'speakers'
-                        }`}
-                  </span>
-                </button>
-              ) : null}
+          {SOURCES_ENABLED && isDraggingOverMeeting && (
+            <div className="pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center bg-pro-bg/85 backdrop-blur-xs">
+              <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-pro-accent/60 bg-pro-accent/[0.05] p-8 text-center shadow-lg">
+                <Paperclip className="mb-2.5 h-8 w-8 text-pro-accent animate-bounce" />
+                <p className="text-[14px] font-semibold text-pro-text-main">
+                  Drop document to attach to this meeting
+                </p>
+                <p className="mt-1 text-[12px] text-pro-text-muted">
+                  Word, Pages, PDF, or text files will ground notes synthesis
+                </p>
+              </div>
             </div>
-            <div className="meeting-document-actions">
-              {editsMap[ANALYSIS_SNAPSHOT_PATH] ? (
-                <button
-                  type="button"
-                  onClick={() => void restorePreviousGeneratedNotes()}
-                  disabled={isRestoringNotes}
-                  className="meeting-toolbar-button meeting-toolbar-button--undo"
-                  aria-label={
-                    isRestoringNotes
-                      ? 'Restoring previous notes…'
-                      : 'Undo rewrite'
-                  }
-                  title={isRestoringNotes ? 'Restoring…' : 'Undo rewrite'}
-                >
-                  {isRestoringNotes ? (
-                    <Loader2 className="h-6 w-6 animate-spin" />
-                  ) : (
-                    <Undo2 className="h-6 w-6" strokeWidth={2.25} />
-                  )}
-                </button>
-              ) : null}
-              {downstreamPresentation.state === 'ready' &&
-              canRegenerateMeetingIntelligence ? (
-                <button
-                  type="button"
-                  onClick={() => void regenerateEnhancedNotes()}
-                  disabled={isRegeneratingNotes}
-                  className={`meeting-toolbar-button ${
-                    isRegeneratingNotes
-                      ? 'opacity-50 cursor-not-allowed'
-                      : 'meeting-toolbar-button--primary'
-                  }`}
-                  aria-label={
-                    isRegeneratingNotes
-                      ? 'Generating Enhanced Notes...'
-                      : 'Regenerate Enhanced Notes'
-                  }
-                >
-                  {isRegeneratingNotes ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5 opacity-70" />
-                  )}
-                  <span>{isRegeneratingNotes ? 'Writing…' : 'Regenerate'}</span>
-                </button>
-              ) : null}
-              <DetailsMenu className="meeting-document-menu">
-                <summary aria-label="Meeting note actions">
-                  <MoreHorizontal aria-hidden="true" size={15} />
-                </summary>
-                <div className="meeting-document-menu__panel">
-                  <div className="meeting-document-menu__section">
-                    <label
-                      htmlFor="meeting-notes-template"
-                      className="meeting-template-picker"
-                    >
-                      <span className="meeting-template-picker__label">
-                        Notes template
-                      </span>
-                      <SearchSelect
-                        id="meeting-notes-template"
-                        value={notesTemplate}
-                        onValueChange={(value) =>
-                          setNotesTemplate(value as MeetingNotesTemplate)
-                        }
-                        ariaLabel="Notes template"
-                        searchable
-                        options={meetingNotesTemplateOptions}
-                      />
-                    </label>
-                  </div>
-                  <div className="meeting-document-menu__section">
-                    {canImproveHistoricalSpeakerLabelsForMeeting &&
-                    !inlineSpeakerLabelRepairRequired &&
-                    onRetryTranscriptValidation ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onRetryTranscriptValidation('speaker_labels')
-                        }
-                        className="meeting-toolbar-button"
-                        disabled={transcriptValidationBusy}
-                        aria-label={
-                          transcriptValidationRetrying
-                            ? 'Improving speaker labels'
-                            : 'Improve speaker labels'
-                        }
-                        title={
-                          transcriptValidationBusy &&
-                          !transcriptValidationRetrying
-                            ? 'Another meeting is being improved'
-                            : undefined
-                        }
-                      >
-                        {transcriptValidationRetrying ? (
-                          <Loader2
-                            aria-hidden="true"
-                            className="h-4 w-4 animate-spin"
-                          />
-                        ) : (
-                          <Sparkles aria-hidden="true" className="h-4 w-4" />
-                        )}
-                        <span>
-                          {transcriptValidationRetrying
-                            ? 'Improving labels'
-                            : 'Improve speaker labels'}
-                        </span>
-                      </button>
-                    ) : null}
+          )}
+          {onBack && (
+            <div className="meeting-document-topline">
+              <button
+                type="button"
+                className="meeting-document-back"
+                onClick={onBack}
+                aria-label={backLabel || 'Back'}
+              >
+                <ArrowLeft aria-hidden="true" size={15} />
+                <span>{backLabel || 'Back'}</span>
+              </button>
+            </div>
+          )}
+          <header
+            className={`meeting-document-header ${
+              onBack ? 'meeting-document-header--has-back' : ''
+            }`}
+          >
+            <TextareaAutosize
+              value={
+                editingTitle || titleSaveError || isSavingTitle
+                  ? titleValue
+                  : latestTitle || 'Untitled Session'
+              }
+              onFocus={() => {
+                titleEdit.current.cancelled = false;
+                if (editingTitle || titleSaveError) return;
+                titleEdit.current.expectedTitle = latestTitle;
+                setEditingTitle(true);
+                setTitleValue(latestTitle || 'Untitled Session');
+              }}
+              onChange={(e) => setTitleValue(e.target.value)}
+              onBlur={() => {
+                if (titleEdit.current.cancelled) {
+                  titleEdit.current.cancelled = false;
+                  return;
+                }
+                if (!titleSaveError) void saveTitle();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  if (titleEdit.current.saving) return;
+                  titleEdit.current.cancelled = true;
+                  setTitleValue(latestTitle || 'Untitled Session');
+                  setTitleSaveError(null);
+                  setEditingTitle(false);
+                  e.currentTarget.blur();
+                }
+              }}
+              className="meeting-document-title w-full bg-transparent outline-none resize-none mb-0 p-0 block overflow-hidden"
+              spellCheck={false}
+              aria-label="Meeting title"
+              aria-describedby={
+                titleSaveError ? 'meeting-title-save-error' : undefined
+              }
+              aria-busy={isSavingTitle}
+              readOnly={isSavingTitle}
+            />
+            {titleSaveError ? (
+              <output
+                id="meeting-title-save-error"
+                data-meeting-title-save-error
+                className="mb-3 block text-xs leading-5 text-pro-text-muted"
+              >
+                <span className="block">
+                  {titleSaveError === 'conflict'
+                    ? `Title not saved. The current title is “${latestTitle}”. Your edit is still here.`
+                    : titleSaveError === 'missing'
+                      ? 'Title not saved. This meeting is no longer available. Your edit is still here to copy.'
+                      : 'Title not saved. Your edit is still here.'}
+                </span>
+                {titleSaveError !== 'missing' ? (
+                  <button
+                    type="button"
+                    disabled={isSavingTitle}
+                    onClick={() =>
+                      void saveTitle(
+                        titleSaveError === 'conflict'
+                          ? latestTitle
+                          : titleEdit.current.expectedTitle,
+                      )
+                    }
+                    className="rounded px-1.5 py-1 text-xs font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-50"
+                  >
+                    {isSavingTitle
+                      ? 'Saving…'
+                      : titleSaveError === 'conflict'
+                        ? 'Save my title instead'
+                        : 'Try again'}
+                  </button>
+                ) : null}
+              </output>
+            ) : null}
+            <div className="meeting-document-meta-row">
+              <div className="meeting-document-meta min-w-0">
+                <span>
+                  {new Date(
+                    selectedMeeting
+                      ? meetingTimestamp(selectedMeeting)
+                      : Date.now(),
+                  ).toLocaleString([], {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}
+                </span>
+                {participantCount > 0 ? (
+                  <div className="relative inline-flex items-center">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (selectedMeeting) {
-                          const markdown = formatMeetingNotesAsMarkdown({
-                            meeting: selectedMeeting,
-                            documentModel: notesDocument,
-                            calendarContext,
-                            transcriptSegments: displayedTranscriptSegments,
-                            includeTranscript: exportIncludeTranscript,
-                          });
-                          const filename = buildMeetingExportFilename(
-                            selectedMeeting.title || 'Untitled Session',
-                            selectedMeeting.created_at || Date.now(),
-                            selectedMeeting.id,
-                          );
-                          const blob = new Blob([markdown], {
-                            type: 'text/markdown;charset=utf-8',
-                          });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = filename;
-                          a.click();
-                          URL.revokeObjectURL(url);
-                        }
-                      }}
-                      className="meeting-toolbar-button"
-                      aria-label="Export meeting notes"
+                      ref={participantsTriggerRef}
+                      data-meeting-participants-trigger
+                      onClick={() => setIsParticipantsOpen((prev) => !prev)}
+                      className="meeting-participants-trigger inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent group"
+                      aria-expanded={isParticipantsOpen}
+                      aria-haspopup="dialog"
+                      aria-label={`View ${participantCount} meeting participants`}
                     >
-                      <svg
-                        aria-hidden="true"
-                        className="w-4 h-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                        />
-                      </svg>
-                      <span>Export meeting notes</span>
+                      <Users
+                        size={12}
+                        className="opacity-75 group-hover:text-pro-text-main transition-colors"
+                      />
+                      <span className="font-medium text-pro-text-main/90">
+                        {participantCount}{' '}
+                        {participantCount === 1
+                          ? 'participant'
+                          : 'participants'}
+                      </span>
+                      <ChevronDown
+                        size={11}
+                        className={`opacity-60 transition-transform duration-150 ${
+                          isParticipantsOpen ? 'rotate-180' : ''
+                        }`}
+                      />
                     </button>
-                    {SOURCES_ENABLED ? (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          (
-                            e.currentTarget.closest(
-                              'details',
-                            ) as HTMLDetailsElement | null
-                          )?.removeAttribute('open');
-                          void handleAttachReferenceDocument();
+
+                    {isParticipantsOpen && (
+                      <MeetingParticipantsPopover
+                        participants={resolvedParticipants}
+                        onClose={() => setIsParticipantsOpen(false)}
+                        onOpenPerson={(personId) => {
+                          setIsParticipantsOpen(false);
+                          onOpenPerson?.(personId);
                         }}
-                        className="meeting-toolbar-button"
-                        aria-label="Attach reference document"
-                      >
-                        <Paperclip
-                          aria-hidden="true"
-                          className="h-4 w-4 shrink-0"
-                        />
-                        <span>Attach reference document…</span>
-                      </button>
-                    ) : null}
+                        onIdentifySpeaker={(speakerKey) => {
+                          setIsParticipantsOpen(false);
+                          setSelectedSpeakerForModal(speakerKey);
+                          setIsSpeakerModalOpen(true);
+                        }}
+                      />
+                    )}
                   </div>
-                  {selectedMeeting.finalization_status !==
-                  'recovery_required' ? (
-                    <div className="meeting-document-menu__section meeting-document-menu__section--danger">
-                      {selectedMeeting.audio_path ||
-                      selectedMeeting.system_audio_path ||
-                      selectedMeeting.mixed_audio_path ||
-                      selectedMeeting.has_audio ? (
+                ) : null}
+                {addedPeople.length ? (
+                  <span className="inline-flex flex-wrap items-center gap-1">
+                    With
+                    {addedPeople.map((person, index) => (
+                      <button
+                        key={person.id}
+                        type="button"
+                        className="font-medium text-pro-text-main hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent rounded"
+                        onClick={() => onOpenPerson?.(person.id)}
+                      >
+                        {person.name}
+                        {index < addedPeople.length - 1 ? ',' : ''}
+                      </button>
+                    ))}
+                  </span>
+                ) : !calendarContext &&
+                  notesDocument.hasAnalysis &&
+                  !resolvedParticipants.some(
+                    (participant) =>
+                      participant.personId && !participant.isSelf,
+                  ) ? (
+                  <MeetingWhoWasThere
+                    meetingId={String(selectedMeeting.id)}
+                    onAdded={() => {
+                      void window.ipcRenderer
+                        .invoke('GET_MEETING_ENTITIES', selectedMeeting.id)
+                        .then((entities) => {
+                          if (Array.isArray(entities))
+                            setMeetingEntities(entities);
+                        });
+                    }}
+                  />
+                ) : null}
+                {participantCount === 0 && selectedMeeting.duration_seconds ? (
+                  <span>
+                    {selectedMeeting.duration_seconds < 60
+                      ? '< 1 min'
+                      : `${Math.floor(selectedMeeting.duration_seconds / 60)} min`}
+                  </span>
+                ) : null}
+                {tentativeVoiceMatches
+                  .slice(0, 1)
+                  .map(({ speaker, suggestion }) => (
+                    <button
+                      key={`${speaker}:${suggestion.candidateDigest}`}
+                      type="button"
+                      data-tentative-speaker-match={speaker}
+                      aria-label={`Review tentative speaker match: maybe ${suggestion.suggestedPersonName}`}
+                      onClick={() => {
+                        setSelectedSpeakerForModal(speaker);
+                        setIsSpeakerModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1 rounded border border-pro-accent/25 bg-pro-accent/[0.06] px-1.5 py-0.5 text-xs text-pro-text-main transition-colors hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                    >
+                      <Sparkles size={11} className="text-pro-accent" />
+                      <span>Maybe {suggestion.suggestedPersonName}</span>
+                    </button>
+                  ))}
+                {tentativeVoiceMatches.length === 0 &&
+                unidentifiedWithoutSuggestionCount > 0 ? (
+                  <button
+                    type="button"
+                    id="meeting-header-speaker-review-trigger"
+                    onClick={() => {
+                      setSelectedSpeakerForModal(null);
+                      setIsSpeakerModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                  >
+                    <Users size={12} className="opacity-70" />
+                    <span>
+                      {tentativeVoiceMatches.length > 0
+                        ? `${unidentifiedWithoutSuggestionCount} more ${
+                            unidentifiedWithoutSuggestionCount === 1
+                              ? 'speaker'
+                              : 'speakers'
+                          } to identify`
+                        : `${unidentifiedWithoutSuggestionCount} unidentified ${
+                            unidentifiedWithoutSuggestionCount === 1
+                              ? 'speaker'
+                              : 'speakers'
+                          }`}
+                    </span>
+                  </button>
+                ) : null}
+              </div>
+              <div className="meeting-document-actions">
+                {canAsk ? (
+                  <button
+                    ref={askTriggerRef}
+                    type="button"
+                    onClick={() => (askOpen ? closeAsk() : setAskOpen(true))}
+                    className={`note-ask-trigger ${askOpen ? 'is-active' : ''}`}
+                    aria-pressed={askOpen}
+                    aria-label="Ask Pluto about this meeting"
+                    title="Ask Pluto about this meeting (⌘J)"
+                  >
+                    <Logo size={14} variant="default" />
+                    <span>Ask Pluto</span>
+                    <kbd>⌘J</kbd>
+                  </button>
+                ) : null}
+                {editsMap[ANALYSIS_SNAPSHOT_PATH] ? (
+                  <button
+                    type="button"
+                    onClick={() => void restorePreviousGeneratedNotes()}
+                    disabled={isRestoringNotes}
+                    className="meeting-toolbar-button meeting-toolbar-button--undo"
+                    aria-label={
+                      isRestoringNotes
+                        ? 'Restoring previous notes…'
+                        : 'Undo rewrite'
+                    }
+                    title={isRestoringNotes ? 'Restoring…' : 'Undo rewrite'}
+                  >
+                    {isRestoringNotes ? (
+                      <Loader2 className="h-6 w-6 animate-spin" />
+                    ) : (
+                      <Undo2 className="h-6 w-6" strokeWidth={2.25} />
+                    )}
+                  </button>
+                ) : null}
+                {downstreamPresentation.state === 'ready' &&
+                canRegenerateMeetingIntelligence ? (
+                  <button
+                    type="button"
+                    onClick={() => void regenerateEnhancedNotes()}
+                    disabled={isRegeneratingNotes}
+                    className={`meeting-toolbar-button ${
+                      isRegeneratingNotes
+                        ? 'opacity-50 cursor-not-allowed'
+                        : 'meeting-toolbar-button--primary'
+                    }`}
+                    aria-label={
+                      isRegeneratingNotes
+                        ? 'Generating Enhanced Notes...'
+                        : 'Regenerate Enhanced Notes'
+                    }
+                  >
+                    {isRegeneratingNotes ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 opacity-70" />
+                    )}
+                    <span>
+                      {isRegeneratingNotes ? 'Writing…' : 'Regenerate'}
+                    </span>
+                  </button>
+                ) : null}
+                <DetailsMenu className="meeting-document-menu">
+                  <summary aria-label="Meeting note actions">
+                    <MoreHorizontal aria-hidden="true" size={15} />
+                  </summary>
+                  <div className="meeting-document-menu__panel">
+                    <div className="meeting-document-menu__section">
+                      <label
+                        htmlFor="meeting-notes-template"
+                        className="meeting-template-picker"
+                      >
+                        <span className="meeting-template-picker__label">
+                          Notes template
+                        </span>
+                        <SearchSelect
+                          id="meeting-notes-template"
+                          value={notesTemplate}
+                          onValueChange={(value) =>
+                            setNotesTemplate(value as MeetingNotesTemplate)
+                          }
+                          ariaLabel="Notes template"
+                          searchable
+                          options={meetingNotesTemplateOptions}
+                        />
+                      </label>
+                    </div>
+                    <div className="meeting-document-menu__section">
+                      {canImproveHistoricalSpeakerLabelsForMeeting &&
+                      !inlineSpeakerLabelRepairRequired &&
+                      onRetryTranscriptValidation ? (
                         <button
                           type="button"
-                          onClick={() => void deleteRecordingAudio()}
-                          disabled={isDeletingAudio}
-                          className="meeting-toolbar-button meeting-toolbar-button--danger disabled:cursor-not-allowed disabled:opacity-50"
-                          aria-label="Delete recording audio"
+                          onClick={() =>
+                            onRetryTranscriptValidation('speaker_labels')
+                          }
+                          className="meeting-toolbar-button"
+                          disabled={transcriptValidationBusy}
+                          aria-label={
+                            transcriptValidationRetrying
+                              ? 'Improving speaker labels'
+                              : 'Improve speaker labels'
+                          }
+                          title={
+                            transcriptValidationBusy &&
+                            !transcriptValidationRetrying
+                              ? 'Another meeting is being improved'
+                              : undefined
+                          }
                         >
-                          {isDeletingAudio ? (
+                          {transcriptValidationRetrying ? (
                             <Loader2
                               aria-hidden="true"
                               className="h-4 w-4 animate-spin"
                             />
                           ) : (
-                            <VolumeX aria-hidden="true" className="h-4 w-4" />
+                            <Sparkles aria-hidden="true" className="h-4 w-4" />
                           )}
                           <span>
-                            {isDeletingAudio
-                              ? 'Deleting audio…'
-                              : 'Delete recording audio'}
+                            {transcriptValidationRetrying
+                              ? 'Improving labels'
+                              : 'Improve speaker labels'}
                           </span>
                         </button>
                       ) : null}
                       <button
                         type="button"
-                        onClick={() => handleDeleteMeeting(selectedMeeting.id)}
-                        className="meeting-toolbar-button meeting-toolbar-button--danger"
-                        aria-label="Delete meeting"
+                        onClick={() => {
+                          if (selectedMeeting) {
+                            const markdown = formatMeetingNotesAsMarkdown({
+                              meeting: selectedMeeting,
+                              documentModel: notesDocument,
+                              calendarContext,
+                              transcriptSegments: displayedTranscriptSegments,
+                              includeTranscript: exportIncludeTranscript,
+                            });
+                            const filename = buildMeetingExportFilename(
+                              selectedMeeting.title || 'Untitled Session',
+                              selectedMeeting.created_at || Date.now(),
+                              selectedMeeting.id,
+                            );
+                            const blob = new Blob([markdown], {
+                              type: 'text/markdown;charset=utf-8',
+                            });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = filename;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }
+                        }}
+                        className="meeting-toolbar-button"
+                        aria-label="Export meeting notes"
                       >
                         <svg
                           aria-hidden="true"
@@ -1922,397 +1961,494 @@ const SelectedMeetingView = ({
                             strokeLinecap="round"
                             strokeLinejoin="round"
                             strokeWidth={2}
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                           />
                         </svg>
-                        <span>Delete meeting</span>
+                        <span>Export meeting notes</span>
                       </button>
+                      {SOURCES_ENABLED ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            (
+                              e.currentTarget.closest(
+                                'details',
+                              ) as HTMLDetailsElement | null
+                            )?.removeAttribute('open');
+                            void handleAttachReferenceDocument();
+                          }}
+                          className="meeting-toolbar-button"
+                          aria-label="Attach reference document"
+                        >
+                          <Paperclip
+                            aria-hidden="true"
+                            className="h-4 w-4 shrink-0"
+                          />
+                          <span>Attach reference document…</span>
+                        </button>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
-              </DetailsMenu>
+                    {selectedMeeting.finalization_status !==
+                    'recovery_required' ? (
+                      <div className="meeting-document-menu__section meeting-document-menu__section--danger">
+                        {selectedMeeting.audio_path ||
+                        selectedMeeting.system_audio_path ||
+                        selectedMeeting.mixed_audio_path ||
+                        selectedMeeting.has_audio ? (
+                          <button
+                            type="button"
+                            onClick={() => void deleteRecordingAudio()}
+                            disabled={isDeletingAudio}
+                            className="meeting-toolbar-button meeting-toolbar-button--danger disabled:cursor-not-allowed disabled:opacity-50"
+                            aria-label="Delete recording audio"
+                          >
+                            {isDeletingAudio ? (
+                              <Loader2
+                                aria-hidden="true"
+                                className="h-4 w-4 animate-spin"
+                              />
+                            ) : (
+                              <VolumeX aria-hidden="true" className="h-4 w-4" />
+                            )}
+                            <span>
+                              {isDeletingAudio
+                                ? 'Deleting audio…'
+                                : 'Delete recording audio'}
+                            </span>
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDeleteMeeting(selectedMeeting.id)
+                          }
+                          className="meeting-toolbar-button meeting-toolbar-button--danger"
+                          aria-label="Delete meeting"
+                        >
+                          <svg
+                            aria-hidden="true"
+                            className="w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            />
+                          </svg>
+                          <span>Delete meeting</span>
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </DetailsMenu>
+              </div>
             </div>
-          </div>
-          {calendarContext ? (
-            <MeetingCalendarContext
-              context={calendarContext}
-              canSuggestTitle={
-                /^(meeting(?: \d+)?|new meeting|untitled (?:meeting|session))$/i.test(
-                  latestTitle.trim(),
-                ) && calendarContext.event.title.trim() !== latestTitle.trim()
+            {calendarContext ? (
+              <MeetingCalendarContext
+                context={calendarContext}
+                canSuggestTitle={
+                  /^(meeting(?: \d+)?|new meeting|untitled (?:meeting|session))$/i.test(
+                    latestTitle.trim(),
+                  ) && calendarContext.event.title.trim() !== latestTitle.trim()
+                }
+                onUseTitle={(title) =>
+                  void saveTitle(titleEdit.current.expectedTitle, title)
+                }
+              />
+            ) : null}
+            <PrepForMeeting
+              meetingId={String(selectedMeeting.id)}
+              onOpenMeeting={onOpenMeeting}
+            />
+          </header>
+          <TranscriptIntegrityPanel
+            status={selectedMeeting.transcript_status}
+            finalizationStatus={selectedMeeting.finalization_status}
+            integrityJson={selectedMeeting.transcript_integrity_json}
+            transcriptJson={selectedMeeting.transcript_json}
+            transcriptValidatedAt={selectedMeeting.transcript_validated_at}
+            audioPath={selectedMeeting.audio_path}
+            systemAudioPath={selectedMeeting.system_audio_path}
+            mixedAudioPath={selectedMeeting.mixed_audio_path}
+            activityEvidenceAvailable={Boolean(
+              selectedMeeting.transcript_integrity_json?.includes(
+                '"activityEvidence"',
+              ),
+            )}
+            hasExistingAnalysis={Boolean(
+              selectedMeeting.analysis_json ||
+                selectedMeeting.enhanced_notes ||
+                draftPreview,
+            )}
+            downstreamFailed={downstreamPresentation.state === 'failed'}
+            downstreamFailureCode={
+              downstreamPresentation.state === 'failed'
+                ? downstreamPresentation.failureCode
+                : undefined
+            }
+            speakerLabelsRequired={inlineSpeakerLabelRepairRequired}
+            onRetry={onRetryTranscriptValidation}
+            retrying={transcriptValidationRetrying}
+            retryOperationKind={
+              selectedMeetingRetryOperation
+                ? transcriptValidationRetryOperation.kind
+                : null
+            }
+            retryUnavailable={
+              transcriptValidationBusy && !transcriptValidationRetrying
+            }
+          />
+          {regenerateNotesError ? (
+            <section
+              className="meeting-failure-notice meeting-failure-notice--regeneration"
+              role="alert"
+              aria-live="polite"
+            >
+              <span
+                className="meeting-failure-notice__marker"
+                aria-hidden="true"
+              >
+                <CircleAlert className="h-3.5 w-3.5" />
+              </span>
+              <div className="meeting-failure-notice__copy">
+                <strong>{regenerateNotesError.title}</strong>
+                <p>{regenerateNotesError.detail}</p>
+              </div>
+              {regenerateNotesError.canRetry ? (
+                <button
+                  type="button"
+                  className="meeting-failure-notice__action"
+                  onClick={() => void regenerateEnhancedNotes()}
+                  disabled={isRegeneratingNotes}
+                >
+                  {isRegeneratingNotes ? 'Trying again…' : 'Try again'}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="meeting-failure-notice__dismiss"
+                aria-label="Dismiss regeneration error"
+                onClick={() => setRegenerateNotesError(null)}
+              >
+                <X aria-hidden="true" className="h-4 w-4" />
+              </button>
+            </section>
+          ) : null}
+
+          {SOURCES_ENABLED ? (
+            <MeetingAttachmentsBar
+              meetingId={selectedMeeting.id}
+              hasExistingNotes={notesDocument.hasAnalysis}
+              onRegenerateNotes={() => void regenerateEnhancedNotes()}
+              isRegeneratingNotes={isRegeneratingNotes}
+              refreshTrigger={attachmentsRefreshKey}
+            />
+          ) : null}
+
+          {pendingUserNotes ? (
+            <section
+              className="meeting-pending-notes"
+              data-meeting-artifact="user-notes"
+              data-state="processing"
+              aria-label="Your notes"
+            >
+              <div className="meeting-pending-notes__content">
+                <p className="meeting-pending-notes__label">Your notes</p>
+                <p className="meeting-pending-notes__body">
+                  {pendingUserNotes}
+                </p>
+              </div>
+            </section>
+          ) : null}
+
+          {isDetailLoading &&
+          !notesDocument.hasAnalysis &&
+          !draftPreview &&
+          downstreamPresentation.state !== 'failed' ? (
+            <MeetingNotesLoadingSkeleton />
+          ) : (isMeetingProcessing &&
+              downstreamPresentation.state === 'loading' &&
+              !draftPreview) ||
+            (isAnalysisRetrying && !draftPreview) ? (
+            <MeetingAnalysisSkeleton
+              title={
+                downstreamPresentation.state === 'loading'
+                  ? downstreamPresentation.title
+                  : 'Preparing notes'
               }
-              onUseTitle={(title) =>
-                void saveTitle(titleEdit.current.expectedTitle, title)
+              detail={
+                downstreamPresentation.state === 'loading'
+                  ? downstreamPresentation.detail
+                  : 'Pluto is preparing your notes from the transcript…'
               }
             />
           ) : null}
-        </header>
-        <TranscriptIntegrityPanel
-          status={selectedMeeting.transcript_status}
-          finalizationStatus={selectedMeeting.finalization_status}
-          integrityJson={selectedMeeting.transcript_integrity_json}
-          transcriptJson={selectedMeeting.transcript_json}
-          transcriptValidatedAt={selectedMeeting.transcript_validated_at}
-          audioPath={selectedMeeting.audio_path}
-          systemAudioPath={selectedMeeting.system_audio_path}
-          mixedAudioPath={selectedMeeting.mixed_audio_path}
-          activityEvidenceAvailable={Boolean(
-            selectedMeeting.transcript_integrity_json?.includes(
-              '"activityEvidence"',
-            ),
-          )}
-          hasExistingAnalysis={Boolean(
-            selectedMeeting.analysis_json ||
-              selectedMeeting.enhanced_notes ||
-              draftPreview,
-          )}
-          downstreamFailed={downstreamPresentation.state === 'failed'}
-          downstreamFailureCode={
-            downstreamPresentation.state === 'failed'
-              ? downstreamPresentation.failureCode
-              : undefined
-          }
-          speakerLabelsRequired={inlineSpeakerLabelRepairRequired}
-          onRetry={onRetryTranscriptValidation}
-          retrying={transcriptValidationRetrying}
-          retryOperationKind={
-            selectedMeetingRetryOperation
-              ? transcriptValidationRetryOperation.kind
-              : null
-          }
-          retryUnavailable={
-            transcriptValidationBusy && !transcriptValidationRetrying
-          }
-        />
-        {regenerateNotesError ? (
-          <section
-            className="meeting-failure-notice meeting-failure-notice--regeneration"
-            role="alert"
-            aria-live="polite"
-          >
-            <span className="meeting-failure-notice__marker" aria-hidden="true">
-              <CircleAlert className="h-3.5 w-3.5" />
-            </span>
-            <div className="meeting-failure-notice__copy">
-              <strong>{regenerateNotesError.title}</strong>
-              <p>{regenerateNotesError.detail}</p>
-            </div>
-            {regenerateNotesError.canRetry ? (
-              <button
-                type="button"
-                className="meeting-failure-notice__action"
-                onClick={() => void regenerateEnhancedNotes()}
-                disabled={isRegeneratingNotes}
-              >
-                {isRegeneratingNotes ? 'Trying again…' : 'Try again'}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="meeting-failure-notice__dismiss"
-              aria-label="Dismiss regeneration error"
-              onClick={() => setRegenerateNotesError(null)}
-            >
-              <X aria-hidden="true" className="h-4 w-4" />
-            </button>
-          </section>
-        ) : null}
-
-        {SOURCES_ENABLED ? (
-          <MeetingAttachmentsBar
-            meetingId={selectedMeeting.id}
-            hasExistingNotes={notesDocument.hasAnalysis}
-            onRegenerateNotes={() => void regenerateEnhancedNotes()}
-            isRegeneratingNotes={isRegeneratingNotes}
-            refreshTrigger={attachmentsRefreshKey}
-          />
-        ) : null}
-
-        {pendingUserNotes ? (
-          <section
-            className="meeting-pending-notes"
-            data-meeting-artifact="user-notes"
-            data-state="processing"
-            aria-label="Your notes"
-          >
-            <div className="meeting-pending-notes__content">
-              <p className="meeting-pending-notes__label">Your notes</p>
-              <p className="meeting-pending-notes__body">{pendingUserNotes}</p>
-            </div>
-          </section>
-        ) : null}
-
-        {isDetailLoading &&
-        !notesDocument.hasAnalysis &&
-        !draftPreview &&
-        downstreamPresentation.state !== 'failed' ? (
-          <MeetingNotesLoadingSkeleton />
-        ) : (isMeetingProcessing &&
-            downstreamPresentation.state === 'loading' &&
-            !draftPreview) ||
-          (isAnalysisRetrying && !draftPreview) ? (
-          <MeetingAnalysisSkeleton
-            title={
-              downstreamPresentation.state === 'loading'
-                ? downstreamPresentation.title
-                : 'Preparing notes'
-            }
-            detail={
-              downstreamPresentation.state === 'loading'
-                ? downstreamPresentation.detail
-                : 'Pluto is preparing your notes from the transcript…'
-            }
-          />
-        ) : null}
-        {isMeetingProcessing && downstreamPresentation.state === 'queued' ? (
-          <MeetingAnalysisQueueStatus
-            title={downstreamPresentation.title}
-            detail={downstreamPresentation.detail}
-          />
-        ) : null}
-        {downstreamPresentation.state === 'failed' &&
-        !notesDocument.hasAnalysis &&
-        !draftPreview &&
-        !isAnalysisRetrying ? (
-          <MeetingAnalysisUnavailable />
-        ) : null}
-        {draftPreview ? (
-          <MeetingNotesDraftPreview
-            preview={draftPreview}
-            isRetry={
-              notesDocument.hasAnalysis ||
-              Boolean(selectedMeeting.analysis_json) ||
-              Boolean(selectedMeeting.enhanced_notes) ||
-              Boolean(
-                selectedMeetingRetryOperation &&
-                  transcriptValidationRetryOperation?.kind === 'analysis',
-              )
-            }
-          />
-        ) : null}
-        {notesDocument.hasAnalysis ? (
-          <div data-meeting-artifact="analysis" data-state="ready">
-            {downstreamPresentation.state === 'ready' &&
-            downstreamPresentation.notesUpdateQueuePosition ? (
-              <output
-                aria-atomic="true"
-                className="mx-auto mb-2 block w-full max-w-[760px] px-6 text-sm text-pro-text-muted md:px-8"
-              >
-                {downstreamPresentation.notesUpdateQueuePosition === 1
-                  ? 'Notes update is next in the local queue.'
-                  : `Notes update is position ${downstreamPresentation.notesUpdateQueuePosition} in the local queue.`}
-              </output>
-            ) : null}
-            {downstreamPresentation.state === 'ready' &&
-            downstreamPresentation.notesUpdateFailed &&
-            !regenerateNotesError &&
-            !isRegeneratingNotes ? (
-              <output className="meeting-status-card mb-2">
-                Couldn’t update notes. Your previous notes are still here.
-              </output>
-            ) : null}
-            <SavedEditConflicts
-              conflicts={editConflicts}
-              onCopy={handleCopySummary}
+          {isMeetingProcessing && downstreamPresentation.state === 'queued' ? (
+            <MeetingAnalysisQueueStatus
+              title={downstreamPresentation.title}
+              detail={downstreamPresentation.detail}
             />
-            <MeetingNotesDocument
-              reminderEntityId={reminderEntityId}
-              onDismissReminder={onDismissReminder}
-              meeting={selectedMeeting}
-              model={notesDocument}
-              transcriptSegments={displayedTranscriptSegments}
-              onDocumentChanged={fetchMeetings}
-              onShowTranscript={() => setTranscriptVisible(true)}
-              workspaceStatus={
-                downstreamPresentation.state === 'ready' &&
-                downstreamPresentation.secondaryStatus ? (
-                  <output className="meeting-status-card">
-                    <span>
-                      {downstreamPresentation.secondaryStatus === 'failed'
-                        ? 'Notes are ready. Related insights could not finish.'
-                        : 'Notes are ready. Updating related insights…'}
-                    </span>
-                    {downstreamPresentation.secondaryStatus === 'failed' ? (
-                      <button
-                        type="button"
-                        className="meeting-status-card__action"
-                        disabled={isRegeneratingNotes}
-                        onClick={() =>
-                          void regenerateEnhancedNotes('secondary')
-                        }
-                      >
-                        {isRegeneratingNotes ? 'Retrying…' : 'Retry insights'}
-                      </button>
-                    ) : null}
-                  </output>
-                ) : null
+          ) : null}
+          {downstreamPresentation.state === 'failed' &&
+          !notesDocument.hasAnalysis &&
+          !draftPreview &&
+          !isAnalysisRetrying ? (
+            <MeetingAnalysisUnavailable />
+          ) : null}
+          {draftPreview ? (
+            <MeetingNotesDraftPreview
+              preview={draftPreview}
+              isRetry={
+                notesDocument.hasAnalysis ||
+                Boolean(selectedMeeting.analysis_json) ||
+                Boolean(selectedMeeting.enhanced_notes) ||
+                Boolean(
+                  selectedMeetingRetryOperation &&
+                    transcriptValidationRetryOperation?.kind === 'analysis',
+                )
               }
             />
+          ) : null}
+          {notesDocument.hasAnalysis ? (
+            <div data-meeting-artifact="analysis" data-state="ready">
+              {downstreamPresentation.state === 'ready' &&
+              downstreamPresentation.notesUpdateQueuePosition ? (
+                <output
+                  aria-atomic="true"
+                  className="mx-auto mb-2 block w-full max-w-[760px] px-6 text-sm text-pro-text-muted md:px-8"
+                >
+                  {downstreamPresentation.notesUpdateQueuePosition === 1
+                    ? 'Notes update is next in the local queue.'
+                    : `Notes update is position ${downstreamPresentation.notesUpdateQueuePosition} in the local queue.`}
+                </output>
+              ) : null}
+              {downstreamPresentation.state === 'ready' &&
+              downstreamPresentation.notesUpdateFailed &&
+              !regenerateNotesError &&
+              !isRegeneratingNotes ? (
+                <output className="meeting-status-card mb-2">
+                  Couldn’t update notes. Your previous notes are still here.
+                </output>
+              ) : null}
+              <SavedEditConflicts
+                conflicts={editConflicts}
+                onCopy={handleCopySummary}
+              />
+              <MeetingNotesDocument
+                reminderEntityId={reminderEntityId}
+                onDismissReminder={onDismissReminder}
+                meeting={selectedMeeting}
+                model={notesDocument}
+                transcriptSegments={displayedTranscriptSegments}
+                onDocumentChanged={fetchMeetings}
+                onShowTranscript={() => setTranscriptVisible(true)}
+                workspaceStatus={
+                  downstreamPresentation.state === 'ready' &&
+                  downstreamPresentation.secondaryStatus ? (
+                    <output className="meeting-status-card">
+                      <span>
+                        {downstreamPresentation.secondaryStatus === 'failed'
+                          ? 'Notes are ready. Related insights could not finish.'
+                          : 'Notes are ready. Updating related insights…'}
+                      </span>
+                      {downstreamPresentation.secondaryStatus === 'failed' ? (
+                        <button
+                          type="button"
+                          className="meeting-status-card__action"
+                          disabled={isRegeneratingNotes}
+                          onClick={() =>
+                            void regenerateEnhancedNotes('secondary')
+                          }
+                        >
+                          {isRegeneratingNotes ? 'Retrying…' : 'Retry insights'}
+                        </button>
+                      ) : null}
+                    </output>
+                  ) : null
+                }
+              />
+            </div>
+          ) : null}
+        </div>
+
+        {!transcriptVisible ? (
+          <div className="meeting-transcript-toggle-wrap">
+            <button
+              type="button"
+              data-meeting-transcript-toggle
+              className="meeting-transcript-toggle"
+              onClick={() => setTranscriptVisible(true)}
+            >
+              <FileText aria-hidden="true" size={17} />
+              <span>Transcript</span>
+              <span className="meeting-transcript-toggle__action">
+                View
+                <ChevronRight aria-hidden="true" size={16} />
+              </span>
+            </button>
           </div>
         ) : null}
-      </div>
 
-      {!transcriptVisible ? (
-        <div className="meeting-transcript-toggle-wrap">
-          <button
-            type="button"
-            data-meeting-transcript-toggle
-            className="meeting-transcript-toggle"
-            onClick={() => setTranscriptVisible(true)}
+        {transcriptVisible && (
+          <section
+            data-meeting-artifact="transcript"
+            data-reading-surface="meeting-transcript"
+            data-state={hasTranscriptContent ? 'ready' : 'loading'}
+            className="meeting-transcript-surface"
+            aria-labelledby="meeting-transcript-heading"
           >
-            <FileText aria-hidden="true" size={17} />
-            <span>Transcript</span>
-            <span className="meeting-transcript-toggle__action">
-              View
-              <ChevronRight aria-hidden="true" size={16} />
-            </span>
-          </button>
-        </div>
-      ) : null}
-
-      {transcriptVisible && (
-        <section
-          data-meeting-artifact="transcript"
-          data-reading-surface="meeting-transcript"
-          data-state={hasTranscriptContent ? 'ready' : 'loading'}
-          className="meeting-transcript-surface"
-          aria-labelledby="meeting-transcript-heading"
-        >
-          <header className="meeting-transcript-header">
-            <div className="meeting-transcript-header__title">
-              <p>Source record</p>
-              <h2 id="meeting-transcript-heading">Transcript</h2>
-            </div>
-            <div className="meeting-transcript-header__actions">
-              <button
-                type="button"
-                data-copy-transcript
-                onClick={() =>
-                  handleCopySummary(
-                    formatMeetingTranscriptForClipboard(transcriptTurns),
+            <header className="meeting-transcript-header">
+              <div className="meeting-transcript-header__title">
+                <p>Source record</p>
+                <h2 id="meeting-transcript-heading">Transcript</h2>
+              </div>
+              <div className="meeting-transcript-header__actions">
+                <button
+                  type="button"
+                  data-copy-transcript
+                  onClick={() =>
+                    handleCopySummary(
+                      formatMeetingTranscriptForClipboard(transcriptTurns),
+                    )
+                  }
+                  disabled={!hasTranscriptContent}
+                  aria-label={
+                    copySuccess ? 'Transcript copied' : 'Copy transcript'
+                  }
+                >
+                  {copySuccess ? (
+                    <Check aria-hidden="true" size={15} />
+                  ) : (
+                    <Copy aria-hidden="true" size={15} />
+                  )}
+                  <span>{copySuccess ? 'Copied' : 'Copy'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTranscriptVisible(false)}
+                  aria-label="Close transcript"
+                >
+                  <span>Hide</span>
+                  <ChevronUp aria-hidden="true" size={15} />
+                </button>
+              </div>
+            </header>
+            <div className="meeting-transcript-record">
+              {hasTranscriptContent ? (
+                transcriptTurns.map((turn) => {
+                  const text = turn.segments
+                    .map((segment) => segment.text)
+                    .join(' ');
+                  const seconds = turn.startSeconds;
+                  const timestamp = `${Math.floor(seconds / 60)}:${Math.floor(
+                    seconds % 60,
                   )
-                }
-                disabled={!hasTranscriptContent}
-                aria-label={
-                  copySuccess ? 'Transcript copied' : 'Copy transcript'
-                }
-              >
-                {copySuccess ? (
-                  <Check aria-hidden="true" size={15} />
-                ) : (
-                  <Copy aria-hidden="true" size={15} />
-                )}
-                <span>{copySuccess ? 'Copied' : 'Copy'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setTranscriptVisible(false)}
-                aria-label="Close transcript"
-              >
-                <span>Hide</span>
-                <ChevronUp aria-hidden="true" size={15} />
-              </button>
-            </div>
-          </header>
-          <div className="meeting-transcript-record">
-            {hasTranscriptContent ? (
-              transcriptTurns.map((turn) => {
-                const text = turn.segments
-                  .map((segment) => segment.text)
-                  .join(' ');
-                const seconds = turn.startSeconds;
-                const timestamp = `${Math.floor(seconds / 60)}:${Math.floor(
-                  seconds % 60,
-                )
-                  .toString()
-                  .padStart(2, '0')}`;
-                const speakerLabel = String(turn.speaker || 'Unknown speaker');
-                const isSelfSpeaker = speakerLabel.endsWith(' (You)');
-                const numberedMatch = speakerLabel.match(/^Speaker (\d+)$/u);
-                const reviewSpeaker = numberedMatch
-                  ? `Remote Speaker ${numberedMatch[1]}`
-                  : speakerLabel === 'Them'
-                    ? 'Them'
-                    : null;
-                const isAnonymousSpeaker = Boolean(
-                  reviewSpeaker && reviewableSpeakers.includes(reviewSpeaker),
-                );
-                const rawSpeakerKey = String(turn.speaker ?? '');
-                const personIdForSpeaker =
-                  !isAnonymousSpeaker &&
-                  (speakerToPersonIdMap.get(speakerLabel) ||
-                    speakerToPersonIdMap.get(rawSpeakerKey));
-                return (
-                  <div
-                    key={turn.id}
-                    className="meeting-transcript-row"
-                    data-transcript-start-ms={Math.round(
-                      turn.startSeconds * 1000,
-                    )}
-                  >
-                    <div>
-                      <strong
-                        className={
-                          isAnonymousSpeaker
-                            ? 'cursor-pointer transition-colors hover:text-pro-accent'
-                            : personIdForSpeaker && onOpenPerson
-                              ? 'cursor-pointer transition-colors hover:text-pro-accent hover:underline underline-offset-2'
-                              : undefined
-                        }
-                        title={
-                          isAnonymousSpeaker
-                            ? 'Click to review and identify this speaker'
-                            : personIdForSpeaker && onOpenPerson
-                              ? `View ${speakerLabel.replace(/ \(You\)$/, '')}'s profile`
-                              : undefined
-                        }
-                        onClick={
-                          isAnonymousSpeaker
-                            ? () => {
-                                setSelectedSpeakerForModal(reviewSpeaker);
-                                setIsSpeakerModalOpen(true);
-                              }
-                            : personIdForSpeaker && onOpenPerson
-                              ? () => onOpenPerson(personIdForSpeaker)
-                              : undefined
-                        }
-                      >
-                        {isSelfSpeaker ? (
-                          <span>
-                            {speakerLabel.replace(/ \(You\)$/, '')}
-                            <span className="ml-1.5 text-[11px] font-normal text-pro-text-muted">
-                              (You)
+                    .toString()
+                    .padStart(2, '0')}`;
+                  const speakerLabel = String(
+                    turn.speaker || 'Unknown speaker',
+                  );
+                  const isSelfSpeaker = speakerLabel.endsWith(' (You)');
+                  const numberedMatch = speakerLabel.match(/^Speaker (\d+)$/u);
+                  const reviewSpeaker = numberedMatch
+                    ? `Remote Speaker ${numberedMatch[1]}`
+                    : speakerLabel === 'Them'
+                      ? 'Them'
+                      : null;
+                  const isAnonymousSpeaker = Boolean(
+                    reviewSpeaker && reviewableSpeakers.includes(reviewSpeaker),
+                  );
+                  const rawSpeakerKey = String(turn.speaker ?? '');
+                  const personIdForSpeaker =
+                    !isAnonymousSpeaker &&
+                    (speakerToPersonIdMap.get(speakerLabel) ||
+                      speakerToPersonIdMap.get(rawSpeakerKey));
+                  return (
+                    <div
+                      key={turn.id}
+                      className="meeting-transcript-row"
+                      data-transcript-start-ms={Math.round(
+                        turn.startSeconds * 1000,
+                      )}
+                    >
+                      <div>
+                        <strong
+                          className={
+                            isAnonymousSpeaker
+                              ? 'cursor-pointer transition-colors hover:text-pro-accent'
+                              : personIdForSpeaker && onOpenPerson
+                                ? 'cursor-pointer transition-colors hover:text-pro-accent hover:underline underline-offset-2'
+                                : undefined
+                          }
+                          title={
+                            isAnonymousSpeaker
+                              ? 'Click to review and identify this speaker'
+                              : personIdForSpeaker && onOpenPerson
+                                ? `View ${speakerLabel.replace(/ \(You\)$/, '')}'s profile`
+                                : undefined
+                          }
+                          onClick={
+                            isAnonymousSpeaker
+                              ? () => {
+                                  setSelectedSpeakerForModal(reviewSpeaker);
+                                  setIsSpeakerModalOpen(true);
+                                }
+                              : personIdForSpeaker && onOpenPerson
+                                ? () => onOpenPerson(personIdForSpeaker)
+                                : undefined
+                          }
+                        >
+                          {isSelfSpeaker ? (
+                            <span>
+                              {speakerLabel.replace(/ \(You\)$/, '')}
+                              <span className="ml-1.5 text-[11px] font-normal text-pro-text-muted">
+                                (You)
+                              </span>
                             </span>
-                          </span>
-                        ) : (
-                          speakerLabel
-                        )}
-                      </strong>
-                      <time>{timestamp}</time>
+                          ) : (
+                            speakerLabel
+                          )}
+                        </strong>
+                        <time>{timestamp}</time>
+                      </div>
+                      <p>{text}</p>
                     </div>
-                    <p>{text}</p>
-                  </div>
-                );
-              })
-            ) : (
-              <MeetingTranscriptSkeleton />
-            )}
-          </div>
-        </section>
-      )}
-      <SpeakerIdentificationModal
-        isOpen={isSpeakerModalOpen}
-        onClose={() => {
-          setIsSpeakerModalOpen(false);
-          setSelectedSpeakerForModal(null);
-        }}
-        meetingId={String(selectedMeeting.id)}
-        initialSpeaker={selectedSpeakerForModal}
-        attendeeNames={calendarAttendeeNames}
-        hasSystemAudio={Boolean(selectedMeeting.system_audio_path)}
-        speakerSummaries={speakerSummaries}
-        onDisplayNamesChange={updateSpeakerDisplayNames}
-      />
+                  );
+                })
+              ) : (
+                <MeetingTranscriptSkeleton />
+              )}
+            </div>
+          </section>
+        )}
+        <SpeakerIdentificationModal
+          isOpen={isSpeakerModalOpen}
+          onClose={() => {
+            setIsSpeakerModalOpen(false);
+            setSelectedSpeakerForModal(null);
+          }}
+          meetingId={String(selectedMeeting.id)}
+          initialSpeaker={selectedSpeakerForModal}
+          attendeeNames={calendarAttendeeNames}
+          hasSystemAudio={Boolean(selectedMeeting.system_audio_path)}
+          speakerSummaries={speakerSummaries}
+          onDisplayNamesChange={updateSpeakerDisplayNames}
+        />
+      </div>
+      {canAsk && askOpen ? (
+        <MeetingAskPlutoPanel
+          key={selectedMeeting.id}
+          meeting={selectedMeeting}
+          person={onlyOtherPerson}
+          conversation={askConversation}
+          onConversationChange={setAskConversation}
+          onClose={closeAsk}
+        />
+      ) : null}
     </div>
   );
 };

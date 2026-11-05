@@ -5,7 +5,10 @@ import type {
   NoteAgendaItem,
   NoteType,
   SaveNoteInput,
+  SetNoteChecklistItemInput,
 } from '../src/types/notes';
+import { findMentions } from '../src/utils/noteMentions';
+import { lineOwnedBy, ownerLabelsFor } from '../src/utils/noteOwner';
 
 export interface NotesStore {
   listNotes: () => Note[];
@@ -15,7 +18,14 @@ export interface NotesStore {
   getNotesForAttendees: (emails: string[], names: string[]) => NoteAgendaItem[];
   searchNotes: (query: string, limit?: number) => Note[];
   getNotesForEntity: (entityId: string) => Note[];
+  /** Notes linked to someone else, or no one, that "@Name" this person. */
+  getNotesMentioningPerson: (personId: string) => Note[];
+  setChecklistItem: (input: SetNoteChecklistItemInput) => NoteAgendaItem;
+  /** Checklist lines like "Priya: send deck" in notes not linked to them. */
+  getOwnedNoteItems: (personId: string) => NoteAgendaItem[];
 }
+
+const CHECKLIST_LINE = /^(\s*[-*]\s+\[)([ xX])(\]\s+)(.+?)\s*$/;
 
 function deriveNoteTitle(
   content: string,
@@ -192,6 +202,52 @@ export function createNotesStore(db: Database.Database): NotesStore {
     return res.changes > 0;
   };
 
+  const getOwnedNoteItems = (personId: string): NoteAgendaItem[] => {
+    if (!personId) return [];
+    const people = db
+      .prepare(`SELECT id, name FROM entities WHERE type = 'person'`)
+      .all() as Array<{ id: string; name: string }>;
+    const person = people.find((entry) => entry.id === personId);
+    if (!person) return [];
+    const labels = ownerLabelsFor(person, people);
+    if (!labels.length) return [];
+    const notes = db
+      .prepare(`
+      SELECT n.id, n.title, n.content, e.name as targetName
+      FROM notes n
+      LEFT JOIN entities e ON n.target_id = e.id
+      WHERE n.target_id IS NULL OR n.target_id != ?
+      ORDER BY datetime(n.updated_at) DESC
+    `)
+      .all(personId) as Array<{
+      id: string;
+      title: string;
+      content: string;
+      targetName: string | null;
+    }>;
+    const items: NoteAgendaItem[] = [];
+    for (const note of notes) {
+      const lowered = note.content.toLowerCase();
+      if (!labels.some((label) => lowered.includes(label))) continue;
+      note.content.split('\n').forEach((raw, lineIndex) => {
+        const match = raw.trim().match(/^[-*]\s+\[([ xX])\]\s+(.+)$/);
+        if (!match) return;
+        const text = match[2].trim();
+        if (lineOwnedBy(text, labels) === null) return;
+        items.push({
+          id: `${note.id}-line-${lineIndex}`,
+          noteId: note.id,
+          noteTitle: note.title,
+          targetName: note.targetName,
+          text,
+          checked: match[1].toLowerCase() === 'x',
+          lineIndex,
+        });
+      });
+    }
+    return items;
+  };
+
   const getNotesForAttendees = (
     emails: string[],
     names: string[],
@@ -220,14 +276,29 @@ export function createNotesStore(db: Database.Database): NotesStore {
       for (const e of entities) matchedPersonIds.add(e.id);
     }
 
-    // Also check person aliases or links
+    // Attendee emails map to people through the links meeting prep keeps
+    // (`email:<address>`), the same source the pre-meeting brief uses.
+    const optionalRows = <T>(query: string, ...args: unknown[]): T[] => {
+      try {
+        return db.prepare(query).all(...args) as T[];
+      } catch {
+        return []; // Older or partial databases may not have this table.
+      }
+    };
     for (const email of normalizedEmails) {
-      const aliases = db
-        .prepare(`
-        SELECT person_id as id FROM person_aliases WHERE lower(alias) = ?
-      `)
-        .all(email) as Array<{ id: string }>;
-      for (const a of aliases) matchedPersonIds.add(a.id);
+      for (const row of optionalRows<{ id: string }>(
+        'SELECT person_id AS id FROM prep_attendee_links WHERE attendee_key = ? AND person_id IS NOT NULL',
+        `email:${email}`,
+      ))
+        matchedPersonIds.add(row.id);
+    }
+    // Notes linked to a person who was later merged into a matched person.
+    for (const id of [...matchedPersonIds]) {
+      for (const row of optionalRows<{ id: string }>(
+        'SELECT person_id AS id FROM person_aliases WHERE canonical_id = ? AND active = 1',
+        id,
+      ))
+        matchedPersonIds.add(row.id);
     }
 
     if (matchedPersonIds.size === 0) return [];
@@ -269,8 +340,19 @@ export function createNotesStore(db: Database.Database): NotesStore {
             targetName: note.targetName,
             text: taskMatch[2].trim(),
             checked: taskMatch[1].toLowerCase() === 'x',
+            lineIndex: i,
           });
         }
+      }
+    }
+
+    // Lines like "Priya: send deck" in other notes are Priya's too.
+    const seen = new Set(items.map((item) => item.id));
+    for (const personId of matchedPersonIds) {
+      for (const item of getOwnedNoteItems(personId)) {
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
+        items.push(item);
       }
     }
 
@@ -415,6 +497,110 @@ export function createNotesStore(db: Database.Database): NotesStore {
     return rows.map(mapNoteRow);
   };
 
+  const getNotesMentioningPerson = (personId: string): Note[] => {
+    if (!personId) return [];
+    // Everyone, so "@Sam Rivera" counts for Sam Rivera and not for "Sam".
+    const people = db
+      .prepare(`SELECT id, name FROM entities WHERE type = 'person'`)
+      .all() as Array<{ id: string; name: string }>;
+    if (!people.some((person) => person.id === personId)) return [];
+    // LIKE narrows to notes with an "@"; the check below is exact.
+    const rows = db
+      .prepare(`
+      SELECT
+        n.id,
+        n.title,
+        n.content,
+        n.note_type as noteType,
+        n.target_id as targetId,
+        e.name as targetName,
+        n.pinned,
+        n.created_at as createdAt,
+        n.updated_at as updatedAt
+      FROM notes n
+      LEFT JOIN entities e ON n.target_id = e.id
+      WHERE (n.target_id IS NULL OR n.target_id != ?)
+        AND n.content LIKE '%@%'
+      ORDER BY n.pinned DESC, datetime(n.updated_at) DESC
+    `)
+      .all(personId) as Array<{
+      id: string;
+      title: string;
+      content: string;
+      noteType: NoteType;
+      targetId: string | null;
+      targetName: string | null;
+      pinned: number;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    return rows
+      .filter((row) =>
+        findMentions(row.content, people).some(
+          (mention) => mention.person.id === personId,
+        ),
+      )
+      .map(mapNoteRow);
+  };
+
+  // Ticks one checklist line in a note, in place, so the item shown in meeting
+  // prep and the line in the note stay one item. If the note was edited and the
+  // line moved, the item is found by its text when that text is unique.
+  const setChecklistItem = (
+    input: SetNoteChecklistItemInput,
+  ): NoteAgendaItem => {
+    const text = typeof input?.text === 'string' ? input.text.trim() : '';
+    if (
+      !input ||
+      typeof input.noteId !== 'string' ||
+      !Number.isInteger(input.lineIndex) ||
+      !text ||
+      typeof input.checked !== 'boolean'
+    ) {
+      throw new Error('Invalid checklist item');
+    }
+    return db.transaction(() => {
+      const row = db
+        .prepare(
+          `SELECT n.id, n.title, n.content, e.name AS targetName
+           FROM notes n LEFT JOIN entities e ON n.target_id = e.id
+           WHERE n.id = ?`,
+        )
+        .get(input.noteId) as
+        | { id: string; title: string; content: string; targetName: string }
+        | undefined;
+      if (!row) throw new Error('This note no longer exists.');
+      const lines = row.content.split('\n');
+      const matches = (index: number) =>
+        lines[index]?.match(CHECKLIST_LINE)?.[4].trim() === text;
+      let index = matches(input.lineIndex) ? input.lineIndex : -1;
+      if (index < 0) {
+        const found = lines.map((_, i) => i).filter((i) => matches(i));
+        if (found.length !== 1) {
+          throw new Error(
+            'This item changed in its note. Open the note to update it.',
+          );
+        }
+        index = found[0];
+      }
+      const match = lines[index].match(CHECKLIST_LINE)!;
+      lines[index] =
+        `${match[1]}${input.checked ? 'x' : ' '}${match[3]}${match[4]}`;
+      db.prepare(
+        'UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      ).run(lines.join('\n'), row.id);
+      return {
+        id: `${row.id}-line-${index}`,
+        noteId: row.id,
+        noteTitle: row.title,
+        targetName: row.targetName ?? null,
+        text,
+        checked: input.checked,
+        lineIndex: index,
+      };
+    })();
+  };
+
   return {
     listNotes,
     getNote,
@@ -423,5 +609,8 @@ export function createNotesStore(db: Database.Database): NotesStore {
     getNotesForAttendees,
     searchNotes,
     getNotesForEntity,
+    getNotesMentioningPerson,
+    setChecklistItem,
+    getOwnedNoteItems,
   };
 }

@@ -18,19 +18,11 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChatTurnAnchor } from '../../hooks/useChatTurnAnchor';
-import type { Meeting } from '../../types';
+import { useMeetingAskPluto } from '../../hooks/useMeetingAskPluto';
 import type {
-  MeetingAskPlutoAnswerDelta,
   MeetingAskPlutoConversationMessage,
   MeetingAskPlutoLiveContext,
-  MeetingAskPlutoRequest,
-  MeetingAskPlutoResponse,
-  MeetingAskPlutoTurn,
 } from '../../types/askPluto';
-import {
-  createMeetingAskPlutoRequestId,
-  describeMeetingAskPlutoRequest,
-} from '../../utils/askPlutoDiagnostics';
 import {
   LIVE_MEETING_COMMANDS,
   LIVE_MEETING_SHORTCUT_HELP,
@@ -39,112 +31,18 @@ import {
 import { MEETING_ASK_PLUTO_LIMITS } from '../../utils/meetingAskPlutoRequest';
 import { Logo } from '../Brand/Logo';
 
+/** Ask Pluto while recording. Finished meetings use MeetingAskPlutoPanel. */
 type MeetingAskPlutoDockProps = {
-  onOpenMeeting?: (meetingId: string) => void;
+  liveContext: MeetingAskPlutoLiveContext;
   conversation?: MeetingAskPlutoConversationMessage[];
   onConversationChange?: React.Dispatch<
     React.SetStateAction<MeetingAskPlutoConversationMessage[]>
   >;
   isMinimized?: boolean;
   onMinimizedChange?: (isMinimized: boolean) => void;
-} & (
-  | {
-      meeting: Meeting;
-      liveContext?: never;
-    }
-  | {
-      meeting?: never;
-      liveContext: MeetingAskPlutoLiveContext;
-    }
-);
-
-const LIVE_TRANSCRIPT_LIMIT = MEETING_ASK_PLUTO_LIMITS.transcriptSegments;
-const LIVE_TRANSCRIPT_SEGMENT_CHAR_LIMIT =
-  MEETING_ASK_PLUTO_LIMITS.transcriptSegmentChars;
-const LIVE_NOTES_CHAR_LIMIT = MEETING_ASK_PLUTO_LIMITS.notesChars;
-const LIVE_INTERIM_CHAR_LIMIT = MEETING_ASK_PLUTO_LIMITS.interimChars;
-const LIVE_PARTICIPANT_LIMIT = MEETING_ASK_PLUTO_LIMITS.participants;
-const LIVE_TITLE_CHAR_LIMIT = MEETING_ASK_PLUTO_LIMITS.titleChars;
-
-const trimToLimit = (value: string | undefined, limit: number) =>
-  (value || '').trim().slice(0, limit);
-
-const buildBoundedLiveContext = (
-  liveContext: MeetingAskPlutoLiveContext,
-): MeetingAskPlutoLiveContext => ({
-  ...(liveContext.meetingId ? { meetingId: liveContext.meetingId } : {}),
-  title: trimToLimit(liveContext.title, LIVE_TITLE_CHAR_LIMIT) || 'Meeting',
-  participants: liveContext.participants
-    .map((participant) => participant.trim())
-    .filter(Boolean)
-    .slice(0, LIVE_PARTICIPANT_LIMIT),
-  notes: trimToLimit(liveContext.notes, LIVE_NOTES_CHAR_LIMIT),
-  transcript: liveContext.transcript
-    .slice(-LIVE_TRANSCRIPT_LIMIT)
-    .map((segment) => ({
-      ...segment,
-      text: trimToLimit(segment.text, LIVE_TRANSCRIPT_SEGMENT_CHAR_LIMIT),
-    })),
-  interimText: trimToLimit(liveContext.interimText, LIVE_INTERIM_CHAR_LIMIT),
-});
-
-const toTurns = (
-  messages: MeetingAskPlutoConversationMessage[],
-): MeetingAskPlutoTurn[] => {
-  let latestCompletedAssistantIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message.role === 'assistant' && !message.interrupted) {
-      latestCompletedAssistantIndex = index;
-      break;
-    }
-  }
-
-  const turns = messages.reduce<MeetingAskPlutoTurn[]>(
-    (turns, message, index) => {
-      if (message.role === 'user') {
-        turns.push({
-          role: 'user',
-          content: trimToLimit(
-            message.content,
-            MEETING_ASK_PLUTO_LIMITS.turnChars,
-          ),
-        });
-        return turns;
-      }
-
-      if (message.interrupted) return turns;
-
-      turns.push({
-        role: 'assistant',
-        content: trimToLimit(
-          message.content,
-          MEETING_ASK_PLUTO_LIMITS.turnChars,
-        ),
-        citationIds: message.packet?.citations
-          .map((citation) => citation.id)
-          .slice(0, MEETING_ASK_PLUTO_LIMITS.citationIds),
-        ...(index === latestCompletedAssistantIndex
-          ? {
-              evidenceHints: message.packet?.citations
-                .map((citation) => citation.evidence_span || citation.claim)
-                .filter((hint): hint is string => Boolean(hint?.trim()))
-                .slice(0, MEETING_ASK_PLUTO_LIMITS.evidenceHints)
-                .map((hint) =>
-                  trimToLimit(hint, MEETING_ASK_PLUTO_LIMITS.evidenceHintChars),
-                ),
-            }
-          : {}),
-      });
-      return turns;
-    },
-    [],
-  );
-  return turns.slice(-MEETING_ASK_PLUTO_LIMITS.turns);
 };
 
 export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
-  meeting,
   liveContext,
   conversation,
   onConversationChange,
@@ -156,7 +54,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   const [commandsDismissed, setCommandsDismissed] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const commandListId = useId();
-  const hasCommands = Boolean(liveContext) && LIVE_MEETING_COMMANDS.length > 0;
+  const hasCommands = LIVE_MEETING_COMMANDS.length > 0;
   const filteredCommands = LIVE_MEETING_COMMANDS.filter((command) =>
     command.name.startsWith(query.toLowerCase()),
   );
@@ -174,15 +72,17 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     setCommandsDismissed(true);
     composerRef.current?.focus();
   };
-  const [localMessages, setLocalMessages] = useState<
-    MeetingAskPlutoConversationMessage[]
-  >([]);
-  const messages = conversation ?? localMessages;
-  const setMessages = onConversationChange ?? setLocalMessages;
+  const {
+    messages,
+    isAsking,
+    streamingAnswer,
+    error,
+    setError,
+    ask,
+    stop: stopAnswer,
+  } = useMeetingAskPluto({ liveContext, conversation, onConversationChange });
   const { anchorTurn, conversationRef: threadRef } =
     useChatTurnAnchor<HTMLDivElement>(messages.length);
-  const [isAsking, setIsAsking] = useState(false);
-  const [streamingAnswer, setStreamingAnswer] = useState('');
   const [localIsMinimized, setLocalIsMinimized] = useState(false);
   const isMinimized = controlledIsMinimized ?? localIsMinimized;
   const setIsMinimized = useCallback(
@@ -194,16 +94,8 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     },
     [controlledIsMinimized, onMinimizedChange],
   );
-  const [error, setError] = useState<string | null>(null);
   const dockRef = useRef<HTMLElement>(null);
-  const activeRequestIdRef = useRef<string | null>(null);
-  const mountedRef = useRef(true);
-  const scopeKey = meeting
-    ? `meeting:${String(meeting.id)}`
-    : 'live:active-recording';
-  const scopeKeyRef = useRef(scopeKey);
-  scopeKeyRef.current = scopeKey;
-  const scopeTitle = meeting?.title || liveContext?.title || 'Meeting';
+  const scopeTitle = liveContext.title || 'Meeting';
   const calculatedRows = Math.max(
     1,
     Math.min(
@@ -249,172 +141,19 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [setIsMinimized, showsConversation]);
 
-  useEffect(
-    () =>
-      window.ipcRenderer.on(
-        'intelligence:meeting-chat:delta',
-        (_event, packet: MeetingAskPlutoAnswerDelta) => {
-          if (
-            packet.requestId !== activeRequestIdRef.current ||
-            !packet.delta
-          ) {
-            return;
-          }
-          setStreamingAnswer((current) => `${current}${packet.delta}`);
-        },
-      ),
-    [],
-  );
-
-  useEffect(() => {
-    // React Strict Mode replays effect setup/cleanup in development. Restore the
-    // mounted flag during setup so a completed IPC response is not discarded
-    // after the simulated cleanup.
-    mountedRef.current = true;
-    return () => {
-      const activeRequestId = activeRequestIdRef.current;
-      if (activeRequestId) {
-        void window.ipcRenderer.invoke(
-          'intelligence:meeting-chat:cancel',
-          activeRequestId,
-        );
-      }
-      mountedRef.current = false;
-      activeRequestIdRef.current = null;
-    };
-  }, []);
-
-  const stopAnswer = useCallback(() => {
-    const activeRequestId = activeRequestIdRef.current;
-    if (!activeRequestId) return;
-    activeRequestIdRef.current = null;
-    const partialAnswer = streamingAnswer.trim();
-    if (partialAnswer) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: `assistant-stopped-${Date.now()}`,
-          role: 'assistant',
-          content: partialAnswer,
-          interrupted: true,
-        },
-      ]);
-    }
-    setStreamingAnswer('');
-    setIsAsking(false);
-    void window.ipcRenderer.invoke(
-      'intelligence:meeting-chat:cancel',
-      activeRequestId,
-    );
-  }, [setMessages, streamingAnswer]);
-
-  const submitQuestion = async (value: string) => {
+  const submitQuestion = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed || isAsking) return;
-    if (liveContext && parseLiveMeetingCommand(trimmed).kind === 'unknown') {
+    if (parseLiveMeetingCommand(trimmed).kind === 'unknown') {
       setError(LIVE_MEETING_SHORTCUT_HELP);
       setIsMinimized(false);
       return;
     }
-
-    const requestId = createMeetingAskPlutoRequestId();
-    const previousRequestId = activeRequestIdRef.current;
-    if (previousRequestId) {
-      void window.ipcRenderer.invoke(
-        'intelligence:meeting-chat:cancel',
-        previousRequestId,
-      );
-    }
-    const priorTurns = toTurns(messages);
-    setError(null);
+    const userMessageId = ask(trimmed);
+    if (!userMessageId) return;
     setQuery('');
-    setStreamingAnswer('');
-    setIsAsking(true);
     setIsMinimized(false);
-    const userMessageId = `user-${Date.now()}`;
     anchorTurn(userMessageId);
-    setMessages((current) => [
-      ...current,
-      {
-        id: userMessageId,
-        role: 'user',
-        content: trimmed,
-      },
-    ]);
-    activeRequestIdRef.current = requestId;
-    const requestScopeKey = scopeKey;
-
-    try {
-      const requestStartedAt = Date.now();
-      const request: MeetingAskPlutoRequest = meeting
-        ? {
-            requestId,
-            query: trimmed,
-            scope: {
-              type: 'meeting',
-              meetingId: String(meeting.id),
-            },
-            turns: priorTurns,
-          }
-        : {
-            requestId,
-            query: trimmed,
-            scope: {
-              type: 'live_meeting',
-              ...buildBoundedLiveContext(liveContext),
-            },
-            turns: priorTurns,
-          };
-      console.info(
-        '[Pluto][Ask Pluto][renderer] request',
-        describeMeetingAskPlutoRequest(request),
-      );
-      const packet = (await window.ipcRenderer.invoke(
-        'intelligence:meeting-chat',
-        request,
-      )) as MeetingAskPlutoResponse;
-      console.info('[Pluto][Ask Pluto][renderer] response', {
-        requestId,
-        status: packet.status,
-        trustStatus: packet.trustStatus,
-        citationCount: packet.citations.length,
-        elapsedMs: Date.now() - requestStartedAt,
-      });
-
-      if (
-        !mountedRef.current ||
-        activeRequestIdRef.current !== requestId ||
-        scopeKeyRef.current !== requestScopeKey
-      ) {
-        return;
-      }
-
-      if (packet.status === 'unavailable' || !packet.answer.trim()) {
-        setError('Pluto could not answer this meeting right now.');
-        return;
-      }
-
-      setMessages((current) => [
-        ...current,
-        {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: packet.answer,
-          packet,
-        },
-      ]);
-    } catch (submitError) {
-      console.error('Meeting Ask Pluto error:', submitError);
-      if (mountedRef.current && activeRequestIdRef.current === requestId) {
-        setError('Pluto could not answer this meeting right now.');
-      }
-    } finally {
-      if (mountedRef.current && activeRequestIdRef.current === requestId) {
-        activeRequestIdRef.current = null;
-        setStreamingAnswer('');
-        setIsAsking(false);
-      }
-    }
   };
 
   return (
@@ -430,7 +169,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
         >
           <MessageCircle className="h-4 w-4" />
           <span className="meeting-ask-pluto-dock__restore-copy">
-            <strong>Ask Pluto{liveContext ? ' · Beta' : ''}</strong>
+            <strong>Ask Pluto · Beta</strong>
             <span>{isAsking ? 'Answering…' : 'Active conversation'}</span>
           </span>
           <ChevronUp className="h-4 w-4" />
@@ -440,7 +179,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
       {showsConversation ? (
         <div className="meeting-ask-pluto-dock__header">
           <div className="meeting-ask-pluto-dock__header-copy">
-            <span>Ask Pluto{liveContext ? ' · Beta' : ''}</span>
+            <span>Ask Pluto · Beta</span>
             <span>{scopeTitle}</span>
           </div>
           <button
@@ -489,23 +228,6 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                     >
                       {message.content}
                     </ReactMarkdown>
-                    {!liveContext && message.packet?.citations.length ? (
-                      <details className="meeting-ask-pluto-dock__evidence">
-                        <summary>View evidence</summary>
-                        <div>Check these excerpts against the answer.</div>
-                        {message.packet.citations.map((citation) => (
-                          <blockquote key={citation.id}>
-                            {citation.evidence_span || citation.claim}
-                          </blockquote>
-                        ))}
-                      </details>
-                    ) : !liveContext &&
-                      message.packet?.claims.length &&
-                      message.packet.trustStatus === 'needs_review' ? (
-                      <span className="meeting-ask-pluto-dock__evidence-note">
-                        No supporting evidence cited.
-                      </span>
-                    ) : null}
                     {message.interrupted ? (
                       <span className="meeting-ask-pluto-dock__interrupted">
                         Stopped
@@ -548,9 +270,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                     className="h-4 w-4 animate-spin"
                     aria-hidden="true"
                   />
-                  {liveContext
-                    ? 'Reading live transcript'
-                    : 'Reading this meeting'}
+                  Reading live transcript
                 </span>
               </output>
             ) : null}
@@ -595,7 +315,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
           className="meeting-ask-pluto-dock__composer"
           onSubmit={(event) => {
             event.preventDefault();
-            void submitQuestion(query);
+            submitQuestion(query);
           }}
         >
           <textarea
@@ -647,17 +367,15 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
               }
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                void submitQuestion(query);
+                submitQuestion(query);
               }
             }}
             rows={calculatedRows}
             maxLength={MEETING_ASK_PLUTO_LIMITS.queryChars}
             placeholder={
-              liveContext
-                ? hasCommands
-                  ? 'Ask about this meeting (beta), or type /'
-                  : 'Ask a specific question about this meeting (beta)'
-                : 'Ask about this meeting'
+              hasCommands
+                ? 'Ask about this meeting (beta), or type /'
+                : 'Ask a specific question about this meeting (beta)'
             }
           />
           <button

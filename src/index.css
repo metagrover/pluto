@@ -151,20 +151,101 @@
   .people-unlinked[open] > summary svg {
     @apply rotate-180;
   }
-  .people-empty {
-    @apply rounded-xl border border-pro-border/50 bg-pro-surface/20 px-6 py-12 text-center text-pro-text-muted mb-10;
+  .empty-canvas {
+    --empty-wash: #aa5a56;
+    container: empty-canvas / inline-size;
+    width: 100%;
+    border-radius: 14px;
+    background: color-mix(in oklab, hsl(var(--pro-bg)), var(--empty-wash) 11%);
+    text-align: left;
   }
-  .people-empty__icon {
-    @apply mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-pro-border bg-pro-surface text-pro-text-muted shadow-sm;
+  .empty-canvas[data-kind="notes"] {
+    --empty-wash: #c29a49;
   }
-  .people-empty h2 {
-    @apply font-serif text-xl font-medium text-pro-text-main;
+  .empty-canvas[data-kind="tasks"] {
+    --empty-wash: #819552;
   }
-  .people-empty p {
-    @apply mx-auto mt-2 max-w-[54ch] text-sm leading-relaxed text-pro-text-muted;
+  .empty-canvas[data-kind="people"] {
+    --empty-wash: #a26999;
   }
-  .people-empty button {
-    @apply mt-4 inline-flex items-center gap-1.5 rounded-lg border border-pro-border px-3 py-1.5 text-xs font-medium text-pro-text-main hover:bg-pro-hover;
+  .empty-canvas[data-kind="projects"] {
+    --empty-wash: #488c85;
+  }
+  .empty-canvas[data-kind="notes"] {
+    width: auto;
+    margin-inline: clamp(12px, 4%, 40px);
+  }
+  .empty-canvas[data-compact="true"] {
+    margin-top: 20px;
+  }
+  .empty-canvas-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    padding: clamp(20px, 6cqi, 52px);
+  }
+  .empty-canvas-title {
+    @apply text-balance font-serif font-medium text-pro-text-main;
+    max-width: 18ch;
+    font-size: clamp(30px, 5cqi, 46px);
+    line-height: 1.04;
+    letter-spacing: -.035em;
+  }
+  .empty-canvas-copy {
+    margin-top: 12px;
+    max-width: 40ch;
+    color: color-mix(
+      in oklab,
+      hsl(var(--pro-text-main)) 67%,
+      hsl(var(--pro-text-muted))
+    );
+    font-size: 14px;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+  .empty-canvas-art {
+    width: min(100%, 240px);
+    height: auto;
+    justify-self: center;
+  }
+  .empty-canvas[data-compact="true"] .empty-canvas-layout {
+    padding-block: 18px;
+  }
+  .empty-canvas[data-compact="true"] .empty-canvas-title {
+    max-width: 25ch;
+    font-size: clamp(27px, 4cqi, 36px);
+  }
+  .empty-canvas[data-compact="true"] .empty-canvas-art {
+    width: min(100%, 200px);
+  }
+  @container empty-canvas (width < 520px) {
+    .empty-canvas[data-compact="true"] .empty-canvas-layout {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 27%);
+    }
+  }
+  @container empty-canvas (min-width: 520px) {
+    .empty-canvas-layout {
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+      gap: clamp(18px, 4cqi, 44px);
+    }
+    .empty-canvas-art {
+      width: min(100%, 330px);
+    }
+  }
+  .ask-pluto-welcome {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 34%);
+    padding: 0;
+  }
+  .ask-pluto-welcome .empty-canvas-title {
+    font-size: clamp(32px, 4.5vw, 52px);
+  }
+  .ask-pluto-welcome .empty-canvas-art {
+    width: min(100%, 225px);
+  }
+  .empty-canvas-action {
+    @apply mt-5 inline-flex min-h-10 cursor-pointer items-center justify-center rounded-md bg-pro-text-main px-4 py-2 text-[13px] font-semibold text-pro-bg hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent;
   }
   .people-no-results {
     @apply border-b border-pro-border py-12 text-center text-sm text-pro-text-muted;
@@ -532,9 +613,6 @@
     --meetings-muted: oklch(72% 0.012 82);
     --meetings-subtle: oklch(61% 0.012 82);
   }
-  .meetings-index--empty {
-    @apply flex min-h-full items-center justify-center pb-20;
-  }
   .meetings-index__header {
     @apply mb-8 items-end md:mb-10;
   }
@@ -643,31 +721,19 @@
   .meetings-index__row:focus-within .meetings-index__row-chevron--deletable {
     @apply opacity-0;
   }
-  .meetings-index__no-results,
-  .meetings-index__empty {
-    @apply mx-auto flex w-full max-w-lg flex-col items-center justify-center border-y border-pro-border px-6 text-center;
-  }
   .meetings-index__no-results {
+    @apply mx-auto flex w-full max-w-lg flex-col items-center justify-center border-y border-pro-border px-6 text-center;
     @apply min-h-64 text-pro-text-muted;
   }
-  .meetings-index__no-results > p,
-  .meetings-index__empty h2 {
+  .meetings-index__no-results > p {
     @apply mt-4 text-lg font-semibold text-pro-text-main;
   }
-  .meetings-index__no-results > span,
-  .meetings-index__empty p {
+  .meetings-index__no-results > span {
     @apply mt-1.5 max-w-sm text-sm leading-6 text-pro-text-muted;
   }
   .meetings-index__no-results button {
     @apply mt-5 rounded-md px-2 py-1 text-sm font-semibold text-pro-accent transition-colors hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
-  .meetings-index__empty {
-    @apply min-h-80;
-  }
-  .meetings-index__empty-icon {
-    @apply flex h-12 w-12 items-center justify-center rounded-xl border border-pro-border bg-pro-surface text-pro-text-muted;
-  }
-
   @media (max-width: 640px) {
     .meetings-index__header {
       @apply flex-col items-stretch gap-5;
@@ -810,18 +876,51 @@
   .meeting-ask-pluto-dock__message--assistant pre code {
     @apply bg-transparent p-0;
   }
-  .meeting-ask-pluto-dock__evidence {
-    @apply mt-2 text-sm leading-5 text-pro-text-muted;
-    overflow-wrap: anywhere;
-  }
-  .meeting-ask-pluto-dock__evidence summary {
-    @apply w-fit cursor-pointer rounded-sm hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent;
-  }
-  .meeting-ask-pluto-dock__evidence-note {
-    @apply mt-2 block text-xs leading-5 text-pro-text-muted;
-  }
   .meeting-ask-pluto-dock__interrupted {
     @apply mt-1 block text-[10px] font-medium text-pro-text-muted;
+  }
+  .next-discussed {
+    @apply ml-6 flex flex-wrap items-center gap-1 text-[12px] leading-5 text-pro-text-muted;
+  }
+  .next-discussed > button:not(.next-discussed__hide) {
+    @apply rounded text-pro-text-muted underline decoration-pro-border underline-offset-2 hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .next-from-note {
+    @apply ml-6 flex items-center gap-1 text-[12px] leading-5 text-pro-text-muted;
+  }
+  .next-from-note > button {
+    @apply truncate rounded text-pro-text-muted underline decoration-pro-border underline-offset-2 hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .note-owner-label {
+    @apply shrink-0 select-none pt-1 text-[11px] text-pro-text-muted/70;
+  }
+  .next-discussed__hide {
+    @apply inline-flex h-5 w-5 items-center justify-center rounded text-pro-text-muted/70 hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .answer-actions {
+    @apply mt-2 flex flex-wrap items-center gap-1;
+  }
+  .answer-actions--editing {
+    @apply w-full flex-nowrap;
+  }
+  .answer-actions > button,
+  .answer-actions--editing button {
+    @apply inline-flex min-h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-40;
+  }
+  .answer-actions--editing button[type="submit"] {
+    @apply bg-pro-accent/10 text-pro-accent hover:bg-pro-accent/20 hover:text-pro-accent;
+  }
+  .answer-actions--editing input {
+    @apply h-8 w-80 min-w-0 max-w-full flex-1 rounded-md border border-pro-border bg-pro-bg px-2 text-[13px] text-pro-text-main outline-none focus:ring-2 focus:ring-pro-accent;
+  }
+  .prep-linked-note__task {
+    @apply text-pro-text-muted;
+  }
+  .answer-actions__done {
+    @apply inline-flex items-center gap-1 px-1 text-[11px] text-pro-text-muted;
+  }
+  .answer-actions__error {
+    @apply basis-full text-[11px] text-pro-warning;
   }
   .meeting-ask-pluto-dock__loading {
     @apply flex items-center gap-2 px-3 py-2 text-xs font-bold text-pro-text-muted;
@@ -1626,16 +1725,6 @@
     > p {
     @apply text-[17px] leading-[1.65];
   }
-  .meeting-notes-section--scratchpad textarea {
-    @apply mt-4 w-full resize-y rounded-md px-4 py-3 text-base leading-[1.5] outline-none transition-colors placeholder:text-pro-text-muted/50;
-    min-height: 7rem;
-    border: none;
-    background: var(--notes-wash);
-    color: var(--notes-ink);
-    display: block;
-    width: 100%;
-    box-sizing: border-box;
-  }
   .meeting-scratchpad-caption {
     @apply mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5;
     color: var(--notes-muted);
@@ -2282,6 +2371,33 @@
   .rail-notes textarea {
     @apply min-h-60 flex-1 resize-none border-0 bg-transparent p-0 text-[15px] leading-7 outline-none placeholder:text-pro-text-muted/65 focus-visible:ring-0;
   }
+  .live-notes-editor {
+    @apply min-h-60 flex-1 cursor-text text-[15px] leading-7;
+  }
+  .rail-notes .live-notes-editor textarea {
+    @apply min-h-0 flex-none leading-7;
+  }
+  .live-notes-editor .notion-gutter-container {
+    @apply hidden;
+  }
+  .rail-note-suggestion {
+    @apply mb-3 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-lg border border-pro-border/70 bg-pro-surface/30 px-3 py-2 text-[13px] text-pro-text-main;
+  }
+  .rail-note-suggestion > svg {
+    @apply shrink-0 text-pro-text-muted;
+  }
+  .rail-note-suggestion p {
+    @apply min-w-0 flex-1;
+  }
+  .rail-note-suggestion__actions {
+    @apply flex shrink-0 items-center gap-1;
+  }
+  .rail-note-suggestion__actions button {
+    @apply min-h-8 rounded-md px-2.5 text-[12px] font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .rail-note-suggestion__actions .rail-note-suggestion__use {
+    @apply bg-pro-accent/10 text-pro-accent hover:bg-pro-accent/20 hover:text-pro-accent;
+  }
   .recording-finalizing-view {
     @apply mx-auto w-full max-w-[920px] pb-20 pt-5;
   }
@@ -2541,7 +2657,7 @@
    Cool paper, deep ink, softened blue, and restrained editorial typography
    ========================================================================== */
 .pluto-site {
-  --font-main: 'Inter', ui-sans-serif, -apple-system, sans-serif;
+  --font-main: "Inter", ui-sans-serif, -apple-system, sans-serif;
   --pro-bg: 200 27% 98%; /* #F9FBFC */
   --pro-surface: 205 26% 96%; /* #F2F5F7 */
   --pro-text-main: 214 30% 18%; /* #202C3C */
@@ -2553,8 +2669,8 @@
   --pro-urgent: 0 70% 43%;
   --pro-warning: 32 79% 35%;
   --pro-success: 151 60% 29%;
-  --pro-shadow-premium: 0 2px 8px rgba(32, 44, 60, 0.03),
-    0 12px 28px -6px rgba(32, 44, 60, 0.07);
+  --pro-shadow-premium: 0 2px 8px rgba(32, 44, 60, 0.03), 0 12px 28px -6px
+    rgba(32, 44, 60, 0.07);
 }
 
 .pluto-site ::selection {
@@ -3003,6 +3119,41 @@
 .meeting-markdown-preview li,
 .meeting-markdown-preview div {
   @apply text-[16px] leading-[1.55] text-pro-text-main;
+}
+/* Meeting notes read as one document: "Add item" shows only while working in
+   a section (Enter at the end of a line adds one anyway), and the space
+   under the summary is part of your notes. */
+.meeting-notes-section:not(:focus-within) .meeting-notes-add-item {
+  display: none;
+}
+/* A finished meeting with Ask Pluto open: the notes and the panel sit side by
+   side, and the panel stays in view while the notes scroll. */
+.meeting-page {
+  display: flex;
+  align-items: flex-start;
+  flex: 1 0 auto;
+  width: 100%;
+  min-height: 100%;
+}
+.meeting-page > .meeting-document {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+}
+.meeting-page > .note-ask-panel {
+  position: sticky;
+  top: 0;
+  height: calc(100dvh - 3rem);
+}
+.meeting-notes-section--scratchpad {
+  min-height: 8rem;
+  cursor: text;
+}
+/* The faint "Write anything…" line at the end of a meeting's notes. */
+.meeting-markdown-preview .meeting-note-placeholder {
+  @apply m-0 cursor-text;
+  color: var(--notes-muted);
+  opacity: 0.75;
 }
 
 .meeting-note-block {

@@ -1531,6 +1531,7 @@ export const meetingPrep = sqliteTable('meeting_prep', {
   notes: text('notes').notNull().default(''),
   topicsJson: text('topics_json').notNull().default('[]'),
   meetingsJson: text('meetings_json').notNull().default('[]'),
+  noteIdsJson: text('note_ids_json').notNull().default('[]'),
   briefingJson: text('briefing_json'),
   meetingId: text('meeting_id').unique(),
   recordingStarted: integer('recording_started').notNull().default(0),

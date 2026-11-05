@@ -1,4 +1,4 @@
-import { CheckCircle2, UserRound, X } from 'lucide-react';
+import { CheckCircle2, FileText, UserRound, X } from 'lucide-react';
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import type { CalendarEvent } from '../../../electron/calendar/types';
 import {
@@ -7,9 +7,14 @@ import {
   identityPersonLabel,
 } from '../../api/identity';
 import { getEntitiesByType, upsertEntity } from '../../api/knowledgeGraph';
+import { listNotes } from '../../api/notes';
+import type { Note } from '../../types/notes';
+import { suggestNoteForMeeting } from '../../utils/meetingNoteSuggestion';
 import { isGenericSpeakerLabel } from '../../utils/speakerReview';
 import { SearchSelect, type SearchSelectOption } from '../ui/SearchSelect';
-import { SavedMeetingPrep } from './MeetingPrepEditor';
+import { LiveNotesEditor } from './LiveNotesEditor';
+import { AttendeeNoteChecklist, SavedMeetingPrep } from './MeetingPrepEditor';
+import { prepNotesWith } from './PrepLinkedNotes';
 import {
   RecordingCalendarSuggestion,
   type RecordingCalendarSuggestionProps,
@@ -63,6 +68,35 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
     const [saveState, setSaveState] = useState<'saved' | 'dirty'>('saved');
     const [localQuery, setLocalQuery] = useState('');
     const [loadedPeople, setLoadedPeople] = useState<IdentityPerson[]>([]);
+    const [recentNotes, setRecentNotes] = useState<Note[]>([]);
+    const [skippedNoteIds, setSkippedNoteIds] = useState<string[]>([]);
+
+    useEffect(() => {
+      let active = true;
+      void Promise.resolve(listNotes())
+        .then((list) => {
+          if (active) setRecentNotes(Array.isArray(list) ? list : []);
+        })
+        .catch(() => {});
+      return () => {
+        active = false;
+      };
+    }, []);
+    const suggestedNote = disabled
+      ? null
+      : suggestNoteForMeeting({
+          notes: recentNotes.filter(
+            (note) => !skippedNoteIds.includes(note.id),
+          ),
+          title,
+          people: [
+            ...participants,
+            ...(calendarEvent?.attendees || [])
+              .map((attendee) => attendee.name || '')
+              .filter((name) => name && !name.includes('@')),
+          ],
+          currentNotes: notes,
+        });
 
     const searchQuery =
       participantInput !== undefined ? participantInput : localQuery;
@@ -293,7 +327,7 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
             </div>
           </header>
           <section className="rail-notes" aria-label="Meeting notes and prep">
-            <label className="sr-only" htmlFor="recording-notes">
+            <label className="sr-only" htmlFor="recording-notes-0">
               Meeting notes
             </label>
             <div
@@ -330,11 +364,46 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
               }
               hidden={notesTab !== 'meeting'}
             >
-              <textarea
-                id="recording-notes"
+              {suggestedNote ? (
+                <div
+                  className="rail-note-suggestion"
+                  role="group"
+                  aria-label="Suggested note"
+                >
+                  <FileText size={14} aria-hidden="true" />
+                  <p>
+                    Use your “{suggestedNote.title.trim() || 'Untitled'}” note
+                    for this meeting?
+                  </p>
+                  <div className="rail-note-suggestion__actions">
+                    <button
+                      type="button"
+                      className="rail-note-suggestion__use"
+                      onClick={() => {
+                        onNotesChange(
+                          prepNotesWith(notes, suggestedNote.content),
+                        );
+                        setSkippedNoteIds((ids) => [...ids, suggestedNote.id]);
+                      }}
+                    >
+                      Use it
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSkippedNoteIds((ids) => [...ids, suggestedNote.id])
+                      }
+                    >
+                      Not now
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              <LiveNotesEditor
+                idPrefix="recording-notes-"
                 value={notes}
-                onChange={(event) => onNotesChange(event.target.value)}
-                placeholder="Start typing. Pluto will preserve your words and enrich them after the meeting."
+                onChange={onNotesChange}
+                placeholder="Start typing. [] makes a checkbox. Pluto keeps your words and adds to them after the meeting."
               />
             </div>
             {notesTab === 'prep' && (
@@ -343,10 +412,28 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
                 aria-label="Meeting preparation"
                 className="min-h-0 overflow-y-auto"
               >
-                <SavedMeetingPrep
-                  event={calendarEvent}
-                  onOpenMeeting={onOpenMeeting}
-                />
+                {calendarEvent ? (
+                  <SavedMeetingPrep
+                    event={calendarEvent}
+                    onOpenMeeting={onOpenMeeting}
+                  />
+                ) : (
+                  // Without a calendar event, prep is what's open with the
+                  // people in this meeting.
+                  <div className="p-1">
+                    <AttendeeNoteChecklist
+                      event={{
+                        attendees: participants.map((name) => ({ name })),
+                      }}
+                    />
+                    {participants.length ? null : (
+                      <p className="text-sm text-pro-text-muted">
+                        Add who you’re meeting with to see what’s open with
+                        them.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </section>

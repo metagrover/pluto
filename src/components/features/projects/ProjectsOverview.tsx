@@ -3,7 +3,6 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
-  FolderKanban,
   FolderPlus,
   GitBranch,
   GitMerge,
@@ -42,6 +41,7 @@ import {
   readProjectPortfolioDisposition,
   readProjectQualification,
 } from '../../../utils/projectQualification';
+import { EmptyCanvas } from '../../ui/EmptyCanvas';
 import { PageHeader } from '../../ui/PageHeader';
 import { ReportProblemButton } from '../ReportProblemButton';
 import { ProjectCommitments } from './ProjectCommitments';
@@ -1401,36 +1401,32 @@ export function ProjectsOverview({
               </details>
             )}
 
-          {portfolio.current.length === 0 &&
-            ['all', 'current', 'primary', 'side'].includes(filter) && (
+          {!loadError &&
+            portfolio.current.length === 0 &&
+            ['all', 'current', 'primary', 'side'].includes(filter) &&
+            (!search ? (
+              <EmptyCanvas
+                kind="projects"
+                title="See your work take shape"
+                description="When work comes up across meetings, Pluto can bring the related conversations, decisions, and next steps together here."
+              />
+            ) : (
               <div className="rounded-xl border border-pro-border/50 bg-pro-surface/20 px-6 py-12 text-center mb-10">
-                <div
-                  className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-pro-border bg-pro-surface text-pro-text-muted shadow-sm"
-                  aria-hidden="true"
-                >
-                  <FolderKanban size={20} strokeWidth={1.5} />
-                </div>
                 <h2 className="font-serif text-xl font-medium text-pro-text-main">
-                  {search
-                    ? 'No matching focus themes'
-                    : 'No durable themes established yet'}
+                  No matching focus themes
                 </h2>
                 <p className="mx-auto mt-2 max-w-[58ch] text-sm leading-relaxed text-pro-text-muted">
-                  {search
-                    ? 'Suggestions and discussed work remain searchable below.'
-                    : 'Pluto keeps one-off plans and topics out of your portfolio until another conversation reinforces them or you confirm them.'}
+                  Suggestions and discussed work remain searchable below.
                 </p>
-                {search && (
-                  <button
-                    type="button"
-                    onClick={() => setSearch('')}
-                    className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-pro-border px-3 py-1.5 text-xs font-medium text-pro-text-main hover:bg-pro-hover"
-                  >
-                    Clear search
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-pro-border px-3 py-1.5 text-xs font-medium text-pro-text-main hover:bg-pro-hover"
+                >
+                  Clear search
+                </button>
               </div>
-            )}
+            ))}
 
           {/* DISCUSSED TOPICS RADAR / WORK */}
           {showTopicRadarSection && (

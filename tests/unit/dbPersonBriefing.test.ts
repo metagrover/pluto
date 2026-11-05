@@ -270,6 +270,37 @@ describe('person briefing database read model', () => {
     });
   });
 
+  it('counts a participant the user added as a confirmed meeting', () => {
+    const person = db.upsertEntity({
+      id: 'person-lee',
+      type: 'person',
+      name: 'Lee Chen',
+    });
+    saveFixtureMeeting('added', '2026-08-05T12:00:00.000Z');
+    saveFixtureMeeting('named', '2026-08-06T12:00:00.000Z');
+    db.addMeetingEntity({
+      meeting_id: 'added',
+      entity_id: person.id,
+      context: 'Manual participant',
+    });
+    db.addMeetingEntity({
+      meeting_id: 'named',
+      entity_id: person.id,
+      context: 'Lee was referenced.',
+    });
+
+    const briefing = db.getPersonBriefing(person.id);
+
+    expect(briefing?.meetings).toEqual([
+      expect.objectContaining({ id: 'named', evidence: 'mentioned' }),
+      expect.objectContaining({
+        id: 'added',
+        evidence: 'confirmed',
+        context: null,
+      }),
+    ]);
+  });
+
   it('does not attach a calendar attendee when the name is ambiguous', () => {
     const person = db.upsertEntity({
       id: 'person-sam-1',

@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   NotesView,
   extractNoteTitleAndBlocks,
+  findNoteTask,
+  findUpcomingMeetingForNote,
 } from '../../src/components/features/notes/NotesView';
 import type { Note } from '../../src/types/notes';
 
@@ -705,6 +707,322 @@ describe('NotesView workspace', () => {
       '#note-textarea-editor',
     ) as HTMLTextAreaElement;
     expect(textarea.value).toContain('@Sarah Connor');
+    // Mentioning someone doesn't silently turn the note into their note.
+    expect(
+      invoke.mock.calls.some(
+        ([channel, payload]) =>
+          channel === 'NOTES_SAVE' && payload?.targetId === 'person-1',
+      ),
+    ).toBe(false);
+  });
+
+  it('opens the people menu on "@", inserts the name, and shows it as a tag', async () => {
+    const onOpenPerson = vi.fn();
+    await act(async () => {
+      root.render(
+        <NotesView
+          initialNoteId="note-scratchpad"
+          onOpenPerson={onOpenPerson}
+        />,
+      );
+    });
+    const block = () =>
+      container.querySelector('#note-block-0') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype,
+      'value',
+    )?.set;
+
+    await act(async () => {
+      setter?.call(block(), 'Ping @Sar');
+      block().setSelectionRange(9, 9);
+      block().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const menu = container.querySelector('[aria-label="Slash commands"]');
+    expect(menu?.textContent).toContain('Sarah Connor');
+
+    await act(async () => {
+      block().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    expect(block().value).toBe('Ping @Sarah Connor ');
+    expect(container.querySelector('[aria-label="Slash commands"]')).toBeNull();
+
+    const tag = container.querySelector('.note-mention') as HTMLElement;
+    expect(tag?.textContent).toBe('@Sarah Connor');
+    await act(async () => {
+      tag.click();
+    });
+    expect(onOpenPerson).toHaveBeenCalledWith('person-1', 'note-scratchpad');
+  });
+
+  describe('slash commands leave no "/" behind', () => {
+    const block = () =>
+      container.querySelector('#note-block-0') as HTMLTextAreaElement;
+    const type = async (value: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype,
+          'value',
+        )?.set?.call(block(), value);
+        block().setSelectionRange(value.length, value.length);
+        block().dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    const press = async (key: string) => {
+      await act(async () => {
+        block().dispatchEvent(
+          new KeyboardEvent('keydown', { key, bubbles: true }),
+        );
+      });
+    };
+    const menu = () => container.querySelector('[aria-label="Slash commands"]');
+
+    beforeEach(async () => {
+      await act(async () => {
+        root.render(<NotesView initialNoteId="note-scratchpad" />);
+      });
+    });
+
+    it('Person swaps "/" for "@" and typing filters people', async () => {
+      await type('/');
+      const person = Array.from(
+        menu()?.querySelectorAll('[role="menuitem"]') ?? [],
+      ).find((item) => item.textContent?.includes('Person')) as HTMLElement;
+      await act(async () => {
+        person.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      });
+      expect(block().value).toBe('@');
+      expect(menu()?.textContent).toContain('Sarah Connor');
+
+      await type('@Sar');
+      await press('Enter');
+      expect(block().value).toBe('@Sarah Connor ');
+      expect(menu()).toBeNull();
+    });
+
+    it('a partly typed "/per" is removed too', async () => {
+      await type('/per');
+      await press('Enter');
+      expect(block().value).toBe('@');
+      await press('Enter');
+      expect(block().value).toBe('@Sarah Connor ');
+    });
+
+    it('Project swaps "/" for "#" and typing filters projects', async () => {
+      await type('/proj');
+      await press('Enter');
+      expect(block().value).toBe('#');
+      expect(menu()?.textContent).toContain('Pluto App');
+      await type('#Plu');
+      expect(menu()?.textContent).toContain('Pluto App');
+      await press('Enter');
+      expect(block().value).toBe('#Pluto App ');
+      expect(menu()).toBeNull();
+    });
+
+    it.each([
+      ['/check', 'todo'],
+      ['/hea', 'h1'],
+      ['/bul', 'bullet'],
+      ['/quo', 'quote'],
+      ['/num', 'numbered'],
+      ['/ta', 'task'],
+    ])('"%s" then Enter leaves an empty %s line', async (typed, type_) => {
+      await type(typed);
+      await press('Enter');
+      expect(menu()).toBeNull();
+      expect(
+        container.querySelector(`[data-block-type="${type_}"]`),
+      ).not.toBeNull();
+      expect(block().value).toBe('');
+    });
+  });
+
+  it('inserts the name in the right place when a shortcut strips a prefix', async () => {
+    await act(async () => {
+      root.render(<NotesView initialNoteId="note-scratchpad" />);
+    });
+    const block = () =>
+      container.querySelector('#note-block-0') as HTMLTextAreaElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value',
+      )?.set?.call(block(), '[] Send @Sar');
+      block().setSelectionRange(12, 12);
+      block().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      block().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    expect(block().value).toBe('Send @Sarah Connor ');
+    expect(
+      container.querySelector('[data-block-type="todo"] .note-mention')
+        ?.textContent,
+    ).toBe('@Sarah Connor');
+  });
+
+  it('leaves "@" plain text when no one matches or the menu is closed', async () => {
+    await act(async () => {
+      root.render(<NotesView initialNoteId="note-scratchpad" />);
+    });
+    const block = () =>
+      container.querySelector('#note-block-0') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype,
+      'value',
+    )?.set;
+    const type = async (value: string) => {
+      await act(async () => {
+        setter?.call(block(), value);
+        block().setSelectionRange(value.length, value.length);
+        block().dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    const menuOpen = () =>
+      container.querySelector('[aria-label="Slash commands"]') !== null;
+
+    await type('mail me@Sar');
+    expect(menuOpen()).toBe(false);
+    await type('@Zed');
+    expect(menuOpen()).toBe(false);
+
+    await type('@S');
+    expect(menuOpen()).toBe(true);
+    await act(async () => {
+      block().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+    expect(menuOpen()).toBe(false);
+    await type('@Sa');
+    expect(menuOpen()).toBe(false);
+  });
+
+  it('offers to link a note that mentions someone in an upcoming meeting', async () => {
+    notes[0].content = 'Ideas for @Sarah Connor';
+    const baseInvoke = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (channel: string, payload: any) =>
+      channel === 'CALENDAR_LIST_DAY'
+        ? [
+            {
+              title: 'Planning',
+              start: '2026-11-05T10:00:00.000Z',
+              attendees: [{ name: 'Sarah Connor' }],
+            },
+          ]
+        : baseInvoke(channel, payload),
+    );
+    await act(async () => {
+      root.render(<NotesView initialNoteId="note-scratchpad" />);
+    });
+    const aside = container.querySelector(
+      'aside[aria-label="Context & Upcoming Meetings"]',
+    )!;
+    expect(aside.textContent).toContain('Planning');
+    expect(aside.textContent).not.toContain('Invalid Date');
+    expect(aside.textContent).not.toContain('automatically');
+    const link = [...aside.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Link to Sarah Connor',
+    )!;
+    await act(async () => link.click());
+    expect(invoke).toHaveBeenCalledWith(
+      'NOTES_SAVE',
+      expect.objectContaining({ targetId: 'person-1', noteType: 'person' }),
+    );
+    expect(aside.textContent).toContain('Unchecked checklist items');
+  });
+
+  it('finds upcoming meetings by exact attendee name only', () => {
+    const entities = [
+      { id: 'p1', name: 'Sam', type: 'person' },
+      { id: 'p2', name: 'Lee', type: 'person' },
+      { id: 'pr', name: 'Launch', type: 'project' },
+    ];
+    const events = [
+      {
+        title: 'Samantha sync',
+        startDate: '2026-11-05T10:00:00.000Z',
+        attendees: [{ name: 'Samantha', email: 'sam@example.com' }],
+      },
+      {
+        title: 'Lee 1:1',
+        startDate: '2026-11-06T10:00:00.000Z',
+        attendees: [{ name: ' lee ' }],
+      },
+    ];
+    expect(
+      findUpcomingMeetingForNote({
+        targetId: 'p1',
+        content: '',
+        entities,
+        events,
+      }),
+    ).toBeNull();
+    expect(
+      findUpcomingMeetingForNote({
+        targetId: 'p2',
+        content: '',
+        entities,
+        events,
+      }),
+    ).toMatchObject({ title: 'Lee 1:1', personId: 'p2', linked: true });
+    expect(
+      findUpcomingMeetingForNote({
+        targetId: null,
+        content: 'Ask @Lee',
+        entities,
+        events,
+      }),
+    ).toMatchObject({ personId: 'p2', linked: false });
+    // A note linked to a project is not offered to a mentioned person.
+    expect(
+      findUpcomingMeetingForNote({
+        targetId: 'pr',
+        content: 'Ask @Lee',
+        entities,
+        events,
+      }),
+    ).toBeNull();
+  });
+
+  it('matches note tasks only within their own note', () => {
+    const tasks = [
+      {
+        id: 'meeting',
+        title: 'Send deck',
+        status: 'active' as const,
+        sourceNoteId: null,
+        sourceNoteLineId: null,
+      },
+      {
+        id: 'mine',
+        title: 'Send deck',
+        status: 'active' as const,
+        sourceNoteId: 'n1',
+        sourceNoteLineId: 'n1:line:2',
+      },
+    ];
+    expect(findNoteTask(tasks, 'n1', 'send deck')?.id).toBe('mine');
+    expect(findNoteTask(tasks, 'n2', 'Send deck')).toBeUndefined();
+    // Edited text on the same line keeps its task...
+    expect(
+      findNoteTask(tasks, 'n1', 'Send the deck', 'n1:line:2', new Set())?.id,
+    ).toBe('mine');
+    // ...unless the old task is still in the note on another line.
+    expect(
+      findNoteTask(
+        tasks,
+        'n1',
+        'Book room',
+        'n1:line:2',
+        new Set(['send deck']),
+      ),
+    ).toBeUndefined();
   });
 
   it('refers project via /project and embeds #Name into note', async () => {
@@ -814,10 +1132,21 @@ describe('NotesView workspace', () => {
         return {
           tasks: [
             {
+              // A meeting action item with the same wording must not tick
+              // the note's line.
+              entity: {
+                id: 'meeting-q4',
+                name: 'Review Q4 goals',
+                status: 'completed',
+                metadata: JSON.stringify({ source_meeting_id: 'm1' }),
+              },
+            },
+            {
               entity: {
                 id: 'task-q4',
                 name: 'Review Q4 goals',
                 status: taskStatus,
+                metadata: JSON.stringify({ source_note_id: 'note-person' }),
               },
             },
           ],
@@ -837,6 +1166,11 @@ describe('NotesView workspace', () => {
       'input[type="checkbox"]',
     ) as HTMLInputElement;
     expect(checkbox).not.toBeNull();
+    expect(checkbox.checked).toBe(false);
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pluto:tasks-changed'));
+    });
     expect(checkbox.checked).toBe(false);
 
     // External task completion occurs in Tasks ledger (e.g. Dashboard or TasksView)

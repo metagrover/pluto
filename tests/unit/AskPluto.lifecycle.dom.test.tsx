@@ -69,9 +69,7 @@ describe('Ask Pluto request lifecycle', () => {
     });
 
     expect(container.textContent).toContain("Hello, I'm Pluto.");
-    expect(container.textContent).toContain(
-      'No suggestions right now. Ask a question below.',
-    );
+    expect(container.textContent).toContain('Pick up a thread from a meeting');
     expect(
       container.querySelector('input[aria-label="Ask Pluto"]'),
     ).not.toBeNull();

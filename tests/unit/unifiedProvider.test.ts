@@ -36,6 +36,7 @@ import {
 } from '../../electron/llm/localInferenceProfile';
 import * as modelMemory from '../../electron/llm/localModelMemory';
 import { setLocalModelMemoryProbeReader } from '../../electron/llm/localModelMemoryProbe';
+import { estimateNotesTokens } from '../../electron/llm/meetingNotesBudget';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import * as ollamaTransport from '../../electron/llm/ollamaHttpTransport';
 import type { LLMSettings } from '../../electron/llm/provider';
@@ -1553,6 +1554,45 @@ describe('UnifiedLLMProvider', () => {
     expect(selectedModels).toEqual(['gemma4:12b', 'gemma4:12b', 'gemma4:12b']);
   });
 
+  it('fits long local entity prompts and refuses silent Ollama truncation', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    installFetchMock((url, init) => {
+      if (url.endsWith('/api/tags'))
+        return jsonResponse({ models: [{ name: 'gemma4:12b' }] });
+      bodies.push(parseRequestBody(init));
+      return jsonResponse({
+        response: JSON.stringify({
+          people: [],
+          topics: [],
+          projects: [],
+          relationships: [],
+        }),
+      });
+    });
+    const transcript = Array.from(
+      { length: 4_000 },
+      (_, index) => `Speaker ${index % 3}: we reviewed item ${index} together.`,
+    ).join('\n');
+    const provider = new UnifiedLLMProvider('ollama', {});
+    await provider.extractEntities(
+      transcript,
+      { summary: 'Avery owns the rollout.' },
+      { omitCommitments: true },
+    );
+    const body = bodies.find((entry) => entry.keep_alive !== 0)!;
+    const prompt = String(body.prompt);
+    expect(body.truncate).toBe(false);
+    expect(prompt.startsWith('You are an expert at extracting')).toBe(true);
+    expect(prompt).not.toContain('action_items');
+    expect(prompt).toContain('middle of the transcript omitted');
+    expect(estimateNotesTokens(prompt) + 2_500 + 512).toBeLessThanOrEqual(
+      16_384,
+    );
+    expect((body.options as { num_ctx: number }).num_ctx).toBeLessThanOrEqual(
+      16_384,
+    );
+  });
+
   it.each(['fast', 'deep'] as const)(
     'does not substitute another role after a configured %s model fails',
     async (mode) => {
@@ -2415,6 +2455,8 @@ it.each(['recovered', 'pressure', 'cancelled'] as const)(
               },
             ],
           });
+        if (url.endsWith('/api/show'))
+          return new Response(null, { status: 404 });
         if (parseRequestBody(init).keep_alive === 0) {
           resident = false;
           unloaded = true;
@@ -2476,11 +2518,15 @@ it.each(['recovered', 'pressure', 'cancelled'] as const)(
 
 it.each([
   { residentContext: 8192, expectedContext: 8192, unload: false },
-  { residentContext: 16384, expectedContext: 2048, unload: true },
+  // Larger than this request's cap, but shrinking it would only reload weights.
+  { residentContext: 16384, expectedContext: 16384, unload: false },
+  // A knowledge-document allocation serves the next smaller request too.
+  { residentContext: 32768, expectedContext: 32768, unload: false },
+  { residentContext: 40000, expectedContext: 2048, unload: true },
   { residentContext: 1024, expectedContext: 2048, unload: true },
   { residentContext: undefined, expectedContext: 2048, unload: false },
 ])(
-  'reuses only a resident context within the request cap: $residentContext',
+  'reuses a sufficient resident context up to Pluto allocations: $residentContext',
   async ({ residentContext, expectedContext, unload }) => {
     let resident = residentContext !== undefined;
     const events: string[] = [];
@@ -2524,6 +2570,79 @@ it.each([
       expect(events).toEqual(unload ? ['unload', 'generate'] : ['generate']);
     } finally {
       vi.unstubAllGlobals();
+    }
+  },
+);
+
+it.each([
+  { name: 'metadata', show: true, bytes: 128 * 1024 },
+  { name: 'no metadata', show: false, bytes: undefined },
+])(
+  'passes the model cache size to cold admission when Ollama reports it ($name)',
+  async ({ show, bytes }) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      process.versions,
+      'electron',
+    );
+    Object.defineProperty(process.versions, 'electron', {
+      value: 'test',
+      configurable: true,
+    });
+    const transport = vi
+      .spyOn(ollamaTransport, 'ollamaHttpFetch')
+      .mockImplementation((input, init) => fetch(input, init));
+    const memory = vi
+      .spyOn(modelMemory, 'readLocalModelMemory')
+      .mockResolvedValue({ available: 1024 ** 3, total: 16 * 1024 ** 3 });
+    const capacity = vi.spyOn(modelMemory, 'assertLocalModelMemoryCapacity');
+    const digest = `cache-size-${show}`;
+    installFetchMock(
+      (url) => {
+        if (url.endsWith('/api/tags'))
+          return jsonResponse({
+            models: [{ name: 'phi4-mini:3.8b', digest, size: 2 * 1024 ** 3 }],
+          });
+        if (url.endsWith('/api/show') && show)
+          return jsonResponse({
+            model_info: {
+              'general.architecture': 'phi3',
+              'phi3.block_count': 32,
+              'phi3.attention.head_count': 24,
+              'phi3.attention.head_count_kv': 8,
+              'phi3.embedding_length': 3072,
+            },
+          });
+        return new Response(null, { status: 404 });
+      },
+      () => jsonResponse({ models: [] }),
+    );
+    try {
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: 'phi4-mini:3.8b',
+      });
+      await expect(
+        provider.generateText({
+          prompt: 'Milo discussed access.',
+          task: 'notesWriter',
+          notesModel: 'phi4-mini:3.8b',
+          notesBudget: { contextTokens: 8192, outputTokens: 1024 },
+        }),
+      ).rejects.toThrow('Not enough memory');
+      expect(capacity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resident: false,
+          modelDigest: digest,
+          contextBytesPerToken: bytes,
+        }),
+      );
+    } finally {
+      memory.mockRestore();
+      capacity.mockRestore();
+      transport.mockRestore();
+      vi.unstubAllGlobals();
+      if (descriptor)
+        Object.defineProperty(process.versions, 'electron', descriptor);
+      else Reflect.deleteProperty(process.versions, 'electron');
     }
   },
 );
@@ -2859,8 +2978,16 @@ it.each([
     unload: true,
   },
   {
+    // A larger admitted resident is kept: shrinking it would reload the weights.
     task: 'title' as const,
     residentContext: 20000,
+    expectedContext: 20000,
+    output: 64,
+    unload: false,
+  },
+  {
+    task: 'title' as const,
+    residentContext: 40000,
     expectedContext: 2048,
     output: 64,
     unload: true,

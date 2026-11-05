@@ -552,33 +552,54 @@ describe('shared personal tasks', () => {
     );
   });
 
-  it('updates existing task idempotently and preserves provenance when sourceNoteLineId is provided', () => {
+  it('keeps note tasks to their own note and renames only by task id', () => {
+    const meetingTask = savePersonalTask({ title: 'Send deck' });
+    const otherNoteTask = savePersonalTask({
+      title: 'Send deck',
+      sourceNoteId: 'note-other',
+      sourceNoteLineId: 'note-other:line:0',
+    });
     const id1 = savePersonalTask({
-      title: 'Action item from living note',
+      title: 'Send deck',
       sourceNoteId: 'note-living-1',
-      sourceNoteLineId: 'note-living-1-line-5',
+      sourceNoteLineId: 'note-living-1:line:5',
+    });
+    expect(id1).not.toBe(meetingTask);
+    expect(id1).not.toBe(otherNoteTask);
+    expect(JSON.parse(db.getEntity(id1)!.metadata!)).toMatchObject({
+      source_note_id: 'note-living-1',
+      source_note_line_id: 'note-living-1:line:5',
     });
 
-    const task1 = db.getEntity(id1)!;
-    expect(task1).toBeDefined();
-    expect(task1.name).toBe('Action item from living note');
-    const meta1 = JSON.parse(task1.metadata!);
-    expect(meta1.source_note_id).toBe('note-living-1');
-    expect(meta1.source_note_line_id).toBe('note-living-1-line-5');
+    // Saving the same line again finds the same task by note and title.
+    expect(
+      savePersonalTask({
+        title: 'Send deck',
+        sourceNoteId: 'note-living-1',
+        sourceNoteLineId: 'note-living-1:line:6',
+      }),
+    ).toBe(id1);
 
-    // Save again with same sourceNoteLineId but updated title (e.g. edited in note)
+    // A different task that lands on the same line is a new task, not a rename.
     const id2 = savePersonalTask({
-      title: 'Action item from living note (updated)',
+      title: 'Book room',
       sourceNoteId: 'note-living-1',
-      sourceNoteLineId: 'note-living-1-line-5',
+      sourceNoteLineId: 'note-living-1:line:5',
     });
+    expect(id2).not.toBe(id1);
+    expect(db.getEntity(id1)!.name).toBe('Send deck');
 
-    expect(id2).toBe(id1);
-    const updated = db.getEntity(id1)!;
-    expect(updated.name).toBe('Action item from living note (updated)');
-    const meta2 = JSON.parse(updated.metadata!);
-    expect(meta2.source_note_id).toBe('note-living-1');
-    expect(meta2.source_note_line_id).toBe('note-living-1-line-5');
+    // An edit to the line's text is a rename when the note passes the task id.
+    expect(
+      savePersonalTask({
+        id: id1,
+        title: 'Send the deck',
+        sourceNoteId: 'note-living-1',
+        sourceNoteLineId: 'note-living-1:line:5',
+      }),
+    ).toBe(id1);
+    expect(db.getEntity(id1)!.name).toBe('Send the deck');
+    expect(db.getEntity(meetingTask)!.name).toBe('Send deck');
   });
 
   it('synchronizes status and title updates bidirectionally with notes', () => {
@@ -591,10 +612,11 @@ describe('shared personal tasks', () => {
       noteType: 'general',
     });
 
-    // Create or find personal task
+    // The task written in that note
     const taskId = savePersonalTask({
       title: 'Deploy auth microservice',
       status: 'active',
+      sourceNoteId: 'note-sync-1',
     });
 
     expect(taskId).toBeDefined();

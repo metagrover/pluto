@@ -34,21 +34,37 @@ export type NotesSourceWindow = {
   sourceText: string;
 };
 
-const isTokenDense = (text: string): boolean => {
-  const nonWhitespace = text.replaceAll(/\s/g, '');
-  if (!nonWhitespace) return false;
-  const asciiLetters = (nonWhitespace.match(/[A-Za-z]/g) ?? []).length;
-  return (
-    asciiLetters < nonWhitespace.length / 2 ||
-    /(?:^|[^\p{L}\p{N}_$])[\p{L}\p{N}_$]{65}/u.test(text)
-  );
+/** Additive inputs to the token estimate. Pieces joined by whitespace combine by
+ * summing counts and OR-ing longRun, because a word run cannot cross that join. */
+export type NotesTokenStats = {
+  bytes: number;
+  nonWhitespace: number;
+  asciiLetters: number;
+  longRun: boolean;
 };
 
-export const estimateNotesTokens = (text: string): number => {
-  const bytes = Buffer.byteLength(text, 'utf8');
-  if (isTokenDense(text)) return bytes;
-  return Math.ceil(Math.ceil(bytes / 3) * 1.25);
+export const measureNotesText = (text: string): NotesTokenStats => {
+  const nonWhitespace = text.replaceAll(/\s/g, '');
+  return {
+    bytes: Buffer.byteLength(text, 'utf8'),
+    nonWhitespace: nonWhitespace.length,
+    asciiLetters: (nonWhitespace.match(/[A-Za-z]/g) ?? []).length,
+    longRun: /(?:^|[^\p{L}\p{N}_$])[\p{L}\p{N}_$]{65}/u.test(text),
+  };
 };
+
+export const estimateNotesTokensFromStats = (
+  stats: NotesTokenStats,
+): number => {
+  const tokenDense =
+    stats.nonWhitespace > 0 &&
+    (stats.asciiLetters < stats.nonWhitespace / 2 || stats.longRun);
+  if (tokenDense) return stats.bytes;
+  return Math.ceil(Math.ceil(stats.bytes / 3) * 1.25);
+};
+
+export const estimateNotesTokens = (text: string): number =>
+  estimateNotesTokensFromStats(measureNotesText(text));
 
 export const planNotesCapacity = (input: NotesCapacityInput) => {
   const writerFits =
@@ -94,15 +110,21 @@ const isSurrogateBoundary = (text: string, offset: number): boolean => {
   );
 };
 
+export const notesSegmentAt = (
+  source: NotesSource,
+  index: number,
+): NotesSource['segments'][number] | undefined => {
+  const indexed = source.segments[index];
+  return indexed?.index === index
+    ? indexed
+    : source.segments.find((entry) => entry.index === index);
+};
+
+const spanTextFor = (source: NotesSource, span: SourceSpan): string =>
+  notesSegmentAt(source, span.segment)?.text.slice(span.start, span.end) ?? '';
+
 const primaryTextFor = (source: NotesSource, spans: SourceSpan[]): string =>
-  spans
-    .map((span) => {
-      const segment = source.segments.find(
-        (entry) => entry.index === span.segment,
-      );
-      return segment?.text.slice(span.start, span.end) ?? '';
-    })
-    .join('\n');
+  spans.map((span) => spanTextFor(source, span)).join('\n');
 
 export const bisectNotesSourceSpans = (
   source: NotesSource,
@@ -126,7 +148,7 @@ export const bisectNotesSourceSpans = (
   }
   const span = spans[0];
   if (!span || span.end - span.start < 2) return null;
-  const segment = source.segments.find((entry) => entry.index === span.segment);
+  const segment = notesSegmentAt(source, span.segment);
   if (!segment) throw new MeetingNotesError('invalid_source_span');
   let offset = span.start + Math.floor((span.end - span.start) / 2);
   const priorWhitespace = segment.text.lastIndexOf(' ', offset - 1);
@@ -218,31 +240,34 @@ export const partitionNotesSource = (
 
   const windows: NotesSourceWindow[] = [];
   let current: SourceSpan[] = [];
+  // Grow the packet text alongside the spans instead of rebuilding it per step.
+  let currentText = '';
   for (const span of primarySpans) {
     const candidate = [...current, span];
-    if (
-      current.length > 0 &&
-      !fitsPrompt(primaryTextFor(source, candidate), candidate)
-    ) {
-      const primaryText = primaryTextFor(source, current);
+    const spanText = spanTextFor(source, span);
+    const candidateText = current.length
+      ? `${currentText}\n${spanText}`
+      : spanText;
+    if (current.length > 0 && !fitsPrompt(candidateText, candidate)) {
       windows.push({
         primarySpans: current,
         overlapSpans: [],
-        primaryText,
-        sourceText: primaryText,
+        primaryText: currentText,
+        sourceText: currentText,
       });
       current = [span];
+      currentText = spanText;
     } else {
       current = candidate;
+      currentText = candidateText;
     }
   }
   if (current.length > 0) {
-    const primaryText = primaryTextFor(source, current);
     windows.push({
       primarySpans: current,
       overlapSpans: [],
-      primaryText,
-      sourceText: primaryText,
+      primaryText: currentText,
+      sourceText: currentText,
     });
   }
   if (!windows.length) throw new MeetingNotesError('notes_context_exhausted');

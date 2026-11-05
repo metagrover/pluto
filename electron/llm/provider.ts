@@ -253,7 +253,12 @@ export interface LLMProvider {
   extractEntities(
     transcript: string,
     context?: EntityExtractionContext,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
+      /** Skip actions and decisions when the caller uses the notes' own. */
+      omitCommitments?: boolean;
+    },
   ): Promise<ExtractedEntities>;
 }
 

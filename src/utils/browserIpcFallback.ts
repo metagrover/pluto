@@ -20,6 +20,7 @@ import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
 import type { LocalArtifact } from '../api/localArtifacts';
 import type { Meeting } from '../types';
 import type { Note, SaveNoteInput } from '../types/notes';
+import { findMentions } from './noteMentions';
 import { hasVerifiedSpeakerAttribution } from './speakerAttributionTrust';
 import { invokeTaskPreview } from './taskPreview';
 
@@ -1197,12 +1198,22 @@ const invokeNotesFallback = (channel: string, payload: unknown) => {
     saveStoredNotes(filtered);
     return true;
   }
-  if (channel === 'NOTES_FOR_ATTENDEES') {
+  if (channel === 'NOTES_FOR_ATTENDEES' || channel === 'NOTES_OWNED_ITEMS') {
     return [];
   }
   if (channel === 'NOTES_FOR_ENTITY') {
     const entityId = payload as string;
     return notes.filter((n) => n.targetId === entityId);
+  }
+  if (channel === 'NOTES_MENTIONING_PERSON') {
+    const personId = payload as string;
+    return notes.filter(
+      (n) =>
+        n.targetId !== personId &&
+        findMentions(n.content, previewPeople).some(
+          (mention) => mention.person.id === personId,
+        ),
+    );
   }
   return null;
 };
@@ -1346,6 +1357,9 @@ const createInvokeFallback =
       case 'MEETING_PREP_FOR_MEETING':
         result = null;
         break;
+      case 'MEETING_PREP_FOR_NOTE':
+        result = [];
+        break;
       case 'MEETING_PREP_BRIEF_BUILD':
       case 'MEETING_PREP_BRIEF_SYNTHESIZE': {
         const prep = JSON.parse(
@@ -1402,6 +1416,14 @@ const createInvokeFallback =
           throw new Error('Prep changed elsewhere. Reload before saving.');
         const patch = request.patch;
         if ('notes' in patch) prep.notes = patch.notes;
+        if (typeof patch.addNoteId === 'string')
+          prep.noteIds = [
+            ...new Set([...(prep.noteIds || []), patch.addNoteId]),
+          ];
+        if (typeof patch.removeNoteId === 'string')
+          prep.noteIds = (prep.noteIds || []).filter(
+            (id) => id !== patch.removeNoteId,
+          );
         if (Array.isArray(patch.meetingIds)) {
           prep.meetings = patch.meetingIds.map(
             (id: string) =>

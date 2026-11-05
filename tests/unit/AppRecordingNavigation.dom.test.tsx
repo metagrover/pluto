@@ -12,6 +12,16 @@ import type {
   LiveTranscriptSegment,
 } from '../../src/components/features/recordingWorkspaceModel';
 
+/** What the live notes show, one line per block, as the user reads them. */
+const liveNotesText = (container: HTMLElement) =>
+  [
+    ...container.querySelectorAll<HTMLTextAreaElement>(
+      '.live-notes-editor textarea',
+    ),
+  ]
+    .map((area) => area.value)
+    .join('\n');
+
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 let recordingCompleted = false;
@@ -26,6 +36,49 @@ let notesAtManualStart: string | null = null;
 let calendarForTest: CalendarEvent | null = null;
 let publishRecordingPreview: (() => void) | null = null;
 const calendarListeners = new Map<string, (...args: unknown[]) => void>();
+
+// A person page that only offers "Start 1:1", to test the handoff into recording.
+vi.mock('../../src/components/KnowledgeGraph/PeopleTab', () => ({
+  PeopleTab: ({
+    onStartMeeting,
+  }: {
+    onStartMeeting?: (person: { id: string; name: string }) => void;
+  }) => (
+    <button
+      type="button"
+      disabled={!onStartMeeting}
+      onClick={() => onStartMeeting?.({ id: 'p1', name: 'Priya Shah' })}
+    >
+      Start 1:1 test
+    </button>
+  ),
+}));
+
+// A note that only offers "Start meeting now".
+vi.mock('../../src/components/features/notes/NotesView', () => ({
+  NotesView: ({
+    onStartMeeting,
+  }: {
+    onStartMeeting?: (start: {
+      title: string;
+      participants: string[];
+      notes?: string;
+    }) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onStartMeeting?.({
+          title: 'Vendor eval',
+          participants: ['Dana Ortiz'],
+          notes: '- [ ] Data residency',
+        })
+      }
+    >
+      Start meeting from note test
+    </button>
+  ),
+}));
 
 vi.mock('../../src/components/AudioManager', () => ({
   AudioManager: ({
@@ -327,9 +380,77 @@ describe('App recording navigation', () => {
         'button[aria-label="Edit meeting title: Customer launch review"]',
       )?.textContent,
     ).toBe('Customer launch review');
+    expect(liveNotesText(container)).toBe('Ask about the launch checklist');
+    await act(async () => root.unmount());
+  });
+
+  it('starts a 1:1 from a person with their name as title and participant', async () => {
+    const { default: App } = await import('../../src/App');
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<App />);
+      await flushPromises();
+    });
+    const people = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'People',
+    )!;
+    await act(async () => {
+      people.click();
+      await flushPromises();
+    });
+    const start = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Start 1:1 test',
+    )!;
+    expect(start.disabled).toBe(false);
+    await act(async () => {
+      start.click();
+      await flushPromises();
+    });
     expect(
-      container.querySelector<HTMLTextAreaElement>('#recording-notes')?.value,
-    ).toBe('Ask about the launch checklist');
+      container.querySelector(
+        'button[aria-label="Edit meeting title: 1:1 with Priya Shah"]',
+      ),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('.rail-participants')?.textContent,
+    ).toContain('Priya Shah');
+    await act(async () => root.unmount());
+  });
+
+  it('starts a meeting from a note with the note as its notes', async () => {
+    const { default: App } = await import('../../src/App');
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<App />);
+      await flushPromises();
+    });
+    const notesTab = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Notes',
+    )!;
+    await act(async () => {
+      notesTab.click();
+      await flushPromises();
+    });
+    const start = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Start meeting from note test',
+    )!;
+    await act(async () => {
+      start.click();
+      await flushPromises();
+    });
+    expect(
+      container.querySelector(
+        'button[aria-label="Edit meeting title: Vendor eval"]',
+      ),
+    ).not.toBeNull();
+    expect(liveNotesText(container)).toBe('Data residency');
+    // The prep item is a checkbox in the live notes, as in Notes.
+    expect(
+      container.querySelector('.live-notes-editor .notion-todo-checkbox'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('.rail-participants')?.textContent,
+    ).toContain('Dana Ortiz');
     await act(async () => root.unmount());
   });
 
@@ -391,9 +512,7 @@ describe('App recording navigation', () => {
         await flushPromises();
       });
       expect(notesAtCalendarStart).toBe(existingNotes || null);
-      expect(
-        container.querySelector<HTMLTextAreaElement>('#recording-notes')?.value,
-      ).toBe(existingNotes);
+      expect(liveNotesText(container)).toBe(existingNotes);
       await act(async () => root.unmount());
     },
   );

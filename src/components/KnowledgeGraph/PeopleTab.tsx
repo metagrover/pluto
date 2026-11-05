@@ -5,8 +5,6 @@ import {
   ChevronRight,
   CircleHelp,
   Clock3,
-  ExternalLink,
-  FileText,
   MessageCircle,
   MoreHorizontal,
   Pencil,
@@ -15,7 +13,6 @@ import {
   Search,
   Trash2,
   Undo2,
-  UserRound,
   Volume2,
   X,
 } from 'lucide-react';
@@ -39,6 +36,7 @@ import {
 } from '../../api/knowledgeGraph';
 import {
   getNotesForEntity,
+  getNotesMentioningPerson,
   saveNote,
   subscribeNotesChanged,
 } from '../../api/notes';
@@ -74,8 +72,10 @@ import {
 import { readPersonProfile } from '../../utils/personProfile';
 import { PersonChatDock } from '../features/PersonChatDock';
 import { DetailsMenu } from '../ui/DetailsMenu';
+import { EmptyCanvas } from '../ui/EmptyCanvas';
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
+import { NextWithPerson } from './NextWithPerson';
 import { PersonProfileContent } from './PersonProfileContent';
 import { compileKnowledgeBrief } from './knowledgeDocument';
 
@@ -337,13 +337,11 @@ export const PeopleBriefing = ({
       </PageHeader>
 
       {visibleRows.length === 0 ? (
-        <div className="people-empty">
-          <div className="people-empty__icon" aria-hidden="true">
-            <UserRound size={20} strokeWidth={1.5} />
-          </div>
-          <h2>No relationship context yet</h2>
-          <p>People will appear as Pluto connects them to conversations.</p>
-        </div>
+        <EmptyCanvas
+          kind="people"
+          title="The people in your conversations"
+          description="As Pluto connects people to your meetings, you’ll have a place to revisit what you discussed together."
+        />
       ) : (
         <div className="people-list" aria-label="People relationships">
           {regularRows.length > 0 ? (
@@ -663,6 +661,98 @@ const MeetingList = ({
   </div>
 );
 
+const noteSnippet = (content: string): string =>
+  content
+    .split('\n')
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^\[task(?::(?:done|x))?:\s*(.+?)\]$/i, '$1')
+        .replace(/^[-*]\s*(\[[ xX]\])?\s*(\[task\]\s*)?/, ''),
+    )
+    .filter(Boolean)
+    .join(' · ');
+
+/** Meetings and notes with a person as one list, newest first. */
+const PersonTimeline = ({
+  meetings,
+  notes,
+  fallbackNoteTitle,
+  mentionedNoteIds,
+  onOpenMeeting,
+  onOpenNote,
+}: {
+  meetings: PersonBriefingMeeting[];
+  notes: Note[];
+  fallbackNoteTitle: string;
+  /** Notes that "@Name" the person without being linked to them. */
+  mentionedNoteIds?: ReadonlySet<string>;
+  onOpenMeeting: (meetingId: string) => void;
+  onOpenNote?: (noteId: string) => void;
+}) => {
+  const rows = [
+    ...meetings.map((meeting) => ({
+      kind: 'meeting' as const,
+      id: meeting.id,
+      at: meeting.started_at || meeting.created_at || '',
+      meeting,
+    })),
+    ...notes.map((note) => ({
+      kind: 'note' as const,
+      id: note.id,
+      at: note.updatedAt,
+      note,
+    })),
+  ].sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+  return (
+    <div className="person-dossier__meetings">
+      {rows.map((row) =>
+        row.kind === 'meeting' ? (
+          <button
+            type="button"
+            key={`meeting:${row.id}`}
+            onClick={() => onOpenMeeting(row.id)}
+          >
+            <span>
+              <strong>{row.meeting.title}</strong>
+              {row.meeting.context ? (
+                <small>{row.meeting.context}</small>
+              ) : null}
+            </span>
+            <span className="person-dossier__meeting-date">
+              {formatDate(row.at)}
+              <ChevronRight aria-hidden="true" size={14} />
+            </span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            key={`note:${row.id}`}
+            onClick={() => onOpenNote?.(row.id)}
+            aria-label={`Open note ${row.note.title || fallbackNoteTitle}`}
+          >
+            <span>
+              <strong>{row.note.title || fallbackNoteTitle}</strong>
+              <small className="line-clamp-1">
+                {mentionedNoteIds?.has(row.note.id)
+                  ? 'Mentioned in note'
+                  : 'Note'}
+                {noteSnippet(row.note.content)
+                  ? ` · ${noteSnippet(row.note.content)}`
+                  : ''}
+              </small>
+            </span>
+            <span className="person-dossier__meeting-date">
+              {formatDate(row.at)}
+              <ChevronRight aria-hidden="true" size={14} />
+            </span>
+          </button>
+        ),
+      )}
+    </div>
+  );
+};
+
 const MeetingGroup = ({
   evidence,
   meetings,
@@ -703,10 +793,12 @@ export const PersonDossier = ({
   mergeCandidates = [],
   possibleDuplicateCount = 0,
   onIdentityChanged = async () => {},
+  onStartMeeting,
 }: {
   detail: PersonBriefingDetail;
   onBack: () => void;
   backLabel?: string;
+  onStartMeeting?: (person: { id: string; name: string }) => void;
   onOpenMeeting: (meetingId: string) => void;
   onOpenNote?: (noteId: string) => void;
   personNotes?: Note[];
@@ -739,6 +831,36 @@ export const PersonDossier = ({
   }, [detail.person.id, personNotes]);
 
   const notesToDisplay = personNotes ?? fetchedNotes;
+
+  // Other notes that "@Name" this person, listed with their own notes.
+  const [mentionedNotes, setMentionedNotes] = useState<Note[]>(EMPTY_NOTES);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchMentions = async () => {
+      try {
+        const loaded = await getNotesMentioningPerson(detail.person.id);
+        if (!cancelled) setMentionedNotes(loaded);
+      } catch (err) {
+        console.error('Failed to fetch notes mentioning person:', err);
+      }
+    };
+    void fetchMentions();
+    const unsub = subscribeNotesChanged(() => {
+      void fetchMentions();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [detail.person.id]);
+  const { timelineNotes, mentionedNoteIds } = useMemo(() => {
+    const linked = new Set(notesToDisplay.map((note) => note.id));
+    const mentioned = mentionedNotes.filter((note) => !linked.has(note.id));
+    return {
+      timelineNotes: [...notesToDisplay, ...mentioned],
+      mentionedNoteIds: new Set(mentioned.map((note) => note.id)),
+    };
+  }, [notesToDisplay, mentionedNotes]);
 
   const handleCreateOrOpenNote = async () => {
     if (notesToDisplay.length > 0) {
@@ -1688,6 +1810,19 @@ export const PersonDossier = ({
         </div>
       </header>
 
+      {!currentDetail.isSelf ? (
+        <NextWithPerson
+          person={currentDetail.person}
+          notes={notesToDisplay}
+          onOpenMeeting={onOpenMeeting}
+          onStartMeeting={
+            onStartMeeting
+              ? () => onStartMeeting(currentDetail.person)
+              : undefined
+          }
+        />
+      ) : null}
+
       {mergeOpen ? (
         <section
           className="person-dossier__merge"
@@ -2301,99 +2436,34 @@ export const PersonDossier = ({
         ) : null}
       </section>
 
-      <section
-        className="person-dossier__notes border-b border-pro-border/60 py-8"
-        id="person-notes"
-      >
-        <div className="person-dossier__major-heading mb-4">
+      <section className="person-dossier__history" id="person-meetings">
+        <div className="person-dossier__major-heading">
           <div>
-            <h2>Running 1:1 Notes</h2>
-            <span className="text-xs tabular-nums text-pro-text-muted">
-              {notesToDisplay.length}
-            </span>
+            <h2>Meetings and notes</h2>
+            <span>{confirmedMeetings.length + timelineNotes.length}</span>
           </div>
           <button
             type="button"
             onClick={handleCreateOrOpenNote}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-pro-accent/10 hover:bg-pro-accent/20 text-pro-accent text-[12px] font-medium transition-colors cursor-pointer"
-            aria-label={`+ 1:1 Note for ${currentDetail.person.name}`}
+            aria-label={`New 1:1 note for ${currentDetail.person.name}`}
           >
             <Plus size={13} aria-hidden="true" />
-            <span>+ 1:1 Note</span>
+            <span>1:1 Note</span>
           </button>
         </div>
-
-        {notesToDisplay.length === 0 ? (
-          <p className="person-dossier__section-empty text-sm text-pro-text-muted">
-            No running 1:1 notes yet.
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {notesToDisplay.map((note) => {
-              const snippet =
-                note.content
-                  .split('\n')
-                  .map((l) => l.trim().replace(/^[-*]\s*(\[[ xX]\])?\s*/, ''))
-                  .filter((l) => l.length > 0)
-                  .join(' ') || 'No additional content yet.';
-              const dateDisplay = new Date(note.updatedAt).toLocaleDateString(
-                undefined,
-                { month: 'short', day: 'numeric' },
-              );
-
-              return (
-                <div
-                  key={note.id}
-                  className="p-4 rounded-xl border border-pro-border bg-black/[0.02] dark:bg-white/[0.02] flex items-start justify-between gap-4"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <FileText
-                        size={14}
-                        className="text-pro-text-muted shrink-0"
-                        aria-hidden="true"
-                      />
-                      <h3 className="font-semibold text-pro-text-main text-[14px] truncate">
-                        {note.title ||
-                          `Notes with ${currentDetail.person.name}`}
-                      </h3>
-                      <span className="text-[11px] text-pro-text-muted shrink-0">
-                        {dateDisplay}
-                      </span>
-                    </div>
-                    <p className="text-[12px] text-pro-text-muted line-clamp-2 leading-relaxed">
-                      {snippet}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onOpenNote?.(note.id)}
-                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded border border-pro-border hover:bg-black/5 dark:hover:bg-white/5 text-[12px] text-pro-text-main font-medium transition-colors cursor-pointer"
-                    aria-label={`Open note ${note.title || '1:1 note'}`}
-                  >
-                    <span>Open in Notes</span>
-                    <ExternalLink size={12} aria-hidden="true" />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <section className="person-dossier__history" id="person-meetings">
-        <div className="person-dossier__major-heading">
-          <h2>Meetings</h2>
-          <span>{confirmedMeetings.length}</span>
-        </div>
-        {confirmedMeetings.length === 0 ? (
+        {confirmedMeetings.length + timelineNotes.length === 0 ? (
           <p className="person-dossier__section-empty">
-            No confirmed meetings yet.
+            No meetings or notes yet.
           </p>
         ) : (
-          <MeetingList
+          <PersonTimeline
             meetings={confirmedMeetings}
+            notes={timelineNotes}
+            mentionedNoteIds={mentionedNoteIds}
+            fallbackNoteTitle={`Notes with ${currentDetail.person.name}`}
             onOpenMeeting={onOpenMeeting}
+            onOpenNote={onOpenNote}
           />
         )}
         {otherMeetingLinks.length > 0 ? (
@@ -2436,6 +2506,7 @@ export const PeopleTab: React.FC<{
     personContext?: { id: string; name: string },
   ) => void;
   onOpenNote?: (noteId: string) => void;
+  onStartMeeting?: (person: { id: string; name: string }) => void;
   backLabel?: string;
   onBack?: () => void;
 }> = ({
@@ -2443,6 +2514,7 @@ export const PeopleTab: React.FC<{
   onSelectPerson = () => {},
   onOpenMeeting = () => {},
   onOpenNote,
+  onStartMeeting,
   backLabel,
   onBack,
 }) => {
@@ -2590,6 +2662,7 @@ export const PeopleTab: React.FC<{
             })
           }
           onOpenNote={onOpenNote}
+          onStartMeeting={onStartMeeting}
           personNotes={personNotes}
           mergeCandidates={rows}
           possibleDuplicateCount={selectedSummary?.possibleDuplicateCount ?? 0}
@@ -2618,6 +2691,7 @@ export const PeopleTab: React.FC<{
         <PersonChatDock
           personId={selectedDetail.person.id}
           personName={selectedDetail.person.name}
+          isSelf={Boolean(selectedDetail.isSelf)}
           onOpenMeeting={onOpenMeeting}
         />
       </>

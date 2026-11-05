@@ -44,6 +44,7 @@ type MeetingRecord = {
   user_notes?: string | null;
   finalization_status?: string | null;
   analysis_json?: string | null;
+  ended_at?: string | null;
 };
 
 type MeetingAnalysisRunRecord = {
@@ -219,6 +220,7 @@ type NotesProvider = {
     options?: {
       signal?: AbortSignal;
       workClass?: import('./llm/llmWorkClass').LLMWorkClass;
+      omitCommitments?: boolean;
     },
   ): Promise<import('./llm/provider').ExtractedEntities>;
 };
@@ -448,6 +450,16 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   };
   onUpdated?: (meetingId: string) => void;
   onPublished?: (meetingId: string, runId: string) => void;
+  /** Observational: a finished run's timings, for the app log. */
+  onRunMetric?: (input: {
+    runId: string;
+    reason: 'automatic' | 'manual';
+    status: 'published' | 'failed' | 'cancelled';
+    errorCode: string | null;
+    metrics: import('./llm/meetingNotesRunMetrics').MeetingNotesRunMetric;
+    completedAt: string;
+    meetingEndedAt: string | null;
+  }) => void;
   runSecondary?: (input: {
     meetingId: string;
     runId: string;
@@ -997,6 +1009,8 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       if (metricFinalized) return;
       metricFinalized = true;
       const completedAtMs = Date.now();
+      const metrics = runMetrics.snapshot(status, completedAtMs);
+      const completedAt = new Date(completedAtMs).toISOString();
       try {
         dependencies.db.upsertMeetingAnalysisRunMetric?.({
           meetingId,
@@ -1004,13 +1018,27 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           reason: primaryReason,
           status,
           errorCode: terminalErrorCode ?? null,
-          metrics: runMetrics.snapshot(status, completedAtMs),
+          metrics,
           startedAt: metricsStartedAt,
-          completedAt: new Date(completedAtMs).toISOString(),
+          completedAt,
         });
       } catch {
         // Metrics are observational: a deleted parent row or telemetry failure
         // must not replace the run's publication or cancellation outcome.
+      }
+      try {
+        dependencies.onRunMetric?.({
+          runId,
+          reason: primaryReason,
+          status,
+          errorCode: terminalErrorCode ?? null,
+          metrics,
+          completedAt,
+          meetingEndedAt:
+            dependencies.db.getMeeting(meetingId)?.ended_at ?? null,
+        });
+      } catch {
+        // Logging must not change the run's outcome either.
       }
     };
     dependencies.db.beginMeetingAnalysisRun({

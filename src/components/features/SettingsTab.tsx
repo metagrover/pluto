@@ -1206,13 +1206,13 @@ export const SettingsTab = ({
 
             <SettingsRow
               label="Generate notes during meetings"
-              helper="Precomputes notes in the background while recording so they are ready immediately when the meeting ends. Turn this off when using large local models to keep live transcription smooth."
+              helper="Drafts notes from the live transcript while recording. The final transcript usually differs, so these drafts are rarely reused and notes are seldom faster. Uses the local model during meetings."
               actionControl
             >
               <Toggle
-                checked={fasterNotesEnabled !== false}
+                checked={fasterNotesEnabled === true}
                 onChange={() => {
-                  const next = !(fasterNotesEnabled !== false);
+                  const next = fasterNotesEnabled !== true;
                   setFasterNotesEnabled?.(next);
                   persistSetting(
                     'faster_notes_enabled',

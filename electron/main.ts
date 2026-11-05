@@ -238,6 +238,7 @@ const plutoLog = createLogger('Pluto');
 const captureLog = createLogger('Capture');
 const audioCapLog = createLogger('AudioCap');
 const llmLog = createLogger('LLM');
+const notesTimingLog = createLogger('Notes timings');
 
 const ffprobePath = resolveUnpackedExecutablePath(ffprobeStatic.path);
 
@@ -817,6 +818,8 @@ import { createMeetingContextProducer } from './intelligence/meetingContextProdu
 import { generateMid } from './intelligence/midGenerator';
 import { renderMidToMarkdown } from './intelligence/midRenderer';
 import {
+  NOTE_RELATED_MEETINGS,
+  type NoteRelatedMeeting,
   buildNoteAskPlutoPrompt,
   describeNoteAskPlutoFailure,
   generateWithMemoryFallback,
@@ -897,6 +900,7 @@ import {
   resolveLocalThroughput,
 } from './llm/localInferenceProfile';
 import { notesWriterPolicy } from './llm/meetingNotesBudget';
+import { formatMeetingNotesRunTimings } from './llm/meetingNotesRunMetrics';
 import { createNotesSource } from './llm/meetingNotesSource';
 import {
   MEETING_NOTES_DEFAULT_TEMPLATE_SETTING,
@@ -925,6 +929,11 @@ import {
   createMeetingAnalysisRunCoordinator,
 } from './meetingAnalysisRuns';
 import { reconcileSingletonManualParticipantIdentity } from './meetingParticipantIdentity';
+import {
+  type NextTimeItem,
+  findDiscussedItems,
+  transcriptSegments,
+} from './nextTimeDiscussed';
 import {
   PersonChatThreadArchivedError,
   createPersonChatStore,
@@ -996,6 +1005,8 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   getSettings: () => getAllSettings(db),
   getProvider,
   knowledgeSynthesisPause,
+  onRunMetric: (record) =>
+    notesTimingLog.info(formatMeetingNotesRunTimings(record)),
   onUpdated: (meetingId) => {
     invalidateDreamingCatalog();
     for (const win of BrowserWindow.getAllWindows()) {
@@ -1063,7 +1074,12 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
         summary: reviewedNotes,
         valueSignals: signals,
       },
-      { signal: input.signal, workClass: 'meeting_secondary' },
+      // Actions and decisions come from the published notes below.
+      {
+        signal: input.signal,
+        workClass: 'meeting_secondary',
+        omitCommitments: true,
+      },
     );
     if (!input.canCommit()) return;
     await extractAndProcessEntities(
@@ -1448,6 +1464,13 @@ app.whenReady().then(async () => {
   );
   app.on('before-quit', () => chatGPTAuth.cancelSignIn());
   registerBugReportHandlers(db.getSetting);
+  try {
+    // Recent saved runs, oldest first, so timings from before this build are readable.
+    for (const run of db.listMeetingAnalysisRunMetrics({ limit: 20 }).reverse())
+      notesTimingLog.info(`history ${formatMeetingNotesRunTimings(run)}`);
+  } catch (error) {
+    notesTimingLog.warn('history unavailable', error);
+  }
   const requestedEncryptionRollout = process.env[ENCRYPTION_ROLLOUT_ENV];
   const encryptionRollout = resolveEncryptionRolloutPolicy({
     isPackaged: app.isPackaged,
@@ -2184,6 +2207,9 @@ app.whenReady().then(async () => {
       throw new Error('Invalid meeting ID');
     return db.meetingPrepStore.forMeeting(id);
   });
+  ipcMain.handle('MEETING_PREP_FOR_NOTE', (_event, noteId) =>
+    db.meetingPrepStore.forNote(noteId),
+  );
   const buildCurrentLinkedMeetingBrief = (
     prep: import('./meetingPrep').MeetingPrep,
   ) =>
@@ -2661,7 +2687,9 @@ app.whenReady().then(async () => {
           thermalState: powerMonitor.getCurrentThermalState(),
           freeMemoryBytes: os.freemem(),
           totalMemoryBytes: os.totalmem(),
-          fasterNotesEnabled: db.getSetting('faster_notes_enabled') !== 'false',
+          // Off unless chosen: final transcription replaces the live text, so leaves
+          // written during recording are almost never reused (2026-11-04).
+          fasterNotesEnabled: db.getSetting('faster_notes_enabled') === 'true',
           ...availableMemory,
         };
         return evaluateIncrementalMeetingNotesAdmission(policy).admitted;
@@ -5207,9 +5235,74 @@ app.whenReady().then(async () => {
   ipcMain.handle('NOTES_FOR_ATTENDEES', (_event, { emails, names }) =>
     db.notesStore.getNotesForAttendees(emails || [], names || []),
   );
+  ipcMain.handle('NOTES_SET_CHECKLIST_ITEM', (_event, input) => {
+    const result = db.notesStore.setChecklistItem(input);
+    for (const window of BrowserWindow.getAllWindows())
+      window.webContents.send('NOTES_CHANGED');
+    return result;
+  });
   ipcMain.handle('NOTES_FOR_ENTITY', (_event, entityId) =>
     db.notesStore.getNotesForEntity(entityId),
   );
+  ipcMain.handle('NOTES_MENTIONING_PERSON', (_event, personId) =>
+    typeof personId === 'string' && personId.length <= 300
+      ? db.notesStore.getNotesMentioningPerson(personId)
+      : [],
+  );
+  ipcMain.handle('NOTES_OWNED_ITEMS', (_event, personId) =>
+    typeof personId === 'string' && personId.length <= 300
+      ? db.notesStore.getOwnedNoteItems(personId)
+      : [],
+  );
+  // "Next time with …" items that came up in the latest meeting with them.
+  ipcMain.handle('NEXT_TIME_DISCUSSED', (_event, input) => {
+    const personId = input?.personId;
+    if (typeof personId !== 'string' || !personId || personId.length > 300)
+      return [];
+    const items = (Array.isArray(input?.items) ? input.items : [])
+      .slice(0, 200)
+      .filter(
+        (item: unknown): item is NextTimeItem =>
+          Boolean(item) &&
+          typeof (item as NextTimeItem).key === 'string' &&
+          typeof (item as NextTimeItem).noteId === 'string' &&
+          typeof (item as NextTimeItem).text === 'string',
+      );
+    if (!items.length) return [];
+    const latest = (db.getPersonBriefing(personId)?.meetings ?? []).find(
+      (meeting) => meeting.evidence === 'confirmed',
+    );
+    const meeting = latest
+      ? (db.getMeeting(latest.id) as db.PersistedMeeting | undefined)
+      : undefined;
+    if (!latest || !meeting) return [];
+    const noteUpdatedAt: Record<string, string> = Object.fromEntries(
+      db.notesStore
+        .getNotesForEntity(personId)
+        .map((note: { id: string; updatedAt: string }) => [
+          note.id,
+          note.updatedAt,
+        ]),
+    );
+    // Items can also come from other notes ("Priya: send deck").
+    for (const noteId of new Set<string>(
+      items.map((item: NextTimeItem) => item.noteId),
+    )) {
+      if (noteUpdatedAt[noteId]) continue;
+      const note = db.notesStore.getNote(noteId);
+      if (note) noteUpdatedAt[noteId] = note.updatedAt;
+    }
+    return findDiscussedItems({
+      items,
+      noteUpdatedAt,
+      meeting: {
+        id: String(meeting.id),
+        title: meeting.title || latest.title || 'Meeting',
+        startedAt: String(meeting.started_at || meeting.created_at || ''),
+        segments: transcriptSegments(meeting.transcript_json),
+      },
+    });
+  });
 
   ipcMain.handle('GET_ENTITY', (_event, id) => db.getEntity(id));
   ipcMain.handle('GET_ENTITIES_BY_TYPE', (_event, type) =>
@@ -10886,7 +10979,43 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
       try {
         const settings = await getAllSettings(db);
         const provider = await getProvider(settings);
-        const prompt = buildNoteAskPlutoPrompt({ note, request });
+        // A note about a person can draw on recent meetings with them, each
+        // named in the prompt so answers say which meeting they came from.
+        const relatedMeetings: NoteRelatedMeeting[] = [];
+        if (note.targetId && note.noteType === 'person') {
+          const recent = (db.getPersonBriefing(note.targetId)?.meetings ?? [])
+            .filter((meeting) => meeting.evidence === 'confirmed')
+            .slice(0, 8);
+          for (const summary of recent) {
+            if (relatedMeetings.length >= NOTE_RELATED_MEETINGS) break;
+            const meeting = db.getMeeting(summary.id) as
+              | db.PersistedMeeting
+              | undefined;
+            if (!meeting) continue;
+            const evidence = buildMeetingNotesEvidenceDocument(
+              meeting,
+              db.getMeetingNotesIdentityProjection(meeting.id)
+                .speakerDisplayNames,
+            );
+            if (!evidence.hasUsableNotes) continue;
+            const date = summary.started_at || summary.created_at;
+            relatedMeetings.push({
+              title: summary.title,
+              date: date
+                ? new Date(date).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                  })
+                : null,
+              notes: evidence.notesText,
+            });
+          }
+        }
+        const prompt = buildNoteAskPlutoPrompt({
+          note,
+          request,
+          relatedMeetings,
+        });
         let streamed = false;
         const generationOptions = {
           signal: controller.signal,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type NotesStageEvent,
   createMeetingNotesRunMetrics,
+  formatMeetingNotesRunTimings,
   parseMeetingNotesRunMetric,
   serializeMeetingNotesRunMetric,
 } from '../../electron/llm/meetingNotesRunMetrics';
@@ -214,5 +215,84 @@ describe('meeting notes run metrics', () => {
         })),
       }),
     ).toThrow('invalid_meeting_notes_run_metric');
+  });
+});
+
+describe('notes timing log line', () => {
+  const metrics = {
+    schemaVersion: 1 as const,
+    reason: 'automatic' as const,
+    status: 'published' as const,
+    sourceSegmentCount: 40,
+    sourceCharacterCount: 9_000,
+    plannedLeafCount: 2,
+    generatedNodeCount: 2,
+    repairCount: 1,
+    repartitionCount: 0,
+    queueMs: 1_200,
+    modelMs: 48_000,
+    totalMs: 51_000,
+    stages: [
+      {
+        sequence: 0,
+        task: 'notesWriter' as const,
+        outcome: 'complete' as const,
+        queueWaitMs: 900,
+        modelMs: 30_000,
+        inputTokens: 5_000,
+        outputTokens: 800,
+      },
+    ],
+  };
+
+  it('writes only timings, counts and a short run prefix', () => {
+    const line = formatMeetingNotesRunTimings({
+      runId: '0123456789abcdef',
+      reason: 'automatic',
+      status: 'failed',
+      errorCode:
+        'notes_guardrail:[{"code":"missing_condition","segments":[3]}]',
+      metrics,
+      completedAt: '2026-11-04T10:02:30.000Z',
+      meetingEndedAt: '2026-11-04T10:00:00.000Z',
+    });
+    expect(JSON.parse(line)).toEqual({
+      run: '01234567',
+      completedAt: '2026-11-04T10:02:30.000Z',
+      reason: 'automatic',
+      status: 'failed',
+      error: 'notes_guardrail',
+      meetingEndToDoneMs: 150_000,
+      totalMs: 51_000,
+      queueMs: 1_200,
+      modelMs: 48_000,
+      chars: 9_000,
+      segments: 40,
+      leaves: 2,
+      nodes: 2,
+      repairs: 1,
+      repartitions: 0,
+      stages: [['notesWriter', 'complete', 900, 30_000, 5_000, 800]],
+    });
+  });
+
+  it('leaves the meeting-end gap empty when it is unknown or out of order', () => {
+    for (const meetingEndedAt of [
+      null,
+      'not a date',
+      '2026-11-04T11:00:00.000Z',
+    ])
+      expect(
+        JSON.parse(
+          formatMeetingNotesRunTimings({
+            runId: 'run',
+            reason: 'manual',
+            status: 'published',
+            metrics: null,
+            completedAt: '2026-11-04T10:02:30.000Z',
+            meetingEndedAt,
+          }),
+        ).meetingEndToDoneMs,
+      ).toBeNull();
   });
 });

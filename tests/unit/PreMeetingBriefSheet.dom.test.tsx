@@ -16,8 +16,13 @@ const api = vi.hoisted(() => ({
 vi.mock('../../src/api/meetingPrep', () => api);
 const notesApi = vi.hoisted(() => ({
   getNotesForAttendees: vi.fn(),
+  setNoteChecklistItem: vi.fn(),
+  getNote: vi.fn(),
+  openNoteInApp: vi.fn(),
+  subscribeNotesChanged: vi.fn(() => () => {}),
 }));
 vi.mock('../../src/api/notes', () => notesApi);
+import { PrepForMeeting } from '../../src/components/features/MeetingPrepEditor';
 import { PreMeetingBriefSheet } from '../../src/components/features/PreMeetingBriefSheet';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
@@ -885,56 +890,147 @@ it('shows all open action items even when the overview fills the briefing budget
   expect(open).toHaveBeenCalledWith('past');
 });
 
-it('offers open items from notes about the attendees and adds them to the agenda', async () => {
+it('shows open items from attendee notes as checkboxes that tick the note', async () => {
   notesApi.getNotesForAttendees.mockResolvedValue([
     {
-      id: 'n1:0',
+      id: 'n1-line-0',
       noteId: 'n1',
       noteTitle: '1:1 with Sam',
       targetName: 'Sam',
       text: 'Confirm launch date',
       checked: false,
+      lineIndex: 0,
     },
     {
-      id: 'n1:1',
+      id: 'n1-line-1',
       noteId: 'n1',
       noteTitle: '1:1 with Sam',
       targetName: 'Sam',
       text: 'Already done',
       checked: true,
-    },
-    {
-      id: 'n2:0',
-      noteId: 'n2',
-      noteTitle: 'Pricing',
-      targetName: null,
-      text: 'Share pricing draft',
-      checked: false,
+      lineIndex: 1,
     },
   ]);
+  notesApi.setNoteChecklistItem.mockResolvedValue({
+    id: 'n1-line-0',
+    noteId: 'n1',
+    noteTitle: '1:1 with Sam',
+    targetName: 'Sam',
+    text: 'Confirm launch date',
+    checked: true,
+    lineIndex: 0,
+  });
   await render();
   expect(notesApi.getNotesForAttendees).toHaveBeenCalledWith(
     ['sam@example.com'],
     ['Sam'],
   );
-  expect(host.textContent).toContain('Confirm launch date');
-  expect(host.textContent).not.toContain('Already done');
+  const section = host.querySelector('[aria-label="From your notes"]')!;
+  expect(section.textContent).toContain('Confirm launch date');
+  expect(section.textContent).not.toContain('Already done');
 
-  const addOne = [...host.querySelectorAll('button')].find(
-    (b) => b.textContent?.trim() === '+ Add',
-  ) as HTMLButtonElement;
-  await act(async () => addOne.click());
+  const box = section.querySelector(
+    'input[type="checkbox"]',
+  ) as HTMLInputElement;
+  await act(async () => box.click());
+  expect(notesApi.setNoteChecklistItem).toHaveBeenCalledWith({
+    noteId: 'n1',
+    lineIndex: 0,
+    text: 'Confirm launch date',
+    checked: true,
+  });
+  expect(box.checked).toBe(true);
+  // Nothing is copied into the prep notes.
   const notes = host.querySelector(
     'textarea[aria-label="Preparation notes"]',
   ) as HTMLTextAreaElement;
-  expect(notes.value).toBe('- [ ] Confirm launch date\n');
+  expect(notes.value).toBe('');
+});
 
-  const addAll = [...host.querySelectorAll('button')].find((b) =>
-    b.textContent?.includes('Add all to agenda'),
-  ) as HTMLButtonElement;
-  await act(async () => addAll.click());
-  expect(notes.value).toBe(
-    '- [ ] Confirm launch date\n- [ ] Share pricing draft\n',
-  );
-  expect(host.textContent).toContain('All added');
+it('shows the prepared brief on a recorded meeting, and nothing without one', async () => {
+  api.getPrepForMeeting.mockResolvedValueOnce(null);
+  await act(async () => root.render(<PrepForMeeting meetingId="m1" />));
+  expect(host.textContent).toBe('');
+
+  api.getPrepForMeeting.mockResolvedValueOnce({
+    ...structuredClone(prep),
+    meetingId: 'm2',
+    meetings: [
+      {
+        id: 'past',
+        title: 'Launch',
+        date: event.start,
+        participants: 'Sam',
+        preview: 'Previous discussion',
+        context: 'Previous discussion',
+        capturedAt: event.start,
+      },
+    ],
+    briefing: {
+      title: 'Launch',
+      startsAt: event.start,
+      agenda: null,
+      relationship: 'same_series',
+      priorMeeting: null,
+      lastTime: [],
+      stillOpen: [{ id: 'open', text: 'Sam: confirm launch date' }],
+      relevantContext: [],
+      emptyMessage: null,
+      synthesisStatus: 'ready',
+    },
+  });
+  await act(async () => root.render(<PrepForMeeting meetingId="m2" />));
+  expect(api.getPrepForMeeting).toHaveBeenLastCalledWith('m2');
+  expect(host.querySelector('summary')?.textContent).toBe('Before the meeting');
+  expect(host.textContent).toContain('Sam: confirm launch date');
+});
+
+it('shows a note used as prep from the note itself, and follows its edits', async () => {
+  let content = 'Questions:\n- [ ] Ask about data residency\n[task: Send deck]';
+  notesApi.getNote.mockImplementation(async () => ({
+    id: 'note-vendor',
+    title: 'Vendor eval',
+    content,
+    noteType: 'general',
+    pinned: false,
+    createdAt: event.start,
+    updatedAt: event.start,
+  }));
+  let notify = () => {};
+  notesApi.subscribeNotesChanged.mockImplementation((listener: () => void) => {
+    notify = listener;
+    return () => {};
+  });
+  api.getPrepForMeeting.mockResolvedValueOnce({
+    ...structuredClone(prep),
+    meetingId: 'm3',
+    noteIds: ['note-vendor'],
+  });
+  await act(async () => root.render(<PrepForMeeting meetingId="m3" />));
+  expect(host.querySelector('summary')?.textContent).toBe('Before the meeting');
+  expect(host.textContent).toContain('Vendor eval');
+  expect(host.textContent).toContain('Ask about data residency');
+  // No "no briefing" placeholder next to a note.
+  expect(host.textContent).not.toContain('No briefing was generated');
+  expect(host.textContent).not.toContain('- [ ]');
+  expect(host.textContent).toContain('To-do: Send deck');
+  const box = host.querySelector(
+    'section[aria-label="Notes for this meeting"] input[type="checkbox"]',
+  ) as HTMLInputElement;
+  notesApi.setNoteChecklistItem.mockResolvedValue({});
+  await act(async () => box.click());
+  expect(notesApi.setNoteChecklistItem).toHaveBeenCalledWith({
+    noteId: 'note-vendor',
+    lineIndex: 1,
+    text: 'Ask about data residency',
+    checked: true,
+  });
+  content = 'Questions:\n- [ ] Ask about data residency and SSO';
+  await act(async () => notify());
+  expect(host.textContent).toContain('and SSO');
+  const open = [...host.querySelectorAll('button')].find(
+    (b) => b.textContent === 'Vendor eval',
+  )!;
+  await act(async () => open.click());
+  expect(notesApi.openNoteInApp).toHaveBeenCalledWith('note-vendor');
 });
