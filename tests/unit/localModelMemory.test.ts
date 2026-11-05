@@ -5,8 +5,8 @@ import {
   assertLocalModelMemoryCapacity,
   getEstablishedGemmaLoadOptions,
   readContextBytesPerToken,
-  usesQuickModelHeadroom,
   readLocalModelMemory,
+  usesQuickModelHeadroom,
   watchLocalModelMemory,
 } from '../../electron/llm/localModelMemory';
 import * as memoryProbe from '../../electron/llm/localModelMemoryProbe';
