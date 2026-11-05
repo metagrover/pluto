@@ -79,6 +79,7 @@ import {
 } from './editor';
 import { MentionTextarea } from './editor/MentionTextarea';
 import './notes.css';
+import { SidePanelPortal } from '../../layout/SidePanelSlot';
 
 export interface NoteBlock {
   id: string;
@@ -4445,23 +4446,25 @@ export const NotesView = ({
                 ) : null}
               </div>
               {askOpen ? (
-                <NoteAskPlutoPanel
-                  key={activeNote.id}
-                  noteId={activeNote.id}
-                  selection={askSelection}
-                  onClearSelection={() => setAskSelection(null)}
-                  onClose={() => {
-                    setAskOpen(false);
-                    setAskSelection(null);
-                    const index = lastFocusedBlockRef.current;
-                    if (index !== null) requestFocus(index, 'end');
-                  }}
-                  onInsertMarkdown={insertAnswerIntoNote}
-                  onAddTasks={addSuggestedTasks}
-                  personName={
-                    targetEntity?.type === 'person' ? targetEntity.name : null
-                  }
-                />
+                <SidePanelPortal>
+                  <NoteAskPlutoPanel
+                    key={activeNote.id}
+                    noteId={activeNote.id}
+                    selection={askSelection}
+                    onClearSelection={() => setAskSelection(null)}
+                    onClose={() => {
+                      setAskOpen(false);
+                      setAskSelection(null);
+                      const index = lastFocusedBlockRef.current;
+                      if (index !== null) requestFocus(index, 'end');
+                    }}
+                    onInsertMarkdown={insertAnswerIntoNote}
+                    onAddTasks={addSuggestedTasks}
+                    personName={
+                      targetEntity?.type === 'person' ? targetEntity.name : null
+                    }
+                  />
+                </SidePanelPortal>
               ) : null}
             </div>
           </>
