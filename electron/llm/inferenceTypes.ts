@@ -42,6 +42,8 @@ export interface InferenceRequest {
   egress: {
     classification: 'local' | 'selected_meeting_context';
     userInitiated: boolean;
+    /** The person chose ChatGPT for this question after a local memory refusal. */
+    memoryFallback?: boolean;
   };
 }
 

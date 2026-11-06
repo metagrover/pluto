@@ -28,6 +28,19 @@ const validLiveRequest = () => ({
 });
 
 describe('meeting Ask Pluto request validation', () => {
+  it('accepts only ChatGPT as a one-question answer choice', () => {
+    expect(
+      parseMeetingAskPlutoRequest({
+        ...validLiveRequest(),
+        answerWith: 'chatgpt',
+      }),
+    ).toMatchObject({ ok: true, request: { answerWith: 'chatgpt' } });
+    for (const answerWith of ['gemini', '', 1, null])
+      expect(
+        parseMeetingAskPlutoRequest({ ...validLiveRequest(), answerWith }),
+      ).toEqual({ ok: false, reason: 'answerWith is invalid' });
+  });
+
   it('accepts a bounded live meeting request', () => {
     expect(parseMeetingAskPlutoRequest(validLiveRequest())).toMatchObject({
       ok: true,

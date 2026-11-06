@@ -279,6 +279,11 @@ export interface LLMSettings {
   gemini_model?: string;
   openai_model?: string;
   chatgpt_model?: string;
+  /**
+   * Set only for one question the person chose to send to ChatGPT after a
+   * local memory refusal. Never stored; see chatGPTMemoryFallback.ts.
+   */
+  chatgpt_memory_fallback?: boolean;
   openrouter_model?: string;
   claude_model?: string;
   cloud_consents?: Partial<

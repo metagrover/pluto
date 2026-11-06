@@ -112,6 +112,7 @@ export const assertLocalModelMemoryCapacity = ({
   modelDigest,
   resident,
   contextTokens,
+  minimumContextTokens = 4096,
   contextBytesPerToken,
   measuredColdPeak,
 }: {
@@ -121,6 +122,7 @@ export const assertLocalModelMemoryCapacity = ({
   modelDigest?: string;
   resident: boolean;
   contextTokens: number;
+  minimumContextTokens?: number;
   // Key/value cache bytes per context token read from the model's metadata.
   contextBytesPerToken?: number;
   // Peak this Mac actually used for a cold load of the same artifact and
@@ -165,7 +167,7 @@ export const assertLocalModelMemoryCapacity = ({
     if (!resident && Number.isSafeInteger(contextTokens)) {
       for (
         let context = Math.floor((contextTokens - 1) / 1024) * 1024;
-        context >= 4096;
+        context >= minimumContextTokens;
         context -= 1024
       ) {
         if (

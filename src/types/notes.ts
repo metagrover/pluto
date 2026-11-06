@@ -64,6 +64,8 @@ export interface NoteAskPlutoRequest {
   /** Text the user selected in the note, when the question is about a part. */
   selection?: string;
   turns?: NoteAskPlutoTurn[];
+  /** The person chose ChatGPT for this question after a memory refusal. */
+  answerWith?: 'chatgpt';
 }
 
 export interface NoteAskPlutoResponse {
@@ -76,6 +78,8 @@ export interface NoteAskPlutoResponse {
   detail?: string;
   /** Set when low memory meant a smaller local model answered instead. */
   fallbackModel?: string;
+  /** Local memory refused the answer and ChatGPT is ready to answer instead. */
+  chatGPTFallback?: 'available';
 }
 
 export interface NoteAskPlutoDelta {

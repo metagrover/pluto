@@ -614,15 +614,24 @@ export const buildMeetingAskPlutoProviderUnavailableResponse = ({
   scope,
   query,
   error,
+  answer,
 }: {
   scope: MeetingAskPlutoScope;
   query: string;
   error: unknown;
+  /** Replaces the default explanation. */
+  answer?: string;
 }): MeetingAskPlutoResponse => {
   const reason = error instanceof Error ? error.message : 'Unknown model error';
+  const memoryRefusal =
+    error instanceof Error && error.name === 'LocalModelMemoryError';
   return {
     status: 'unavailable',
-    answer: `I can’t answer “${query.trim()}” from “${scope.title || 'this meeting'}” because the configured answer model is not available right now. Check the selected LLM provider/model, then try again.`,
+    answer: answer
+      ? answer
+      : memoryRefusal
+        ? `I stopped answering “${query.trim()}” to protect your Mac’s memory. Close a few apps or pick a smaller local model in Settings, then try again.`
+        : `I can’t answer “${query.trim()}” from “${scope.title || 'this meeting'}” because the configured answer model is not available right now. Check the selected LLM provider/model, then try again.`,
     scope,
     trustStatus: 'needs_review',
     claims: [],

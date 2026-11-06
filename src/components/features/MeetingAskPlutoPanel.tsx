@@ -34,8 +34,16 @@ export const MeetingAskPlutoPanel: React.FC<MeetingAskPlutoPanelProps> = ({
   onClose,
 }) => {
   const [query, setQuery] = useState('');
-  const { messages, isAsking, streamingAnswer, error, ask, stop } =
-    useMeetingAskPluto({ meeting, conversation, onConversationChange });
+  const {
+    messages,
+    isAsking,
+    streamingAnswer,
+    error,
+    ask,
+    stop,
+    canAnswerWithChatGPT,
+    answerWithChatGPT,
+  } = useMeetingAskPluto({ meeting, conversation, onConversationChange });
 
   const submit = () => {
     if (ask(query)) setQuery('');
@@ -100,6 +108,12 @@ export const MeetingAskPlutoPanel: React.FC<MeetingAskPlutoPanelProps> = ({
             {message.interrupted ? (
               <span className="note-ask-panel__meta">Stopped</span>
             ) : null}
+            {message.answeredBy === 'chatgpt' ? (
+              <span className="note-ask-panel__meta">
+                Answered by ChatGPT, since there wasn’t enough free memory for
+                your local model.
+              </span>
+            ) : null}
             {!message.interrupted && message.content.trim() ? (
               <AnswerActions answer={message.content} person={person} />
             ) : null}
@@ -131,7 +145,20 @@ export const MeetingAskPlutoPanel: React.FC<MeetingAskPlutoPanelProps> = ({
         <div className="note-ask-panel__error" role="alert">
           <div className="note-ask-panel__error-copy">
             <span>{error}</span>
+            {canAnswerWithChatGPT ? (
+              <span className="note-ask-panel__error-note">
+                Sends this question, relevant meeting notes or transcript
+                excerpts, and earlier chat messages to ChatGPT, just this once.
+              </span>
+            ) : null}
           </div>
+          {canAnswerWithChatGPT ? (
+            <div className="note-ask-panel__error-actions">
+              <button type="button" onClick={() => answerWithChatGPT()}>
+                Answer with ChatGPT
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </AskPlutoSidebar>

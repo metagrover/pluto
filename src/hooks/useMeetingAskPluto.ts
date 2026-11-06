@@ -130,6 +130,10 @@ export const useMeetingAskPluto = ({
   const [isAsking, setIsAsking] = useState(false);
   const [streamingAnswer, setStreamingAnswer] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // The question local memory refused, when ChatGPT can answer it instead.
+  const [chatGPTFallbackQuery, setChatGPTFallbackQuery] = useState<
+    string | null
+  >(null);
   const activeRequestIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const scopeKey = meeting
@@ -201,9 +205,21 @@ export const useMeetingAskPluto = ({
    * Sends a question. Returns the new question's message id, or null when
    * nothing was sent (empty question, or an answer is still running).
    */
-  const ask = (value: string): string | null => {
+  const ask = (
+    value: string,
+    options: {
+      answerWith?: 'chatgpt';
+      /** Replace the last, unanswered question instead of repeating it. */
+      replaceLastQuestion?: boolean;
+    } = {},
+  ): string | null => {
     const trimmed = value.trim();
     if (!trimmed || isAsking) return null;
+    const { answerWith } = options;
+    const dropLast = (current: MeetingAskPlutoConversationMessage[]) =>
+      options.replaceLastQuestion && current.at(-1)?.role === 'user'
+        ? current.slice(0, -1)
+        : current;
 
     const requestId = createMeetingAskPlutoRequestId();
     const previousRequestId = activeRequestIdRef.current;
@@ -213,13 +229,14 @@ export const useMeetingAskPluto = ({
         previousRequestId,
       );
     }
-    const priorTurns = toTurns(messages);
+    const priorTurns = toTurns(dropLast(messages));
     setError(null);
+    setChatGPTFallbackQuery(null);
     setStreamingAnswer('');
     setIsAsking(true);
     const userMessageId = `user-${Date.now()}`;
     setMessages((current) => [
-      ...current,
+      ...dropLast(current),
       {
         id: userMessageId,
         role: 'user',
@@ -237,6 +254,7 @@ export const useMeetingAskPluto = ({
             meetingId: String(meeting.id),
           },
           turns: priorTurns,
+          ...(answerWith ? { answerWith } : {}),
         }
       : {
           requestId,
@@ -246,6 +264,7 @@ export const useMeetingAskPluto = ({
             ...buildBoundedLiveContext(liveContext),
           },
           turns: priorTurns,
+          ...(answerWith ? { answerWith } : {}),
         };
 
     void (async () => {
@@ -276,7 +295,13 @@ export const useMeetingAskPluto = ({
         }
 
         if (packet.status === 'unavailable' || !packet.answer.trim()) {
-          setError('Pluto could not answer this meeting right now.');
+          // The main process explains why, for example low memory.
+          setError(
+            packet.answer.trim() ||
+              'Pluto could not answer this meeting right now.',
+          );
+          if (packet.chatGPTFallback === 'available')
+            setChatGPTFallbackQuery(trimmed);
           return;
         }
 
@@ -287,6 +312,7 @@ export const useMeetingAskPluto = ({
             role: 'assistant',
             content: packet.answer,
             packet,
+            ...(answerWith ? { answeredBy: answerWith } : {}),
           },
         ]);
       } catch (submitError) {
@@ -306,6 +332,15 @@ export const useMeetingAskPluto = ({
     return userMessageId;
   };
 
+  /** Sends the question local memory refused to ChatGPT, just this once. */
+  const answerWithChatGPT = () =>
+    chatGPTFallbackQuery
+      ? ask(chatGPTFallbackQuery, {
+          answerWith: 'chatgpt',
+          replaceLastQuestion: true,
+        })
+      : null;
+
   return {
     messages,
     isAsking,
@@ -314,5 +349,7 @@ export const useMeetingAskPluto = ({
     setError,
     ask,
     stop,
+    canAnswerWithChatGPT: chatGPTFallbackQuery !== null && !isAsking,
+    answerWithChatGPT,
   };
 };

@@ -92,6 +92,10 @@ export interface AskPlutoMessage {
   actionProposal?: AskPlutoQueryResponse['actionProposal'];
   actionState?: 'saving' | 'completed' | 'failed';
   actionTaskId?: string;
+  /** Local memory refused the answer and ChatGPT can answer instead. */
+  chatGPTFallback?: boolean;
+  /** The person sent this question to ChatGPT after a memory refusal. */
+  answeredBy?: 'chatgpt';
 }
 
 const groupCitationsByMeeting = (citations: CitationChain[]) => {
@@ -141,6 +145,7 @@ const toWorkspacePayload = (
     ? { conversationContext: message.conversationContext }
     : {}),
   ...(message.retryQuery ? { retryQuery: message.retryQuery } : {}),
+  ...(message.answeredBy ? { answeredBy: message.answeredBy } : {}),
   ...(message.evidenceState ? { evidenceState: message.evidenceState } : {}),
   ...(message.outcome ? { outcome: message.outcome } : {}),
   ...(message.resolvedScope ? { resolvedScope: message.resolvedScope } : {}),
@@ -432,6 +437,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     e?: React.FormEvent,
     presetQuery?: string,
     retryMessageId?: string,
+    // Set when the person chose ChatGPT after a local memory refusal.
+    answerWith?: 'chatgpt',
   ) => {
     e?.preventDefault();
     let submitQuery = presetQuery || query;
@@ -481,6 +488,15 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     const validHistory = history.filter(
       (_message, index) => !failedTurnIndexes.has(index),
     );
+    // The ChatGPT offer is used once; retrying must not send the question twice.
+    if (effectiveRetryMessageId)
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === effectiveRetryMessageId && message.chatGPTFallback
+            ? { ...message, chatGPTFallback: false }
+            : message,
+        ),
+      );
 
     if (isProcessing && activeRequestIdRef.current && window.ipcRenderer) {
       void window.ipcRenderer
@@ -618,6 +634,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               }
             : {}),
           ...(activeMeetingSnapshot ? { activeMeetingSnapshot } : {}),
+          ...(answerWith ? { answerWith } : {}),
         });
 
         if (activeRequestIdRef.current !== requestId) return;
@@ -662,6 +679,16 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   typeof response !== 'string' &&
                   response.status === 'unavailable'
                     ? submitQuery.trim()
+                    : undefined,
+                chatGPTFallback:
+                  typeof response !== 'string' &&
+                  response.chatGPTFallback === 'available',
+                answeredBy:
+                  answerWith &&
+                  typeof response !== 'string' &&
+                  response.status !== 'unavailable' &&
+                  response.status !== 'cancelled'
+                    ? answerWith
                     : undefined,
                 evidenceState:
                   typeof response === 'string' || !response.currentMeeting
@@ -1415,15 +1442,53 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                     {msg.role === 'assistant' &&
                       !msg.isLoading &&
                       msg.retryQuery && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void handleSubmit(undefined, msg.retryQuery, msg.id)
-                          }
-                          className="px-1 text-[12px] font-medium text-pro-accent hover:text-pro-text-main"
-                        >
-                          Retry
-                        </button>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleSubmit(
+                                undefined,
+                                msg.retryQuery,
+                                msg.id,
+                              )
+                            }
+                            className="text-[12px] font-medium text-pro-accent hover:text-pro-text-main"
+                          >
+                            Retry
+                          </button>
+                          {msg.chatGPTFallback ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void handleSubmit(
+                                    undefined,
+                                    msg.retryQuery,
+                                    msg.id,
+                                    'chatgpt',
+                                  )
+                                }
+                                className="text-[12px] font-medium text-pro-accent hover:text-pro-text-main"
+                              >
+                                Answer with ChatGPT
+                              </button>
+                              <span className="w-full text-[11px] text-pro-text-muted/75">
+                                Sends this question, relevant saved context, and
+                                relevant earlier chat messages to ChatGPT, just
+                                this once.
+                              </span>
+                            </>
+                          ) : null}
+                        </div>
+                      )}
+
+                    {msg.role === 'assistant' &&
+                      !msg.isLoading &&
+                      msg.answeredBy === 'chatgpt' && (
+                        <div className="px-1 text-[11px] text-pro-text-muted/75">
+                          Answered by ChatGPT, since there wasn’t enough free
+                          memory for your local model.
+                        </div>
                       )}
 
                     {msg.role === 'assistant' &&

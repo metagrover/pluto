@@ -43,6 +43,8 @@ export interface MeetingAskPlutoRequest {
         type: 'live_meeting';
       } & MeetingAskPlutoLiveContext);
   turns?: MeetingAskPlutoTurn[];
+  /** The person chose ChatGPT for this question after a memory refusal. */
+  answerWith?: 'chatgpt';
 }
 
 export interface MeetingAskPlutoAnswerDelta {
@@ -75,6 +77,8 @@ export interface MeetingAskPlutoResponse {
   claims: MeetingAskPlutoClaim[];
   citations: MeetingAskPlutoCitation[];
   rationale?: string;
+  /** Local memory refused the answer and ChatGPT is ready to answer instead. */
+  chatGPTFallback?: 'available';
 }
 
 export type MeetingAskPlutoConversationMessage =
@@ -89,4 +93,6 @@ export type MeetingAskPlutoConversationMessage =
       content: string;
       packet?: MeetingAskPlutoResponse;
       interrupted?: boolean;
+      /** The person sent this question to ChatGPT after a memory refusal. */
+      answeredBy?: 'chatgpt';
     };

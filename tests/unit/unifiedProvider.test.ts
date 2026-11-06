@@ -2964,6 +2964,15 @@ it.each([
     unload: false,
   },
   {
+    task: 'askPluto' as const,
+    residentContext: null,
+    availableGiB: 10.66,
+    expectedContext: 5120,
+    output: 768,
+    unload: false,
+    repeat: true,
+  },
+  {
     task: 'valueSignals' as const,
     residentContext: 7168,
     expectedContext: 7168,
@@ -3024,7 +3033,10 @@ it.each([
       });
     const memory = vi
       .spyOn(modelMemory, 'readLocalModelMemory')
-      .mockResolvedValue({ available: 14 * 1024 ** 3, total: 16 * 1024 ** 3 });
+      .mockResolvedValue({
+        available: ('availableGiB' in row ? row.availableGiB : 14) * 1024 ** 3,
+        total: 16 * 1024 ** 3,
+      });
     let context: number | null = residentContext;
     let unloaded = false;
     let options: unknown;
@@ -3114,9 +3126,15 @@ it.each([
           provider.generateText({ prompt: 'Another short meeting.', task }),
         ).resolves.toBe('Done.');
         expect(unloaded).toBe(false);
-        expect(options).toMatchObject({ num_ctx: 2048, num_predict: output });
+        expect(options).toMatchObject({
+          num_ctx: expectedContext,
+          num_predict: output,
+        });
         expect(capacity).toHaveBeenCalledWith(
-          expect.objectContaining({ resident: true, contextTokens: 2048 }),
+          expect.objectContaining({
+            resident: true,
+            contextTokens: expectedContext,
+          }),
         );
         start.mockClear();
         capacity.mockClear();
@@ -3144,6 +3162,82 @@ it.each([
     }
   },
 );
+
+it('shrinks a cold live Ask Pluto context to the prompt when memory is short', async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(
+    process.versions,
+    'electron',
+  );
+  Object.defineProperty(process.versions, 'electron', {
+    value: 'test',
+    configurable: true,
+  });
+  const watcher = vi
+    .spyOn(modelMemory, 'watchLocalModelMemory')
+    .mockReturnValue({
+      signal: new AbortController().signal,
+      dispose: vi.fn(async () => {}),
+      setResidentCheck: vi.fn(),
+      start: vi.fn(async () => {}),
+    });
+  const capacity = vi.spyOn(modelMemory, 'assertLocalModelMemoryCapacity');
+  // Unknown layout, 2.3 GiB: 4096 tokens do not fit in 8.25 GiB, 3072 do.
+  const memory = vi
+    .spyOn(modelMemory, 'readLocalModelMemory')
+    .mockResolvedValue({ available: 8.25 * 1024 ** 3, total: 16 * 1024 ** 3 });
+  let options: { num_ctx?: number } | undefined;
+  const transport = vi
+    .spyOn(ollamaTransport, 'ollamaHttpFetch')
+    .mockImplementation(async (url, init) => {
+      if (url.endsWith('/api/ps')) return jsonResponse({ models: [] });
+      if (url.endsWith('/api/tags'))
+        return jsonResponse({
+          models: [
+            { name: 'phi4-mini:3.8b', size: 2.3 * 1024 ** 3, digest: 'phi' },
+          ],
+        });
+      if (url.endsWith('/api/show')) return jsonResponse({});
+      options = parseRequestBody(init).options as { num_ctx: number };
+      return jsonResponse({
+        response: 'Done.',
+        message: { content: 'Done.' },
+        done: true,
+      });
+    });
+  const stream = vi
+    .spyOn(ollamaTransport, 'ollamaHttpStream')
+    .mockImplementation(async (_url, init, onChunk) => {
+      options = parseRequestBody(init).options as { num_ctx: number };
+      onChunk(
+        `${JSON.stringify({ response: 'Done.', message: { content: 'Done.' }, done: true })}\n`,
+      );
+      return { ok: true, status: 200, statusText: 'OK' };
+    });
+  try {
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+    await expect(
+      provider.answerAskPluto('What did we decide?', { live: true }),
+    ).resolves.toBe('Done.');
+    expect(options?.num_ctx).toBe(3072);
+    expect(capacity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextTokens: 4096,
+        minimumContextTokens: 2048,
+      }),
+    );
+  } finally {
+    watcher.mockRestore();
+    capacity.mockRestore();
+    memory.mockRestore();
+    transport.mockRestore();
+    stream.mockRestore();
+    if (descriptor)
+      Object.defineProperty(process.versions, 'electron', descriptor);
+    else Reflect.deleteProperty(process.versions, 'electron');
+  }
+});
 
 it.each([
   { outcome: 'recovered' },

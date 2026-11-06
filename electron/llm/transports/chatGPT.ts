@@ -46,7 +46,7 @@ export async function executeChatGPT(
     onStart?: () => void;
   } = {},
 ): Promise<InferenceResult> {
-  assertChatGPTSelected();
+  assertChatGPTSelected(request.egress.memoryFallback === true);
   const auth = getChatGPTAuth();
   auth.assertUsageAvailable();
   return getChatGPTUsage().run(
@@ -73,7 +73,7 @@ async function executeChatGPTRequest(
   auth.assertUsageAvailable();
   const token = await auth.accessToken();
   signal.throwIfAborted();
-  assertChatGPTSelected();
+  assertChatGPTSelected(request.egress.memoryFallback === true);
   const body = {
     model: request.model,
     store: false,

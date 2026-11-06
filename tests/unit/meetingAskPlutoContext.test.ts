@@ -440,6 +440,25 @@ describe('meeting-scoped Ask Pluto context', () => {
     expect(response.citations).toEqual([]);
   });
 
+  it('names memory protection instead of a missing model when memory refuses', () => {
+    const error = new Error('Not enough memory to safely load the model.');
+    error.name = 'LocalModelMemoryError';
+    const response = buildMeetingAskPlutoProviderUnavailableResponse({
+      scope: {
+        type: 'meeting',
+        meetingId: 'meeting-1',
+        title: 'Launch review',
+      },
+      query: "What's assigned to Lee Chen?",
+      error,
+    });
+
+    expect(response.status).toBe('unavailable');
+    expect(response.answer).toContain('protect your Mac’s memory');
+    expect(response.answer).not.toContain('answer model is not available');
+    expect(response.rationale).toContain('Not enough memory');
+  });
+
   it('retains complete bounded live exchanges rather than dropping short fragments', () => {
     const context = buildLiveMeetingAskPlutoContext({
       meetingId: 'meeting-live-1',

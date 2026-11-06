@@ -99,6 +99,9 @@ export const parseNoteAskPlutoRequest = (
         ? { selection: value.selection.trim() }
         : {}),
       ...(turns ? { turns: turns as NoteAskPlutoTurn[] } : {}),
+      ...(value.answerWith === 'chatgpt'
+        ? { answerWith: 'chatgpt' as const }
+        : {}),
     },
   };
 };

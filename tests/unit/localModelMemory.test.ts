@@ -841,6 +841,27 @@ it('keeps the watchdog headroom after a known-layout cold load', () => {
   }
 });
 
+it('offers a smaller chat context without relaxing cold-load headroom', () => {
+  const total = 16 * GIB;
+  const request = {
+    total,
+    available: total * 0.48,
+    modelBytes: PHI4_MINI_BYTES,
+    resident: false,
+    contextTokens: 4096,
+    contextBytesPerToken: readContextBytesPerToken(PHI4_MINI_INFO),
+  };
+  expect(() => assertLocalModelMemoryCapacity(request)).toThrow(
+    expect.objectContaining({ maxContextTokens: undefined }),
+  );
+  expect(() =>
+    assertLocalModelMemoryCapacity({ ...request, minimumContextTokens: 2048 }),
+  ).toThrow(expect.objectContaining({ maxContextTokens: 3072 }));
+  expect(() =>
+    assertLocalModelMemoryCapacity({ ...request, contextTokens: 3072 }),
+  ).not.toThrow();
+});
+
 it('charges the real cache size when suggesting a smaller context', () => {
   const total = 16 * GIB;
   const contextBytesPerToken = 128 * 1024;

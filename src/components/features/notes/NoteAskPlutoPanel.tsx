@@ -54,6 +54,8 @@ interface PanelMessage {
   inserted?: boolean;
   stopped?: boolean;
   fallbackModel?: string;
+  /** The person sent this question to ChatGPT after a memory refusal. */
+  answeredBy?: 'chatgpt';
 }
 
 const STARTERS: Array<{
@@ -93,6 +95,8 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
   const [pending, setPending] = useState<NoteAskPlutoIntent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  // Local memory refused the last answer and ChatGPT can answer instead.
+  const [chatGPTFallback, setChatGPTFallback] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [taskChoices, setTaskChoices] = useState<Record<string, string[]>>({});
   const activeRequestRef = useRef<string | null>(null);
@@ -121,7 +125,11 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
   }, []);
 
   const ask = useCallback(
-    async (intent: NoteAskPlutoIntent, rawQuery: string) => {
+    async (
+      intent: NoteAskPlutoIntent,
+      rawQuery: string,
+      answerWith?: 'chatgpt',
+    ) => {
       const trimmed = rawQuery.trim();
       if (pending || (intent === 'ask' && !trimmed)) return;
       const requestId = newRequestId();
@@ -136,6 +144,7 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
       activeRequestRef.current = requestId;
       setError(null);
       setErrorDetail(null);
+      setChatGPTFallback(false);
       setStreaming('');
       setQuery('');
       setPending(intent);
@@ -156,6 +165,7 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
           query: trimmed,
           ...(selection ? { selection: selection.text } : {}),
           turns,
+          ...(answerWith ? { answerWith } : {}),
         });
         if (!mountedRef.current || activeRequestRef.current !== requestId) {
           return;
@@ -163,6 +173,7 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
         if (response.status !== 'answered' || !response.answer.trim()) {
           setError(response.error || 'Pluto could not answer right now.');
           setErrorDetail(response.detail ?? null);
+          setChatGPTFallback(response.chatGPTFallback === 'available');
           return;
         }
         const id = `assistant-${requestId}`;
@@ -181,6 +192,7 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
             intent,
             suggestedTasks: response.suggestedTasks,
             fallbackModel: response.fallbackModel,
+            ...(answerWith ? { answeredBy: answerWith } : {}),
           },
         ]);
       } catch (askError) {
@@ -397,6 +409,12 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
                 there wasn’t enough free memory for your main model.
               </span>
             ) : null}
+            {message.answeredBy === 'chatgpt' ? (
+              <span className="note-ask-panel__meta">
+                Answered by ChatGPT, since there wasn’t enough free memory for
+                your local model.
+              </span>
+            ) : null}
             {!message.suggestedTasks?.length ? (
               <div className="note-ask-panel__actions">
                 <button
@@ -449,6 +467,12 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
         <div className="note-ask-panel__error" role="alert">
           <div className="note-ask-panel__error-copy">
             <span>{error}</span>
+            {chatGPTFallback ? (
+              <span className="note-ask-panel__error-note">
+                Sends this question, the note, any related meeting notes, and
+                earlier chat messages to ChatGPT, just this once.
+              </span>
+            ) : null}
             {errorDetail ? (
               <details>
                 <summary>Details</summary>
@@ -457,18 +481,34 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
             ) : null}
           </div>
           {lastRequestRef.current ? (
-            <button
-              type="button"
-              onClick={() => {
-                const last = lastRequestRef.current;
-                if (!last) return;
-                // Drop the failed question so the retry isn't duplicated.
-                setMessages((current) => current.slice(0, -1));
-                void ask(last.intent, last.query);
-              }}
-            >
-              Try again
-            </button>
+            <div className="note-ask-panel__error-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  const last = lastRequestRef.current;
+                  if (!last) return;
+                  // Drop the failed question so the retry isn't duplicated.
+                  setMessages((current) => current.slice(0, -1));
+                  void ask(last.intent, last.query);
+                }}
+              >
+                Try again
+              </button>
+              {chatGPTFallback ? (
+                <button
+                  type="button"
+                  title="Sends this question and the note to ChatGPT, just this once."
+                  onClick={() => {
+                    const last = lastRequestRef.current;
+                    if (!last) return;
+                    setMessages((current) => current.slice(0, -1));
+                    void ask(last.intent, last.query, 'chatgpt');
+                  }}
+                >
+                  Answer with ChatGPT
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : null}

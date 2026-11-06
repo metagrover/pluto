@@ -124,6 +124,9 @@ export const parseMeetingAskPlutoRequest = (
   ) {
     return { ok: false, reason: 'turns are invalid' };
   }
+  if (value.answerWith !== undefined && value.answerWith !== 'chatgpt') {
+    return { ok: false, reason: 'answerWith is invalid' };
+  }
   if (!isRecord(value.scope)) {
     return { ok: false, reason: 'scope is invalid' };
   }
