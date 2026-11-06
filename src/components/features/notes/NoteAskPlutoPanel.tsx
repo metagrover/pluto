@@ -1,4 +1,3 @@
-import { PlutoActionCard } from '../PlutoActionCard';
 import {
   AlignLeft,
   Check,
@@ -23,6 +22,7 @@ import type {
   NoteAskPlutoTurn,
 } from '../../../types/notes';
 import { AskPlutoSidebar } from '../AskPlutoSidebar';
+import { PlutoActionCard } from '../PlutoActionCard';
 
 export interface NoteAskPlutoSelection {
   text: string;

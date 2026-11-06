@@ -1,4 +1,3 @@
-import { PlutoActionCard } from './PlutoActionCard';
 import {
   Archive,
   ArchiveRestore,
@@ -39,6 +38,7 @@ import type {
 } from '../../types/personChat';
 import { Logo } from '../Brand/Logo';
 import { AnswerActions } from './AnswerActions';
+import { PlutoActionCard } from './PlutoActionCard';
 
 const starterPrompts = (name: string) => [
   `Catch me up on ${name}`,

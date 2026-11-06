@@ -1,4 +1,3 @@
-import { PlutoActionCard } from './PlutoActionCard';
 import {
   ChevronDown,
   ChevronUp,
@@ -31,6 +30,7 @@ import {
 } from '../../utils/liveMeetingCommands';
 import { MEETING_ASK_PLUTO_LIMITS } from '../../utils/meetingAskPlutoRequest';
 import { Logo } from '../Brand/Logo';
+import { PlutoActionCard } from './PlutoActionCard';
 
 /** Ask Pluto while recording. Finished meetings use MeetingAskPlutoPanel. */
 type MeetingAskPlutoDockProps = {

@@ -1,4 +1,3 @@
-import { PlutoActionCard } from './PlutoActionCard';
 import {
   ArrowRight,
   ArrowUpRight,
@@ -55,6 +54,7 @@ import type {
 import { Logo } from '../Brand/Logo';
 import { EmptyCanvasArt } from '../ui/EmptyCanvas';
 import type { CitationChain } from './CitationCard';
+import { PlutoActionCard } from './PlutoActionCard';
 
 interface AskPlutoProps {
   onOpenTask?: (id: string) => void;
