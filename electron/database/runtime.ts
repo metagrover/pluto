@@ -23,6 +23,7 @@ import { DatabaseLifecycleError } from './errors';
 import {
   type DatabaseIntegrityCheckRequest,
   checkDatabaseIntegrity,
+  isCorruptionCode,
   probeDatabaseReadable,
 } from './integrityCheck';
 import {
@@ -72,11 +73,6 @@ const sqliteCode = (error: unknown): string | undefined => {
     return undefined;
   const code = (error as { code?: unknown }).code;
   return typeof code === 'string' ? code : undefined;
-};
-
-const isCorruptionError = (error: unknown) => {
-  const code = sqliteCode(error);
-  return code === 'SQLITE_CORRUPT' || code === 'SQLITE_NOTADB';
 };
 
 const prepareDirectory = (databasePath: string) => {
@@ -143,19 +139,27 @@ const configureConnection = (sqlite: Database.Database, inMemory: boolean) => {
 };
 
 const verifyHealth = (sqlite: Database.Database) => {
+  let result: ReturnType<typeof checkDatabaseIntegrity>;
   try {
-    const result = checkDatabaseIntegrity(sqlite);
-    if (!result.ok) {
-      throw Object.assign(new Error(`${result.failure} failed`), {
-        code: result.sqliteCode,
-      });
-    }
+    result = checkDatabaseIntegrity(sqlite);
   } catch (error) {
+    throw new DatabaseLifecycleError(
+      'database_open_failed',
+      'SQLite could not complete database health verification.',
+      { sqliteCode: sqliteCode(error) },
+      { cause: error },
+    );
+  }
+  if (!result.ok) {
     throw new DatabaseLifecycleError(
       'database_integrity_failed',
       'SQLite health verification failed.',
-      { sqliteCode: sqliteCode(error) },
-      { cause: error },
+      { sqliteCode: result.sqliteCode },
+      {
+        cause: Object.assign(new Error(`${result.failure} failed`), {
+          code: result.sqliteCode,
+        }),
+      },
     );
   }
 };
@@ -164,10 +168,13 @@ const verifyReadable = (sqlite: Database.Database) => {
   try {
     probeDatabaseReadable(sqlite);
   } catch (error) {
+    const code = sqliteCode(error);
     throw new DatabaseLifecycleError(
-      'database_integrity_failed',
+      isCorruptionCode(code)
+        ? 'database_integrity_failed'
+        : 'database_open_failed',
       'SQLite could not read the database schema.',
-      { sqliteCode: sqliteCode(error) },
+      { sqliteCode: code },
       { cause: error },
     );
   }
@@ -489,18 +496,13 @@ export const createDatabaseRuntime = (
 
           if (
             !inMemory &&
-            (isCorruptionError(error) ||
-              error instanceof DatabaseLifecycleError)
-          ) {
-            if (
-              isCorruptionError(cause) ||
+            (isCorruptionCode(code) ||
               (error instanceof DatabaseLifecycleError &&
-                error.code === 'database_integrity_failed')
-            ) {
-              connection = replaceExisting('integrity-failed', keyHex);
-              currentState = 'open';
-              return connection;
-            }
+                error.code === 'database_integrity_failed'))
+          ) {
+            connection = replaceExisting('integrity-failed', keyHex);
+            currentState = 'open';
+            return connection;
           }
           throw error;
         }

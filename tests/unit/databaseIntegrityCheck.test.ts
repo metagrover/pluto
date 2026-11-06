@@ -120,6 +120,39 @@ describe('startup integrity check mode', () => {
     expect(full).toContain('foreign_key_check');
   });
 
+  it.each(['deferred', 'full'] as const)(
+    'preserves a standard database if the %s startup check is busy',
+    (integrityCheck) => {
+      const databasePath = makeDatabasePath();
+      createManagedDatabase(databasePath);
+      const before = fs.readFileSync(databasePath);
+      const cleanupStaged = vi.fn();
+      const runtime = createDatabaseRuntime({
+        databasePath,
+        migrationsFolder,
+        integrityCheck,
+        cleanupStaged,
+        openConnection(file) {
+          const sqlite = new Database(file);
+          const pragma = sqlite.pragma.bind(sqlite);
+          sqlite.pragma = ((source, options) => {
+            if (source === 'schema_version' || source === 'quick_check')
+              throw Object.assign(new Error('database is busy'), {
+                code: 'SQLITE_BUSY',
+              });
+            return pragma(source, options);
+          }) as typeof sqlite.pragma;
+          return sqlite;
+        },
+      });
+      expect(() => runtime.initialize()).toThrowError(
+        expect.objectContaining({ code: 'database_open_failed' }),
+      );
+      expect(cleanupStaged).not.toHaveBeenCalled();
+      expect(fs.readFileSync(databasePath).equals(before)).toBe(true);
+    },
+  );
+
   it('still runs the full check after applying migrations in deferred mode', () => {
     const pragmas: string[] = [];
     const runtime = createDatabaseRuntime({
