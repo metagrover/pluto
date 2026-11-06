@@ -3005,6 +3005,14 @@ Every retry still requires a fresh memory sample and an empty runner list. Persi
 - **Reason:** Native fictional-source tests reproduced future receipt described as completed. Reusing the general item-classification prompt lost primary responsibilities or transferred pronouns between people. A final-stage refresh also allowed an unused writer summary to consume body repair and fail an otherwise source-faithful document. Separating source-only overview authoring before strict validation addresses these boundaries without weakening publication checks. Full source-fidelity and app acceptance remain separate release gates.
 
 
+## 2026-11-05 — Check database integrity after the window opens
+
+- **Status:** Accepted
+- **Supersedes in part:** “2026-09-01 - Use a verified Drizzle lifecycle with development-phase replacement”, only where every launch ran the full health check (`quick_check` and `foreign_key_check`) before opening the window. Its staging, replacement, migration-failure and fail-closed rules for encrypted databases are unchanged.
+- **Decision:** On a normal launch Pluto proves the database opens with its key and that its schema reads (page 1 and `sqlite_schema`), then opens the window. About five seconds after the first window loads, a worker thread runs the same full check on its own read-only connection. Damage shows the database recovery overlay (“Check Again”, “Open Data Folder”, “Quit”) and writes `pluto.db.integrity-check-required` beside the database, so the next launch runs the full check before the window opens and follows the existing startup failure path. The full check still runs before the window whenever migrations were applied, and on any fresh or replaced database. A worker that cannot run falls back to checking on the app connection; busy or I/O errors count as inconclusive, never as damage.
+- **Reason:** On a synthetic 600-meeting SQLCipher database (369 MB), the full check took about 11 seconds of every launch on the main process. `quick_check(N)` does not help: N caps the errors reported, not the pages read.
+- **Consequences:** Damage that the schema probe cannot see is reported a few seconds after the window opens instead of before it; the overlay then covers the workspace. A wrong key or a non-database file still fails at open, as before. Standard (unencrypted) profiles keep the 2026-09-01 replacement policy on the launch after damage, so the overlay asks people to copy `pluto.db` first.
+
 ## 2026-11-05 — Offer ChatGPT for one question after a local memory refusal
 
 - **Status:** Accepted by direct owner request.

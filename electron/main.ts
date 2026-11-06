@@ -109,7 +109,9 @@ import {
 import {
   closeApplicationDatabase,
   getApplicationDatabase,
+  verifyApplicationDatabaseIntegrity,
 } from './database/applicationDatabase';
+import { createBackgroundIntegrityMonitor } from './database/backgroundIntegrity';
 import { syncMeetingActionEntitiesFromUserEdits } from './database/meetingActionSync';
 import { createBeforeQuitHandler } from './database/shutdown';
 import {
@@ -375,6 +377,16 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
 });
 
 let win: BrowserWindow | null;
+// The full database check runs after the first window loads, not before it
+// opens; damage it finds is shown through the database recovery overlay.
+const databaseIntegrityMonitor = createBackgroundIntegrityMonitor({
+  verify: verifyApplicationDatabaseIntegrity,
+  notify: (notice) => {
+    for (const window of BrowserWindow.getAllWindows())
+      window.webContents.send('database-recovery-required', notice);
+  },
+  logger: createLogger('Database'),
+});
 let tray: Tray | null = null;
 let updateChecker: UpdateChecker | null = null;
 let checkingFromMenu = false;
@@ -555,6 +567,13 @@ function createWindow() {
   win.webContents.on('did-finish-load', () => {
     postMeetingBackgroundActivity.reset();
     win?.webContents.send('main-process-message', new Date().toLocaleString());
+    databaseIntegrityMonitor.schedule();
+    const integrityFailure = databaseIntegrityMonitor.currentFailure();
+    if (integrityFailure)
+      createdWindow.webContents.send(
+        'database-recovery-required',
+        integrityFailure,
+      );
   });
   win.webContents.on('did-start-loading', () => {
     settingsMenuNavigation.loading(createdWindow.webContents);
@@ -738,6 +757,7 @@ import {
   ASK_PLUTO_LOCAL_MAX_FIRST_TOKEN_MS,
   planAskPlutoLocalPromptBudget,
 } from './intelligence/askPlutoLocalBudget';
+import { createAskPlutoMeetingSource } from './intelligence/askPlutoMeetingSource';
 import {
   clearAskPlutoOmissions,
   describeUnverifiedAskPlutoOmissions,
@@ -870,6 +890,7 @@ import {
   retrieveContext,
   selectNamedPersonAnswerContext,
   selectRecentPersonNoteContext,
+  selectWorkspaceRecallCandidates,
   shouldKeepActivePersonScope,
   shouldKeepActiveProjectScope,
   shouldUsePreparedExtractiveAnswer,
@@ -1667,7 +1688,7 @@ app.whenReady().then(async () => {
   const audioRetention = createAudioRetentionManager({
     rootDir: getMeetingArtifactsRootDir(),
     sqlite: getApplicationDatabase(),
-    listMeetings: () => db.getMeetings() as db.PersistedMeeting[],
+    listMeetings: db.getAudioLifecycleMeetings,
     getSetting: db.getSetting,
     audioKeyStore: getAudioKeyStore(),
     isMeetingActive: (meetingId) =>
@@ -5471,7 +5492,7 @@ app.whenReady().then(async () => {
     // Admission must precede full-history notes/identity projection, not just
     // the later provider call. Background routing retries can run every 5s.
     if (!canCollectSources()) return Promise.resolve(deferredSynthesis());
-    const sourceFromMeeting = (meeting: db.PersistedMeeting) => {
+    const sourceFromMeeting = (meeting: db.ProjectSynthesisMeeting) => {
       const evidence = buildMeetingNotesEvidenceDocument(
         meeting,
         db.getMeetingNotesIdentityProjection(meeting.id).speakerDisplayNames,
@@ -5558,11 +5579,7 @@ app.whenReady().then(async () => {
     };
     projectThemeSynthesis = (async () => {
       const collected = await collectProjectSynthesisSources({
-        listMeetings: () =>
-          (db.getMeetings() as db.PersistedMeeting[]).filter(
-            (meeting) =>
-              !selectedMeetingIds || selectedMeetingIds.has(String(meeting.id)),
-          ),
+        listMeetings: () => db.getProjectSynthesisMeetings(selectedMeetingIds),
         buildSource: sourceFromMeeting,
         shouldContinue: canCollectSources,
       });
@@ -5643,7 +5660,7 @@ app.whenReady().then(async () => {
         publishProjects();
         // Routing changed memberships; theme synthesis needs fresh identities.
         const regrouped = await collectProjectSynthesisSources({
-          listMeetings: () => db.getMeetings() as db.PersistedMeeting[],
+          listMeetings: () => db.getProjectSynthesisMeetings(),
           buildSource: sourceFromMeeting,
           shouldContinue: canCollectSources,
         });
@@ -8440,7 +8457,11 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               turnMode: conversationResolution.turnMode,
             };
           }
-          const persistedMeetings = db.getAskPlutoMeetings();
+          // Headers come from an index; notes and analysis load only for the
+          // meetings a step below reads.
+          const askMeetings = createAskPlutoMeetingSource(db);
+          const meetingHeaderSnapshot =
+            askMeetings.headers as db.PersistedMeeting[];
           sendStatus('retrieving');
           const omissionReview =
             conversationResolution.relation === 'omission_follow_up'
@@ -8617,13 +8638,13 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             ...(semanticScope ? { classification: semanticScope } : {}),
           });
           const assigneeRecall =
-            buildAssigneeActionRecall(effectiveQueryText, persistedMeetings) ??
+            buildAssigneeActionRecall(effectiveQueryText, askMeetings.all) ??
             (conversationResolution.relation !== 'new_topic'
               ? buildAssigneeActionRecall(
                   conversationResolution.priorQuestion ||
                     planningConversationAnchor ||
                     '',
-                  persistedMeetings,
+                  askMeetings.all,
                 )
               : null);
           const overviewRecall = buildWorkingMemoryOverviewRecall(
@@ -8633,7 +8654,10 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           const workspaceRecall = isPlanning
             ? buildWorkspaceIntelligenceRecall({
                 query: effectiveQueryText,
-                persistedMeetings,
+                // Only recent notes are read; the recall applies its own cutoff.
+                persistedMeetings: askMeetings.hydrate(
+                  selectWorkspaceRecallCandidates(meetingHeaderSnapshot),
+                ),
                 selfPersonId: selfPersonId || undefined,
                 mode: workspaceIntelligenceMode,
               })
@@ -8716,7 +8740,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             !/^\s*(?:tell me about|who is)\b/i.test(queryText)
               ? buildAssigneeActionRecall(
                   `What is assigned to ${personWorkSubject}?`,
-                  persistedMeetings,
+                  askMeetings.all,
                 )
               : null;
           const inheritedPersonWorkRecall =
@@ -8793,7 +8817,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             frameReference && framePeople.length
               ? selectPersonMeetings({
                   people: framePeople,
-                  meetings: persistedMeetings,
+                  meetings: meetingHeaderSnapshot,
                   meetingIdsByPerson: new Map(
                     framePeople.map((person) => [
                       person.id,
@@ -8822,24 +8846,21 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                   reference: frameReference,
                   rangeLabel: frameTemporal?.label,
                 }),
-                meetings: framePersonMeetings.slice(
-                  0,
-                  12,
-                ) as db.PersistedMeeting[],
+                meetings: askMeetings.hydrate(framePersonMeetings.slice(0, 12)),
               };
             }
             const days = resolveTemporalDayMentions(effectiveQueryText);
             if (days.length < 2) return null;
             const onDays = selectMeetingsOnDays({
               query: effectiveQueryText,
-              meetings: persistedMeetings,
+              meetings: meetingHeaderSnapshot,
               days,
             });
             return onDays.length
               ? {
                   kind: 'named' as const,
                   label: `meetings on ${days.map((day) => day.label).join(' and ')}`,
-                  meetings: onDays.slice(0, 12) as db.PersistedMeeting[],
+                  meetings: askMeetings.hydrate(onDays.slice(0, 12)),
                 }
               : null;
           };
@@ -8864,12 +8885,20 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               : // Person and compared-day references are more specific than a
                 // title that also appears in the question.
                 (resolveFrameMeetingScope() ??
-                resolveExplicitMeetingScope(
-                  // A rewritten topic can echo a prior source title without
-                  // the user asking to restrict the answer to that meeting.
-                  turnPlan ? queryText : effectiveQueryText,
-                  persistedMeetings,
-                ));
+                (() => {
+                  const titled = resolveExplicitMeetingScope(
+                    // A rewritten topic can echo a prior source title without
+                    // the user asking to restrict the answer to that meeting.
+                    turnPlan ? queryText : effectiveQueryText,
+                    meetingHeaderSnapshot,
+                  );
+                  return titled
+                    ? {
+                        ...titled,
+                        meetings: askMeetings.hydrate(titled.meetings),
+                      }
+                    : null;
+                })());
           const requestedMode =
             typeof input !== 'string' &&
             (input.modeOverride === 'fast' || input.modeOverride === 'deep')
@@ -8948,7 +8977,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             if (nextOnly) events = events.slice(0, 1);
             const { answer, relatedMeetings } = buildScheduleAnswer({
               events,
-              meetings: persistedMeetings,
+              meetings: meetingHeaderSnapshot,
               rangeLabel: nextOnly
                 ? 'next'
                 : (frameTemporal?.label ?? 'over the next 7 days'),
@@ -9080,7 +9109,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                 ? framePersonMeetings
                 : selectPersonMeetings({
                     people: framePeople,
-                    meetings: persistedMeetings,
+                    meetings: meetingHeaderSnapshot,
                     meetingIdsByPerson: new Map(
                       framePeople.map((person) => [
                         person.id,
@@ -9260,7 +9289,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                   .filter((meeting): meeting is db.PersistedMeeting =>
                     Boolean(meeting),
                   )
-              : persistedMeetings.filter((meeting) => {
+              : meetingHeaderSnapshot.filter((meeting) => {
                   const occurredAt =
                     meeting.started_at || meeting.created_at || '';
                   return (
@@ -9270,9 +9299,8 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                 })
             : [];
           const temporalMeetingLimit = 24;
-          const includedTemporalMeetings = temporalMeetings.slice(
-            0,
-            temporalMeetingLimit,
+          const includedTemporalMeetings = askMeetings.hydrate(
+            temporalMeetings.slice(0, temporalMeetingLimit),
           );
           const temporalRetrievalSummary: AskPlutoRetrievalSummary | undefined =
             temporalRange
@@ -9371,7 +9399,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             sendStatus('retrieving');
           }
           if (temporalRange && temporalMeetings.length === 0) {
-            const latest = persistedMeetings.slice(0, 3);
+            const latest = meetingHeaderSnapshot.slice(0, 3);
             const latestLines = latest
               .map(
                 (meeting) =>
@@ -9532,11 +9560,14 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           const historicalCandidateLimit = currentMeetingRequested
             ? getCrossMeetingCandidateLimit(effectiveQueryText, parsed.intent)
             : 0;
-          const historicalPinnedResults = persistedMeetings
-            .filter(
-              (meeting) => String(meeting.id) !== currentMeeting.meetingId,
+          const historicalPinnedResults = askMeetings
+            .hydrate(
+              meetingHeaderSnapshot
+                .filter(
+                  (meeting) => String(meeting.id) !== currentMeeting.meetingId,
+                )
+                .slice(0, historicalCandidateLimit),
             )
-            .slice(0, historicalCandidateLimit)
             .map((meeting) =>
               buildMeetingRetrievalResult(
                 meeting,
@@ -9862,7 +9893,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
                     .length
                 : assigneeRecall
                   ? assigneeRecall.mentionedMeetingCount
-                  : persistedMeetings.length),
+                  : meetingHeaderSnapshot.length),
             meetings: contextMeetings.map((result) => ({
               meetingId: result.meeting_id,
               meetingTitle:
@@ -11387,7 +11418,9 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
     return true;
   });
 
-  ipcMain.handle('DATABASE_RETRY', () => {
+  ipcMain.handle('DATABASE_RETRY', async () => {
+    if (databaseIntegrityMonitor.currentFailure())
+      return { ok: await databaseIntegrityMonitor.check() };
     try {
       const conn = getApplicationDatabase();
       return { ok: conn.open };
@@ -11673,7 +11706,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
     const historicalAudioMigration = createHistoricalAudioMigrationManager({
       rootDir: getMeetingArtifactsRootDir(),
       sqlite: getApplicationDatabase(),
-      listMeetings: () => db.getMeetings() as db.PersistedMeeting[],
+      listMeetings: db.getAudioLifecycleMeetings,
       audioKeyStore: historicalMigrationKeyStore,
       isMeetingActive: (meetingId) =>
         activeTranscriptionMeetings.has(meetingId) ||

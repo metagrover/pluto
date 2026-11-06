@@ -28,6 +28,8 @@ export const DatabaseRecoveryOverlay: FC<DatabaseRecoveryOverlayProps> = ({
   const isKeyIssue =
     errorCode === 'database_key_unavailable' ||
     errorCode === 'database_key_rejected';
+  // Found by the background check while Pluto was already running.
+  const isIntegrityIssue = errorCode === 'database_integrity_failed';
 
   return (
     <div className="fixed inset-0 z-[1200] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-in">
@@ -57,9 +59,18 @@ export const DatabaseRecoveryOverlay: FC<DatabaseRecoveryOverlayProps> = ({
         </p>
 
         <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 text-amber-800 dark:text-amber-300 text-xs leading-relaxed mb-6">
-          <strong>Your data is preserved safely.</strong> Pluto will never
-          replace or overwrite your encrypted database without your explicit
-          action.
+          {isIntegrityIssue ? (
+            <>
+              <strong>Pluto has not changed your database.</strong> Copy it
+              somewhere safe before you reopen Pluto.
+            </>
+          ) : (
+            <>
+              <strong>Your data is preserved safely.</strong> Pluto will never
+              replace or overwrite your encrypted database without your explicit
+              action.
+            </>
+          )}
         </div>
 
         {!showDestructiveConfirm ? (
@@ -70,7 +81,9 @@ export const DatabaseRecoveryOverlay: FC<DatabaseRecoveryOverlayProps> = ({
               className="w-full flex items-center justify-center space-x-2 py-2.5 px-4 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium text-sm hover:opacity-90 transition-opacity shadow-sm"
             >
               <RefreshCw className="w-4 h-4" />
-              <span>Retry Keychain Access</span>
+              <span>
+                {isIntegrityIssue ? 'Check Again' : 'Retry Keychain Access'}
+              </span>
             </button>
 
             <div className="grid grid-cols-2 gap-3">

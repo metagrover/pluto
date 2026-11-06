@@ -33,6 +33,7 @@ export default defineConfig(({ command }) => ({
         entry: {
           bootstrap: 'electron/bootstrap.ts',
           encryptedAudioWorker: 'electron/crypto/encryptedAudioWorker.ts',
+          databaseIntegrityWorker: 'electron/database/integrityCheckWorker.ts',
         },
         onstart({ startup }) {
           const userDataDir = resolveSourceUserDataDir({

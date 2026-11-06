@@ -3,6 +3,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DATABASE_INTEGRITY_NOTICE } from '../../electron/database/backgroundIntegrity';
 import { DatabaseRecoveryOverlay } from '../../src/components/overlays/DatabaseRecoveryOverlay';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -58,6 +59,30 @@ describe('DatabaseRecoveryOverlay', () => {
     expect(container.textContent).toContain('Retry Keychain Access');
     expect(container.textContent).toContain('Open Data Folder');
     expect(container.textContent).toContain('Quit Pluto');
+  });
+
+  it('offers a fresh check, not Keychain access, for background-check damage', () => {
+    act(() => {
+      const root = createRoot(container);
+      root.render(
+        <DatabaseRecoveryOverlay
+          visible={true}
+          errorCode={DATABASE_INTEGRITY_NOTICE.errorCode}
+          errorMessage={DATABASE_INTEGRITY_NOTICE.errorMessage}
+          onRetry={vi.fn()}
+          onOpenDataFolder={vi.fn()}
+          onQuit={vi.fn()}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Database Recovery Required');
+    expect(container.textContent).toContain('Check Again');
+    expect(container.textContent).not.toContain('Keychain');
+    expect(container.textContent).toContain(
+      'Pluto has not changed your database.',
+    );
+    expect(container.textContent).toContain('Open Data Folder');
   });
 
   it('triggers onRetry when clicking retry button', () => {

@@ -123,6 +123,18 @@ export const meetings = sqliteTable(
       table.id,
     ),
     index('idx_meetings_transcript_status').on(table.transcriptStatus),
+    // transcript_json sits early in each row and runs to hundreds of KB, so
+    // reading any later column walks its overflow pages. Covering the header
+    // columns lets Ask Pluto list every meeting without touching the rows.
+    index('idx_meetings_headers').on(
+      sql`COALESCE(${table.startedAt}, ${table.createdAt})`,
+      table.id,
+      table.title,
+      table.startedAt,
+      table.createdAt,
+      table.finalizationStatus,
+      table.downstreamProcessingJson,
+    ),
   ],
 );
 

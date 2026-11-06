@@ -163,7 +163,7 @@ export const adoptLegacyDatabase = (input: {
     }
 
     // Ensure legacy meetings table has columns referenced by baseline triggers
-    // and by the meeting list indexes (migration 0022).
+    // and by the meeting list and header indexes (migrations 0022 and 0023).
     try {
       const meetingCols = sqlite.pragma('table_info(meetings)') as Array<{
         name: string;
@@ -176,6 +176,11 @@ export const adoptLegacyDatabase = (input: {
           { name: 'started_at', type: 'DATETIME' },
           { name: 'created_at', type: 'DATETIME' },
           { name: 'transcript_status', type: "TEXT DEFAULT 'provisional'" },
+          {
+            name: 'finalization_status',
+            type: "TEXT DEFAULT 'finalized' NOT NULL",
+          },
+          { name: 'downstream_processing_json', type: 'TEXT' },
         ];
         for (const col of requiredCols) {
           if (!colNames.has(col.name)) {
