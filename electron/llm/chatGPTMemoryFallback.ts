@@ -26,6 +26,40 @@ export const canOfferChatGPTMemoryFallback = (
   status?.planEnabled === true &&
   status.usageLimited !== true;
 
+type OfferSurface = 'ask' | 'meeting' | 'note';
+
+const offers = new WeakMap<
+  object,
+  Map<OfferSurface, { question: string; expiresAt: number }>
+>();
+
+export const offerChatGPTMemoryFallback = (
+  owner: object,
+  surface: OfferSurface,
+  question: string,
+) => {
+  let pending = offers.get(owner);
+  if (!pending) {
+    pending = new Map();
+    offers.set(owner, pending);
+  }
+  pending.set(surface, { question, expiresAt: Date.now() + 5 * 60_000 });
+  return { chatGPTFallback: 'available' as const };
+};
+
+export const consumeChatGPTMemoryFallback = (
+  owner: object,
+  surface: OfferSurface,
+  question: string,
+): boolean => {
+  const pending = offers.get(owner);
+  const offer = pending?.get(surface);
+  pending?.delete(surface);
+  return Boolean(
+    offer && offer.question === question && offer.expiresAt >= Date.now(),
+  );
+};
+
 /** Settings for the one question the person chose to send to ChatGPT. */
 export const chatGPTMemoryFallbackSettings = (
   settings: LLMSettings,

@@ -152,7 +152,9 @@ import {
   CHATGPT_FALLBACK_UNAVAILABLE_MESSAGE,
   canOfferChatGPTMemoryFallback,
   chatGPTMemoryFallbackSettings,
+  consumeChatGPTMemoryFallback,
   isLocalMemoryRefusal,
+  offerChatGPTMemoryFallback,
 } from './llm/chatGPTMemoryFallback';
 import { LocalModelMemoryError } from './llm/localModelMemory';
 import { checkOllamaReadiness } from './llm/ollamaReadiness';
@@ -7739,6 +7741,16 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
     async (event, input: string | AskPlutoQueryRequest) => {
       const startTime = Date.now();
       const queryText = typeof input === 'string' ? input : input?.query;
+      const chatGPTQuestion =
+        typeof queryText === 'string' &&
+        (typeof input === 'string' || !input.activeMeetingSnapshot)
+          ? queryText.trim()
+          : '';
+      const offeredChatGPT = consumeChatGPTMemoryFallback(
+        event.sender,
+        'ask',
+        chatGPTQuestion,
+      );
       const requestId =
         typeof input === 'string' || !input?.requestId
           ? `ask-pluto-${randomUUID()}`
@@ -7778,7 +7790,12 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
         // The person chose ChatGPT for this one question after a memory refusal.
         const answerWithChatGPT =
           typeof input !== 'string' && input?.answerWith === 'chatgpt';
-        if (answerWithChatGPT && !canOfferChatGPTMemoryFallback(storedSettings))
+        if (
+          answerWithChatGPT &&
+          (!chatGPTQuestion ||
+            !offeredChatGPT ||
+            !canOfferChatGPTMemoryFallback(storedSettings))
+        )
           return {
             status: 'unavailable' as const,
             answer: CHATGPT_FALLBACK_UNAVAILABLE_MESSAGE,
@@ -7790,8 +7807,9 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           : storedSettings;
         offerChatGPT = (reason) =>
           reason === 'memory_pressure' &&
+          chatGPTQuestion &&
           canOfferChatGPTMemoryFallback(settings)
-            ? { chatGPTFallback: 'available' as const }
+            ? offerChatGPTMemoryFallback(event.sender, 'ask', chatGPTQuestion)
             : {};
         const settingsCompletedAt = Date.now();
         const isLocalProvider =
@@ -10549,6 +10567,15 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
       }
       const request = parsedRequest.request;
       const query = request.query.trim();
+      const chatGPTQuestion =
+        request.scope.type === 'meeting'
+          ? JSON.stringify([request.scope.meetingId, query])
+          : '';
+      const offeredChatGPT = consumeChatGPTMemoryFallback(
+        event.sender,
+        'meeting',
+        chatGPTQuestion,
+      );
       const requestId = request.requestId;
       const turns = normalizeMeetingAskPlutoTurns(request.turns);
       const conversationResolutionStartedAt = performance.now();
@@ -10800,7 +10827,9 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
         // The person chose ChatGPT for this one question after a memory refusal.
         if (
           request.answerWith === 'chatgpt' &&
-          !canOfferChatGPTMemoryFallback(storedSettings)
+          (!chatGPTQuestion ||
+            !offeredChatGPT ||
+            !canOfferChatGPTMemoryFallback(storedSettings))
         )
           return buildMeetingAskPlutoProviderUnavailableResponse({
             scope: context.scope,
@@ -10904,8 +10933,13 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               error: providerError,
             }),
             ...(isLocalMemoryRefusal(providerError) &&
+            chatGPTQuestion &&
             canOfferChatGPTMemoryFallback(settings)
-              ? { chatGPTFallback: 'available' as const }
+              ? offerChatGPTMemoryFallback(
+                  event.sender,
+                  'meeting',
+                  chatGPTQuestion,
+                )
               : {}),
           };
         } finally {
@@ -11030,6 +11064,17 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
         };
       }
       const request = parsed.request;
+      const chatGPTQuestion = JSON.stringify([
+        request.noteId,
+        request.intent,
+        request.query,
+        request.selection,
+      ]);
+      const offeredChatGPT = consumeChatGPTMemoryFallback(
+        event.sender,
+        'note',
+        chatGPTQuestion,
+      );
       const note = db.notesStore.getNote(request.noteId);
       if (!note) {
         return {
@@ -11059,7 +11104,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
         // The person chose ChatGPT for this one question after a memory refusal.
         if (
           request.answerWith === 'chatgpt' &&
-          !canOfferChatGPTMemoryFallback(storedSettings)
+          (!offeredChatGPT || !canOfferChatGPTMemoryFallback(storedSettings))
         )
           return {
             status: 'unavailable' as const,
@@ -11172,7 +11217,7 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
           answer: '',
           ...describeNoteAskPlutoFailure(error),
           ...(canOfferChatGPT && isLocalMemoryRefusal(error)
-            ? { chatGPTFallback: 'available' as const }
+            ? offerChatGPTMemoryFallback(event.sender, 'note', chatGPTQuestion)
             : {}),
         };
       } finally {

@@ -1473,8 +1473,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                                 Answer with ChatGPT
                               </button>
                               <span className="w-full text-[11px] text-pro-text-muted/75">
-                                Sends this question and the notes it needs to
-                                ChatGPT, just this once.
+                                Sends this question, relevant saved context, and
+                                relevant earlier chat messages to ChatGPT, just
+                                this once.
                               </span>
                             </>
                           ) : null}

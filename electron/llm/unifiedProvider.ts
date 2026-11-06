@@ -38,7 +38,6 @@ import {
   isEstablishedGemmaArtifact,
   readContextBytesPerToken,
   readLocalModelMemory,
-  usesQuickModelHeadroom,
   watchLocalModelMemory,
 } from './localModelMemory';
 
@@ -2137,13 +2136,6 @@ export class UnifiedLLMProvider implements LLMProvider {
       await this.requestOllamaUnload(model, signal);
       resident = false;
     }
-    // The configured quick chat model gets the smaller load margin in both
-    // admission and the watchdog, so an admitted load is not stopped at once.
-    const quickModel =
-      normalizeOllamaModelName(model) ===
-      normalizeOllamaModelName(
-        resolveConfiguredOllamaModel(this.settings, true),
-      );
     if (entry) {
       const checkCapacity = async (isResident: boolean) => {
         for (;;) {
@@ -2160,7 +2152,6 @@ export class UnifiedLLMProvider implements LLMProvider {
                 ? { minimumContextTokens: requiredContext }
                 : {}),
               contextBytesPerToken,
-              quickModel,
               measuredColdPeak: getMeasuredColdPeak(
                 model,
                 allocationDigest,
@@ -2245,15 +2236,6 @@ export class UnifiedLLMProvider implements LLMProvider {
             loaded.context_length === num_ctx,
         );
       });
-      // Set after admission so it matches the context that was admitted.
-      memory?.setQuickModelHeadroom?.(
-        usesQuickModelHeadroom({
-          quickModel,
-          modelDigest: entry.digest,
-          contextBytesPerToken,
-          contextTokens: num_ctx,
-        }),
-      );
       await memory?.start(signal);
     }
     ollamaMemoryReclaimDeadline = 0;

@@ -469,8 +469,8 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
             <span>{error}</span>
             {chatGPTFallback ? (
               <span className="note-ask-panel__error-note">
-                Answer with ChatGPT sends this question and the note to ChatGPT,
-                just this once.
+                Sends this question, the note, any related meeting notes, and
+                earlier chat messages to ChatGPT, just this once.
               </span>
             ) : null}
             {errorDetail ? (

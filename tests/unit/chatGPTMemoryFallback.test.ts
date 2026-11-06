@@ -5,7 +5,9 @@ import { createMemoryChatGPTUsage } from '../../electron/chatgpt/usage';
 import {
   canOfferChatGPTMemoryFallback,
   chatGPTMemoryFallbackSettings,
+  consumeChatGPTMemoryFallback,
   isLocalMemoryRefusal,
+  offerChatGPTMemoryFallback,
 } from '../../electron/llm/chatGPTMemoryFallback';
 import type { InferenceRequest } from '../../electron/llm/inferenceTypes';
 import { LocalModelMemoryError } from '../../electron/llm/localModelMemory';
@@ -57,6 +59,25 @@ describe('offering ChatGPT after a local memory refusal', () => {
   it('recognizes only memory refusals', () => {
     expect(isLocalMemoryRefusal(new LocalModelMemoryError('short'))).toBe(true);
     expect(isLocalMemoryRefusal(new Error('timeout'))).toBe(false);
+  });
+
+  it('allows only the offered question once, in its own window and surface', () => {
+    const owner = {};
+    const question = 'Fictional meeting question';
+    expect(consumeChatGPTMemoryFallback(owner, 'meeting', question)).toBe(
+      false,
+    );
+    offerChatGPTMemoryFallback(owner, 'meeting', question);
+    expect(consumeChatGPTMemoryFallback({}, 'meeting', question)).toBe(false);
+    expect(consumeChatGPTMemoryFallback(owner, 'note', question)).toBe(false);
+    expect(consumeChatGPTMemoryFallback(owner, 'meeting', question)).toBe(true);
+    expect(consumeChatGPTMemoryFallback(owner, 'meeting', question)).toBe(
+      false,
+    );
+    offerChatGPTMemoryFallback(owner, 'meeting', question);
+    expect(
+      consumeChatGPTMemoryFallback(owner, 'meeting', 'Other question'),
+    ).toBe(false);
   });
 });
 
@@ -141,6 +162,17 @@ describe('ChatGPT guard for a memory fallback question', () => {
         egress: { ...request.egress, memoryFallback: true },
       }),
     ).rejects.toMatchObject({ code: 'chatgpt_cloud_consent_required' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses if the selected provider changed before sending', async () => {
+    settings.set('llm_provider', 'gemini');
+    await expect(
+      executeChatGPT({
+        ...request,
+        egress: { ...request.egress, memoryFallback: true },
+      }),
+    ).rejects.toMatchObject({ code: 'chatgpt_not_selected' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -147,8 +147,8 @@ export const MeetingAskPlutoPanel: React.FC<MeetingAskPlutoPanelProps> = ({
             <span>{error}</span>
             {canAnswerWithChatGPT ? (
               <span className="note-ask-panel__error-note">
-                Answer with ChatGPT sends this question and the meeting notes to
-                ChatGPT, just this once.
+                Sends this question, relevant meeting context, and earlier chat
+                messages to ChatGPT, just this once.
               </span>
             ) : null}
           </div>
