@@ -53,9 +53,9 @@ export const createBackgroundIntegrityMonitor = (
           options.notify(failure);
           return false;
         }
+        if (!result) return failure === null;
         failure = null;
-        if (result)
-          log.info(`Database integrity ok in ${result.durationMs}ms.`);
+        log.info(`Database integrity ok in ${result.durationMs}ms.`);
         return true;
       } catch (error) {
         // Inconclusive: keep any earlier finding, never invent one.

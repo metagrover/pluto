@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url';
 import type Database from 'better-sqlite3';
 import { app } from 'electron';
 import { ApplicationKeyStore } from '../crypto/applicationKeyStore';
-import { resolveUnpackedExecutablePath } from '../packagedExecutablePath';
 import {
   type DatabaseIntegrityCheckRequest,
   type DatabaseIntegrityResult,
@@ -51,10 +50,9 @@ const currentDir =
     ? __dirname
     : path.dirname(fileURLToPath(import.meta.url));
 
+// Electron workers can load this CommonJS bundle and its dependencies from ASAR.
 const defaultIntegrityWorkerPath = () =>
-  resolveUnpackedExecutablePath(
-    path.join(currentDir, 'databaseIntegrityWorker.js'),
-  );
+  path.join(currentDir, 'databaseIntegrityWorker.js');
 
 interface InitializeApplicationDatabaseOptions {
   keyStore?: ApplicationKeyStore;
@@ -82,8 +80,15 @@ export const createApplicationDatabase = (
     const connection = runtime.initialize();
     if (integrityCheck === 'full' && !checkedAtStartup) {
       checkedAtStartup = true;
-      if (startupCheckRequired)
-        clearStartupIntegrityCheckRequirement(options.databasePath);
+      if (startupCheckRequired) {
+        try {
+          clearStartupIntegrityCheckRequirement(options.databasePath);
+        } catch (error) {
+          log.warn('Could not clear the startup database integrity marker.', {
+            name: error instanceof Error ? error.name : typeof error,
+          });
+        }
+      }
     }
     if (!recovered) {
       try {
@@ -131,9 +136,15 @@ export const createApplicationDatabase = (
           return null;
         }
       }
-      if (result.ok)
-        clearStartupIntegrityCheckRequirement(options.databasePath);
-      else requireStartupIntegrityCheck(options.databasePath, result.failure);
+      try {
+        if (result.ok)
+          clearStartupIntegrityCheckRequirement(options.databasePath);
+        else requireStartupIntegrityCheck(options.databasePath, result.failure);
+      } catch (error) {
+        log.warn('Could not update the startup database integrity marker.', {
+          name: error instanceof Error ? error.name : typeof error,
+        });
+      }
       return result;
     },
     close: () => runtime.close(),

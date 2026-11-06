@@ -364,6 +364,11 @@ describe('background integrity monitor', () => {
     expect(notify).toHaveBeenCalledWith(DATABASE_INTEGRITY_NOTICE);
     expect(monitor.currentFailure()).toEqual(DATABASE_INTEGRITY_NOTICE);
 
+    // An inconclusive retry must leave the warning visible.
+    verify.mockResolvedValueOnce(null as never);
+    await expect(monitor.check()).resolves.toBe(false);
+    expect(monitor.currentFailure()).toEqual(DATABASE_INTEGRITY_NOTICE);
+
     // "Check Again" clears the notice once the database checks out.
     result = { ok: true, durationMs: 1 } as never;
     await expect(monitor.check()).resolves.toBe(true);
