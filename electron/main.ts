@@ -7743,7 +7743,8 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
       const queryText = typeof input === 'string' ? input : input?.query;
       const chatGPTQuestion =
         typeof queryText === 'string' &&
-        (typeof input === 'string' || !input.activeMeetingSnapshot)
+        (typeof input === 'string' || !input.activeMeetingSnapshot) &&
+        !captureSessionLease.recordingForOwner(event.sender.id)
           ? queryText.trim()
           : '';
       const offeredChatGPT = consumeChatGPTMemoryFallback(
@@ -10568,7 +10569,9 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
       const request = parsedRequest.request;
       const query = request.query.trim();
       const chatGPTQuestion =
-        request.scope.type === 'meeting'
+        request.scope.type === 'meeting' &&
+        captureSessionLease.recordingForOwner(event.sender.id)?.meetingId !==
+          request.scope.meetingId
           ? JSON.stringify([request.scope.meetingId, query])
           : '';
       const offeredChatGPT = consumeChatGPTMemoryFallback(
