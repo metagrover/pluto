@@ -1086,7 +1086,11 @@ const readStructuredActionItems = (
 
 export const buildAssigneeActionRecall = (
   query: string,
-  meetings: dbModule.PersistedMeeting[],
+  // A reader is called only for assignee questions, so other questions never
+  // load every meeting's notes.
+  meetingsOrReader:
+    | dbModule.PersistedMeeting[]
+    | (() => dbModule.PersistedMeeting[]),
 ): {
   assignee: string;
   answer: string;
@@ -1097,6 +1101,11 @@ export const buildAssigneeActionRecall = (
 } | null => {
   const assignee = parseAssigneeActionQuery(query);
   if (!assignee) return null;
+  // Each path below reads the meetings once.
+  const readMeetings = () =>
+    typeof meetingsOrReader === 'function'
+      ? meetingsOrReader()
+      : meetingsOrReader;
 
   const selfReference = /^(?:me|myself|mine)$/i.test(assignee.trim());
   const person = selfReference
@@ -1223,7 +1232,7 @@ export const buildAssigneeActionRecall = (
     const names = [person.name, ...(selfReference ? [] : [assignee])].map(
       normalizePersonName,
     );
-    const mentionedMeetings = meetings.filter((meeting) =>
+    const mentionedMeetings = readMeetings().filter((meeting) =>
       [
         meeting.user_notes,
         meeting.enhanced_notes,
@@ -1259,6 +1268,7 @@ export const buildAssigneeActionRecall = (
   }
 
   const normalizedAssignee = normalizePersonName(assignee);
+  const meetings = readMeetings();
   const mentionedMeetingCount = meetings.filter((meeting) =>
     [
       meeting.user_notes,
@@ -2221,6 +2231,28 @@ const renderWorkspaceFocusItem = (
   return `${index + 1}. **${item.title}**${detail ? ` — ${detail}` : ''} ${item.source}`;
 };
 
+const WORKSPACE_RECENT_NOTES_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+const isWithinWorkspaceRecentWindow = (
+  meeting: Pick<dbModule.PersistedMeeting, 'started_at' | 'created_at'>,
+  now: number,
+): boolean => {
+  const occurredAt = Date.parse(meeting.started_at || meeting.created_at || '');
+  return occurredAt > 0 && occurredAt >= now - WORKSPACE_RECENT_NOTES_WINDOW_MS;
+};
+
+/**
+ * The meetings buildWorkspaceIntelligenceRecall can read notes from, chosen
+ * from headers. Call it before the recall: a later `now` only narrows the set.
+ */
+export const selectWorkspaceRecallCandidates = <
+  Meeting extends Pick<dbModule.PersistedMeeting, 'started_at' | 'created_at'>,
+>(
+  meetings: readonly Meeting[],
+  now = Date.now(),
+): Meeting[] =>
+  meetings.filter((meeting) => isWithinWorkspaceRecentWindow(meeting, now));
+
 export const buildWorkspaceIntelligenceRecall = (input: {
   query: string;
   persistedMeetings: dbModule.PersistedMeeting[];
@@ -2230,7 +2262,7 @@ export const buildWorkspaceIntelligenceRecall = (input: {
 }): WorkspaceIntelligenceRecall => {
   const now = input.now ?? Date.now();
   const mode = input.mode ?? 'summary';
-  const recentCutoff = now - 14 * 24 * 60 * 60 * 1000;
+  const recentCutoff = now - WORKSPACE_RECENT_NOTES_WINDOW_MS;
   const recordDate = (
     item: Record<string, unknown>,
     primaryKey: string,
@@ -2381,12 +2413,7 @@ export const buildWorkspaceIntelligenceRecall = (input: {
   // Recent saved notes are the fresh evidence layer. Do not require a MID
   // decision or a priority keyword: that drops new work the snapshot never saw.
   const recentCandidates = input.persistedMeetings
-    .filter((meeting) => {
-      const occurredAt = Date.parse(
-        meeting.started_at || meeting.created_at || '',
-      );
-      return occurredAt > 0 && occurredAt >= recentCutoff;
-    })
+    .filter((meeting) => isWithinWorkspaceRecentWindow(meeting, now))
     .sort(
       (left, right) =>
         (Date.parse(right.started_at || right.created_at || '') || 0) -

@@ -21,6 +21,12 @@ import {
 } from './encryptionMigration';
 import { DatabaseLifecycleError } from './errors';
 import {
+  type DatabaseIntegrityCheckRequest,
+  checkDatabaseIntegrity,
+  isCorruptionCode,
+  probeDatabaseReadable,
+} from './integrityCheck';
+import {
   assertSupportedMigrationHistory,
   getPendingMigrationId,
   readAppliedMigrationHistory,
@@ -33,7 +39,20 @@ export interface DatabaseRuntime {
   getConnection(): Database.Database;
   close(): void;
   readonly state: 'new' | 'open' | 'closed';
+  /**
+   * Where a separate connection can run the full check of the open database,
+   * or null for an in-memory or unopened database.
+   */
+  integrityCheckRequest?(): DatabaseIntegrityCheckRequest | null;
 }
+
+/**
+ * `full` runs `quick_check` and `foreign_key_check` over the whole file before
+ * returning the connection. `deferred` only proves the file opens with this key
+ * and reads its schema; the caller owns running the full check later. Both run
+ * the full check after applying migrations.
+ */
+export type DatabaseIntegrityCheckMode = 'full' | 'deferred';
 
 export interface DatabaseRuntimeOptions {
   databasePath: string;
@@ -44,6 +63,7 @@ export interface DatabaseRuntimeOptions {
   encryptionKeyHex?: string;
   keyStore?: ApplicationKeyStore;
   enableEncryption?: boolean;
+  integrityCheck?: DatabaseIntegrityCheckMode;
 }
 
 type DatabaseKind = 'blank' | 'legacy' | 'managed';
@@ -53,11 +73,6 @@ const sqliteCode = (error: unknown): string | undefined => {
     return undefined;
   const code = (error as { code?: unknown }).code;
   return typeof code === 'string' ? code : undefined;
-};
-
-const isCorruptionError = (error: unknown) => {
-  const code = sqliteCode(error);
-  return code === 'SQLITE_CORRUPT' || code === 'SQLITE_NOTADB';
 };
 
 const prepareDirectory = (databasePath: string) => {
@@ -124,18 +139,42 @@ const configureConnection = (sqlite: Database.Database, inMemory: boolean) => {
 };
 
 const verifyHealth = (sqlite: Database.Database) => {
+  let result: ReturnType<typeof checkDatabaseIntegrity>;
   try {
-    if (sqlite.pragma('quick_check', { simple: true }) !== 'ok') {
-      throw new Error('quick_check failed');
-    }
-    if ((sqlite.pragma('foreign_key_check') as unknown[]).length !== 0) {
-      throw new Error('foreign_key_check failed');
-    }
+    result = checkDatabaseIntegrity(sqlite);
   } catch (error) {
+    throw new DatabaseLifecycleError(
+      'database_open_failed',
+      'SQLite could not complete database health verification.',
+      { sqliteCode: sqliteCode(error) },
+      { cause: error },
+    );
+  }
+  if (!result.ok) {
     throw new DatabaseLifecycleError(
       'database_integrity_failed',
       'SQLite health verification failed.',
-      { sqliteCode: sqliteCode(error) },
+      { sqliteCode: result.sqliteCode },
+      {
+        cause: Object.assign(new Error(`${result.failure} failed`), {
+          code: result.sqliteCode,
+        }),
+      },
+    );
+  }
+};
+
+const verifyReadable = (sqlite: Database.Database) => {
+  try {
+    probeDatabaseReadable(sqlite);
+  } catch (error) {
+    const code = sqliteCode(error);
+    throw new DatabaseLifecycleError(
+      isCorruptionCode(code)
+        ? 'database_integrity_failed'
+        : 'database_open_failed',
+      'SQLite could not read the database schema.',
+      { sqliteCode: code },
       { cause: error },
     );
   }
@@ -168,7 +207,9 @@ export const createDatabaseRuntime = (
 ): DatabaseRuntime => {
   let currentState: DatabaseRuntime['state'] = 'new';
   let connection: Database.Database | null = null;
+  let connectionKeyHex: string | null = null;
   const inMemory = options.databasePath === ':memory:';
+  const deferIntegrityCheck = options.integrityCheck === 'deferred';
   const cleanup = options.cleanupStaged ?? cleanupStagedDatabase;
   const opener =
     options.openConnection ?? ((databasePath) => new Database(databasePath));
@@ -177,6 +218,7 @@ export const createDatabaseRuntime = (
   const closeConnection = () => {
     if (connection?.open) connection.close();
     connection = null;
+    connectionKeyHex = null;
   };
 
   const preflightMigrationHistory = (sqlite: Database.Database) => {
@@ -202,7 +244,7 @@ export const createDatabaseRuntime = (
     const applied = readAppliedMigrationHistory(sqlite);
     assertSupportedMigrationHistory(applied, packagedHistory);
     const pendingMigrationId = getPendingMigrationId(applied, packagedHistory);
-    if (!pendingMigrationId) return;
+    if (!pendingMigrationId) return false;
 
     let migrationFailure: DatabaseLifecycleError | undefined;
     try {
@@ -236,6 +278,7 @@ export const createDatabaseRuntime = (
       readAppliedMigrationHistory(sqlite),
       packagedHistory,
     );
+    return true;
   };
 
   const isEncryptedDatabaseTarget = (
@@ -334,6 +377,7 @@ export const createDatabaseRuntime = (
         );
       }
     }
+    connectionKeyHex = keyHex;
     return sqlite;
   };
 
@@ -428,7 +472,8 @@ export const createDatabaseRuntime = (
       try {
         connection = openWithKey(options.databasePath, keyHex);
         try {
-          verifyHealth(connection);
+          if (deferIntegrityCheck) verifyReadable(connection);
+          else verifyHealth(connection);
         } catch (error) {
           const cause =
             error instanceof DatabaseLifecycleError ? error.cause : error;
@@ -451,18 +496,13 @@ export const createDatabaseRuntime = (
 
           if (
             !inMemory &&
-            (isCorruptionError(error) ||
-              error instanceof DatabaseLifecycleError)
-          ) {
-            if (
-              isCorruptionError(cause) ||
+            (isCorruptionCode(code) ||
               (error instanceof DatabaseLifecycleError &&
-                error.code === 'database_integrity_failed')
-            ) {
-              connection = replaceExisting('integrity-failed', keyHex);
-              currentState = 'open';
-              return connection;
-            }
+                error.code === 'database_integrity_failed'))
+          ) {
+            connection = replaceExisting('integrity-failed', keyHex);
+            currentState = 'open';
+            return connection;
           }
           throw error;
         }
@@ -478,14 +518,19 @@ export const createDatabaseRuntime = (
         }
         preflightMigrationHistory(connection);
         configureConnection(connection, inMemory);
-        applyPendingMigrations(connection);
-        verifyHealth(connection);
+        const migrated = applyPendingMigrations(connection);
+        // Migrations run with foreign keys off, so always prove them after.
+        if (migrated || !deferIntegrityCheck) verifyHealth(connection);
         currentState = 'open';
         return connection;
       } catch (error) {
         closeConnection();
         throw error;
       }
+    },
+    integrityCheckRequest() {
+      if (inMemory || !connection || currentState !== 'open') return null;
+      return { databasePath: options.databasePath, keyHex: connectionKeyHex };
     },
     getConnection() {
       if (currentState === 'closed') {
