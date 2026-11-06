@@ -1,3 +1,4 @@
+import { PlutoActionCard } from './PlutoActionCard';
 import type React from 'react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -89,6 +90,9 @@ export const MeetingAskPlutoPanel: React.FC<MeetingAskPlutoPanelProps> = ({
                 {message.content}
               </ReactMarkdown>
             </div>
+            {message.packet?.actionBatchId && (
+              <PlutoActionCard batchId={message.packet.actionBatchId} />
+            )}
             {message.packet?.citations.length ? (
               <details className="note-ask-panel__evidence">
                 <summary>View evidence</summary>

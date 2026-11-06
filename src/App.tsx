@@ -1559,6 +1559,34 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    const open = (event: Event) => {
+      const result = (event as CustomEvent<{ kind: string; id: string }>)
+        .detail;
+      if (!result?.id) return;
+      setPreMeetingBriefVisible(false);
+      if (result.kind === 'note') {
+        setSelectedMeetingId(null);
+        setSelectedNoteId(result.id);
+        setActiveTab('notes');
+      }
+      if (result.kind === 'task') {
+        setSelectedMeetingId(null);
+        setSelectedTaskId(result.id);
+        setActiveTab('tasks');
+      }
+      if (result.kind === 'meeting') void handleOpenMeeting(result.id);
+    };
+    window.addEventListener('pluto:open-action-result', open);
+    return () => window.removeEventListener('pluto:open-action-result', open);
+  });
+
+  useEffect(() =>
+    window.ipcRenderer.on('PLUTO_ACTIONS_CHANGED', () => {
+      void refreshSelectedMeetingState();
+    }),
+  );
+
   // "Open in Notes" from prep and other places outside Notes.
   useEffect(() => {
     const open = (event: Event) => {

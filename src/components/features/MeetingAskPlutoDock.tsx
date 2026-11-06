@@ -1,3 +1,4 @@
+import { PlutoActionCard } from './PlutoActionCard';
 import {
   ChevronDown,
   ChevronUp,
@@ -230,6 +231,11 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                     >
                       {message.content}
                     </ReactMarkdown>
+                    {message.packet?.actionBatchId && (
+                      <PlutoActionCard
+                        batchId={message.packet?.actionBatchId}
+                      />
+                    )}
                     {message.interrupted ? (
                       <span className="meeting-ask-pluto-dock__interrupted">
                         Stopped

@@ -21,6 +21,7 @@ export interface PersonChatCitation {
 }
 
 export interface PersonChatMessage {
+  actionBatchId?: string;
   id: string;
   threadId: string;
   role: 'user' | 'assistant';

@@ -20,6 +20,7 @@ export interface WorkspaceChatThread {
 }
 
 export interface WorkspaceChatMessagePayload {
+  actionBatchId?: string;
   citations?: unknown[];
   trustStatus?: 'grounded' | 'inferred' | 'needs_review';
   unsupportedClaimCount?: number;

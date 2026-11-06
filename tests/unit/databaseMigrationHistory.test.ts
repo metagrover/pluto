@@ -134,7 +134,8 @@ describe('database migration history', () => {
     const history = readPackagedMigrationHistory(
       path.join(process.cwd(), 'drizzle'),
     );
-    expect(history).toHaveLength(24);
+    expect(history).toHaveLength(25);
+    expect(history[24]).toMatchObject({ tag: '0024_pluto_actions' });
     expect(history[0]).toMatchObject({ tag: '0000_pluto_baseline' });
     expect(history[1]).toMatchObject({ tag: '0001_voice_representatives' });
     expect(history[2]).toMatchObject({

@@ -1,3 +1,4 @@
+import { PlutoActionCard } from './PlutoActionCard';
 import {
   Archive,
   ArchiveRestore,
@@ -608,6 +609,9 @@ export const PersonChatDock: React.FC<{
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {message.content}
                     </ReactMarkdown>
+                    {message.actionBatchId && (
+                      <PlutoActionCard batchId={message.actionBatchId} />
+                    )}
                     {message.status === 'interrupted' ? (
                       <small>Stopped</small>
                     ) : null}
