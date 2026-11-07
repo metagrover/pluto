@@ -112,13 +112,16 @@ export function undoActionChanges(
     for (const { name } of schema) {
       const fks = db
         .prepare(`PRAGMA foreign_key_list(${quote(name)})`)
-        .all() as Array<{ table: string; from: string; to: string }>;
-      for (const fk of fks.filter(
-        (f) => f.table === parent.table && f.to in parent.after!,
-      )) {
+        .all() as Array<{ table: string; from: string; to: string | null }>;
+      for (const fk of fks.filter((f) => f.table === parent.table)) {
+        // A REFERENCES clause without a column points at the primary key and
+        // is reported with a null target column.
+        const to = fk.to ?? (parent.keys.length === 1 ? parent.keys[0] : null);
+        if (!to || !(to in parent.after!))
+          throw new Error('Invalid action history');
         const refs = db
           .prepare(`SELECT * FROM ${quote(name)} WHERE ${quote(fk.from)} = ?`)
-          .all(parent.after![fk.to]) as Row[];
+          .all(parent.after![to]) as Row[];
         for (const row of refs) {
           if (
             !changes.some(

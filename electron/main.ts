@@ -8464,45 +8464,30 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               : conversationResolution.turnMode === 'act' ||
                 isTaskChatRequest(queryText)
           ) {
-            const taskReply = /^(?:show|list|what)\b/i.test(queryText.trim())
-              ? await prepareTaskChatReply({
-                  query: queryText,
-                  previousAnswer: previousAssistantTurn?.content,
-                  snapshot: personalTasks.listPersonalTasks(),
-                  canShareSource: (meetingId) => {
-                    const meeting = db.getAskPlutoMeeting(meetingId);
-                    return Boolean(
-                      meeting &&
-                        !containsConfidentialAside(
-                          `${meeting.title}\n${buildMeetingNotesEvidenceDocument(meeting).notesText}`,
-                        ),
-                    );
-                  },
-                  generate: async (prompt) => {
-                    const provider = await getProvider(settings);
-                    return provider.answerAskPluto(prompt, {
-                      signal: controller.signal,
-                      mode: 'fast',
-                      jsonMode: true,
-                    });
-                  },
-                })
-              : (await preparePlutoActions({
+            // Action requests and their follow-ups were prepared above; this
+            // path lists tasks or proposes a single task change.
+            const taskReply = await prepareTaskChatReply({
+              query: queryText,
+              previousAnswer: previousAssistantTurn?.content,
+              snapshot: personalTasks.listPersonalTasks(),
+              canShareSource: (meetingId) => {
+                const meeting = db.getAskPlutoMeeting(meetingId);
+                return Boolean(
+                  meeting &&
+                    !containsConfidentialAside(
+                      `${meeting.title}\n${buildMeetingNotesEvidenceDocument(meeting).notesText}`,
+                    ),
+                );
+              },
+              generate: async (prompt) => {
+                const provider = await getProvider(settings);
+                return provider.answerAskPluto(prompt, {
                   signal: controller.signal,
-                  force: true,
-                  requestId,
-                  query: queryText,
-                  previousAnswer: previousAssistantTurn?.content,
-                  turns: priorTurns,
-                  generate: async (prompt) =>
-                    (
-                      await getProvider(settings)
-                    ).answerAskPluto(prompt, {
-                      signal: controller.signal,
-                      mode: 'fast',
-                      jsonMode: true,
-                    }),
-                }))!;
+                  mode: 'fast',
+                  jsonMode: true,
+                });
+              },
+            });
             outputCharacters = taskReply.answer.length;
             generationCompletedAt = Date.now();
             finalizationStartedAt = generationCompletedAt;

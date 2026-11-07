@@ -1559,6 +1559,12 @@ function App() {
     }
   };
 
+  // Action results open meetings through handlers defined further down; the
+  // ref keeps these listeners subscribed once while calling the latest ones.
+  const actionResultHandlersRef = useRef<{
+    openMeeting: (id: string) => unknown;
+    refreshMeeting: () => Promise<void>;
+  } | null>(null);
   useEffect(() => {
     const open = (event: Event) => {
       const result = (event as CustomEvent<{ kind: string; id: string }>)
@@ -1575,16 +1581,19 @@ function App() {
         setSelectedTaskId(result.id);
         setActiveTab('tasks');
       }
-      if (result.kind === 'meeting') void handleOpenMeeting(result.id);
+      if (result.kind === 'meeting')
+        void actionResultHandlersRef.current?.openMeeting(result.id);
     };
     window.addEventListener('pluto:open-action-result', open);
     return () => window.removeEventListener('pluto:open-action-result', open);
-  });
+  }, []);
 
-  useEffect(() =>
-    window.ipcRenderer.on('PLUTO_ACTIONS_CHANGED', () => {
-      void refreshSelectedMeetingState();
-    }),
+  useEffect(
+    () =>
+      window.ipcRenderer.on('PLUTO_ACTIONS_CHANGED', () => {
+        void actionResultHandlersRef.current?.refreshMeeting();
+      }),
+    [],
   );
 
   // "Open in Notes" from prep and other places outside Notes.
@@ -1794,6 +1803,10 @@ function App() {
     },
     [activeTab, selectedMeetingId, selectedPersonId, selectedProjectId],
   );
+  actionResultHandlersRef.current = {
+    openMeeting: handleOpenMeeting,
+    refreshMeeting: refreshSelectedMeetingState,
+  };
 
   useEffect(
     () =>

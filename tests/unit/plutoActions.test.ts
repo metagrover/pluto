@@ -9,6 +9,8 @@ import * as db from '../../electron/db';
 import {
   applyPlutoActionBatch,
   explicitRelativeDeadline,
+  isPlutoActionFollowup,
+  isPlutoActionRequest,
   getPlutoActionBatch,
   preparePlutoActions,
   undoPlutoActionBatch,
@@ -315,6 +317,105 @@ describe('shared Pluto actions', () => {
       expect(reply?.actionBatchId).toBeUndefined();
     }
     expect(tasks.listPersonalTasks().tasks).toHaveLength(0);
+  });
+  it('recognizes action requests without capturing ordinary chat requests', () => {
+    for (const query of [
+      'Create a task to email Bob tomorrow',
+      'Add this to my notes',
+      'Make a note of the pricing decision',
+      'Turn these action items into tasks',
+      'Mark the deck review task done',
+      'Add pricing to next time with Priya',
+      'Please reopen the launch task',
+      'Create a task to send an email to Bob',
+    ])
+      expect(isPlutoActionRequest(query), query).toBe(true);
+    for (const query of [
+      'Turn this into an email to Sam',
+      'Make this shorter',
+      'Update me on what was decided in this meeting',
+      'Update me on the notes',
+      'Create an email from these notes',
+      'Complete this sentence',
+      'Do not create a task',
+    ])
+      expect(isPlutoActionRequest(query), query).toBe(false);
+  });
+  it('continues an action only for a short reply naming its target', () => {
+    const turns = [
+      { role: 'user' as const, content: 'Add this to my notes' },
+      {
+        role: 'assistant' as const,
+        content: 'Which note should I add this to?',
+      },
+    ];
+    expect(isPlutoActionFollowup('The launch note', turns)).toBe(true);
+    expect(
+      isPlutoActionFollowup('What did Priya say about pricing?', turns),
+    ).toBe(false);
+    expect(isPlutoActionFollowup('Summarize the last meeting', turns)).toBe(
+      false,
+    );
+  });
+  it('does not treat a source named for today as a deadline', () => {
+    expect(
+      explicitRelativeDeadline("Create a task about today's meeting"),
+    ).toBeUndefined();
+  });
+  it('keeps due dates on edits that only rename a task', async () => {
+    const taskId = tasks.savePersonalTask({ title: 'Call mom' });
+    const reply = await preparePlutoActions({
+      requestId: randomUUID(),
+      query: "Edit the task I added today to say 'Call Ana'",
+      generate: async () =>
+        JSON.stringify({
+          actions: [{ kind: 'edit_task', taskId, title: 'Call Ana' }],
+        }),
+    });
+    const batch = getPlutoActionBatch(reply!.actionBatchId!);
+    expect(batch.items[0].action).toEqual({
+      kind: 'edit_task',
+      taskId,
+      title: 'Call Ana',
+    });
+  });
+  it('acts inside a recurring meeting whose title other meetings share', async () => {
+    for (const id of ['sync-1', 'sync-2'])
+      db.saveMeeting({
+        id,
+        title: 'Weekly planning',
+        started_at: new Date().toISOString(),
+        user_notes: 'Notes',
+        transcript_json: '[]',
+        user_edits_json: '{}',
+      });
+    const reply = await preparePlutoActions({
+      requestId: randomUUID(),
+      query: 'Add a task to send the weekly planning deck',
+      context: { meetingId: 'sync-2' },
+      generate: async () =>
+        JSON.stringify({
+          actions: [
+            {
+              kind: 'create_task',
+              title: 'Send the weekly planning deck',
+              sourceMeetingId: 'sync-2',
+            },
+          ],
+        }),
+    });
+    expect(reply?.actionBatchId, reply?.answer).toBeTruthy();
+  });
+  it('lets provider failures reach the chat instead of answering with them', async () => {
+    await expect(
+      preparePlutoActions({
+        requestId: randomUUID(),
+        query: 'Create a task',
+        generate: async () => {
+          throw new Error('Not enough memory');
+        },
+      }),
+    ).rejects.toThrow('Not enough memory');
   });
   it('does not call the planner for discussion or a negated command', async () => {
     const generate = vi.fn();

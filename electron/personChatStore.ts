@@ -227,6 +227,12 @@ export const createPersonChatStore = (sqlite: Database.Database) => {
             JSON.stringify(input.citations ?? []),
             now,
           );
+        if (input.actionBatchId)
+          sqlite
+            .prepare(
+              'UPDATE person_chat_messages SET action_batch_id = ? WHERE id = ?',
+            )
+            .run(input.actionBatchId, id);
         const firstUser = sqlite
           .prepare(`
             SELECT content FROM person_chat_messages
@@ -250,12 +256,6 @@ export const createPersonChatStore = (sqlite: Database.Database) => {
           );
       });
       transaction();
-      if (input.actionBatchId)
-        sqlite
-          .prepare(
-            'UPDATE person_chat_messages SET action_batch_id = ? WHERE id = ?',
-          )
-          .run(input.actionBatchId, id);
       return mapMessage(
         sqlite
           .prepare('SELECT * FROM person_chat_messages WHERE id = ?')

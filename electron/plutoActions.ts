@@ -75,27 +75,72 @@ const hash = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const append = (before: string, text: string) =>
   [before.trimEnd(), text].filter(Boolean).join('\n\n');
-export const isPlutoActionRequest = (query: string) =>
-  /^(?:(?:please|can you|could you|would you)\s+)*(?:add|append|save|create|make|turn|convert|extract|edit|update|reschedule|move|mark|complete|finish|reopen|put|record|discuss)\b/i.test(
-    query.trim(),
-  ) &&
-  /\b(?:notes?|tasks?|to-?dos?|action items?|next time|agenda|deadline|due|complete|completed|done|reopen|it|this|that)\b/i.test(
-    query,
-  );
+const GENERIC_TITLE =
+  /^(?:untitled|notes?|tasks?|to-?dos?|agenda|meeting|sync|call|1:1)$/i;
+const escapeRegExp = (text: string) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** True when the request names this title as a whole phrase. */
+const mentionsSourceTitle = (query: string, title: string) => {
+  const name = title.trim();
+  if (name.length < 3 || GENERIC_TITLE.test(name)) return false;
+  return new RegExp(
+    `(?:^|[^\\p{L}\\p{N}])${escapeRegExp(name)}(?:$|[^\\p{L}\\p{N}])`,
+    'iu',
+  ).test(query);
+};
+const POLITE = String.raw`^(?:(?:please|can you|could you|would you|will you)\s+)*`;
+const TARGET = String.raw`(?:notes?|tasks?|to-?dos?|action items?|next time|agenda|deadline|due date)`;
+// A verb alone is not enough: "make this shorter" or "turn this into an email"
+// are ordinary chat requests. Each pattern needs a note, task or agenda target.
+const ACTION_REQUEST_PATTERNS = [
+  new RegExp(
+    `${POLITE}(?:add|append|save|create|extract|edit|update|reschedule|move|put|record|discuss)\\b(?!\\s+me\\b).*\\b${TARGET}\\b`,
+    'i',
+  ),
+  new RegExp(
+    `${POLITE}(?:turn|convert)\\b.*\\binto\\s+(?:an?\\s+|my\\s+)?(?:new\\s+)?${TARGET}\\b`,
+    'i',
+  ),
+  new RegExp(
+    `${POLITE}make\\s+(?:me\\s+)?(?:an?\\s+)?(?:new\\s+)?(?:note|task|to-?do)\\b`,
+    'i',
+  ),
+  new RegExp(
+    `${POLITE}(?:mark|complete|finish|reopen)\\b.*\\b(?:${TARGET}|done|complete|completed|finished|open)\\b`,
+    'i',
+  ),
+];
+const DRAFT_REQUEST =
+  /\b(?:an?|the)\s+(?:(?:short|quick|follow-?up)\s+)?(?:email|e-?mail|slack(?:\s+message)?|message|draft|reply)\b/i;
+const TASK_OR_AGENDA =
+  /\b(?:tasks?|to-?dos?|action items?|agenda|next time)\b/i;
+export const isPlutoActionRequest = (query: string) => {
+  const text = query.trim();
+  if (DRAFT_REQUEST.test(text) && !TASK_OR_AGENDA.test(text)) return false;
+  return ACTION_REQUEST_PATTERNS.some((pattern) => pattern.test(text));
+};
 
+// A reply to an action clarification names a target ("the launch note",
+// "Priya"). A new question starts a new turn instead of continuing the action.
+const NEW_QUESTION =
+  /^(?:what|who|whom|whose|when|where|why|how|which|did|does|do|is|are|was|were|can|could|would|should|will|tell|summari[sz]e|show|list|draft|write|explain|catch)\b/i;
 export function isPlutoActionFollowup(
   query: string,
   turns: Array<{ role: 'user' | 'assistant'; content: string }>,
 ) {
   const last = turns.at(-1);
   const user = [...turns].reverse().find((t) => t.role === 'user');
+  const text = query.trim();
   return (
     !!last &&
     last.role === 'assistant' &&
     /(?:\?|please (?:name|specify)|choose|which)/i.test(last.content) &&
     !!user &&
     isPlutoActionRequest(user.content) &&
-    !/^(?:no|cancel|stop|never mind)\b/i.test(query.trim())
+    !/^(?:no|cancel|stop|never mind)\b/i.test(text) &&
+    !NEW_QUESTION.test(text) &&
+    !text.endsWith('?') &&
+    text.split(/\s+/).length <= 15
   );
 }
 
@@ -103,8 +148,9 @@ export function explicitRelativeDeadline(
   query: string,
   now = new Date(),
 ): string | undefined {
+  // "today's meeting" names a source, not a deadline.
   const match = query.match(
-    /\b(?:in\s+(a|one|two|\d+)\s+(day|week)s?|tomorrow|today)\b/i,
+    /\b(?:in\s+(a|one|two|\d+)\s+(day|week)s?|tomorrow|today)\b(?!['’]s)/i,
   );
   if (!match) return undefined;
   const count = match[1]
@@ -317,57 +363,56 @@ export async function preparePlutoActions(input: {
       actionBatchId: (JSON.parse(previous.batch_json) as PlutoActionBatch).id,
     };
   const context = { ...(input.context ?? {}) };
-  const namedNotes = store.notesStore
-    .listNotes()
-    .filter(
-      (n) =>
-        n.title.length > 2 &&
-        input.query.toLocaleLowerCase().includes(n.title.toLocaleLowerCase()),
+  const allNotes = store.notesStore.listNotes();
+  // A source named in the request becomes the context only when the chat has
+  // none and exactly one source carries that name. Recurring meetings share a
+  // title, so several matches leave the target to the planner's clarification.
+  if (!context.noteId && !context.meetingId) {
+    const namedNotes = allNotes.filter((n) =>
+      mentionsSourceTitle(input.query, n.title),
     );
-  if (!context.noteId && namedNotes.length === 1)
-    context.noteId = namedNotes[0].id;
-  const namedMeetings = store.db
-    .prepare(
-      'SELECT id, title FROM meetings ORDER BY created_at DESC LIMIT 150',
-    )
-    .all() as Array<{ id: string; title: string }>;
-  const matchingMeetings = namedMeetings.filter(
-    (m) =>
-      m.title.length > 2 &&
-      input.query.toLocaleLowerCase().includes(m.title.toLocaleLowerCase()),
-  );
-  if (!context.meetingId && matchingMeetings.length === 1)
-    context.meetingId = String(matchingMeetings[0].id);
-  if (namedNotes.length > 1 || matchingMeetings.length > 1)
-    return {
-      answer:
-        'Several sources match that name. Open the intended note or meeting and ask there.',
-    };
+    if (namedNotes.length === 1) context.noteId = namedNotes[0].id;
+    const namedMeetings = (
+      store.db
+        .prepare(
+          'SELECT id, title FROM meetings ORDER BY created_at DESC LIMIT 150',
+        )
+        .all() as Array<{ id: string; title: string | null }>
+    ).filter((m) => mentionsSourceTitle(input.query, m.title ?? ''));
+    if (!namedNotes.length && namedMeetings.length === 1)
+      context.meetingId = String(namedMeetings[0].id);
+  }
   const safe = (text: string) => !containsConfidentialAside(text);
-  const notes = store.notesStore
-    .listNotes()
-    .filter((n) => safe(`${n.title}\n${n.content}`));
-  const personal = tasks.listPersonalTasks().tasks.filter(
-    (t) =>
-      !t.needsReview &&
-      safe(`${t.entity.name}\n${t.description}`) &&
-      (!t.sourceMeetingId ||
-        (() => {
-          const m = store.getAskPlutoMeeting(t.sourceMeetingId!);
-          return !!m && safe(JSON.stringify(m));
-        })()),
-  );
+  const notes = allNotes.filter((n) => safe(`${n.title}\n${n.content}`));
+  const meetingSafety = new Map<string, boolean>();
+  const meetingIsSafe = (meetingId: string) => {
+    let value = meetingSafety.get(meetingId);
+    if (value === undefined) {
+      const m = store.getAskPlutoMeeting(meetingId);
+      value = !!m && safe(JSON.stringify(m));
+      meetingSafety.set(meetingId, value);
+    }
+    return value;
+  };
+  const personal = tasks
+    .listPersonalTasks()
+    .tasks.filter(
+      (t) =>
+        !t.needsReview &&
+        safe(`${t.entity.name}\n${t.description}`) &&
+        (!t.sourceMeetingId || meetingIsSafe(t.sourceMeetingId)),
+    );
   const people = store.getEntitiesByType('person').filter((p) => safe(p.name));
   const projects = store
     .getEntitiesByType('project')
     .filter((p) => safe(p.name));
   const meeting = context.meetingId ? requireMeeting(context.meetingId) : null;
+  const meetingEvidence = meeting
+    ? buildMeetingNotesEvidenceDocument(meeting)
+    : null;
   if (
     (context.noteId && !notes.some((n) => n.id === context.noteId)) ||
-    (meeting &&
-      !safe(
-        `${meeting.title}\n${buildMeetingNotesEvidenceDocument(meeting).notesText}`,
-      ))
+    (meeting && !safe(`${meeting.title}\n${meetingEvidence!.notesText}`))
   )
     return {
       answer:
@@ -375,7 +420,7 @@ export async function preparePlutoActions(input: {
     };
   const sourceSnapshot = hash([
     context.noteId ? requireNote(context.noteId) : null,
-    meeting ? buildMeetingNotesEvidenceDocument(meeting).sourceRevision : null,
+    meetingEvidence?.sourceRevision ?? null,
   ]);
   const now = new Date();
   const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -420,21 +465,22 @@ ${JSON.stringify({
     ? {
         id: meeting.id,
         title: meeting.title,
-        notes: buildMeetingNotesEvidenceDocument(meeting).notesText.slice(
-          0,
-          24000,
-        ),
+        notes: meetingEvidence!.notesText.slice(0, 24000),
       }
     : undefined,
 })}`;
+  // Provider failures (memory refusals, unavailable models) propagate so each
+  // chat keeps its own fallback and error handling. Only invalid plans and
+  // unresolved targets become clarifications.
+  const raw = await input.generate(prompt);
+  input.signal?.throwIfAborted();
   try {
     const result = z
       .union([
         z.object({ question: z.string().min(1).max(1000) }).strict(),
         z.object({ actions: z.array(actionSchema).min(1).max(12) }).strict(),
       ])
-      .parse(JSON.parse(await input.generate(prompt)));
-    input.signal?.throwIfAborted();
+      .parse(JSON.parse(raw));
     if (
       sourceSnapshot !==
       hash([
@@ -450,8 +496,12 @@ ${JSON.stringify({
           'The source changed while I prepared this. Please ask again using its latest content.',
       };
     if ('question' in result) return { answer: result.question };
+    // Correct the planner's date arithmetic for an explicit relative date. An
+    // edit only gets a date when the planner chose to change its due date.
     const dated = result.actions.filter(
-      (a) => a.kind === 'create_task' || a.kind === 'edit_task',
+      (a): a is Extract<PlutoAction, { kind: 'create_task' | 'edit_task' }> =>
+        a.kind === 'create_task' ||
+        (a.kind === 'edit_task' && a.dueDate !== undefined),
     );
     const relative = explicitRelativeDeadline(input.query, now);
     if (dated.length === 1 && relative) dated[0].dueDate = relative;
