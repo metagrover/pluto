@@ -73,6 +73,7 @@ const expectedTables = [
   'person_chat_messages',
   'person_chat_threads',
   'person_name_aliases',
+  'pluto_action_batches',
   'prep_attendee_links',
   'prep_attendee_rejections',
   'project_aliases',
