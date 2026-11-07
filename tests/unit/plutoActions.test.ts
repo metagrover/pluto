@@ -9,9 +9,9 @@ import * as db from '../../electron/db';
 import {
   applyPlutoActionBatch,
   explicitRelativeDeadline,
+  getPlutoActionBatch,
   isPlutoActionFollowup,
   isPlutoActionRequest,
-  getPlutoActionBatch,
   preparePlutoActions,
   undoPlutoActionBatch,
 } from '../../electron/plutoActions';
