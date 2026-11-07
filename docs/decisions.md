@@ -1,3 +1,9 @@
+## 2026-11-07 - Offer answer to-dos only for concrete open actions
+
+- **Status:** Accepted; covered by answer-action, note-suggestion and meeting-panel regressions.
+- **Supersedes:** The first-list-item-or-sentence prefill in “2026-11-04 - Link notes as prep, offer notes when a meeting starts, act on answers, and mark what came up”, for answer shortcuts.
+- **Decision:** Extract a concrete outstanding action before showing an answer shortcut. Factual summaries, completed work, refusals, clarification prompts, action-preview instructions and no-action replies produce no shortcut. Note task suggestions use the same conservative eligibility check. If no eligible item exists, offer no suggested to-do or next-time item; users can still create their own tasks directly.
+
 ## 2026-11-07 - Preview and apply shared actions across Pluto chats
 
 - **Status:** Implemented with persistence and component regression coverage; live provider quality still requires qualification.

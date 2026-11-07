@@ -224,6 +224,10 @@ describe('MeetingAskPlutoPanel', () => {
   });
 
   it('offers to-do and Next time actions under an answer', async () => {
+    invoke.mockResolvedValue({
+      ...response,
+      answer: 'Send the API proposal to Priya.',
+    });
     await render({ person: { id: 'person-1', name: 'Priya' } });
     await askQuestion('What did we decide?');
 
