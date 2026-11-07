@@ -44,7 +44,7 @@ const type = (input: HTMLInputElement, value: string) => {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 };
 
-it('starts from the first list item or the first sentence, without markup', () => {
+it('extracts an actionable item without markup', () => {
   expect(
     answerItemDraft(
       'Two things:\n\n- **Send** the SSO numbers [Acme call]\n- Book QA',
@@ -88,4 +88,32 @@ it('adds to Next time with the person, and Cancel adds nothing', async () => {
   await act(async () => button('Add').click());
   expect(api.addToNextTime).toHaveBeenCalledWith(person, 'Ask about hiring');
   expect(host.textContent).toContain('Added to Next time with Priya');
+});
+
+it.each([
+  'The team decided to use GraphQL for the API layer.',
+  'Hello! How can I help?',
+  'No new tasks.',
+  '- No further action is needed.',
+  'I could not prepare that change. Please specify the note or task.',
+  'Review the proposed changes below. Nothing has been changed yet.',
+  '- The deadline is Friday.',
+  '- [x] Send the proposal',
+  'Priya already sent the deck.',
+])('does not offer a to-do for non-actionable reply: %s', async (answer) => {
+  expect(answerItemDraft(answer)).toBe('');
+  await act(async () =>
+    root.render(
+      <AnswerActions answer={answer} person={{ id: 'p1', name: 'Priya' }} />,
+    ),
+  );
+  expect(host.querySelector('button')).toBeNull();
+  expect(api.saveTask).not.toHaveBeenCalled();
+});
+it('skips facts and finds a concrete action later in the reply', () => {
+  expect(
+    answerItemDraft(
+      'Summary:\n- Budget is approved.\n- Send the approved budget to Finance.',
+    ),
+  ).toBe('Send the approved budget to Finance');
 });

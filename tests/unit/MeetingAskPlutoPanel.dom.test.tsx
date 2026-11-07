@@ -146,6 +146,37 @@ describe('MeetingAskPlutoPanel', () => {
     vi.restoreAllMocks();
   });
 
+  it('renders an action preview returned by meeting chat without applying it', async () => {
+    invoke.mockImplementation(async (channel: string) =>
+      channel === 'PLUTO_ACTION_GET'
+        ? {
+            id: 'batch',
+            state: 'pending',
+            items: [
+              {
+                id: 'action',
+                action: {
+                  kind: 'append_meeting',
+                  meetingId: 'meeting-1',
+                  content: 'Decision',
+                },
+                destination: 'Architecture Review',
+                preview: 'Decision',
+                revision: 'r',
+              },
+            ],
+          }
+        : { ...response, actionBatchId: 'batch' },
+    );
+    await render();
+    await askQuestion('Add this decision to the meeting notes');
+    expect(
+      container.querySelector('[aria-label="Proposed changes"]'),
+    ).not.toBeNull();
+    expect(
+      invoke.mock.calls.some(([channel]) => channel === 'PLUTO_ACTION_APPLY'),
+    ).toBe(false);
+  });
   it('is the Notes Ask Pluto panel, scoped to this meeting', async () => {
     await render();
 
@@ -193,6 +224,10 @@ describe('MeetingAskPlutoPanel', () => {
   });
 
   it('offers to-do and Next time actions under an answer', async () => {
+    invoke.mockResolvedValue({
+      ...response,
+      answer: 'Send the API proposal to Priya.',
+    });
     await render({ person: { id: 'person-1', name: 'Priya' } });
     await askQuestion('What did we decide?');
 

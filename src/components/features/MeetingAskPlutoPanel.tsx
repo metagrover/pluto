@@ -8,6 +8,7 @@ import type { MeetingAskPlutoConversationMessage } from '../../types/askPluto';
 import { MEETING_ASK_PLUTO_LIMITS } from '../../utils/meetingAskPlutoRequest';
 import { AnswerActions } from './AnswerActions';
 import { AskPlutoSidebar } from './AskPlutoSidebar';
+import { PlutoActionCard } from './PlutoActionCard';
 
 interface MeetingAskPlutoPanelProps {
   meeting: Meeting;
@@ -89,6 +90,9 @@ export const MeetingAskPlutoPanel: React.FC<MeetingAskPlutoPanelProps> = ({
                 {message.content}
               </ReactMarkdown>
             </div>
+            {message.packet?.actionBatchId && (
+              <PlutoActionCard batchId={message.packet.actionBatchId} />
+            )}
             {message.packet?.citations.length ? (
               <details className="note-ask-panel__evidence">
                 <summary>View evidence</summary>

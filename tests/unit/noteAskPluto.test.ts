@@ -245,3 +245,11 @@ describe('generateWithMemoryFallback', () => {
     ).rejects.toThrow('Not enough memory');
   });
 });
+
+it('omits non-actionable and completed bullets from task suggestions', () => {
+  expect(
+    parseSuggestedTasks(
+      '- No new tasks.\n- The launch is on Friday.\n- Review the proposed changes below.\n- [x] Send the old proposal\n- Send the approved proposal to Finance.',
+    ),
+  ).toEqual(['Send the approved proposal to Finance']);
+});

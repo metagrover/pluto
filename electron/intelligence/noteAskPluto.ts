@@ -4,6 +4,7 @@ import type {
   NoteAskPlutoRequest,
   NoteAskPlutoTurn,
 } from '../../src/types/notes';
+import { isActionableAnswerItem } from '../../src/utils/actionableAnswer';
 import {
   type AskPlutoFailureReason,
   classifyAskPlutoFailure,
@@ -235,7 +236,7 @@ export const parseSuggestedTasks = (
   const tasks: string[] = [];
   for (const raw of answer.split('\n')) {
     const match = raw.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
-    if (!match) continue;
+    if (!match || /^\[[xX]\]\s+/.test(match[1])) continue;
     const title = match[1]
       .replace(/^\[[ xX]\]\s+/, '')
       .replace(/\*\*|__|`/g, '')
@@ -244,6 +245,7 @@ export const parseSuggestedTasks = (
       .trim();
     const key = title.toLowerCase();
     if (
+      !isActionableAnswerItem(title) ||
       title.length < 3 ||
       title.length > NOTE_ASK_PLUTO_LIMITS.taskTitleChars ||
       seen.has(key) ||

@@ -38,6 +38,7 @@ import type {
 } from '../../types/personChat';
 import { Logo } from '../Brand/Logo';
 import { AnswerActions } from './AnswerActions';
+import { PlutoActionCard } from './PlutoActionCard';
 
 const starterPrompts = (name: string) => [
   `Catch me up on ${name}`,
@@ -608,6 +609,9 @@ export const PersonChatDock: React.FC<{
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {message.content}
                     </ReactMarkdown>
+                    {message.actionBatchId && (
+                      <PlutoActionCard batchId={message.actionBatchId} />
+                    )}
                     {message.status === 'interrupted' ? (
                       <small>Stopped</small>
                     ) : null}

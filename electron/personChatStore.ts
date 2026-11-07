@@ -17,6 +17,7 @@ type ThreadRow = {
 };
 
 type MessageRow = {
+  action_batch_id?: string | null;
   id: string;
   thread_id: string;
   role: 'user' | 'assistant';
@@ -52,6 +53,7 @@ const mapThread = (row: ThreadRow): PersonChatThread => ({
 });
 
 const mapMessage = (row: MessageRow): PersonChatMessage => ({
+  ...(row.action_batch_id ? { actionBatchId: row.action_batch_id } : {}),
   id: row.id,
   threadId: row.thread_id,
   role: row.role,
@@ -203,6 +205,7 @@ export const createPersonChatStore = (sqlite: Database.Database) => {
       content: string;
       status?: PersonChatMessageStatus;
       citations?: PersonChatCitation[];
+      actionBatchId?: string;
     }): PersonChatMessage {
       const thread = requireThread(input.threadId, input.personId);
       if (thread.archived_at) throw new PersonChatThreadArchivedError();
@@ -224,6 +227,12 @@ export const createPersonChatStore = (sqlite: Database.Database) => {
             JSON.stringify(input.citations ?? []),
             now,
           );
+        if (input.actionBatchId)
+          sqlite
+            .prepare(
+              'UPDATE person_chat_messages SET action_batch_id = ? WHERE id = ?',
+            )
+            .run(input.actionBatchId, id);
         const firstUser = sqlite
           .prepare(`
             SELECT content FROM person_chat_messages
