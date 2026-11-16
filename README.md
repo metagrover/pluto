@@ -4,12 +4,11 @@
 
 <h1 align="center">Pluto</h1>
 
-<h3 align="center">Your work, remembered.</h3>
+<h3 align="center">Your notes, tasks, and meetings in one app.</h3>
 
 <p align="center">
-  Notes, tasks, meetings, and projects in one private app on your Mac.<br />
-  Pluto takes notes in your meetings, keeps track of what everyone promised,<br />
-  and answers questions about anything you've worked on.
+  Pluto takes notes in your meetings, keeps every follow-up in one list,<br />
+  and answers questions about your work. Private, on your Mac.
 </p>
 
 <p align="center">
