@@ -2,8 +2,8 @@
   color: hsl(var(--pro-text-main));
   --task-text-secondary: color-mix(
     in srgb,
-    hsl(var(--pro-text-main)) 75%,
-    hsl(var(--pro-bg))
+    hsl(var(--pro-text-muted)) 55%,
+    hsl(var(--pro-text-main))
   );
 }
 .tasks-workspace .text-pro-text-muted {
@@ -39,6 +39,13 @@
 }
 .task-button:hover {
   background: hsl(var(--pro-text-main) / 0.06);
+}
+.task-button-outline {
+  border: 1px solid hsl(var(--pro-border));
+  background: hsl(var(--pro-bg));
+}
+.task-button-outline:hover {
+  background: hsl(var(--pro-hover));
 }
 .task-button-primary {
   background: hsl(var(--pro-accent));
@@ -137,27 +144,47 @@
   border-color: hsl(var(--pro-accent) / 0.5);
 }
 .task-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 17px 8px;
-  border-radius: 4px;
+  min-width: 0;
 }
-.task-row:hover,
-.task-row.is-selected {
-  background: hsl(var(--pro-text-main) / 0.025);
+.task-row-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+}
+.task-row-summary:hover,
+.task-row-summary:focus-within {
+  background: hsl(var(--pro-text-main) / 0.035);
 }
 .task-check {
-  display: flex;
+  display: grid;
   width: 24px;
-  min-height: 28px;
+  height: 24px;
   flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
+  place-items: center;
+  border: 1px solid
+    color-mix(in srgb, var(--task-text-secondary) 80%, hsl(var(--pro-border)));
+  border-radius: 50%;
   color: var(--task-text-secondary);
 }
-.task-check:hover {
+.task-check:not(.task-review-marker) svg {
+  opacity: 0;
+}
+.task-check:not(.task-review-marker):is(
+    :hover,
+    :focus-visible,
+    [data-completed="true"]
+  ) {
+  border-color: hsl(var(--pro-accent) / 0.65);
+  background: hsl(var(--pro-accent) / 0.08);
   color: hsl(var(--pro-accent));
+}
+.task-check:is(:hover, :focus-visible, [data-completed="true"]) svg {
+  opacity: 1;
+}
+.task-review-marker {
+  border: 0;
 }
 .task-focus {
   display: flex;
@@ -191,18 +218,221 @@
 .tasks-workspace ::selection {
   background: hsl(var(--pro-accent) / 0.2);
 }
-.task-details {
-  animation: task-details-enter 160ms cubic-bezier(0.16, 1, 0.3, 1);
+.task-capture {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  padding: 5px 9px 5px 13px;
+  border: 1px solid hsl(var(--pro-border));
+  border-radius: 6px;
+  transition: border-color 120ms ease-out, background-color 120ms ease-out;
 }
-@keyframes task-details-enter {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
+.task-capture:hover {
+  background: hsl(var(--pro-surface));
+}
+.task-capture:focus-within {
+  border-color: hsl(var(--pro-accent));
+  background: hsl(var(--pro-surface));
+}
+.task-capture-icon {
+  color: var(--task-text-secondary);
+}
+.task-capture:focus-within .task-capture-icon {
+  color: hsl(var(--pro-accent));
+}
+.task-inline-input {
+  font-size: 14px;
+}
+.task-details {
+  position: relative;
+  container-type: inline-size;
+  min-width: 0;
+  margin-block: 4px;
+  padding: 16px 12px 10px;
+  border-radius: 6px;
+  background: hsl(var(--pro-surface) / 0.45);
+  scroll-margin-block: 24px;
+}
+.task-details-close {
+  position: absolute;
+  inset-block-start: 8px;
+  inset-inline-end: 8px;
+  min-width: 32px;
+  padding-inline: 6px;
+  color: var(--task-text-secondary);
+}
+.task-editor-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(226px, 34%);
+  column-gap: 24px;
+  padding-inline-end: 36px;
+}
+.task-writing {
+  display: grid;
+  align-content: start;
+  grid-template-columns: 24px minmax(0, 1fr);
+  column-gap: 10px;
+}
+.task-writing-check {
+  grid-row: span 3;
+  padding-block-start: 2px;
+}
+.task-review-title {
+  margin-inline-end: 36px;
+}
+.task-writing textarea {
+  display: block;
+  width: 100%;
+  border-radius: 4px;
+  background: transparent;
+  padding: 3px 0;
+  field-sizing: content;
+  resize: none;
+  caret-color: hsl(var(--pro-accent));
+}
+.task-writing textarea:focus-visible {
+  outline: 1px solid hsl(var(--pro-accent) / 0.65);
+  outline-offset: 4px;
+}
+.task-writing textarea::placeholder {
+  color: var(--task-text-secondary);
+  opacity: 1;
+}
+.task-editor-title,
+.task-review-title {
+  font-size: 15px;
+  font-weight: 550;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.task-editor-title {
+  max-height: 10rem;
+}
+.task-editor-notes {
+  min-height: 2.25rem;
+  max-height: 16rem;
+  margin-top: 3px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.task-properties {
+  min-width: 0;
+  align-self: start;
+  padding-inline-start: 12px;
+  border-inline-start: 1px solid hsl(var(--pro-border));
+}
+.task-property {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 78px minmax(0, 1fr) 13px;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: start;
+}
+.task-property:hover,
+.task-property[aria-expanded="true"] {
+  background: hsl(var(--pro-hover));
+}
+.task-property-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--task-text-secondary);
+}
+.task-property-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-property-value.is-empty,
+.task-property-chevron {
+  color: var(--task-text-secondary);
+}
+.task-property[aria-expanded="true"] .task-property-chevron {
+  transform: rotate(90deg);
+}
+.task-tool-panel {
+  margin-top: 6px;
+  padding: 8px 6px 2px;
+}
+@container (max-width: 600px) {
+  .task-editor-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding-inline-end: 0;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+  .task-writing {
+    padding-inline-end: 36px;
   }
+  .task-properties {
+    margin-inline-start: 34px;
+    padding: 6px 0 0;
+    border-block-start: 1px solid hsl(var(--pro-border));
+    border-inline-start: 0;
+  }
+}
+.task-tool-panel input[type="date"] {
+  width: 100%;
+  min-width: 0;
+}
+.task-editor-tags:not(:empty) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.task-editor-actions,
+.task-editor-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+}
+.task-editor-actions {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid hsl(var(--pro-border) / 0.7);
+}
+.task-editor-tools {
+  margin-inline-start: auto;
+}
+.task-tool-button {
+  width: 32px;
+  padding-inline: 0;
+  color: var(--task-text-secondary);
+}
+.task-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--task-text-secondary);
+  font-size: 12px;
+}
+.task-source {
+  display: inline-flex;
+  grid-column: 2;
+  justify-self: start;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  border-radius: 3px;
+  color: var(--task-text-secondary);
+  font-size: 12px;
+  text-align: start;
+}
+.task-source:hover {
+  color: hsl(var(--pro-text-main));
+  text-decoration: underline;
+}
+.task-details > div > .task-source {
+  max-width: 100%;
+  margin-inline-start: 0;
 }
 .task-row.is-highlighted {
   animation: task-highlight-pulse 2.2s ease-out;
@@ -214,28 +444,6 @@
   100% {
     background-color: transparent;
   }
-}
-.task-button-success {
-  background: hsl(142 65% 42%);
-  color: #fff;
-}
-.task-button-success:hover {
-  background: hsl(142 65% 38%);
-}
-.dark .tasks-workspace .task-button-success {
-  background: hsl(142 65% 36%);
-  color: #fff;
-}
-.task-button-danger {
-  background: hsl(0 72% 51%);
-  color: #fff;
-}
-.task-button-danger:hover {
-  background: hsl(0 72% 46%);
-}
-.dark .tasks-workspace .task-button-danger {
-  background: hsl(0 72% 48%);
-  color: #fff;
 }
 .task-toast {
   animation: task-toast-enter 180ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -250,11 +458,6 @@
     transform: translateY(0) scale(1);
   }
 }
-@media (max-width: 1279px) {
-  .task-details {
-    grid-row: 1;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .tasks-workspace * {
     transition: none;
@@ -262,7 +465,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .task-details,
   .task-row.is-highlighted,
   .task-toast {
     animation: none;

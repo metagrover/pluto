@@ -66,6 +66,8 @@ describe('Tasks workspace', () => {
         if (channel === 'TASKS_LIST') return structuredClone(snapshot);
         if (channel === 'TASKS_SAVE') return 'created-task';
         if (channel === 'TASKS_DELETE') return 'd'.repeat(64);
+        if (channel === 'TASKS_REVIEW' && payload.state === 'confirmed')
+          snapshot.tasks[0].needsReview = false;
         if (channel === 'TASKS_STATUS')
           snapshot.tasks[0].entity.status = payload.status as
             | 'active'
@@ -85,9 +87,23 @@ describe('Tasks workspace', () => {
     act(() => root.unmount());
     container.remove();
   });
-  it('captures a title-only task and opens optional details without requiring organization', async () => {
+  it('captures a title-only task and returns focus for the next entry', async () => {
     await act(async () => root.render(<TasksView onOpenMeeting={vi.fn()} />));
     expect(container.querySelector('textarea')).toBeNull();
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'TASKS_LIST') return structuredClone(snapshot);
+      if (channel === 'TASKS_SAVE') {
+        const task = initial().tasks[0];
+        task.entity = {
+          ...task.entity,
+          id: 'created-task',
+          name: 'Renew passport',
+        };
+        snapshot.tasks.push(task);
+        return task.entity.id;
+      }
+      return null;
+    });
     await fill('New task', 'Renew passport');
     await act(async () => button('Add').click());
     expect(invoke).toHaveBeenCalledWith('TASKS_SAVE', {
@@ -97,7 +113,31 @@ describe('Tasks workspace', () => {
       (container.querySelector('[aria-label="New task"]') as HTMLInputElement)
         .value,
     ).toBe('');
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('New task');
+
+    const row = [...container.querySelectorAll('li')].find((item) =>
+      item.textContent?.includes('Renew passport'),
+    )!;
+    await act(async () =>
+      row.querySelector<HTMLButtonElement>('[aria-expanded]')?.click(),
+    );
+    expect(row.querySelector('[aria-label="Task title"]')).toBe(
+      document.activeElement,
+    );
   });
+  it('shows a loading error instead of an empty list and retries the load', async () => {
+    invoke.mockRejectedValueOnce(new Error('Disk unavailable'));
+    await act(async () => root.render(<TasksView onOpenMeeting={vi.fn()} />));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Couldn’t load tasks.',
+    );
+    expect(container.textContent).not.toContain('No open tasks');
+    await act(async () => button('Try again').click());
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(button('Complete Send outline')).toBeDefined();
+  });
+
   it('keeps failed capture text available for retry', async () => {
     invoke.mockImplementation(async (channel: string) => {
       if (channel === 'TASKS_LIST') return snapshot;
@@ -142,11 +182,19 @@ describe('Tasks workspace', () => {
     expect(button('Complete Send outline')).toBeUndefined();
     await act(async () => button('Fictional planning').click());
     expect(open).toHaveBeenCalledWith('meeting');
-    await act(async () => button('Take on task').click());
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>('nav button:last-child')
+        ?.click(),
+    );
+    await act(async () => button('Add to tasks').click());
     expect(invoke).toHaveBeenCalledWith('TASKS_REVIEW', {
       id: 'outline',
       state: 'confirmed',
     });
+    expect(container.querySelector('.task-details')).toBeNull();
+    expect(container.textContent).toContain('Nothing to review');
+    expect(container.textContent).toContain('Added to your tasks');
   });
   it('refreshes cross-window changes while preserving an unsaved draft and its original revision', async () => {
     snapshot.tasks[0].revision = 'a'.repeat(64);
@@ -162,7 +210,9 @@ describe('Tasks workspace', () => {
         <TasksView initialTaskId="outline" onOpenMeeting={vi.fn()} />,
       ),
     );
-    const input = container.querySelector('textarea')!;
+    const input = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Notes"]',
+    )!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(
         HTMLTextAreaElement.prototype,
@@ -173,16 +223,20 @@ describe('Tasks workspace', () => {
     snapshot.tasks[0].entity.name = 'Updated in another window';
     snapshot.tasks[0].revision = 'b'.repeat(64);
     await act(async () => notify?.());
-    expect(container.textContent).toContain('Updated in another window');
+    await fill('Search tasks', 'no matching task');
+    expect(container.querySelector('[aria-label="Notes"]')).toBe(input);
     expect(input.value).toBe('My unsaved draft');
     await act(async () => button('Save changes').click());
     expect(invoke).toHaveBeenCalledWith(
       'TASKS_SAVE',
       expect.objectContaining({
-        title: 'My unsaved draft',
+        description: 'My unsaved draft',
         expectedRevision: 'a'.repeat(64),
       }),
     );
+    await fill('Search tasks', '');
+    await act(async () => button('Close task details').click());
+    expect(container.textContent).toContain('Updated in another window');
   });
   it('filters by all selected tags, optional project, date and searchable context', () => {
     const filter = {
@@ -213,6 +267,8 @@ describe('Tasks workspace', () => {
         <TasksView initialTaskId="outline" onOpenMeeting={vi.fn()} />,
       ),
     );
+    expect(container.querySelector('.task-tool-panel')).toBeNull();
+    await act(async () => button('Project').click());
     const project = container.querySelector(
       '[role="combobox"][aria-label="Task project"]',
     ) as HTMLInputElement;
@@ -248,11 +304,12 @@ describe('Tasks workspace', () => {
       return null;
     });
     await act(async () => root.render(<TasksView onOpenMeeting={vi.fn()} />));
-    expect(container.textContent).toContain('Make room for what’s next');
-    await act(async () => button('Write a task').click());
-    expect(document.activeElement).toBe(
-      container.querySelector('input[aria-label="New task"]'),
-    );
+    expect(container.textContent).toContain('No open tasks');
+    await fill('New task', 'Renew passport');
+    await act(async () => button('Add').click());
+    expect(invoke).toHaveBeenCalledWith('TASKS_SAVE', {
+      title: 'Renew passport',
+    });
   });
   it('provides visual feedback and toast notification when creating and saving a task', async () => {
     await act(async () =>
@@ -261,7 +318,6 @@ describe('Tasks workspace', () => {
       ),
     );
     await act(async () => button('Save changes').click());
-    expect(container.textContent).toContain('Saved');
     expect(container.textContent).toContain('Changes saved');
 
     await fill('New task', 'Ship release notes');
@@ -287,6 +343,7 @@ describe('Tasks workspace', () => {
         <TasksView initialTaskId="outline" onOpenMeeting={vi.fn()} />,
       ),
     );
+    await act(async () => button('Due date').click());
     act(() => button('Save changes').click());
     expect(
       [...container.querySelectorAll('textarea')].every(
