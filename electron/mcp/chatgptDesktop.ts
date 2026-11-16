@@ -25,7 +25,7 @@ export async function openChatGptDesktop(
 ): Promise<void> {
   const label =
     pluginName === 'pluto-notes-development' ? 'Pluto (Development)' : 'Pluto';
-  const prompt = `[@${label}](plugin://${pluginName}@${marketplaceName}) What should I focus on?`;
+  const prompt = `[@${label}](plugin://${pluginName}@${marketplaceName}) What did we decide in my latest meeting?`;
   await runCommand(
     '/usr/bin/open',
     [

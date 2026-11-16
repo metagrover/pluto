@@ -1,17 +1,16 @@
 # Use your ChatGPT plan for Pluto intelligence
 
-During first-run setup, choose **Ollama** or **ChatGPT** after recording permissions.
-For ChatGPT, review the text-context disclosure and choose **Continue with ChatGPT**.
+During first-run setup, choose **Ollama**, **ChatGPT**, or **OpenRouter** after recording permissions.
+For ChatGPT, review the text-context disclosure and choose **Sign in with ChatGPT**.
 Complete sign-in and authorize plan usage in your browser, then return to Pluto.
 A one-time confirmation explains plan usage and links to ChatGPT settings. Pluto saves your choice
 and protected connection, skips this question on future launches, and refreshes
 access automatically. An expired or revoked renewable session may require sign-in
 again; it does not reset your provider choice.
 
-Existing users keep their current provider after updating and do not repeat
-first-run setup. A one-time dashboard notice offers **Keep current setup** or
-**Review ChatGPT**. Either action dismisses the notice permanently; reviewing
-opens settings without switching providers or granting cloud consent.
+Existing users keep their current provider after updating. To search your saved
+meeting notes from ChatGPT Desktop or Claude Desktop, open **Settings →
+Connections** and grant note access to the app you want to use.
 
 Use **Settings → Intelligence** whenever you want to change providers or manage
 the connection. Choosing ChatGPT here previews setup without changing your active

@@ -83,41 +83,44 @@ describe('Ask Pluto request lifecycle', () => {
     ).not.toBeNull();
   });
 
-  it('opens the relevant settings from a saved product-help answer', async () => {
-    Object.defineProperty(window, 'ipcRenderer', {
-      configurable: true,
-      value: {
-        invoke: vi.fn(async () => []),
-        on: vi.fn(() => () => undefined),
-      },
-    });
-    const onOpenSettings = vi.fn();
-    await act(async () => {
-      root.render(
-        <AskPluto
-          visible
-          onClose={vi.fn()}
-          onOpenMeeting={vi.fn()}
-          onOpenArtifact={vi.fn()}
-          onOpenSettings={onOpenSettings}
-          messages={[
-            {
-              id: 'help',
-              role: 'assistant',
-              content: '[Open ChatGPT connection settings](/settings/advanced)',
-            },
-          ]}
-        />,
+  it.each(['/settings/connections', '/settings/advanced'])(
+    'opens Connections from a product-help link to %s',
+    async (path) => {
+      Object.defineProperty(window, 'ipcRenderer', {
+        configurable: true,
+        value: {
+          invoke: vi.fn(async () => []),
+          on: vi.fn(() => () => undefined),
+        },
+      });
+      const onOpenSettings = vi.fn();
+      await act(async () => {
+        root.render(
+          <AskPluto
+            visible
+            onClose={vi.fn()}
+            onOpenMeeting={vi.fn()}
+            onOpenArtifact={vi.fn()}
+            onOpenSettings={onOpenSettings}
+            messages={[
+              {
+                id: 'help',
+                role: 'assistant',
+                content: `[Open ChatGPT connection settings](${path})`,
+              },
+            ]}
+          />,
+        );
+      });
+      const shortcut = [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Open ChatGPT connection settings',
       );
-    });
-    const shortcut = [...container.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Open ChatGPT connection settings',
-    );
-    expect(shortcut).toBeDefined();
-    act(() => shortcut?.click());
-    expect(onOpenSettings).toHaveBeenCalledWith('advanced');
-    expect(container.querySelector('a[href="/settings/advanced"]')).toBeNull();
-  });
+      expect(shortcut).toBeDefined();
+      act(() => shortcut?.click());
+      expect(onOpenSettings).toHaveBeenCalledWith('connections');
+      expect(container.querySelector(`a[href="${path}"]`)).toBeNull();
+    },
+  );
 
   it('preserves a controlled conversation when the chat view remounts', async () => {
     const invoke = vi.fn((channel: string) => {

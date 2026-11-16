@@ -195,6 +195,7 @@ const settingsTabs = [
   { id: 'personal', label: 'Personal' },
   { id: 'meetings', label: 'Meetings' },
   { id: 'intelligence', label: 'Intelligence' },
+  { id: 'connections', label: 'Connections' },
   { id: 'advanced', label: 'Advanced' },
   { id: 'help', label: 'Help' },
 ] as const;
@@ -1322,10 +1323,10 @@ export const SettingsTab = ({
           role="tabpanel"
           aria-labelledby="settings-tab-intelligence"
         >
-          <Section title="Analysis">
+          <Section title="AI in Pluto">
             <SettingsRow
-              label="AI Provider"
-              helper="Used for notes, Ask Pluto, meeting preparation, and connected knowledge."
+              label="Model provider"
+              helper="Powers Pluto’s meeting notes, chat, meeting preparation, and People and Project updates."
               actionControl
             >
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -1418,9 +1419,6 @@ export const SettingsTab = ({
               </>
             ) : displayedProvider === 'chatgpt' ? (
               <div className="p-5">
-                <h4 className="mb-3 text-[14px] font-medium text-pro-text-main">
-                  ChatGPT account
-                </h4>
                 <ChatGPTIntelligenceSettings
                   activationPending={chatGPTSetupRequested}
                   onConnected={async () => {
@@ -1593,14 +1591,33 @@ export const SettingsTab = ({
         </div>
       ) : null}
 
+      {activeSettingsTab === 'connections' ? (
+        <div
+          id="settings-panel-connections"
+          role="tabpanel"
+          aria-labelledby="settings-tab-connections"
+        >
+          <header className="mb-6">
+            <h2 className="text-base font-semibold text-pro-text-main">
+              Meeting notes in other apps
+            </h2>
+            <p className="mt-1 max-w-xl text-[13px] leading-5 text-pro-text-muted">
+              Let ChatGPT or Claude search your saved notes to compare
+              decisions, trace changes across meetings, and answer follow-up
+              questions. You control access for each desktop app.
+            </p>
+          </header>
+          <ChatGptConnectionSettings />
+          <ClaudeConnectionSettings />
+        </div>
+      ) : null}
+
       {activeSettingsTab === 'advanced' ? (
         <div
           id="settings-panel-advanced"
           role="tabpanel"
           aria-labelledby="settings-tab-advanced"
         >
-          <ChatGptConnectionSettings />
-          <ClaudeConnectionSettings />
           <Section title="Local data">
             <SettingsRow
               label="Database encryption"
