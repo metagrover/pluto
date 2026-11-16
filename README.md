@@ -4,179 +4,145 @@
 
 <h1 align="center">Pluto</h1>
 
-<h2 align="center">Intelligent meeting notes <em>for Mac.</em></h2>
-
-<p align="center">Pluto takes the notes, tracks who promised what, and reminds you to follow through.</p>
+<h3 align="center">Your meetings, remembered.</h3>
 
 <p align="center">
-  <a href="#get-started">Get Pluto</a> ·
-  <a href="#see-pluto-in-action">Demo</a> ·
-  <a href="#features">Features</a> ·
-  <a href="#explore-pluto">Screenshots</a> ·
+  Pluto listens to your meetings, writes the notes, keeps track of who promised what,<br />
+  and answers questions about any past conversation. No bot joins your call.
+</p>
+
+<p align="center">
+  <a href="#get-started"><strong>Get Pluto</strong></a> ·
+  <a href="https://metagrover.github.io/get-pluto/">Website</a> ·
+  <a href="#see-it-in-action">Demo</a> ·
   <a href="#privacy">Privacy</a> ·
   <a href="#faq">FAQ</a>
 </p>
 
-Pluto is a local-first, open-source meeting notes app for Apple Silicon Macs.
-Record without a bot, transcribe on your Mac, and return to the people, projects,
-and follow-ups that matter.
+<p align="center"><sub>Free and open source · Apple Silicon Macs · Runs on your Mac</sub></p>
 
-<a id="see-pluto-in-action"></a>
+<a id="see-it-in-action"></a>
 
 https://github.com/user-attachments/assets/edbfcc31-2b37-4648-b18a-c0b14b11973d
 
-## Features
+## What Pluto does
 
-- **Chat with Pluto about a meeting, person, or project.** Ask follow-up questions
-  in a meeting chat, focus on someone’s history, or explore a project—with
-  references back to the conversations.
-- **Keep people and projects organized.** See their past conversations,
-  decisions, and next steps in one place.
-- **Track everyone’s commitments.** Keep track of who promised what across
-  conversations, including your own follow-ups. Get reminders for confirmed
-  commitments with due dates.
-- **Keep your tasks together.** Add personal work alongside meeting follow-ups,
-  organize with projects and tags, and choose up to five tasks for today’s focus.
-  Chat can prepare a task change for you to confirm.
-- **Follow project milestones.** Keep milestones, decisions, and open work
-  connected to the meetings behind them.
-- **Recognize familiar voices with Voice ID.** Confirm speaker matches and
-  correct them when needed, so you can follow who said what.
-- **Record without a bot.** Capture your microphone and Mac’s audio directly,
-  then review transcripts, notes, and next steps.
-- **Choose where AI runs.** Use local models through Ollama or an optional cloud provider.
-- **Bring notes into ChatGPT.** Enable the optional connection on the same Mac.
-  [See what’s shared →](#privacy)
+**Takes the notes.** Press record and keep talking. Pluto captures your mic and
+your Mac's audio, so it works in Zoom, Meet, Teams, or any app. When you stop, you
+get a summary, decisions, and next steps.
 
-## How it works
+**Keeps the follow-ups.** Meeting commitments and your own tasks share one list,
+with due dates and reminders. Pick up to five for today.
 
-1. **Record.** Start a meeting in Pluto and carry on with your conversation.
-2. **Review.** Stop recording, let Pluto transcribe and generate notes, then check
-   the decisions and next steps.
-3. **Pick up the thread.** Ask a question or explore the people and projects
-   connected to your meetings.
+**Answers your questions.** Ask "What did we decide about pricing?" or "What do
+I owe Sam?" and get an answer with links to the conversations behind it. Ask Pluto
+can also draft a note or task change. You review it, click Apply, and can undo it.
 
-Let participants know when you record. Generated notes, answers, and speaker
-matches can be wrong—review the source when it matters.
+**Remembers people and projects.** Every person and project gets a page with
+their history, decisions, and open work. Voice ID recognizes familiar voices, so you
+can follow who said what.
+
+**Holds your own notes too.** Write briefs, ideas, and agendas next to your
+meeting notes, link them to people and projects, and turn any line into a task.
+
+![Meeting notes with decisions and next steps in Pluto](docs/screenshots/pluto-meeting.jpg)
+
+## Private by default
+
+Recording and transcription always happen on your Mac. For notes and answers,
+choose where the AI runs:
+
+| Option | What you need | Where your text goes |
+| --- | --- | --- |
+| **On your Mac** | [Ollama](https://ollama.com/download/mac), free | Nowhere. Works offline. |
+| **Your ChatGPT plan** | ChatGPT Plus or Pro sign-in | OpenAI, using your plan |
+| **OpenRouter** | An OpenRouter API key | Your chosen model provider |
+
+You can switch at any time in **Settings → Intelligence**.
 
 ## Get started
 
-You’ll need an **Apple Silicon Mac (M1 or later)** with **macOS 14.2 or later**.
-An internet connection is required for initial downloads.
+You need an **Apple Silicon Mac (M1 or later)** running **macOS 14.2 or later**.
 
-### 1. Install Pluto
+**1. Install Pluto**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/metagrover/pluto/master/scripts/install-macos.sh | bash
 ```
 
-Complete setup to download speech models and allow microphone and system audio
+Setup downloads the speech models and asks for microphone and system-audio
 access. Calendar access is optional.
 
-### 2. Set up Ollama
-
-Install and open [Ollama](https://ollama.com/download/mac), enable its command-line
-tool, then download the models for notes and chat:
+**2. Pick your AI.** For on-device AI, install and open
+[Ollama](https://ollama.com/download/mac), then run:
 
 ```sh
 ollama pull gemma4:12b && ollama pull phi4-mini:3.8b
 ```
 
-Pluto uses these models by default. Keep Ollama running when using notes and chat.
+Or choose ChatGPT or OpenRouter during setup.
 
-### 3. Try your first recording
-
-Let participants know you’re recording, then click **New meeting**. After the
-meeting, stop recording to generate notes and ask follow-up questions.
+**3. Record a meeting.** Tell everyone you're recording, click **New meeting**,
+and stop when you're done. Pluto transcribes the meeting and writes your notes.
 
 [Full setup guide and troubleshooting →](docs/getting-started.md)
 
-## Explore Pluto
+## A closer look
 
-See how Pluto helps you return to a conversation.
-
-### Meeting notes, decisions, and next steps
-
-Review notes and next steps, then ask Pluto follow-up questions in the meeting’s
-chat. Confirm familiar speakers with Voice ID and correct matches when needed.
-
-![Meeting decisions and next steps in Pluto](docs/screenshots/pluto-meeting.jpg)
-
-### Ask Pluto and check the source
-
-Ask across your meeting history, or focus the chat on a person or project.
-Follow references back to the conversations behind the answer.
+**Ask across all your meetings, and check the source.**
 
 ![Ask Pluto answering across meetings with supporting references](docs/screenshots/pluto-chat.jpg)
 
-### People, projects, and follow-through
+**Use your notes in ChatGPT or Claude.** Optional, read-only connections let
+ChatGPT Desktop and Claude Desktop on the same Mac search your meeting notes.
+Turn on either one, or neither.
+[ChatGPT →](docs/chatgpt-connection.md) · [Claude →](docs/claude-connection.md)
 
-Open a person’s page to catch up on your conversations and their commitments.
-Open a project’s page to review its decisions, milestones, and open work.
-Track commitments for everyone involved, with reminders for confirmed due dates.
+**Make it yours.** Choose Light, Dark, Terracotta, Pluto, or Aubergine, or follow your Mac.
 
-### Pick up the thread in ChatGPT or Claude
-
-Optional local connections bring meeting notes into ChatGPT and Claude Desktop
-on the same Mac. Enable either or both independently.
-[Connect ChatGPT →](docs/chatgpt-connection.md) · [Connect Claude →](docs/claude-connection.md)
-
-![Illustrative example of Pluto meeting notes in ChatGPT](docs/screenshots/pluto-chatgpt.jpg)
-
-*The ChatGPT conversation above is illustrative.*
-
-### Themes and appearance
-
-Choose Light, Dark, Terracotta, Pluto, Aubergine, or follow your Mac’s appearance.
-
-![Five Pluto themes and the System appearance option](docs/screenshots/pluto-themes.jpg)
+![Pluto's themes](docs/screenshots/pluto-themes.jpg)
 
 ## Privacy
 
-- **Capture and transcription run on your Mac.** Local intelligence also stays
-  on your Mac. Optional cloud AI sends the text needed for each operation to your
-  chosen provider, which can include transcripts, notes, and retrieved context.
-- **Database encryption is optional at setup.** Audio files are not encrypted
-  by default. [Storage details →](docs/getting-started.md#privacy-and-data)
-- **ChatGPT and Claude access are optional and independent.** Enabling either
-  makes all meeting notes available to that app. Retrieved notes go to OpenAI or
-  Anthropic respectively; raw transcripts and audio are excluded. Disabling a
-  connection stops its future reads; notes already shared remain in that app.
+- **Audio and transcripts stay on your Mac.** Nothing is uploaded to record or
+  transcribe.
+- **On-device AI sends nothing anywhere.** If you choose ChatGPT or OpenRouter,
+  Pluto sends that provider only the text a task needs, such as a transcript,
+  notes, or related context.
+- **Encryption is your choice.** You can encrypt the database during setup.
+  Audio files are not encrypted by default.
+  [Storage details →](docs/getting-started.md#privacy-and-data)
+- **ChatGPT and Claude note access are off until you turn them on.** When on,
+  that app can read your meeting notes, but never raw transcripts or audio.
+  Turning a connection off stops future reads. Notes already shared stay in that app.
+
+AI can get things wrong. Notes, answers, and speaker names link back to the
+transcript so you can check. Always let people know when you're recording.
 
 ## FAQ
 
-### Can I use Pluto offline?
+**Does it work offline?** Yes. Once the speech and Ollama models are downloaded,
+recording, notes, and chat all work without the internet.
 
-Yes, after downloading the speech and Ollama models, local recording,
-transcription, notes, and chat work without a cloud provider or API key. Cloud AI
-and the optional ChatGPT and Claude connections need an internet connection.
+**What does it cost?** Pluto is free and open source. With on-device AI, you need
+no account or API key. ChatGPT and OpenRouter use their own pricing.
 
-### Do I need a subscription?
+**Does it run on Intel, Windows, or Linux?** Not yet. Pluto needs an Apple Silicon Mac.
 
-Pluto is free and open source. You can use local intelligence without an API key.
-If you choose cloud AI or ChatGPT, their own pricing and access requirements apply.
-
-### Does Pluto support Intel Macs, Windows, or Linux?
-
-Currently, Pluto supports Apple Silicon Macs only.
-
-### Where can I get help?
-
-Start with the [setup guide and troubleshooting](docs/getting-started.md).
-In Pluto, **Help → Report a Problem** prepares a report you can review before
-sharing. Keep private meeting content and credentials out of public issues.
+**Where can I get help?** See the [setup guide](docs/getting-started.md), or use
+**Help → Report a Problem** in Pluto. That prepares a report you can review before
+sending. Keep private meeting content out of public issues.
 
 ## Build and contribute
 
-See the [developer guide](docs/dev.md) to run Pluto from source and the
-[architecture overview](docs/architecture.md) to explore the codebase.
-The [documentation index](docs/README.md) links to the current guides.
-Bug reports and focused pull requests are welcome. Browse the
-[releases](https://github.com/metagrover/pluto/releases) for downloads and changes.
+The [developer guide](docs/dev.md) shows how to run Pluto from source, and the
+[architecture overview](docs/architecture.md) explains the codebase. Bug reports
+and focused pull requests are welcome. See [releases](https://github.com/metagrover/pluto/releases)
+for downloads and changes.
 
 ## License
 
-[MIT](LICENSE). Third-party code, fonts, and models retain their own licenses:
+[MIT](LICENSE). Third-party code, fonts, and models keep their own licenses:
 [FluidAudio](native/parakeet-runtime/vendor/FluidAudio/LICENSE),
 [transcription notices](resources/model-manifests/FluidAudio-NOTICE.txt),
 [model manifest](resources/model-manifests/parakeet-tdt-0.6b-v3.json),
