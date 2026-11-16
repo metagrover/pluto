@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { LocalModelMemoryError } from '../../electron/llm/localModelMemory';
 import {
   type ProjectRoutingState,
   routeProjectCandidate,
@@ -384,20 +385,30 @@ describe('filing new work under established projects', () => {
     expect(await routeProjectCandidate(deps)).toMatchObject({ deferred: true });
     expect(deps.generate).not.toHaveBeenCalled();
   });
-  it('reports foreground preemption without recording a routing failure', async () => {
-    const { deps } = fixture();
-    deps.generate.mockRejectedValue(
+  it.each([
+    [
+      'foreground_preempted',
       new Error('aborted', {
         cause: new DOMException('foreground_preempted', 'AbortError'),
       }),
-    );
-    const onDeferred = vi.fn();
-    expect(await routeProjectCandidate({ ...deps, onDeferred })).toMatchObject({
-      deferred: true,
-      failed: 0,
-    });
-    expect(onDeferred).toHaveBeenCalledWith('foreground_preempted');
-  });
+    ],
+    ['memory_pressure', new LocalModelMemoryError('Local memory refusal')],
+  ] as const)(
+    'defers routing on %s without recording a failure',
+    async (reason, error) => {
+      const { deps } = fixture();
+      deps.generate.mockRejectedValue(error);
+      const onDeferred = vi.fn();
+      expect(
+        await routeProjectCandidate({ ...deps, onDeferred }),
+      ).toMatchObject({
+        deferred: true,
+        failed: 0,
+      });
+      expect(onDeferred).toHaveBeenCalledWith(reason);
+      expect(deps.getState()).toBeNull();
+    },
+  );
   it('reports remaining queue work separately from failure', async () => {
     const { deps, projects, sources } = fixture();
     projects.push({ ...projects[1], id: 'next' });

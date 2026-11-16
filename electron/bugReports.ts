@@ -23,6 +23,7 @@ export type BugReportReason =
   | 'ask_pluto_session'
   | 'work_paused'
   | 'foreground_preempted'
+  | 'memory_pressure'
   | 'source_changed'
   | 'routing_queue_remaining';
 export interface BugReportDraft {

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { LocalModelMemoryError } from '../../electron/llm/localModelMemory';
 import {
   PROJECT_THEME_SYNTHESIS_VERSION,
   synthesizeProjectThemes,
@@ -430,26 +431,34 @@ describe('cross-conversation project theme synthesis', () => {
     expect(fixture.deps.generate).not.toHaveBeenCalled();
   });
 
-  it('defers cleanly when preempted by foreground inference without saving failed state', async () => {
-    const fixture = makeDeps();
-    const preemptionError = new Error('The operation was aborted', {
-      cause: new DOMException('foreground_preempted', 'AbortError'),
-    });
-    fixture.deps.generate.mockRejectedValue(preemptionError);
-    const onDeferred = vi.fn();
-    const result = await synthesizeProjectThemes({
-      ...fixture.deps,
-      onDeferred,
-    });
-    expect(onDeferred).toHaveBeenCalledWith('foreground_preempted');
-    expect(result).toMatchObject({
-      discovered: 0,
-      remaining: 1,
-      failed: 0,
-      deferred: true,
-    });
-    expect(fixture.state).toBeNull();
-  });
+  it.each([
+    [
+      'foreground_preempted',
+      new Error('The operation was aborted', {
+        cause: new DOMException('foreground_preempted', 'AbortError'),
+      }),
+    ],
+    ['memory_pressure', new LocalModelMemoryError('Local memory refusal')],
+  ] as const)(
+    'defers theme synthesis on %s without saving failed state',
+    async (reason, error) => {
+      const fixture = makeDeps();
+      fixture.deps.generate.mockRejectedValue(error);
+      const onDeferred = vi.fn();
+      const result = await synthesizeProjectThemes({
+        ...fixture.deps,
+        onDeferred,
+      });
+      expect(onDeferred).toHaveBeenCalledWith(reason);
+      expect(result).toMatchObject({
+        discovered: 0,
+        remaining: 1,
+        failed: 0,
+        deferred: true,
+      });
+      expect(fixture.state).toBeNull();
+    },
+  );
 });
 
 describe('stable project identities and grounded grouping', () => {

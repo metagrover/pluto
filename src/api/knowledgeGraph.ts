@@ -445,6 +445,7 @@ export const discoverProjectInitiative = async (
   remaining: number;
   failed: number;
   deferred: boolean;
+  deferredReason?: 'memory_pressure';
   attemptedSourceId?: string;
   failedSourceId?: string;
   discoveredProjectId?: string;

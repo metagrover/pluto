@@ -1316,19 +1316,26 @@ it('does not let a cached update run mask brief synthesis failure', async () => 
   expect(api.triggerDreamingNow).not.toHaveBeenCalled();
 });
 
-it('reports deferred synthesis and leaves preparation available for retry', async () => {
-  api.getProjectBrief.mockResolvedValue(brief({ theme: null }));
-  api.discoverProjectInitiative.mockResolvedValue({
-    discovered: 0,
-    remaining: 1,
-    failed: 0,
-    deferred: true,
-  });
-  await render();
-  await click('Prepare updates');
-  expect(host.textContent).toContain('Another preparation is running');
-  expect(api.triggerDreamingNow).not.toHaveBeenCalled();
-});
+it.each([
+  [undefined, 'Another preparation is running'],
+  ['memory_pressure', 'Local model needs more memory'],
+])(
+  'reports deferred synthesis (%s) without starting preparation',
+  async (deferredReason, label) => {
+    api.getProjectBrief.mockResolvedValue(brief({ theme: null }));
+    api.discoverProjectInitiative.mockResolvedValue({
+      discovered: 0,
+      remaining: 1,
+      failed: 0,
+      deferred: true,
+      deferredReason,
+    });
+    await render();
+    await click('Prepare updates');
+    expect(host.textContent).toContain(label);
+    expect(api.triggerDreamingNow).not.toHaveBeenCalled();
+  },
+);
 
 it('shows the refreshed brief after preparation instead of the empty state', async () => {
   api.getProjectBrief
