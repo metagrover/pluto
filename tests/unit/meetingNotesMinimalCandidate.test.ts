@@ -7,6 +7,7 @@ import {
   notesSourceGuidance,
 } from '../../electron/llm/meetingNotesGuidance';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
+import { NotesStageCache } from '../../electron/llm/meetingNotesStageCache';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
 import { hasPersonalActionOwner } from '../../src/utils/actionCommitment';
 import { getAnalysisEditBlocks } from '../../src/utils/analysisDocument';
@@ -135,6 +136,82 @@ it('retains the existing bounded writer JSON-format repair', async () => {
   expect(result.generation_metadata).not.toHaveProperty(
     'source_action_review_version',
   );
+});
+
+it('reviews a rejected conversational undertaking without rewriting or caching its untrusted writer', async () => {
+  const { provider, source, response, generate } = fixture(
+    'Let me send the outline.',
+  );
+  const cache = new NotesStageCache();
+  const cacheWrite = vi.spyOn(cache, 'set');
+  generate.mockImplementation(async (request) => {
+    request.onOllamaArtifact?.('synthetic-artifact');
+    if (request.task === 'notesWriter') return JSON.stringify(response);
+    return JSON.stringify({
+      resolutions: [
+        {
+          id: 's0:item:0',
+          kind: 'accepted_action',
+          text: 'Send the outline',
+          owner: 'Milo',
+          due: null,
+          discussion: null,
+        },
+      ],
+    });
+  });
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+    stageCache: cache,
+    cacheKey: 'conversational-undertaking',
+  });
+  expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+  ]);
+  const review = generate.mock.calls[1]![0];
+  const cases = JSON.parse(review.prompt.split('\n').at(-1)!);
+  expect(cases[0]).toMatchObject({
+    subjectSpeech: expect.stringContaining('Let me send the outline.'),
+  });
+  expect(cases[0]).not.toHaveProperty('operationFocus');
+  expect(cases[0]).not.toHaveProperty('draftHint');
+  expect(cacheWrite).not.toHaveBeenCalled();
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining({ text: 'Send the outline', assignee: 'Milo' }),
+  ]);
+  expect(result.generation_metadata).not.toHaveProperty(
+    'source_action_review_version',
+  );
+});
+
+it('keeps a source-review verdict from approving an unaccepted offer', async () => {
+  const { provider, source, response, generate } = fixture(
+    'I could send the outline if somebody needs it.',
+  );
+  generate.mockImplementation(async (request) => {
+    request.onOllamaArtifact?.('synthetic-artifact');
+    if (request.task === 'notesWriter') return JSON.stringify(response);
+    return JSON.stringify({
+      resolutions: [
+        {
+          id: 's0:item:0',
+          kind: 'accepted_action',
+          text: 'Send the outline',
+          owner: 'Milo',
+          due: null,
+          discussion: null,
+        },
+      ],
+    });
+  });
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', { source }),
+  ).rejects.toThrow('notes_semantic_review_incomplete');
+  expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+  ]);
 });
 
 it('repairs a missing required overview inside the existing writer attempt limit', async () => {
@@ -523,22 +600,34 @@ it('authors a verified complete-packet overview before ordinary strict publicati
   ).toBe(1);
 });
 
-it('retains strict body ownership checks after independent overview authoring', async () => {
+it('refuses an unsupported body owner even when the source review repeats it', async () => {
   const { provider, source, response, generate } = fixture();
   response.sections[0]!.items[0]!.owner = 'Nora';
   generate.mockImplementation(async (r) =>
     qualifyResponse(
       r,
-      r.task === 'notesAudit' ? overviewResponse() : JSON.stringify(response),
+      r.task === 'notesAudit'
+        ? JSON.stringify({
+            resolutions: [
+              {
+                id: 's0:item:0',
+                kind: 'accepted_action',
+                text: 'Send the outline',
+                owner: 'Nora',
+                due: null,
+                discussion: null,
+              },
+            ],
+          })
+        : JSON.stringify(response),
     ),
   );
   await expect(
     provider.generateStructuredAnalysis('', '', 'auto', { source }),
-  ).rejects.toThrow('notes_writer_invalid');
+  ).rejects.toThrow('notes_semantic_review_incomplete');
   expect(generate.mock.calls.map(([r]) => r.task)).toEqual([
     'notesWriter',
     'notesAudit',
-    'notesWriter',
   ]);
 });
 

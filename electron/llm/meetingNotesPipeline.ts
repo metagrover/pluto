@@ -800,7 +800,8 @@ const writeDraft = async (
     input.provider !== 'chatgpt' &&
       !(input.compactWriterContract && input.reviewProtocol === 'editor'),
   );
-  input.stageCache?.set(key, draft);
+  if (!input.shouldReviewSourceBoundNotes?.())
+    input.stageCache?.set(key, draft);
   return draft;
 };
 
@@ -939,7 +940,7 @@ const deterministicallyCheckedDraft = (
         ...unsafe.map((issue) => `notes_guardrail:${issue.code}:${item.id}`),
       );
       if (!unsafe.length) return [item];
-      if (!input.reviewSourceBoundNotes) return [];
+      if (!sourceBoundReviewer(input)) return [];
       // Hold disputed tasks as source discussion so review can repair them without publishing them as actions.
       reviewOriginals.set(item.id, structuredClone(item));
       auditedIssues.push(`deterministic_guardrail_review:${item.id}`);
@@ -998,12 +999,20 @@ const deterministicallyCheckedDraft = (
   };
 };
 
+const sourceBoundReviewer = (input: GenerateMeetingNotesInput) =>
+  input.shouldReviewSourceBoundNotes?.() === false
+    ? undefined
+    : input.reviewSourceBoundNotes;
+
 const isLocalWriterOnly = (input: GenerateMeetingNotesInput): boolean =>
   input.provider === 'ollama' &&
   input.compactWriterContract === true &&
   input.hierarchyAuditStrategy === 'deterministic_only' &&
   !input.reviewSourceLedNotes &&
-  !input.reviewSourceBoundNotes;
+  !sourceBoundReviewer(input);
+
+const requiresLocalWriterProse = (input: GenerateMeetingNotesInput): boolean =>
+  isLocalWriterOnly(input) || input.shouldReviewSourceBoundNotes?.() === true;
 
 const deterministicallyAcceptedDraft = (
   input: GenerateMeetingNotesInput,
@@ -1066,7 +1075,7 @@ const unpublishableProseItem = (
   input: GenerateMeetingNotesInput,
   draft: NotesDraft,
 ) => {
-  const blocks = isLocalWriterOnly(input)
+  const blocks = requiresLocalWriterProse(input)
     ? [
         ...(draft.title ? [draft.title] : []),
         ...(draft.overview ? [draft.overview] : []),
@@ -1125,7 +1134,7 @@ const auditDraft = async (
         const advisory =
           repaired &&
           input.provider === 'ollama' &&
-          !input.reviewSourceBoundNotes &&
+          !sourceBoundReviewer(input) &&
           (input.reviewProtocol !== 'editor' || !fullSource);
         if (advisory && audited) {
           const allowed = fullSource ? undefined : evidenceSpans;
@@ -1229,9 +1238,7 @@ const auditDraft = async (
         draft,
         audit,
         qualityPolicy:
-          repaired &&
-          input.provider === 'ollama' &&
-          !input.reviewSourceBoundNotes
+          repaired && input.provider === 'ollama' && !sourceBoundReviewer(input)
             ? 'advisory'
             : 'strict',
         allowedSources: evidenceSpans,
@@ -1324,7 +1331,7 @@ const projectFinalNotes = async (
   input: GenerateMeetingNotesInput,
   audited: AuditedNotes,
 ) => {
-  if (isLocalWriterOnly(input) && !audited.draft.overview?.text.trim())
+  if (requiresLocalWriterProse(input) && !audited.draft.overview?.text.trim())
     throw new MeetingNotesError('notes_writer_invalid');
   let reviewed = audited;
   if (input.reviewSourceLedNotes) {
@@ -1353,9 +1360,11 @@ const projectFinalNotes = async (
       }
     }
   }
-  if (input.reviewSourceBoundNotes) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      reviewed = await input.reviewSourceBoundNotes(reviewed);
+  const reviewSourceBound = sourceBoundReviewer(input);
+  if (reviewSourceBound) {
+    const attempts = input.shouldReviewSourceBoundNotes ? 1 : 2;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      reviewed = await reviewSourceBound(reviewed);
       if (
         !reviewed.issues?.some((issue) =>
           issue.startsWith('semantic_notes_review_unavailable'),
@@ -1388,10 +1397,11 @@ const projectFinalNotes = async (
   )
     throw new MeetingNotesError('notes_semantic_review_incomplete');
   const document = projectAuditedNotes(reviewed, {
-    deriveOverview: !isLocalWriterOnly(input),
+    deriveOverview: !requiresLocalWriterProse(input),
   });
   if (
-    (input.reviewSourceBoundNotes || input.reviewSourceLedNotes) &&
+    ((reviewSourceBound && !input.shouldReviewSourceBoundNotes) ||
+      input.reviewSourceLedNotes) &&
     document.generation_metadata
   )
     document.generation_metadata.source_action_review_version = 1;

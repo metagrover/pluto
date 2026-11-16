@@ -3,7 +3,7 @@ import type { AnalysisProvider, MeetingType } from './analysisTypes';
 import type { REVIEW_RETRY_INSTRUCTIONS } from './meetingNotesSemanticReview';
 
 // Shared by generation metadata and persistent run/cache identity.
-export const NOTES_PROMPT_VERSION = 'notes-v102';
+export const NOTES_PROMPT_VERSION = 'notes-v103';
 export const NOTES_OLLAMA_MODEL = OLLAMA_GENERAL_MODEL;
 export const NOTES_EDITOR_PROMPT_VERSION = NOTES_PROMPT_VERSION;
 export const MAX_NOTES_SUMMARY_SOURCE_SPANS = 36;
@@ -160,6 +160,8 @@ export type GenerateMeetingNotesInput = {
   reviewSourceBoundNotes?: (
     notes: import('./meetingNotesAudit').AuditedNotes,
   ) => Promise<import('./meetingNotesAudit').AuditedNotes>;
+  /** Local writers activate source review only after a semantic rejection. */
+  shouldReviewSourceBoundNotes?: () => boolean;
   provider: AnalysisProvider;
   model: string;
   contextTokens: number;
