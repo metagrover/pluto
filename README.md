@@ -4,11 +4,12 @@
 
 <h1 align="center">Pluto</h1>
 
-<h3 align="center">Your meetings, remembered.</h3>
+<h3 align="center">Your work, remembered.</h3>
 
 <p align="center">
-  Pluto listens to your meetings, writes the notes, keeps track of who promised what,<br />
-  and answers questions about any past conversation. No bot joins your call.
+  Notes, tasks, meetings, and projects in one private app on your Mac.<br />
+  Pluto takes notes in your meetings, keeps track of what everyone promised,<br />
+  and answers questions about anything you've worked on.
 </p>
 
 <p align="center">
@@ -25,25 +26,28 @@
 
 https://github.com/user-attachments/assets/edbfcc31-2b37-4648-b18a-c0b14b11973d
 
-## What Pluto does
+## Everything in one place
 
-**Takes the notes.** Press record and keep talking. Pluto captures your mic and
-your Mac's audio, so it works in Zoom, Meet, Teams, or any app. When you stop, you
-get a summary, decisions, and next steps.
+**Notes.** Write briefs, ideas, checklists, and agendas. Link them to people and
+projects, and turn any line into a task.
 
-**Keeps the follow-ups.** Meeting commitments and your own tasks share one list,
+**Meetings.** Press record and keep talking. No bot joins your call: Pluto captures
+your mic and your Mac's audio, so it works with Zoom, Meet, Teams, or any app. When
+you stop, you get a summary, decisions, and next steps.
+
+**Tasks.** Your own to-dos and everything promised in meetings share one list,
 with due dates and reminders. Pick up to five for today.
 
-**Answers your questions.** Ask "What did we decide about pricing?" or "What do
-I owe Sam?" and get an answer with links to the conversations behind it. Ask Pluto
-can also draft a note or task change. You review it, click Apply, and can undo it.
+**People and projects.** Each person and project has a page that brings together
+its notes, meetings, decisions, and open work. Voice ID recognizes familiar voices,
+so you can follow who said what.
 
-**Remembers people and projects.** Every person and project gets a page with
-their history, decisions, and open work. Voice ID recognizes familiar voices, so you
-can follow who said what.
+**Ask Pluto.** Ask "What did we decide about pricing?" or "What do I owe Sam?"
+and get an answer that links to the notes and meetings behind it. Ask Pluto can
+also draft a new note or task change. You review it, click Apply, and can undo it.
 
-**Holds your own notes too.** Write briefs, ideas, and agendas next to your
-meeting notes, link them to people and projects, and turn any line into a task.
+**Your AI, your way.** Run AI on your Mac, use your ChatGPT plan, or pick a model
+on OpenRouter. You can also let ChatGPT or Claude search your meeting notes.
 
 ![Meeting notes with decisions and next steps in Pluto](docs/screenshots/pluto-meeting.jpg)
 
