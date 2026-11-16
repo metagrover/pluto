@@ -54,6 +54,7 @@ import type {
 import { Logo } from '../Brand/Logo';
 import { EmptyCanvasArt } from '../ui/EmptyCanvas';
 import type { CitationChain } from './CitationCard';
+import { PlutoActionCard } from './PlutoActionCard';
 
 interface AskPlutoProps {
   onOpenTask?: (id: string) => void;
@@ -90,6 +91,7 @@ export interface AskPlutoMessage {
   turnMode?: AskPlutoQueryResponse['turnMode'];
   retrievalPolicy?: AskPlutoQueryResponse['retrievalPolicy'];
   actionProposal?: AskPlutoQueryResponse['actionProposal'];
+  actionBatchId?: string;
   actionState?: 'saving' | 'completed' | 'failed';
   actionTaskId?: string;
   /** Local memory refused the answer and ChatGPT can answer instead. */
@@ -132,6 +134,7 @@ const ASSISTANT_MARKDOWN_CLASS_NAME =
 const toWorkspacePayload = (
   message: AskPlutoMessage,
 ): WorkspaceChatMessagePayload => ({
+  ...(message.actionBatchId ? { actionBatchId: message.actionBatchId } : {}),
   ...(message.citations ? { citations: message.citations } : {}),
   ...(message.trustStatus ? { trustStatus: message.trustStatus } : {}),
   ...(message.unsupportedClaimCount
@@ -720,6 +723,10 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   typeof response === 'string'
                     ? undefined
                     : response.retrievalPolicy,
+                actionBatchId:
+                  typeof response === 'string'
+                    ? undefined
+                    : response.actionBatchId,
                 actionProposal:
                   typeof response === 'string'
                     ? undefined
@@ -1416,6 +1423,10 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                             )}
                         </div>
                       )}
+
+                    {msg.actionBatchId && (
+                      <PlutoActionCard batchId={msg.actionBatchId} />
+                    )}
 
                     {msg.role === 'assistant' &&
                       !msg.isLoading &&

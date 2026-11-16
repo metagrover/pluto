@@ -1,3 +1,17 @@
+## 2026-11-07 - Offer answer to-dos only for concrete open actions
+
+- **Status:** Accepted; covered by answer-action, note-suggestion and meeting-panel regressions.
+- **Supersedes:** The first-list-item-or-sentence prefill in “2026-11-04 - Link notes as prep, offer notes when a meeting starts, act on answers, and mark what came up”, for answer shortcuts.
+- **Decision:** Extract a concrete outstanding action before showing an answer shortcut. Factual summaries, completed work, refusals, clarification prompts, action-preview instructions and no-action replies produce no shortcut. Note task suggestions use the same conservative eligibility check. If no eligible item exists, offer no suggested to-do or next-time item; users can still create their own tasks directly.
+
+## 2026-11-07 - Preview and apply shared actions across Pluto chats
+
+- **Status:** Implemented with persistence and component regression coverage; live provider quality still requires qualification.
+- **Supersedes:** The task-create/status-only execution path for global Ask Pluto. Extends the answer actions in “2026-11-04 - Link notes as prep, offer notes when a meeting starts, act on answers, and mark what came up”; existing explicit answer buttons remain available.
+- **Decision:** Global, meeting, note and person chats share stored action previews for note creation/appending, personal task creation/editing/status, source-linked task extraction and person agenda additions. Selecting Apply is the mutation boundary. Supported changes execute transactionally and a durable row journal makes retries idempotent and Undo conflict-aware. Meeting additions use the user_notes edit overlay.
+- **Target selection:** Current chat context and uniquely named sources resolve targets. Multiple person notes require a choice instead of selecting the latest note, superseding that default only for conversational agenda actions from “2026-11-04 - Carry what to raise with a person, start meetings from people and notes, and ask about finished meetings”. Newly needed agenda notes are titled “Next time with …”.
+- **Boundaries:** Dates are deadlines using the existing reminder policy; no exact-time reminder, recurring execution, external writes or arbitrary tools. Source text never authorizes actions. Stored previews contain local private content under the existing application database protection.
+
 ## 2026-11-04 - Let people retry notes refused for memory
 
 - **Status:** Accepted; covered by failure-presentation regressions.

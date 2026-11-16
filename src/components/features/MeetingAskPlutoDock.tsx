@@ -30,6 +30,7 @@ import {
 } from '../../utils/liveMeetingCommands';
 import { MEETING_ASK_PLUTO_LIMITS } from '../../utils/meetingAskPlutoRequest';
 import { Logo } from '../Brand/Logo';
+import { PlutoActionCard } from './PlutoActionCard';
 
 /** Ask Pluto while recording. Finished meetings use MeetingAskPlutoPanel. */
 type MeetingAskPlutoDockProps = {
@@ -230,6 +231,11 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                     >
                       {message.content}
                     </ReactMarkdown>
+                    {message.packet?.actionBatchId && (
+                      <PlutoActionCard
+                        batchId={message.packet?.actionBatchId}
+                      />
+                    )}
                     {message.interrupted ? (
                       <span className="meeting-ask-pluto-dock__interrupted">
                         Stopped

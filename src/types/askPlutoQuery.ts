@@ -204,6 +204,7 @@ export interface AskPlutoPerformanceDiagnostics {
 }
 
 export interface AskPlutoQueryResponse<Citation = unknown> {
+  actionBatchId?: string;
   status?: 'answered' | 'cancelled' | 'unavailable';
   answer: string;
   citations: Citation[];

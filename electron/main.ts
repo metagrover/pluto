@@ -198,6 +198,14 @@ import {
 } from './nativeAudioCapture';
 import { createNativeSettingsNavigation } from './nativeSettingsNavigation';
 import { resolveUnpackedExecutablePath } from './packagedExecutablePath';
+import {
+  applyPlutoActionBatch,
+  getPlutoActionBatch,
+  isPlutoActionFollowup,
+  isPlutoActionRequest,
+  preparePlutoActions,
+  undoPlutoActionBatch,
+} from './plutoActions';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import { validatePreMeetingBriefRequest } from './preMeetingBrief';
 import { buildPreMeetingBrief } from './preMeetingBrief';
@@ -5244,6 +5252,26 @@ app.whenReady().then(async () => {
     });
   }
 
+  ipcMain.handle('PLUTO_ACTION_GET', (_event, id) => getPlutoActionBatch(id));
+  const publishActionChanges = () => {
+    invalidateDreamingCatalog();
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('TASKS_CHANGED');
+      window.webContents.send('NOTES_CHANGED');
+      window.webContents.send('PLUTO_ACTIONS_CHANGED');
+    }
+    void commitmentReminderScheduler?.reconcile();
+  };
+  ipcMain.handle('PLUTO_ACTION_APPLY', (_event, payload) => {
+    const result = applyPlutoActionBatch(payload);
+    publishActionChanges();
+    return result;
+  });
+  ipcMain.handle('PLUTO_ACTION_UNDO', (_event, id) => {
+    const result = undoPlutoActionBatch(id);
+    publishActionChanges();
+    return result;
+  });
   ipcMain.handle('NOTES_LIST', () => db.notesStore.listNotes());
   ipcMain.handle('NOTES_GET', (_event, id) => db.notesStore.getNote(id));
   ipcMain.handle('NOTES_SAVE', (_event, input) => {
@@ -6199,6 +6227,29 @@ app.whenReady().then(async () => {
           role: 'user',
           content: query,
         });
+        const actionReply = await preparePlutoActions({
+          signal: controller.signal,
+          requestId,
+          query,
+          context: { personId },
+          previousAnswer: previousPersonAnswer,
+          turns: priorPersonMessages,
+          generate: async (prompt) =>
+            (await getProvider(await getAllSettings(db))).answerAskPluto(
+              prompt,
+              { signal: controller.signal, mode: 'fast', jsonMode: true },
+            ),
+        });
+        if (actionReply) {
+          const message = personChatStore.appendMessage({
+            threadId,
+            personId,
+            role: 'assistant',
+            content: actionReply.answer,
+            actionBatchId: actionReply.actionBatchId,
+          });
+          return { status: 'answered', message } satisfies PersonChatResponse;
+        }
         const quickReply = getPersonChatQuickReply(query, previousPersonAnswer);
         if (quickReply) {
           const message = personChatStore.appendMessage({
@@ -8190,6 +8241,44 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               }
             })();
           if (
+            turnPlan
+              ? turnPlan.route === 'task_action'
+              : isPlutoActionRequest(queryText) ||
+                isPlutoActionFollowup(queryText, priorTurns)
+          ) {
+            const previous = latestAssistantTurn(priorTurns);
+            const meetingId =
+              previous?.meetingIds?.length === 1 &&
+              /\b(?:this|that) meeting\b/i.test(queryText)
+                ? previous.meetingIds[0]
+                : undefined;
+            const actionReply = await preparePlutoActions({
+              requestId,
+              query: queryText,
+              force: true,
+              signal: controller.signal,
+              turns: priorTurns,
+              context: { meetingId },
+              previousAnswer: previous?.content,
+              generate: async (prompt) =>
+                withMemoryFallback((provider) =>
+                  provider.answerAskPluto(prompt, {
+                    signal: controller.signal,
+                    mode: 'fast',
+                    jsonMode: true,
+                  }),
+                ),
+            });
+            if (actionReply)
+              return {
+                status: 'answered' as const,
+                ...actionReply,
+                citations: [],
+                outcome: 'answered' as const,
+                turnMode: 'act' as const,
+              };
+          }
+          if (
             turnPlan?.route === 'conversation' ||
             turnPlan?.route === 'help'
           ) {
@@ -8389,6 +8478,8 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
               : conversationResolution.turnMode === 'act' ||
                 isTaskChatRequest(queryText)
           ) {
+            // Action requests and their follow-ups were prepared above; this
+            // path lists tasks or proposes a single task change.
             const taskReply = await prepareTaskChatReply({
               query: queryText,
               previousAnswer: previousAssistantTurn?.content,
@@ -10659,7 +10750,8 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
 
       if (
         request.scope.type === 'live_meeting' &&
-        parseLiveMeetingCommand(query).kind === 'unknown'
+        parseLiveMeetingCommand(query).kind === 'unknown' &&
+        !isPlutoActionRequest(query)
       ) {
         return {
           status: 'answered' as const,
@@ -10713,6 +10805,47 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
       });
 
       try {
+        const actionReply = await preparePlutoActions({
+          signal: controller.signal,
+          requestId,
+          query,
+          context: { meetingId: request.scope.meetingId },
+          turns,
+          previousAnswer: [...turns]
+            .reverse()
+            .find((t) => t.role === 'assistant')?.content,
+          generate: async (prompt) => {
+            const stored = await getAllSettings(db);
+            if (
+              request.answerWith === 'chatgpt' &&
+              (!chatGPTQuestion ||
+                !offeredChatGPT ||
+                !canOfferChatGPTMemoryFallback(stored))
+            )
+              throw new Error(CHATGPT_FALLBACK_UNAVAILABLE_MESSAGE);
+            const settings =
+              request.answerWith === 'chatgpt'
+                ? chatGPTMemoryFallbackSettings(stored)
+                : stored;
+            return (await getProvider(settings)).answerAskPluto(prompt, {
+              signal: controller.signal,
+              mode: 'fast',
+              jsonMode: true,
+            });
+          },
+        });
+        if (actionReply)
+          return {
+            status: 'answered' as const,
+            ...actionReply,
+            scope: {
+              type: request.scope.type,
+              meetingId: request.scope.meetingId || '',
+            },
+            trustStatus: 'needs_review' as const,
+            claims: [],
+            citations: [],
+          };
         if (conversation.relation === 'social') {
           const previousAnswer = [...turns]
             .reverse()
@@ -11165,6 +11298,34 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
             : storedSettings;
         canOfferChatGPT = canOfferChatGPTMemoryFallback(settings);
         const provider = await getProvider(settings);
+        const actionReply = await preparePlutoActions({
+          signal: controller.signal,
+          requestId: request.requestId,
+          query: request.query,
+          turns: request.turns,
+          context: {
+            noteId: note.id,
+            selection: request.selection,
+            personId:
+              note.noteType === 'person'
+                ? (note.targetId ?? undefined)
+                : undefined,
+            projectId:
+              note.noteType === 'project'
+                ? (note.targetId ?? undefined)
+                : undefined,
+          },
+          previousAnswer: [...(request.turns ?? [])]
+            .reverse()
+            .find((t) => t.role === 'assistant')?.content,
+          generate: (prompt) =>
+            provider.answerAskPluto(prompt, {
+              signal: controller.signal,
+              mode: 'fast',
+              jsonMode: true,
+            }),
+        });
+        if (actionReply) return { status: 'answered' as const, ...actionReply };
         // A note about a person can draw on recent meetings with them, each
         // named in the prompt so answers say which meeting they came from.
         const relatedMeetings: NoteRelatedMeeting[] = [];

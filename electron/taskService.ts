@@ -18,7 +18,7 @@ import * as store from './db';
 const mirrorTaskTitle = (entity: store.Entity, text: string): void => {
   const metadata = parseActionMetadata(entity.metadata);
   const meetingId = getActionSourceMeetingId(entity.metadata);
-  if (!meetingId) return;
+  if (!meetingId || metadata.chat_source_reference_only === true) return;
   if (typeof metadata.source_path !== 'string')
     throw new Error('The source task changed. Open the meeting to review it.');
   const meeting = store.db
@@ -107,6 +107,8 @@ const saveSchema = z
     requestId: id.optional(),
     expectedRevision: z.string().length(64).optional(),
     sourceNoteId: id.optional(),
+    sourceMeetingId: id.optional(),
+    dedupeByTitle: z.boolean().optional(),
     sourceNoteLineId: id.optional(),
   })
   .strict();
@@ -206,13 +208,6 @@ const patchMetadata = (
   });
 
 export const listPersonalTasks = (): TasksSnapshot => {
-  try {
-    store.db
-      .prepare(
-        "DELETE FROM entities WHERE type = 'action_item' AND (trim(name) = '/' OR trim(name) = '' OR trim(name) LIKE '/task%' OR lower(trim(name)) LIKE 'jot down thoughts%')",
-      )
-      .run();
-  } catch {}
   const date = getDashboardDateKey();
   const options = selfOptions();
   const focusIds = new Set(
@@ -339,7 +334,12 @@ export const savePersonalTask = (payload: SaveTaskInput): string =>
         existing = requireTask(match.id);
       }
     }
-    if (!existing && input.title && !input.sourceNoteId) {
+    if (
+      !existing &&
+      input.title &&
+      !input.sourceNoteId &&
+      input.dedupeByTitle !== false
+    ) {
       const nameMatches = store.db
         .prepare(
           "SELECT id FROM entities WHERE type = 'action_item' AND lower(trim(name)) = lower(trim(?))",
@@ -379,6 +379,12 @@ export const savePersonalTask = (payload: SaveTaskInput): string =>
               ? 'notes'
               : 'tasks',
         };
+    if (input.sourceMeetingId !== undefined) {
+      if (!store.getMeeting(input.sourceMeetingId))
+        throw new Error('Source meeting is unavailable.');
+      metadata.source_meeting_id = input.sourceMeetingId;
+      metadata.chat_source_reference_only = true;
+    }
     if (input.sourceNoteId !== undefined) {
       metadata.source_note_id = input.sourceNoteId;
     }
