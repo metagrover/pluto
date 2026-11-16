@@ -5,6 +5,7 @@ import {
   readProjectQualification,
 } from '../src/utils/projectQualification';
 import { readProjectPortfolioDisposition } from '../src/utils/projectQualification';
+import { LocalModelMemoryError } from './llm/localModelMemory';
 import { projectIdentityName } from './projectIdentityMatching';
 import { isSerializedTaskPreemption } from './serializedTaskGate';
 
@@ -69,6 +70,7 @@ export interface ProjectThemeSynthesisDependencies {
   onDeferred?(
     reason:
       | 'foreground_preempted'
+      | 'memory_pressure'
       | 'source_changed'
       | 'routing_queue_remaining',
   ): void;
@@ -91,6 +93,7 @@ export interface ProjectThemeSynthesisResult {
   remaining: number;
   failed: number;
   deferred: boolean;
+  deferredReason?: 'memory_pressure';
   discoveredProjectId?: string;
 }
 
@@ -495,8 +498,15 @@ ${JSON.stringify(
     );
     parsed = JSON.parse(cleanJson(raw));
   } catch (error) {
-    if (isSerializedTaskPreemption(error)) {
-      deps.onDeferred?.('foreground_preempted');
+    if (
+      error instanceof LocalModelMemoryError ||
+      isSerializedTaskPreemption(error)
+    ) {
+      deps.onDeferred?.(
+        error instanceof LocalModelMemoryError
+          ? 'memory_pressure'
+          : 'foreground_preempted',
+      );
       return { discovered: 0, remaining: 1, failed: 0, deferred: true };
     }
     if (

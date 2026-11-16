@@ -7,6 +7,7 @@ export type DreamingUiStatus =
   | 'review_required'
   | 'unverified'
   | 'empty_brief'
+  | 'memory_pressure'
   | 'error';
 
 export const DREAMING_STATUS_LABEL = {
@@ -26,5 +27,6 @@ export const DREAMING_STATUS_LABEL = {
   unverified: 'Updates could not be verified',
   failed: 'Preparation failed',
   empty_brief: 'No brief could be prepared',
+  memory_pressure: 'Local model needs more memory',
   error: 'Preparation failed',
 } as const satisfies Record<DreamingUiStatus, string>;

@@ -208,6 +208,43 @@ it('bounds generic references to complete prior speaker turns without replay gro
   );
 });
 
+it('completes a split undertaking without borrowing the next responsibility', () => {
+  const source = createNotesSource(
+    JSON.stringify([
+      { speaker: 'Me', text: 'Let me' },
+      { speaker: 'Me', text: 'reserve the gallery' },
+      { speaker: 'Me', text: 'after the inspection passes.' },
+      { speaker: 'Me', text: 'I will send the budget.' },
+    ]),
+  );
+  const original = structuredClone(source);
+  const window = sourceBoundReviewWindow(source, [
+    { segment: 1, start: 0, end: source.segments[1]!.text.length },
+  ]);
+  expect(window.map((span) => span.segment)).toEqual([0, 1, 2]);
+  expect(window.map((span) => resolveSourceSpan(source, span))).toEqual([
+    'Let me',
+    'reserve the gallery',
+    'after the inspection passes.',
+  ]);
+  expect(sourceBoundReviewWindow(source, window)).toEqual(window);
+  expect(source).toEqual(original);
+});
+
+it.each(['Them', 'Unknown', null])(
+  'keeps adjacent fragments separate when %s does not establish a shared speaker',
+  (speaker) => {
+    const source = createNotesSource(
+      JSON.stringify([
+        { speaker, text: 'Let me' },
+        { speaker, text: 'reserve the gallery.' },
+      ]),
+    );
+    const span = { segment: 1, start: 0, end: source.segments[1]!.text.length };
+    expect(sourceBoundReviewWindow(source, [span])).toEqual([span]);
+  },
+);
+
 it('does not fabricate preceding evidence for a first-turn demonstrative', () => {
   const source = createNotesSource(
     JSON.stringify([{ speaker: 'Ari', text: 'I declined that invitation.' }]),

@@ -134,7 +134,7 @@ function getProjectPalette(
   return WARM_MONOGRAM_PALETTES[hash % WARM_MONOGRAM_PALETTES.length];
 }
 
-type SynthesisState = 'idle' | 'failed' | 'incomplete';
+type SynthesisState = 'idle' | 'failed' | 'incomplete' | 'memory_pressure';
 type PortfolioFilter =
   | 'all'
   | 'primary'
@@ -231,7 +231,9 @@ export function ProjectsOverview({
         const result = await discoverProjectInitiative({ retryFailed });
         if (cancelled) return;
         if (result.discovered > 0) await refresh();
-        if (result.deferred) {
+        if (result.deferredReason === 'memory_pressure') {
+          setSynthesisState('memory_pressure');
+        } else if (result.deferred) {
           timer = setTimeout(synthesize, 5000);
         } else if (result.failed > 0) setSynthesisState('incomplete');
         else if (result.remaining > 0) {
@@ -1479,29 +1481,31 @@ export function ProjectsOverview({
             </details>
           )}
 
-          {!loadError &&
-            (synthesisState === 'failed' ||
-              synthesisState === 'incomplete') && (
-              <div
-                className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-pro-text-muted"
-                aria-live="polite"
-              >
-                <span>Some project updates couldn’t finish.</span>
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    className="shrink-0 rounded px-2 py-1 font-medium text-pro-accent underline underline-offset-4 hover:bg-pro-hover"
-                    onClick={retry}
-                  >
-                    Retry updates
-                  </button>
-                  <ReportProblemButton
-                    area="project_themes"
-                    className="min-h-9 rounded px-2 py-1 font-medium text-pro-text-muted underline underline-offset-4 hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
-                  />
-                </div>
+          {!loadError && synthesisState !== 'idle' && (
+            <div
+              className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-pro-text-muted"
+              aria-live="polite"
+            >
+              <span>
+                {synthesisState === 'memory_pressure'
+                  ? 'Project updates paused because the local model needs more memory.'
+                  : 'Some project updates couldn’t finish.'}
+              </span>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-2 py-1 font-medium text-pro-accent underline underline-offset-4 hover:bg-pro-hover"
+                  onClick={retry}
+                >
+                  Retry updates
+                </button>
+                <ReportProblemButton
+                  area="project_themes"
+                  className="min-h-9 rounded px-2 py-1 font-medium text-pro-text-muted underline underline-offset-4 hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+                />
               </div>
-            )}
+            </div>
+          )}
 
           {showCompletedSection && (
             <details

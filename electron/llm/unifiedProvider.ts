@@ -41,7 +41,11 @@ import {
   watchLocalModelMemory,
 } from './localModelMemory';
 
-import { acceptEditedNotes, parseCompactNotesDraft } from './meetingNotesAudit';
+import {
+  acceptEditedNotes,
+  getSourceLedValidationFailures,
+  parseCompactNotesDraft,
+} from './meetingNotesAudit';
 import {
   notesContextTokens,
   notesSourceSpanLimit,
@@ -805,6 +809,87 @@ export class UnifiedLLMProvider implements LLMProvider {
     let modelStageCalls = 0;
     let overviewProfileActive = false;
     let overviewProfileArtifact: string | undefined;
+    let sourceReviewRequired = false;
+    let sourceReviewContextTokens =
+      options.contextTokens ?? notesContextTokens(this.providerType);
+    const reviewRejectedNotes = async (
+      notes: import('./meetingNotesAudit').AuditedNotes,
+    ) => {
+      const originals = structuredClone(notes.draft);
+      for (const section of originals.sections) {
+        section.items = section.items.map(
+          (item) => notes.reviewOriginals?.get(item.id) ?? item,
+        );
+      }
+      const targets = new Set<string>();
+      const reviewable = new Set([
+        'overview',
+        ...originals.sections.flatMap((section) =>
+          section.items.map((item) => item.id),
+        ),
+      ]);
+      try {
+        acceptEditedNotes({
+          source,
+          draft: originals,
+          omitUnprovedDecisionAuthors: true,
+        });
+      } catch (rejection) {
+        const failures = getSourceLedValidationFailures(rejection);
+        if (!failures?.length)
+          throw new MeetingNotesError('notes_semantic_review_incomplete');
+        for (const { target } of failures) {
+          if (!target || !reviewable.has(target))
+            throw new MeetingNotesError('notes_semantic_review_incomplete');
+          targets.add(target);
+        }
+      }
+      for (const section of notes.draft.sections) {
+        for (const item of section.items) {
+          if (
+            notes.issues?.some(
+              (issue) =>
+                issue.startsWith('deterministic_') &&
+                issue.endsWith(`:${item.id}`),
+            )
+          )
+            targets.add(item.id);
+        }
+      }
+      if (!targets.size)
+        throw new MeetingNotesError('notes_semantic_review_incomplete');
+      const budget = {
+        contextTokens: sourceReviewContextTokens,
+        outputTokens: 1024,
+      };
+      return reviewSourceBoundNotes(
+        notes,
+        async ({ prompt, responseSchema }) => {
+          if (
+            options.optionalReviewDeadlineAtMs !== undefined &&
+            options.optionalReviewDeadlineAtMs - Date.now() <=
+              (options.optionalReviewMinStartMs ?? 0)
+          )
+            throw new MeetingNotesError('notes_review_budget_exhausted');
+          options.onStage?.('notesAudit');
+          return this.generateResumableAnalysisText({
+            prompt,
+            responseSchema,
+            task: 'notesAudit',
+            jsonMode: true,
+            notesModel: model,
+            notesBudget: budget,
+            notesStageObserver: options.onStageEvent,
+            workClass: options.workClass,
+            signal: options.signal,
+          });
+        },
+        options.signal,
+        12000,
+        { ...budget, maxCasesPerBatch: 1 },
+        targets,
+      );
+    };
     const input: Parameters<typeof generateMeetingNotes>[0] = {
       source,
       context: {
@@ -816,6 +901,12 @@ export class UnifiedLLMProvider implements LLMProvider {
       stageCache: options.stageCache,
       cacheKey: options.cacheKey,
       hierarchyAuditStrategy,
+      ...(this.providerType === 'ollama'
+        ? {
+            reviewSourceBoundNotes: reviewRejectedNotes,
+            shouldReviewSourceBoundNotes: () => sourceReviewRequired,
+          }
+        : {}),
       ...(this.providerType === 'chatgpt'
         ? {
             reviewSourceBoundNotes: (
@@ -936,20 +1027,50 @@ export class UnifiedLLMProvider implements LLMProvider {
         if (
           this.providerType !== 'ollama' ||
           request.responseContract !== 'compact_draft' ||
-          request.task !== 'notesWriter' ||
-          !isEstablishedGemmaArtifact(writerArtifact)
+          request.task !== 'notesWriter'
         )
           return decoded;
         try {
-          parseCompactNotesDraft(
+          const parsed = parseCompactNotesDraft(
             decoded,
             notesSourceSpanLimit(this.providerType),
             this.providerType,
           );
+          if (
+            writerArtifact &&
+            hierarchyAuditStrategy === 'deterministic_only'
+          ) {
+            try {
+              acceptEditedNotes({
+                source,
+                draft: parsed,
+                omitUnprovedDecisionAuthors: true,
+              });
+            } catch (error) {
+              const failures = getSourceLedValidationFailures(error);
+              const reviewable = new Set([
+                'overview',
+                ...parsed.sections.flatMap((section) =>
+                  section.items.map((item) => item.id),
+                ),
+              ]);
+              if (
+                failures?.length &&
+                failures.every(
+                  (failure) => failure.target && reviewable.has(failure.target),
+                )
+              ) {
+                sourceReviewRequired = true;
+                sourceReviewContextTokens = request.contextTokens;
+              }
+            }
+          }
         } catch {
           // Keep the writer's existing schema repair and rejected-response feedback.
           return decoded;
         }
+        if (sourceReviewRequired || !isEstablishedGemmaArtifact(writerArtifact))
+          return decoded;
         const overview = prepareNotesOverview(
           source,
           request.sourceSpans ?? [],

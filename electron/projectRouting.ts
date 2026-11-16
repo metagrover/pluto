@@ -4,6 +4,7 @@ import {
   readProjectPortfolioDisposition,
   readProjectQualification,
 } from '../src/utils/projectQualification';
+import { LocalModelMemoryError } from './llm/localModelMemory';
 import { projectIdentityName } from './projectIdentityMatching';
 import {
   rankProjectReviewSources,
@@ -40,6 +41,7 @@ interface Dependencies {
   onDeferred?(
     reason:
       | 'foreground_preempted'
+      | 'memory_pressure'
       | 'source_changed'
       | 'routing_queue_remaining',
   ): void;
@@ -435,8 +437,15 @@ CANDIDATE:\n${JSON.stringify({ id: project.id, name: project.name, outcome: read
     )
       throw new SyntaxError('invalid_project_routing');
   } catch (error) {
-    if (isSerializedTaskPreemption(error)) {
-      deps.onDeferred?.('foreground_preempted');
+    if (
+      error instanceof LocalModelMemoryError ||
+      isSerializedTaskPreemption(error)
+    ) {
+      deps.onDeferred?.(
+        error instanceof LocalModelMemoryError
+          ? 'memory_pressure'
+          : 'foreground_preempted',
+      );
       return {
         grouped: 0,
         remaining: pending.length,

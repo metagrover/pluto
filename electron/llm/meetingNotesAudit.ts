@@ -1894,6 +1894,7 @@ export const hasSourceReviewedAdmission = (
 export const sourceBoundItemReviewWindow = (
   audited: Pick<AuditedNotes, 'source' | 'draft' | 'reviewOriginals'>,
   item: NotesItem,
+  includePriorTurns = false,
 ): SourceSpan[] => {
   // A point may be promoted by the model. Probe the existing action guard only
   // to discover cancellation or prerequisite evidence; never change the item.
@@ -1908,13 +1909,19 @@ export const sourceBoundItemReviewWindow = (
     undefined,
     ['missing_condition', 'conflicting_action'],
   );
-  const window = sourceBoundReviewWindow(audited.source, [
-    ...item.sources,
-    ...issues.flatMap((issue) => issue.sources),
-  ]);
+  const original = audited.reviewOriginals?.get(item.id);
+  const window = sourceBoundReviewWindow(
+    audited.source,
+    [
+      ...(includePriorTurns
+        ? (original?.sources ?? item.sources)
+        : item.sources),
+      ...issues.flatMap((issue) => issue.sources),
+    ],
+    includePriorTurns,
+  );
   // Only the immutable original question anchors forward context. Expanded
   // review citations (or newly inserted items) must not crawl later dialogue.
-  const original = audited.reviewOriginals?.get(item.id);
   if (!original?.sources.length) return window;
   const questions = original.sources.filter((span) =>
     resolveSourceSpan(audited.source, span).includes('?'),
@@ -1944,6 +1951,7 @@ export const sourceBoundItemReviewWindow = (
 export const applySourceBoundSemanticReview = (
   audited: AuditedNotes,
   resolutions: Array<SourceBoundNotesReplacement | SourceBoundNotesOmission>,
+  includePriorTurnsFor: ReadonlySet<string> = new Set(),
 ): AuditedNotes => {
   if (!reviewedResults.has(audited))
     throw new MeetingNotesError('notes_unreviewed_projection');
@@ -2168,7 +2176,11 @@ export const applySourceBoundSemanticReview = (
             ...new Map(
               [item.id, ...replacement.mergedIds]
                 .flatMap((id) =>
-                  sourceBoundItemReviewWindow(audited, originalItems.get(id)!),
+                  sourceBoundItemReviewWindow(
+                    audited,
+                    originalItems.get(id)!,
+                    includePriorTurnsFor.has(id),
+                  ),
                 )
                 .map((span) => [JSON.stringify(span), span]),
             ).values(),
@@ -2191,7 +2203,13 @@ export const applySourceBoundSemanticReview = (
         ) &&
         JSON.stringify(replacement.sources) !== JSON.stringify(item.sources) &&
         JSON.stringify(replacement.sources) !==
-          JSON.stringify(sourceBoundItemReviewWindow(audited, item))
+          JSON.stringify(
+            sourceBoundItemReviewWindow(
+              audited,
+              item,
+              includePriorTurnsFor.has(item.id),
+            ),
+          )
       )
         throw new MeetingNotesError('notes_source_out_of_scope');
       if (

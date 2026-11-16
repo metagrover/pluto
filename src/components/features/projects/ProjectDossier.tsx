@@ -162,6 +162,10 @@ export const ProjectDossier = ({
       });
       if (generation !== prepareGeneration.current) return;
       // A cached update run must never hide a failed or deferred brief synthesis.
+      if (synthesis.deferredReason === 'memory_pressure') {
+        setDreamingState('memory_pressure');
+        return;
+      }
       if (synthesis.failed > 0) {
         setDreamingState('failed');
         return;

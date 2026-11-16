@@ -5582,13 +5582,18 @@ app.whenReady().then(async () => {
         prompt: string,
         responseSchema: Record<string, unknown>,
       ) => {
-        const provider = await getProvider(await getAllSettings(db));
+        const settings = await getAllSettings(db);
+        const provider = await getProvider(settings);
         return provider.synthesizeKnowledgeDocument(prompt, {
           purpose: 'projectScope',
           responseSchema,
           budget: { contextTokens: 32768, outputTokens: 8192 },
           workClass: options?.background ? 'background' : 'project_review',
-          signal: AbortSignal.timeout(300_000),
+          // Ollama enforces its own deadline after the local queue admits the request.
+          signal:
+            !settings.llm_provider || settings.llm_provider === 'ollama'
+              ? undefined
+              : AbortSignal.timeout(300_000),
         });
       },
       isBusy: () => {
@@ -5599,6 +5604,7 @@ app.whenReady().then(async () => {
       onDeferred: (
         reason:
           | 'foreground_preempted'
+          | 'memory_pressure'
           | 'source_changed'
           | 'routing_queue_remaining',
       ) => {
@@ -5646,13 +5652,17 @@ app.whenReady().then(async () => {
             prompt: string,
             responseSchema: Record<string, unknown>,
           ) => {
-            const provider = await getProvider(await getAllSettings(db));
+            const settings = await getAllSettings(db);
+            const provider = await getProvider(settings);
             return provider.synthesizeKnowledgeDocument(prompt, {
               purpose: 'projectScope',
               responseSchema,
               budget: { contextTokens: 32768, outputTokens: 1500 },
               workClass: options?.background ? 'background' : 'project_review',
-              signal: AbortSignal.timeout(300_000),
+              signal:
+                !settings.llm_provider || settings.llm_provider === 'ollama'
+                  ? undefined
+                  : AbortSignal.timeout(300_000),
             });
           },
           getState: (): ProjectRoutingState | null => {
@@ -5754,6 +5764,8 @@ app.whenReady().then(async () => {
               ? { error: 'project_response_incomplete' }
               : {}),
           });
+          if (diagnosticReason === 'memory_pressure')
+            return { ...result, deferredReason: 'memory_pressure' as const };
           return result;
         },
         (error) => {
@@ -5795,7 +5807,9 @@ app.whenReady().then(async () => {
                 Number(result.routingRemaining) > 0)))
         )
           scheduleProjectSynthesis?.(
-            'routingRemaining' in result && Number(result.routingRemaining) > 0
+            !result.deferredReason &&
+              'routingRemaining' in result &&
+              Number(result.routingRemaining) > 0
               ? 5000
               : 60_000,
           );

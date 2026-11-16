@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { notesSegmentAt } from './meetingNotesBudget';
 import {
   type CitedSpeakerAlias,
   MeetingNotesError,
@@ -111,11 +112,7 @@ export const resolveSourceSpan = (
   source: NotesSource,
   span: SourceSpan,
 ): string => {
-  const indexed = source.segments[span.segment];
-  const segment =
-    indexed?.index === span.segment
-      ? indexed
-      : source.segments.find((entry) => entry.index === span.segment);
+  const segment = notesSegmentAt(source, span.segment);
   if (
     !segment ||
     !Number.isInteger(span.segment) ||
@@ -168,18 +165,74 @@ const needsPriorSourceContext = (text: string): boolean =>
   hasBareNotesReferent(text) ||
   /\b(?:this|that|these|those|such)\b/i.test(text);
 
-/** Exact backward-reference context, bounded to three prior turns. */
-export const sourceBoundReviewWindow = (
+/** Restore a sentence split across adjacent, identified-speaker segments. */
+export const completeCitedSourceSentences = (
   source: NotesSource,
   spans: SourceSpan[],
 ): SourceSpan[] => {
-  const referents = spans.filter((span) =>
+  for (const span of spans) resolveSourceSpan(source, span);
+  const citedSegments = new Set(spans.map((span) => span.segment));
+  const turns = groupCitedSourcePassages(
+    source,
+    source.segments
+      .filter((segment) => segment.text.trim())
+      .map((segment) => ({
+        segment: segment.index,
+        start: 0,
+        end: segment.text.length,
+      })),
+  );
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'sentence' });
+  const sentences = turns.flatMap((turn) => {
+    const groups: SourceSpan[][] = [];
+    for (const span of turn.spans) {
+      const group = groups.at(-1);
+      const prior = group?.at(-1);
+      if (prior) {
+        const preceding = resolveSourceSpan(source, prior);
+        const joined = `${preceding} ${resolveSourceSpan(source, span)}`;
+        const continues = [...segmenter.segment(joined)].some(
+          (sentence) =>
+            sentence.index <= preceding.length &&
+            sentence.index + sentence.segment.length > preceding.length + 1,
+        );
+        if (continues) {
+          group!.push(span);
+          continue;
+        }
+      }
+      groups.push([span]);
+    }
+    return groups;
+  });
+  // Transcript segments can split a single undertaking before its subject.
+  return completeCitedSourceWindow(
+    source,
+    sentences
+      .filter((sentence) =>
+        sentence.some((span) => citedSegments.has(span.segment)),
+      )
+      .flat(),
+  );
+};
+
+/** Complete split sentences, plus at most three prior turns for references. */
+export const sourceBoundReviewWindow = (
+  source: NotesSource,
+  spans: SourceSpan[],
+  includePriorTurns = false,
+): SourceSpan[] => {
+  const window = completeCitedSourceSentences(source, spans);
+  const referents = window.filter((span) =>
     needsPriorSourceContext(resolveSourceSpan(source, span)),
   );
-  if (!referents.length) return completeCitedSourceWindow(source, spans);
+  if (!window.length || (!includePriorTurns && !referents.length))
+    return window;
   // Anchor to the latest reference so earlier contextual references cannot
   // extend the window again when a reviewed result is replayed.
-  const first = Math.max(...referents.map((span) => span.segment));
+  const first = includePriorTurns
+    ? window[0]!.segment
+    : Math.max(...referents.map((span) => span.segment));
   const previous = source.segments
     .filter(
       (segment) => segment.index < first && segment.text.trim().length > 0,
@@ -192,7 +245,7 @@ export const sourceBoundReviewWindow = (
   const priorPassages = groupCitedSourcePassages(source, previous).slice(-3);
   return completeCitedSourceWindow(source, [
     ...priorPassages.flatMap(({ spans }) => spans),
-    ...spans,
+    ...window,
   ]);
 };
 
@@ -215,15 +268,12 @@ export const groupCitedSourcePassages = (
     (left, right) => left.segment - right.segment || left.start - right.start,
   );
   for (const span of ordered) {
-    const segment = source.segments.find(
-      (entry) => entry.index === span.segment,
-    )!;
+    const segment = notesSegmentAt(source, span.segment)!;
     const text = resolveSourceSpan(source, span);
     const prior = passages.at(-1);
     const previous = prior?.spans.at(-1);
     const previousSegment =
-      previous &&
-      source.segments.find((entry) => entry.index === previous.segment)!;
+      previous && notesSegmentAt(source, previous.segment)!;
     const adjacent =
       previous &&
       (previous.segment === span.segment
