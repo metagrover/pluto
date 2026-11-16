@@ -10,13 +10,11 @@ const api = vi.hoisted(() => ({
   getClaudeConnectionStatus: vi.fn(),
   setClaudeConnectionEnabled: vi.fn(),
   openClaude: vi.fn(),
-  openClaudeSetupGuide: vi.fn(),
 }));
 const chatgpt = vi.hoisted(() => ({
   getChatGptConnectionStatus: vi.fn(),
   setChatGptConnectionEnabled: vi.fn(),
   openChatGpt: vi.fn(),
-  openChatGptSetupGuide: vi.fn(),
 }));
 vi.mock('../../src/api/claudeConnection', () => api);
 vi.mock('../../src/api/chatgptConnection', () => chatgpt);
@@ -91,7 +89,7 @@ describe('Claude meeting note access', () => {
     );
     await act(async () => button(container, 'Connect to Claude').click());
     expect(api.setClaudeConnectionEnabled).toHaveBeenCalledWith(true);
-    expect(api.openClaude).toHaveBeenCalledOnce();
+    expect(api.openClaude).not.toHaveBeenCalled();
     expect(container.querySelector('[role="status"]')?.textContent).toBe(
       'Local setup ready',
     );
@@ -139,21 +137,21 @@ describe('Claude meeting note access', () => {
     );
     await act(async () => button(container, 'Connect to Claude').click());
     expect(container.textContent).toContain('Local setup ready');
+    expect(api.openClaude).not.toHaveBeenCalled();
+    await act(async () => button(container, 'Open Claude Desktop').click());
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'Install Claude Desktop',
     );
     expect(button(container, 'Disable access').disabled).toBe(false);
   });
 
-  it('handles unavailable IPC and setup guide failures', async () => {
+  it('handles unavailable IPC without offering setup', async () => {
     api.getClaudeConnectionStatus.mockRejectedValue(new Error('unavailable'));
-    api.openClaudeSetupGuide.mockRejectedValue(new Error('unavailable'));
     const container = await render();
     expect(container.textContent).toContain('Connection unavailable');
     expect(button(container, 'Connect to Claude').disabled).toBe(true);
-    await act(async () => button(container, 'Open Claude setup guide').click());
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      'setup guide could not be opened',
+      'Pluto desktop app',
     );
   });
 
@@ -163,9 +161,10 @@ describe('Claude meeting note access', () => {
     const steps = container.querySelector('ol')!;
     expect(steps.closest('details')?.open).toBe(true);
     expect(steps.textContent).toContain('Restart Claude once');
-    expect(steps.textContent).toContain('Developer → Local MCP servers');
+    expect(steps.textContent).toContain('+ → Connectors');
+    expect(container.textContent).toContain('Developer → Local MCP servers');
     expect(container.textContent).toContain(
-      'won’t appear in Claude’s public connector directory',
+      'won’t appear in the public directory',
     );
     expect(container.textContent).toContain('No servers added');
   });
@@ -219,12 +218,10 @@ it('routes Claude desktop actions separately and validates status responses', as
   await actual.getClaudeConnectionStatus();
   await actual.setClaudeConnectionEnabled(true);
   await actual.openClaude();
-  await actual.openClaudeSetupGuide();
   expect(invoke.mock.calls).toEqual([
     ['PLUTO_CLAUDE_GET_STATUS'],
     ['PLUTO_CLAUDE_SET_ENABLED', { enabled: true }],
     ['PLUTO_CLAUDE_OPEN'],
-    ['PLUTO_CLAUDE_OPEN_SETUP_GUIDE'],
   ]);
   invoke.mockResolvedValue({ enabled: true });
   await expect(actual.getClaudeConnectionStatus()).rejects.toThrow(

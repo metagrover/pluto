@@ -2709,7 +2709,7 @@ function App() {
                     <>
                       <NotesConnectionsNotice
                         onOpenSettings={() => {
-                          setSettingsInitialTab('advanced');
+                          setSettingsInitialTab('connections');
                           setSettingsNavigationToken((token) => token + 1);
                           setSelectedMeetingId(null);
                           setActiveTab('settings');

@@ -60,7 +60,7 @@ describe('ChatGPT Desktop local plugin installer', () => {
       expect([...url.searchParams.keys()]).toEqual(['mode', 'prompt']);
       expect(url.searchParams.get('mode')).toBe('work');
       expect(url.searchParams.get('prompt')).toBe(
-        `[@${label}](plugin://${pluginName}@personal) What should I focus on?`,
+        `[@${label}](plugin://${pluginName}@personal) What did we decide in my latest meeting?`,
       );
       runCommand.mockRejectedValueOnce(new Error('missing app'));
       await expect(openChatGptDesktop(plugin, runCommand)).rejects.toThrow(

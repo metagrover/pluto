@@ -467,7 +467,9 @@ describe('About you form and invitation', () => {
     expect(container.textContent).toContain('A little about you');
     expect(invoke).not.toHaveBeenCalledWith('RECORDING_READINESS_PREPARE');
     await click('Skip for now');
-    expect(container.textContent).toContain('Your notes, where you think');
+    expect(container.textContent).toContain(
+      'Search your notes in ChatGPT or Claude',
+    );
     await click('Skip for now');
     expect(invoke).toHaveBeenCalledWith('SET_SETTING', {
       key: 'setup_complete',
@@ -505,7 +507,9 @@ describe('About you form and invitation', () => {
     await act(async () => root.render(<SetupWizard onComplete={complete} />));
     await text('Preferred name', 'Morgan');
     await click('Save and continue');
-    expect(container.textContent).toContain('Your notes, where you think');
+    expect(container.textContent).toContain(
+      'Search your notes in ChatGPT or Claude',
+    );
     await click('Skip for now');
     expect(complete).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')).toBeTruthy();

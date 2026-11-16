@@ -135,9 +135,9 @@ export function ChatGPTIntelligenceSettings({
           <h4 className="text-[15px] font-semibold text-pro-text-main">
             {ready
               ? activationPending
-                ? 'Ready to use ChatGPT'
-                : 'Using your ChatGPT plan'
-              : 'Let ChatGPT power Pluto'}
+                ? 'Ready to use your ChatGPT plan'
+                : 'Using your ChatGPT plan in Pluto'
+              : 'Use your ChatGPT plan in Pluto'}
           </h4>
           <p
             role="status"
@@ -147,7 +147,7 @@ export function ChatGPTIntelligenceSettings({
               ? (status.email ?? 'ChatGPT account connected')
               : status?.connected
                 ? 'Signed in. Allow plan usage to finish connecting.'
-                : 'Get meeting notes and answers with your eligible ChatGPT plan. No API key or Ollama setup needed.'}
+                : 'Sign in to run Pluto’s AI features with the models available on your eligible ChatGPT plan.'}
           </p>
         </div>
         {status?.connected ? (
@@ -177,9 +177,9 @@ export function ChatGPTIntelligenceSettings({
       {!ready ? (
         <div className="space-y-4">
           <p className="text-[13px] leading-5 text-pro-text-main/75">
-            Recording and transcription stay on this Mac. By continuing, you
-            allow relevant transcript text, notes, and questions go to OpenAI
-            for intelligence.
+            Recording and transcription stay on this Mac. By signing in and
+            enabling plan usage, you allow Pluto to send relevant transcript
+            text, notes, and questions to OpenAI.
           </p>
           <p className="text-[13px] leading-5 text-pro-text-main/75">
             Start with Terra when available,{' '}
@@ -218,7 +218,7 @@ export function ChatGPTIntelligenceSettings({
                 ? 'Waiting for browser…'
                 : status?.connected
                   ? 'Enable ChatGPT plan usage'
-                  : 'Continue with ChatGPT'}
+                  : 'Sign in with ChatGPT'}
             </button>
             {busy === 'sign-in' ? (
               <button

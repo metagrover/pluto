@@ -4,8 +4,6 @@ import path from 'node:path';
 import { lockSync } from 'proper-lockfile';
 
 export const CLAUDE_NOTES_ENABLED_SETTING = 'claude_notes_connection_enabled';
-export const CLAUDE_SETUP_URL =
-  'https://modelcontextprotocol.io/docs/develop/connect-local-servers';
 
 const object = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value));

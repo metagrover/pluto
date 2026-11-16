@@ -246,6 +246,7 @@ describe('SettingsTab', () => {
       'Personal',
       'Meetings',
       'Intelligence',
+      'Connections',
       'Advanced',
       'Help',
     ]);
@@ -255,7 +256,7 @@ describe('SettingsTab', () => {
     expect(container.textContent).toContain('Identity settings content');
     expect(container.textContent).toContain('Appearance');
     expect(container.textContent).not.toContain('Calendar settings content');
-    expect(container.textContent).not.toContain('AI Provider');
+    expect(container.textContent).not.toContain('Model provider');
     expect(container.textContent).not.toContain('Reset knowledge base');
 
     act(() => tabs[1].click());
@@ -265,6 +266,33 @@ describe('SettingsTab', () => {
     expect(container.textContent).toContain('Recording');
     expect(container.textContent).not.toContain('Identity settings content');
 
+    act(() => root.unmount());
+  });
+
+  it('offers both desktop note connections in a dedicated tab', async () => {
+    const { container, root } = renderSettings();
+    const connections = getTabs(container).find(
+      (tab) => tab.textContent === 'Connections',
+    )!;
+
+    await act(async () => connections.click());
+
+    const panel = container.querySelector('[role="tabpanel"]');
+    expect(panel?.id).toBe('settings-panel-connections');
+    expect(panel?.textContent).toContain('ChatGPT Desktop');
+    expect(panel?.textContent).toContain('Claude Desktop');
+    expect(panel?.textContent).not.toContain('Model provider');
+    expect(window.ipcRenderer.invoke).not.toHaveBeenCalledWith(
+      'CHATGPT_SIGN_IN',
+    );
+    expect(window.ipcRenderer.invoke).not.toHaveBeenCalledWith(
+      'PLUTO_MCP_SET_ENABLED',
+      { enabled: true },
+    );
+    expect(window.ipcRenderer.invoke).not.toHaveBeenCalledWith(
+      'PLUTO_CLAUDE_SET_ENABLED',
+      { enabled: true },
+    );
     act(() => root.unmount());
   });
 
@@ -287,12 +315,12 @@ describe('SettingsTab', () => {
         new KeyboardEvent('keydown', { key: 'End', bubbles: true }),
       );
     });
-    expect(document.activeElement).toBe(tabs[4]);
-    expect(tabs[4].getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(tabs[5]);
+    expect(tabs[5].getAttribute('aria-selected')).toBe('true');
     expect(container.textContent).toContain('Report a problem');
 
     act(() => {
-      tabs[4].dispatchEvent(
+      tabs[5].dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Home', bubbles: true }),
       );
     });
@@ -304,8 +332,8 @@ describe('SettingsTab', () => {
         new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }),
       );
     });
-    expect(document.activeElement).toBe(tabs[4]);
-    expect(tabs[4].getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(tabs[5]);
+    expect(tabs[5].getAttribute('aria-selected')).toBe('true');
 
     act(() => root.unmount());
   });
@@ -412,7 +440,7 @@ describe('SettingsTab', () => {
 
     it('previews ChatGPT while keeping Ollama active until explicitly connected', async () => {
       const f = await preview();
-      expect(f.container.textContent).toContain('Continue with ChatGPT');
+      expect(f.container.textContent).toContain('Sign in with ChatGPT');
       expect(f.invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
       expect(f.saved.llm_provider).toBeUndefined();
       expect(f.saved.cloud_consent_chatgpt).toBeUndefined();
@@ -434,7 +462,7 @@ describe('SettingsTab', () => {
           });
         return original(channel, input);
       });
-      await f.click('Continue with ChatGPT');
+      await f.click('Sign in with ChatGPT');
       expect(f.invoke).toHaveBeenCalledWith('CHATGPT_SIGN_IN');
       expect(f.invoke).toHaveBeenCalledWith('CHATGPT_MODELS');
       expect(f.saved.cloud_consent_chatgpt).toBe('1');
@@ -477,7 +505,7 @@ describe('SettingsTab', () => {
           });
         return original(channel, input);
       });
-      await f.click('Continue with ChatGPT');
+      await f.click('Sign in with ChatGPT');
       expect(finishConsent).toBeDefined();
       await f.click('Ollama');
       await act(async () => finishConsent());
@@ -498,7 +526,7 @@ describe('SettingsTab', () => {
           throw new Error('Could not save consent');
         return original(channel, input);
       });
-      await f.click('Continue with ChatGPT');
+      await f.click('Sign in with ChatGPT');
       expect(f.saved.llm_provider).toBeUndefined();
       expect(f.saved.cloud_consent_chatgpt).toBeUndefined();
       expect(f.saved.intelligence_setup_complete).toBeUndefined();

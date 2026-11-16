@@ -63,7 +63,7 @@ interface AskPlutoProps {
     target?: { sectionId?: string; timestampMs?: number },
   ) => void;
   onOpenArtifact: (id: string) => void;
-  onOpenSettings?: (tab: 'advanced' | 'meetings') => void;
+  onOpenSettings?: (tab: 'advanced' | 'connections' | 'meetings') => void;
   visible: boolean;
   onClose: () => void;
   activeMeetingSnapshot?: AskPlutoActiveMeetingSnapshot;
@@ -1304,12 +1304,22 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                             remarkPlugins={[remarkGfm]}
                             components={{
                               a: ({ href, children }) => {
+                                // Saved help answers used Advanced for desktop note access.
+                                const legacyConnectionLink =
+                                  href === '/settings/advanced' &&
+                                  typeof children === 'string' &&
+                                  /^Open (ChatGPT |Claude )?connection settings$/.test(
+                                    children,
+                                  );
                                 const tab =
-                                  href === '/settings/advanced'
-                                    ? 'advanced'
-                                    : href === '/settings/meetings'
-                                      ? 'meetings'
-                                      : undefined;
+                                  href === '/settings/connections' ||
+                                  legacyConnectionLink
+                                    ? 'connections'
+                                    : href === '/settings/advanced'
+                                      ? 'advanced'
+                                      : href === '/settings/meetings'
+                                        ? 'meetings'
+                                        : undefined;
                                 if (tab) {
                                   return onOpenSettings ? (
                                     <button

@@ -154,7 +154,7 @@ describe('ChatGPT intelligence settings', () => {
       'Recording and transcription stay on this Mac',
     );
     expect(container.querySelector('input[type="password"]')).toBeNull();
-    await act(async () => button('Continue with ChatGPT').click());
+    await act(async () => button('Sign in with ChatGPT').click());
     expect(container.textContent).toContain('test@example.test');
     const select = container.querySelector('select')!;
     expect([...select.options].map((option) => option.text)).toEqual([
@@ -175,7 +175,7 @@ describe('ChatGPT intelligence settings', () => {
     expect(container.textContent).toContain(
       'Remote revocation could not be confirmed',
     );
-    expect(container.textContent).toContain('Let ChatGPT power Pluto');
+    expect(container.textContent).toContain('Use your ChatGPT plan in Pluto');
     act(() => root.unmount());
   });
 
@@ -220,7 +220,7 @@ describe('ChatGPT intelligence settings', () => {
       );
       await act(async () =>
         [...container.querySelectorAll('button')]
-          .find((button) => button.textContent === 'Continue with ChatGPT')!
+          .find((button) => button.textContent === 'Sign in with ChatGPT')!
           .click(),
       );
       if (stage === 'final status') expect(statusRequests).toBe(3);
@@ -255,7 +255,7 @@ describe('ChatGPT intelligence settings', () => {
     await act(async () => root.render(<ChatGPTIntelligenceSettings />));
     await act(async () =>
       [...container.querySelectorAll('button')]
-        .find((button) => button.textContent === 'Continue with ChatGPT')!
+        .find((button) => button.textContent === 'Sign in with ChatGPT')!
         .click(),
     );
     expect(container.textContent).toContain('Waiting for browser');

@@ -59,11 +59,11 @@ export function NotesConnectionsNotice({
     >
       <div className="min-w-0 flex-1 basis-64">
         <p className="font-medium">
-          Use your meeting notes in ChatGPT or Claude.
+          Search your meeting notes in ChatGPT or Claude.
         </p>
         <p className="mt-1 leading-5 text-pro-text-muted">
-          Connect either desktop app to explore your saved notes. Access is
-          optional and managed separately for each app.
+          Connect either desktop app to compare decisions and ask questions
+          across meetings.
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">

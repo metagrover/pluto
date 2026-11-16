@@ -9,7 +9,6 @@ import { ChatGptConnectionSettings } from '../../src/components/features/ChatGpt
 const api = vi.hoisted(() => ({
   getChatGptConnectionStatus: vi.fn(),
   setChatGptConnectionEnabled: vi.fn(),
-  openChatGptSetupGuide: vi.fn(),
   openChatGpt: vi.fn(),
 }));
 vi.mock('../../src/api/chatgptConnection', () => api);
@@ -75,7 +74,7 @@ describe('ChatGptConnectionSettings', () => {
     expect(enable.disabled).toBe(false);
     await act(async () => enable.click());
     expect(api.setChatGptConnectionEnabled).toHaveBeenCalledWith(true);
-    expect(api.openChatGpt).toHaveBeenCalledOnce();
+    expect(api.openChatGpt).not.toHaveBeenCalled();
     expect(container.textContent).toContain('Note access enabled');
     expect(container.textContent).not.toMatch(/ChatGPT connected/i);
   });
@@ -91,9 +90,8 @@ describe('ChatGptConnectionSettings', () => {
       'What did we decide in my latest meeting?',
     );
     expect(
-      guide.compareDocumentPosition(button(container, 'Connect to ChatGPT')) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+      guide.closest('details')?.querySelector('summary')?.textContent,
+    ).toBe('After you connect');
     expect(api.setChatGptConnectionEnabled).not.toHaveBeenCalled();
     expect(api.openChatGpt).not.toHaveBeenCalled();
   });
@@ -135,7 +133,9 @@ describe('ChatGptConnectionSettings', () => {
       'Note access enabled',
     );
     expect(button(container, 'Start a ChatGPT chat')).toBeDefined();
-    expect(container.textContent).toContain('What should I focus on?');
+    expect(container.textContent).toContain(
+      'What did we decide in my latest meeting?',
+    );
     expect(button(container, 'Disable access').closest('details')).toBeNull();
     expect(
       container.querySelector('#chatgpt-access-disclosure')?.closest('details'),
@@ -184,7 +184,7 @@ describe('ChatGptConnectionSettings', () => {
     expect(button(container, 'Connect to ChatGPT').disabled).toBe(true);
   });
 
-  it('keeps disable available after a start failure and explains errors', async () => {
+  it('can retry setup or revoke consent after a start failure', async () => {
     api.getChatGptConnectionStatus.mockResolvedValue(
       snapshot({ enabled: true, error: 'internal failure' }),
     );
@@ -192,6 +192,13 @@ describe('ChatGptConnectionSettings', () => {
     expect(container.textContent).toContain('Connection needs attention');
     expect(button(container, 'Disable access').disabled).toBe(false);
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    api.setChatGptConnectionEnabled.mockResolvedValue(
+      snapshot({ enabled: true, running: true, pluginReady: true }),
+    );
+    await act(async () => button(container, 'Retry setup').click());
+    expect(api.setChatGptConnectionEnabled.mock.calls).toEqual([[true]]);
+    expect(container.textContent).toContain('Note access enabled');
+    expect(api.openChatGpt).not.toHaveBeenCalled();
   });
 
   it('handles unavailable desktop IPC calmly', async () => {
@@ -202,7 +209,7 @@ describe('ChatGptConnectionSettings', () => {
     expect(button(container, 'Connect to ChatGPT').disabled).toBe(true);
   });
 
-  it('explains local Work usage and opens ChatGPT and help', async () => {
+  it('explains local Work usage and opens ChatGPT on request', async () => {
     api.getChatGptConnectionStatus.mockResolvedValue(
       snapshot({
         enabled: true,
@@ -212,7 +219,6 @@ describe('ChatGptConnectionSettings', () => {
         pluginName: 'Pluto',
       }),
     );
-    api.openChatGptSetupGuide.mockResolvedValue(undefined);
     api.openChatGpt.mockResolvedValue(undefined);
     const container = await render();
     expect(container.textContent).toContain('Note access enabled');
@@ -231,8 +237,6 @@ describe('ChatGptConnectionSettings', () => {
     expect(container.querySelector('code')).toBeNull();
     await act(async () => button(container, 'Start a ChatGPT chat').click());
     expect(api.openChatGpt).toHaveBeenCalledOnce();
-    await act(async () => button(container, 'Open setup guide').click());
-    expect(api.openChatGptSetupGuide).toHaveBeenCalledOnce();
   });
 
   it('does not claim readiness before the local plugin is prepared', async () => {
@@ -260,7 +264,7 @@ describe('ChatGptConnectionSettings', () => {
     );
   });
 
-  it('retains readiness when automatic ChatGPT launch fails', async () => {
+  it('retains readiness when opening ChatGPT fails after setup', async () => {
     api.setChatGptConnectionEnabled.mockResolvedValue(
       snapshot({ enabled: true, running: true, pluginReady: true }),
     );
@@ -270,10 +274,12 @@ describe('ChatGptConnectionSettings', () => {
       container.querySelector<HTMLInputElement>('input')!.click(),
     );
     await act(async () => button(container, 'Connect to ChatGPT').click());
+    expect(api.openChatGpt).not.toHaveBeenCalled();
+    await act(async () => button(container, 'Start a ChatGPT chat').click());
     expect(api.openChatGpt).toHaveBeenCalledOnce();
     expect(container.textContent).toContain('Note access enabled');
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      'Local setup is complete. Open ChatGPT desktop to start a Work chat on this computer.',
+      'Install the ChatGPT desktop app',
     );
     expect(button(container, 'Disable access').disabled).toBe(false);
     expect(button(container, 'Start a ChatGPT chat')).toBeDefined();

@@ -273,7 +273,7 @@ describe('First-run intelligence choice', () => {
       'including for automatic People and Project updates',
     );
     expect(f.container.textContent).toContain('transcription stay on this Mac');
-    expect(f.container.textContent).toContain('Continue with ChatGPT');
+    expect(f.container.textContent).toContain('Sign in with ChatGPT');
     await f.submit();
     expect(f.invoke).toHaveBeenCalledWith('CHATGPT_SIGN_IN');
     expect(f.saved.llm_provider).toBeUndefined();
