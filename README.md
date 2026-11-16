@@ -49,6 +49,14 @@ also draft a new note or task change. You review it, click Apply, and can undo i
 **Your AI, your way.** Run AI on your Mac, use your ChatGPT plan, or pick a model
 on OpenRouter. You can also let ChatGPT or Claude search your meeting notes.
 
+> **You:** What should I know about Maya's rollout?<br />
+> **Pluto:** Maya owns the rollout. The revised plan is due Thursday.<br />
+> **You:** What should I do first?<br />
+> **Pluto:** Start with the customer email you promised Maya by Friday.<br />
+> <sub>From your notes: Client catch-up · Team check-in</sub>
+>
+> <sub>*Illustrative example.*</sub>
+
 ![Meeting notes with decisions and next steps in Pluto](docs/screenshots/pluto-meeting.jpg)
 
 ## Private by default
@@ -108,8 +116,8 @@ Turn on either one, or neither.
 
 ## Privacy
 
-- **Audio and transcripts stay on your Mac.** Nothing is uploaded to record or
-  transcribe.
+- **Your work stays on your Mac.** Notes, tasks, recordings, transcripts, and
+  voice profiles are stored locally. Nothing is uploaded to record or transcribe.
 - **On-device AI sends nothing anywhere.** If you choose ChatGPT or OpenRouter,
   Pluto sends that provider only the text a task needs, such as a transcript,
   notes, or related context.
@@ -117,7 +125,8 @@ Turn on either one, or neither.
   Audio files are not encrypted by default.
   [Storage details →](docs/getting-started.md#privacy-and-data)
 - **ChatGPT and Claude note access are off until you turn them on.** When on,
-  that app can read your meeting notes, but never raw transcripts or audio.
+  that app can read your meeting notes. Your own notes, raw transcripts, and
+  audio are never shared.
   Turning a connection off stops future reads. Notes already shared stay in that app.
 
 AI can get things wrong. Notes, answers, and speaker names link back to the
@@ -125,11 +134,17 @@ transcript so you can check. Always let people know when you're recording.
 
 ## FAQ
 
+**Is Pluto a meeting bot?** No. Nothing joins your call. Pluto listens through
+your Mac's microphone and system audio.
+
 **Does it work offline?** Yes. Once the speech and Ollama models are downloaded,
 recording, notes, and chat all work without the internet.
 
 **What does it cost?** Pluto is free and open source. With on-device AI, you need
 no account or API key. ChatGPT and OpenRouter use their own pricing.
+
+**Can I share my notes?** Export any meeting's notes as a Markdown file. In
+Settings, you choose whether exports include the transcript.
 
 **Does it run on Intel, Windows, or Linux?** Not yet. Pluto needs an Apple Silicon Mac.
 
