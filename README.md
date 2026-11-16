@@ -7,8 +7,8 @@
 <h3 align="center">Your notes, tasks, and meetings in one app.</h3>
 
 <p align="center">
-  Pluto takes notes in your meetings, keeps every follow-up in one list,<br />
-  and answers questions about your work. Private, on your Mac.
+  Write your own notes, manage your tasks, and let Pluto take notes in meetings.
+  Ask Pluto what was decided, what you promised, or what needs your attention next.
 </p>
 
 <p align="center">
@@ -23,7 +23,9 @@
 
 <a id="see-it-in-action"></a>
 
-https://github.com/user-attachments/assets/edbfcc31-2b37-4648-b18a-c0b14b11973d
+[![Watch the Pluto demo showing a launch brief in Notes](docs/media/pluto-demo-poster.jpg)](https://metagrover.github.io/get-pluto/#in-action)
+
+[Watch on the website](https://metagrover.github.io/get-pluto/#in-action) · [Open the MP4](docs/media/pluto-demo.mp4)
 
 ## Everything in one place
 
@@ -99,6 +101,19 @@ and stop when you're done. Pluto transcribes the meeting and writes your notes.
 [Full setup guide and troubleshooting →](docs/getting-started.md)
 
 ## A closer look
+
+### Notes you write
+
+Keep a brief, a checklist, or a note to yourself. Link it to a person, project,
+or upcoming meeting.
+
+![Standalone Notes editor showing a launch brief and checklist](docs/screenshots/pluto-notes.jpg)
+
+### One list for your tasks
+
+Keep tasks you write yourself alongside the follow-ups you add from meetings.
+
+![Tasks showing the customer email follow-up beside manually added tasks](docs/screenshots/pluto-tasks.jpg)
 
 **Ask across all your meetings, and check the source.**
 
