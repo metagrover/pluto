@@ -22,6 +22,7 @@ import type {
   NoteAskPlutoTurn,
 } from '../../../types/notes';
 import { AskPlutoSidebar } from '../AskPlutoSidebar';
+import { PlutoActionCard } from '../PlutoActionCard';
 
 export interface NoteAskPlutoSelection {
   text: string;
@@ -50,6 +51,7 @@ interface PanelMessage {
   content: string;
   intent: NoteAskPlutoIntent;
   suggestedTasks?: string[];
+  actionBatchId?: string;
   addedTasks?: boolean;
   inserted?: boolean;
   stopped?: boolean;
@@ -191,6 +193,7 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
             content: response.answer,
             intent,
             suggestedTasks: response.suggestedTasks,
+            actionBatchId: response.actionBatchId,
             fallbackModel: response.fallbackModel,
             ...(answerWith ? { answeredBy: answerWith } : {}),
           },
@@ -338,6 +341,9 @@ export const NoteAskPlutoPanel: React.FC<NoteAskPlutoPanelProps> = ({
           </div>
         ) : (
           <div key={message.id} className="note-ask-panel__answer">
+            {message.actionBatchId && (
+              <PlutoActionCard batchId={message.actionBatchId} />
+            )}
             {message.suggestedTasks?.length ? (
               <div className="note-ask-panel__suggestions">
                 <p className="note-ask-panel__suggestions-lead">

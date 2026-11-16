@@ -70,6 +70,7 @@ export interface MeetingAskPlutoCitation {
 }
 
 export interface MeetingAskPlutoResponse {
+  actionBatchId?: string;
   status: 'answered' | 'unavailable';
   answer: string;
   scope: MeetingAskPlutoScope;

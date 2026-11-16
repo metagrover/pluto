@@ -21,6 +21,8 @@ export interface TasksSnapshot {
   projects: Array<{ id: string; name: string }>;
 }
 export interface SaveTaskInput {
+  sourceMeetingId?: string;
+  dedupeByTitle?: boolean;
   id?: string;
   title: string;
   status?: 'active' | 'completed';

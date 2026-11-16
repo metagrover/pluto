@@ -1,6 +1,7 @@
 import { Check, ListPlus, MessageSquarePlus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { saveTask } from '../../api/tasks';
+import { isActionableAnswerItem } from '../../utils/actionableAnswer';
 import { addToNextTime } from '../KnowledgeGraph/NextWithPerson';
 
 const ITEM_MAX_LENGTH = 160;
@@ -22,17 +23,20 @@ const shorten = (text: string) => {
   return `${cut.slice(0, space > 60 ? space : ITEM_MAX_LENGTH).trimEnd()}…`;
 };
 
-/**
- * A starting point for an item made from an answer: its first list item, or
- * its first sentence. The user edits it before adding.
- */
+/** Only offer a draft when the answer contains a concrete outstanding action. */
 export const answerItemDraft = (answer: string): string => {
-  const lines = answer.split('\n').map((line) => line.trim());
-  const listItem = lines.find((line) => /^(?:[-*+]|\d+[.)])\s+\S/.test(line));
-  if (listItem) return shorten(plain(listItem));
-  const text = plain(lines.filter(Boolean).join(' '));
-  const sentence = text.match(/^.+?[.!?](?=\s|$)/)?.[0] ?? text;
-  return shorten(sentence.replace(/[.]$/, ''));
+  const lines = answer
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    if (/^\s*(?:[-*+]\s+)?\[[xX]\]/.test(line)) continue;
+    const text = plain(line);
+    const sentence = text.match(/^.+?[.!?](?=\s|$)/)?.[0] ?? text;
+    if (isActionableAnswerItem(sentence))
+      return shorten(sentence.replace(/[.]$/, ''));
+  }
+  return '';
 };
 
 type Target = 'task' | 'next';
@@ -100,6 +104,9 @@ export function AnswerActions({
       setBusy(false);
     }
   };
+
+  const suggestedDraft = answerItemDraft(answer);
+  if (!suggestedDraft) return null;
 
   if (target) {
     return (

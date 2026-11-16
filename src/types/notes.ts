@@ -69,6 +69,7 @@ export interface NoteAskPlutoRequest {
 }
 
 export interface NoteAskPlutoResponse {
+  actionBatchId?: string;
   status: 'answered' | 'unavailable';
   answer: string;
   /** Present for the "tasks" intent: task titles the user can approve. */

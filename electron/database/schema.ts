@@ -391,6 +391,7 @@ export const personChatThreads = sqliteTable(
 export const personChatMessages = sqliteTable(
   'person_chat_messages',
   {
+    actionBatchId: text('action_batch_id'),
     id: text('id').primaryKey(),
     threadId: text('thread_id')
       .notNull()
@@ -1580,3 +1581,11 @@ export const notes = sqliteTable(
     index('idx_notes_updated_at').on(desc(table.updatedAt)),
   ],
 );
+
+export const plutoActionBatches = sqliteTable('pluto_action_batches', {
+  id: text('id').primaryKey().notNull(),
+  requestKey: text('request_key').notNull().unique(),
+  batchJson: text('batch_json').notNull(),
+  undoJson: text('undo_json'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});
