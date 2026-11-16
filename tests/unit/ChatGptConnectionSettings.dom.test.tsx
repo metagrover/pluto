@@ -133,7 +133,9 @@ describe('ChatGptConnectionSettings', () => {
       'Note access enabled',
     );
     expect(button(container, 'Start a ChatGPT chat')).toBeDefined();
-    expect(container.textContent).toContain('What did we decide in my latest meeting?');
+    expect(container.textContent).toContain(
+      'What did we decide in my latest meeting?',
+    );
     expect(button(container, 'Disable access').closest('details')).toBeNull();
     expect(
       container.querySelector('#chatgpt-access-disclosure')?.closest('details'),
