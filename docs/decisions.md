@@ -3040,3 +3040,14 @@ Every retry still requires a fresh memory sample and an empty runner list. Persi
 This narrows “2026-10-23 — Include strict local source validation in the bounded writer repair (notes-v89).” When a structurally valid local draft fails identifiable source checks, Pluto reviews the affected blocks against exact transcript spans. The review completes split sentences from the same identified speaker and supplies up to three preceding turns for context. It reconstructs the subject from that evidence without passing the rejected wording as a hint. Schema errors still use the bounded format repair.
 
 The selected local model gets one review round with at most eight requests. Publication requires resolved blocks, exact references, a supported overview, and the existing source and prose checks. A partial review does not grant document-wide action review metadata. Rejected drafts stay out of the accepted-stage cache. Each request goes through the existing model admission and cancellation path.
+
+## 2026-11-16 — Give desktop note access a dedicated Settings tab
+
+- **Status:** Accepted
+- **Supersedes in part:** “2026-10-30 — Separate AI setup from optional desktop note connections” placed the desktop connections in Advanced. The dashboard invitation and product help now open Settings → Connections.
+- **Decision:** Set up AI used inside Pluto, including ChatGPT plan sign-in, in Intelligence. Manage read-only access to saved meeting notes in ChatGPT Desktop and Claude Desktop in Connections. Keep each desktop app’s consent independent and explain the data each app can retrieve before enabling access.
+
+## 2026-11-16 — Finish desktop connection setup in Pluto
+
+- **Supersedes in part:** “2026-11-16 — Give desktop note access a dedicated Settings tab” and the previous automatic launch after granting desktop access.
+- **Decision:** Connect prepares note access without switching apps. Pluto shows the first-run restart instruction before the explicit launch action. Claude’s Developer settings are a recovery step, and the ChatGPT draft starts with a concrete question about the latest meeting. Setup and recovery instructions live next to the controls. A failed setup can be retried under the existing consent, and revocation remains available.

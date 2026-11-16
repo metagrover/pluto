@@ -244,11 +244,11 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
           />
           <span>
             <span className="block text-[15px] font-semibold">
-              ChatGPT · Your plan
+              ChatGPT plan
             </span>
             <span className="mt-1 block text-[13px] leading-5 text-pro-text-main/75">
-              Use an eligible ChatGPT Plus or Pro plan. No Ollama or API key
-              needed. Requests count toward your plan allowance.
+              Use your eligible ChatGPT plan to run Pluto’s AI features.
+              Requests count toward your plan allowance.
             </span>
           </span>
         </label>
@@ -368,7 +368,7 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
             : provider === 'chatgpt'
               ? connected
                 ? 'Use ChatGPT'
-                : 'Continue with ChatGPT'
+                : 'Sign in with ChatGPT'
               : provider === 'ollama'
                 ? 'Use Ollama'
                 : provider === 'openrouter'

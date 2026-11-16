@@ -510,15 +510,19 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             }
             title={
               step === 'connections'
-                ? 'Keep thinking in your favorite app.'
+                ? 'Follow a thread across meetings.'
                 : 'A little context, in your own words.'
             }
             description={
               step === 'connections'
-                ? 'Explore your saved meeting notes in ChatGPT or Claude, with separate access controls for each.'
+                ? 'Compare decisions from different meetings or ask how a project changed over time.'
                 : 'Add the names people use for you, and the work or interests you bring to your conversations.'
             }
-            footer="You can change or clear this information anytime in Settings."
+            footer={
+              step === 'connections'
+                ? 'Connect either app now or come back to this in Settings.'
+                : 'You can change or clear this information anytime in Settings.'
+            }
           />
           <section
             aria-label={

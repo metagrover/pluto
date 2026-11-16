@@ -9,11 +9,11 @@ describe('Ask Pluto product help', () => {
     'How do I use ChatGPT with Pluto?',
   ])('answers connection setup from product guidance: %s', (query) => {
     const answer = buildPlutoHelpReply(query);
-    expect(answer).toContain('Settings → Advanced → ChatGPT connection');
+    expect(answer).toContain('Settings → Connections → ChatGPT Desktop');
     expect(answer).toContain('Fully quit ChatGPT');
     expect(answer).toContain('type **@**');
     expect(answer).toContain('Retrieved notes are sent to OpenAI');
-    expect(answer).toContain('(/settings/advanced)');
+    expect(answer).toContain('(/settings/connections)');
     expect(answer).not.toMatch(/confirm your identity|API key|tunnel/i);
   });
 
@@ -23,7 +23,7 @@ describe('Ask Pluto product help', () => {
     'Why is my Claude connection not working?',
   ])('explains the independent Claude notes connection: %s', (query) => {
     const answer = buildPlutoHelpReply(query);
-    expect(answer).toContain('Settings → Advanced → Claude connection');
+    expect(answer).toContain('Settings → Connections → Claude Desktop');
     expect(answer).toContain('Fully quit Claude');
     expect(answer).toContain('pluto-notes-development');
     expect(answer).toContain('Developer → Local MCP servers');

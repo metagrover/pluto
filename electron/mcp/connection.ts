@@ -5,8 +5,6 @@ import { startPlutoMcpServer } from './server';
 import type { PlutoMcpDataSource, PlutoMcpSnapshot } from './types';
 
 export const PLUTO_MCP_ENABLED_SETTING = 'chatgpt_notes_connection_enabled';
-export const PLUTO_MCP_SETUP_URL =
-  'https://developers.openai.com/plugins/build/plugins#install-a-local-plugin-manually';
 
 export function createPlutoMcpConnection({
   dataSource,
@@ -109,8 +107,7 @@ export function createPlutoMcpConnection({
           enabled = readEnabled();
           if (enabled) await start();
         } catch {
-          error =
-            'Could not start the local connection. Disable it and try again.';
+          error = 'Could not start the local connection. Retry setup.';
         }
         return getStatus();
       }),

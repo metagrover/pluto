@@ -26,12 +26,12 @@ export function NotesConnectionsSetup({
   return (
     <div className="w-full max-w-xl">
       <h2 className="font-serif text-[2rem] font-medium leading-[1.12] tracking-[-0.02em]">
-        Your notes, where you think
+        Search your notes in ChatGPT or Claude
       </h2>
       <p className="mt-3 text-[15px] leading-6 text-pro-text-muted">
-        Optionally connect ChatGPT Desktop or Claude Desktop to explore your
-        saved meeting notes. These connections are separate from the AI that
-        powers Pluto’s notes and answers.
+        Connect a desktop app to ask questions across your saved meeting notes.
+        This is separate from the AI that powers Pluto. Choose which app can
+        read your notes.
       </p>
       <div
         className="my-6 flex flex-wrap gap-3"
@@ -55,7 +55,7 @@ export function NotesConnectionsSetup({
         {!choice
           ? 'Access is off until you allow it for each app. Retrieved notes are sent to OpenAI or Anthropic; raw transcripts and audio are not shared. '
           : ''}
-        You can manage both connections in Settings → Advanced.
+        Manage access anytime in Settings → Connections.
       </p>
       <button
         type="button"

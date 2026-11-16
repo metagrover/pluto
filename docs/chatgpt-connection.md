@@ -16,18 +16,18 @@ reads; it cannot remove content already shared with ChatGPT.
 ## Connect on your Mac
 
 1. Keep Pluto and a current ChatGPT Desktop with local plugin support installed.
-2. In Pluto, open **Settings → Advanced → ChatGPT connection**.
+2. In Pluto, open **Settings → Connections → ChatGPT Desktop**.
 3. Allow meeting-note access and click **Connect to ChatGPT**.
 4. Fully quit ChatGPT (⌘Q) and reopen it to load the local plugin. Opening
    another window is not enough. Keep Pluto running with access enabled.
 5. Click **Start a ChatGPT chat** in Pluto to open a new Work chat with **@Pluto**
-   and “What should I focus on?” already in the composer. Review or edit the draft,
+   and “What did we decide in my latest meeting?” already in the composer. Review or edit the draft,
    then send it. Development builds mention **@Pluto (Development)** instead.
    ChatGPT controls tool permissions. If ChatGPT restores an older
    screen, start a new Work chat manually and select Pluto with `@`.
 
-The button registers and installs the local plugin through ChatGPT's bundled
-CLI, then opens a new Work chat in ChatGPT. No website, hosted server, tunnel, terminal command,
+**Connect to ChatGPT** registers and installs the local plugin through ChatGPT’s
+bundled CLI. **Start a ChatGPT chat** opens the Work draft when you’re ready. No website, hosted server, tunnel, terminal command,
 separate Node installation, or OpenAI API key is needed. This integration targets
 ChatGPT Desktop's local Work plugins; merely installing a desktop version
 without local plugin support does not make it compatible.

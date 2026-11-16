@@ -3,7 +3,6 @@ import {
   type PlutoMcpSnapshot,
   getChatGptConnectionStatus,
   openChatGpt,
-  openChatGptSetupGuide,
   setChatGptConnectionEnabled,
 } from '../../api/chatgptConnection';
 import chatGptLogo from '../../assets/brand/chatgpt.svg';
@@ -16,7 +15,7 @@ const primaryActionClass = `${buttonClass} border-transparent bg-pro-text-main t
 export const ChatGptConnectionSettings = () => {
   const [status, setStatus] = useState<PlutoMcpSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'connect' | 'disable' | null>(null);
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ready = Boolean(
@@ -46,31 +45,22 @@ export const ChatGptConnectionSettings = () => {
     };
   }, []);
 
-  const changeEnabled = async () => {
-    if (!status || busy || (!status.enabled && !consent)) return;
-    setBusy(true);
+  const changeEnabled = async (enabled: boolean) => {
+    if (!status || busy || (enabled && !status.enabled && !consent)) return;
+    setBusy(enabled ? 'connect' : 'disable');
     setError(null);
     try {
-      const next = await setChatGptConnectionEnabled(!status.enabled);
+      const next = await setChatGptConnectionEnabled(enabled);
       setStatus(next);
       if (!next.enabled) setConsent(false);
-      if (!status.enabled && next.enabled && next.running && next.pluginReady) {
-        try {
-          await openChatGpt();
-        } catch {
-          setError(
-            'Local setup is complete. Open ChatGPT desktop to start a Work chat on this computer. If ChatGPT is not installed, install it on this computer first.',
-          );
-        }
-      }
     } catch {
       setError(
-        status.enabled
-          ? 'Access could not be disabled. Try again; access may still be enabled.'
-          : 'The local service could not be enabled. Try again.',
+        enabled
+          ? 'The local service could not be enabled. Try again.'
+          : 'Access could not be disabled. Try again. Access may still be enabled.',
       );
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -103,31 +93,18 @@ export const ChatGptConnectionSettings = () => {
 
   return (
     <section
-      className="mb-8 max-w-3xl"
+      className="mb-5 max-w-3xl"
       aria-labelledby="chatgpt-connection-heading"
     >
-      <h3
-        id="chatgpt-connection-heading"
-        className="mb-3 ml-1 flex items-center gap-2 text-[13px] font-semibold text-pro-text-main"
-      >
-        <img
-          src={chatGptLogo}
-          alt=""
-          aria-hidden="true"
-          className="h-5 w-5 dark:invert"
-        />
-        ChatGPT connection
-      </h3>
       <div className="space-y-4 rounded-xl border border-pro-border/60 bg-pro-surface/70 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="space-y-1">
-            <p className="text-[13px] font-medium text-pro-text-main">
-              Your meeting notes in ChatGPT
-            </p>
-            <p className="text-xs leading-relaxed text-pro-text-main/75">
-              Ask questions, compare meetings, and explore decisions.
-            </p>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3
+            id="chatgpt-connection-heading"
+            className="flex items-center gap-2 text-sm font-semibold text-pro-text-main"
+          >
+            <img src={chatGptLogo} alt="" className="h-5 w-5 dark:invert" />
+            ChatGPT Desktop
+          </h3>
           <p
             role="status"
             className="text-xs leading-relaxed text-pro-text-main/75"
@@ -152,11 +129,15 @@ export const ChatGptConnectionSettings = () => {
         ) : null}
         {ready ? (
           <div className="space-y-2">
+            <p className="text-xs leading-relaxed text-pro-text-main">
+              First time connecting? If ChatGPT is open, fully quit it with ⌘Q
+              before starting a chat. Keep Pluto running.
+            </p>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 className={primaryActionClass}
-                disabled={busy}
+                disabled={busy !== null}
                 onClick={() => {
                   setError(null);
                   void openChatGpt().catch(() => {
@@ -171,51 +152,34 @@ export const ChatGptConnectionSettings = () => {
               <button
                 type="button"
                 className={actionClass}
-                disabled={busy}
-                onClick={() => void changeEnabled()}
+                disabled={busy !== null}
+                onClick={() => void changeEnabled(false)}
               >
-                {busy ? 'Disabling…' : 'Disable access'}
+                {busy === 'disable' ? 'Disabling…' : 'Disable access'}
               </button>
             </div>
             <p className="text-xs leading-relaxed text-pro-text-main/75">
-              Opens a draft with @{pluginLabel} and “What should I focus on?”
-              for you to review and send. Keep Pluto running; restart ChatGPT
-              after connecting or updating.
+              Opens a draft with @{pluginLabel} and “What did we decide in my
+              latest meeting?” for you to review and send.
             </p>
           </div>
         ) : null}
-        <div className="border-t border-pro-border/60 pt-4">
-          {ready ? (
-            <details className="text-xs leading-relaxed text-pro-text-main/75">
-              <summary className="cursor-pointer rounded font-medium text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent">
-                How to use Pluto in ChatGPT
-              </summary>
-              <div className="mt-3">{setupSteps}</div>
-            </details>
-          ) : (
-            <details className="text-xs leading-relaxed text-pro-text-main/75">
-              <summary className="cursor-pointer rounded font-medium text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent">
-                After you connect
-              </summary>
-              <div className="mt-3">{setupSteps}</div>
-            </details>
-          )}
-        </div>
-        <div className="space-y-3 border-t border-pro-border/60 pt-4">
+        <div className="space-y-3">
           <p
             id="chatgpt-access-disclosure"
             className="text-xs leading-relaxed text-pro-text-main/75"
           >
-            ChatGPT can read all your meeting notes. Retrieved notes are sent to
-            OpenAI. Raw transcripts and audio are not shared. Disabling revokes
-            future access; notes already shared in ChatGPT remain there.
+            ChatGPT can read all your meeting notes, including meeting titles
+            and dates. Retrieved content is sent to OpenAI. Raw transcripts and
+            audio are not shared. Disabling revokes future access. Anything
+            already shared in ChatGPT remains there.
           </p>
           {status && !status.enabled ? (
             <label className="flex items-start gap-2 text-xs leading-relaxed text-pro-text-main">
               <input
                 type="checkbox"
                 checked={consent}
-                disabled={busy}
+                disabled={busy !== null}
                 onChange={(event) => setConsent(event.target.checked)}
                 aria-describedby="chatgpt-access-disclosure"
                 className="mt-0.5 accent-pro-accent"
@@ -224,23 +188,42 @@ export const ChatGptConnectionSettings = () => {
             </label>
           ) : null}
           {!ready ? (
-            <button
-              type="button"
-              className={status?.enabled ? actionClass : primaryActionClass}
-              disabled={
-                loading || !status || busy || (!status.enabled && !consent)
-              }
-              onClick={() => void changeEnabled()}
-            >
-              {busy
-                ? status?.enabled
-                  ? 'Disabling…'
-                  : 'Preparing…'
-                : status?.enabled
-                  ? 'Disable access'
-                  : 'Connect to ChatGPT'}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={primaryActionClass}
+                disabled={
+                  loading ||
+                  !status ||
+                  busy !== null ||
+                  (!status.enabled && !consent)
+                }
+                onClick={() => void changeEnabled(true)}
+              >
+                {busy === 'connect'
+                  ? 'Preparing…'
+                  : status?.enabled
+                    ? 'Retry setup'
+                    : 'Connect to ChatGPT'}
+              </button>
+              {status?.enabled ? (
+                <button
+                  type="button"
+                  className={actionClass}
+                  disabled={busy !== null}
+                  onClick={() => void changeEnabled(false)}
+                >
+                  {busy === 'disable' ? 'Disabling…' : 'Disable access'}
+                </button>
+              ) : null}
+            </div>
           ) : null}
+          <details className="text-xs leading-relaxed text-pro-text-main/75">
+            <summary className="cursor-pointer rounded font-medium text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent">
+              {ready ? 'How to use Pluto in ChatGPT' : 'After you connect'}
+            </summary>
+            <div className="mt-3">{setupSteps}</div>
+          </details>
           <details className="text-xs leading-relaxed text-pro-text-main/75">
             <summary className="cursor-pointer rounded font-medium text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent">
               Troubleshooting
@@ -256,27 +239,13 @@ export const ChatGptConnectionSettings = () => {
                 enabled means Pluto is ready; it does not confirm a successful
                 conversation in ChatGPT.
               </p>
-              <button
-                type="button"
-                className={actionClass}
-                onClick={() => {
-                  setError(null);
-                  void openChatGptSetupGuide().catch(() => {
-                    setError(
-                      'The setup guide could not be opened. Try again in the Pluto desktop app.',
-                    );
-                  });
-                }}
-              >
-                Open setup guide
-              </button>
             </div>
           </details>
         </div>
         {error || status?.error ? (
           <p role="alert" className="text-xs leading-relaxed text-red-500">
             {error ??
-              'The connection could not be prepared. Make sure the ChatGPT desktop app supports local plugins and you are signed in, then disable access and try again.'}
+              'The connection could not be prepared. Make sure the ChatGPT desktop app supports local plugins and you are signed in, then retry setup.'}
           </p>
         ) : null}
       </div>

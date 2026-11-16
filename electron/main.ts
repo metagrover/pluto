@@ -177,12 +177,10 @@ import {
 } from './mcp/chatgptDesktop';
 import {
   CLAUDE_NOTES_ENABLED_SETTING,
-  CLAUDE_SETUP_URL,
   installInClaudeDesktop,
 } from './mcp/claudeDesktop';
 import {
   PLUTO_MCP_ENABLED_SETTING,
-  PLUTO_MCP_SETUP_URL,
   createPlutoMcpConnection,
 } from './mcp/connection';
 import { installPlutoLocalPlugin } from './mcp/localPlugin';
@@ -7059,9 +7057,6 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
       );
     });
   });
-  ipcMain.handle('PLUTO_CLAUDE_OPEN_SETUP_GUIDE', () =>
-    shell.openExternal(CLAUDE_SETUP_URL),
-  );
 
   ipcMain.handle('PLUTO_MCP_GET_STATUS', () => chatgptConnection?.getStatus());
   ipcMain.handle('PLUTO_MCP_SET_ENABLED', (_event, payload: unknown) => {
@@ -7074,15 +7069,18 @@ Rewrite the answer using only direct saved evidence, in at most 60 words. Preser
       throw new Error('invalid_connection_setting');
     return chatgptConnection?.setEnabled(payload.enabled);
   });
-  ipcMain.handle('PLUTO_MCP_OPEN_SETUP_GUIDE', async () => {
-    await shell.openExternal(PLUTO_MCP_SETUP_URL);
-  });
   ipcMain.handle('PLUTO_MCP_OPEN_CHATGPT', async () => {
     if (process.platform !== 'darwin')
       throw new Error('chatgpt_desktop_requires_macos');
     try {
       const status = chatgptConnection?.getStatus();
-      if (!status?.pluginName || !status.marketplaceName || !status.pluginReady)
+      if (
+        !status?.enabled ||
+        !status.running ||
+        !status.pluginName ||
+        !status.marketplaceName ||
+        !status.pluginReady
+      )
         throw new Error('chatgpt_plugin_not_ready');
       await openChatGptDesktop({
         pluginName: status.pluginName,

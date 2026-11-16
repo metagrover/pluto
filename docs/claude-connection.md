@@ -9,12 +9,11 @@ It does not expose raw transcripts, audio, database access, edits, or recording 
 ## Connect on your Mac
 
 1. Install a current Claude Desktop with local MCP support.
-2. Open **Settings → Advanced → Claude connection** in Pluto.
+2. Open **Settings → Connections → Claude Desktop** in Pluto.
 3. Read the disclosure, allow meeting-note access, and click **Connect to Claude**.
 4. Fully quit Claude (⌘Q), then reopen it. Keep Pluto running with access enabled.
-5. In Claude Settings, open **Developer → Local MCP servers** and check for
-   **pluto-notes**. Development builds use **pluto-notes-development**. Then start
-   a new chat and enable Pluto in **+ → Connectors**.
+5. Click **Open Claude Desktop** and start a new chat. Open **+ → Connectors**
+   and enable **pluto-notes**. Development builds use **pluto-notes-development**.
 6. Ask “Use Pluto to tell me what we decided in my latest meeting.” Allow note
    reads when Claude asks.
 
