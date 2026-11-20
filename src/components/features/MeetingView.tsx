@@ -2410,7 +2410,7 @@ const SelectedMeetingView = ({
                               ? 'Click to review and identify this speaker'
                               : personIdForSpeaker && onOpenPerson
                                 ? `View ${speakerLabel.replace(/ \(You\)$/, '')}'s profile`
-                                : undefined
+                                : speakerLabel
                           }
                           onClick={
                             isAnonymousSpeaker
