@@ -4,22 +4,27 @@
 
 <h1 align="center">Pluto</h1>
 
-<h3 align="center">Your notes, tasks, and meetings in one app.</h3>
+<h3 align="center">Private meeting notes that become your to-do list.</h3>
 
 <p align="center">
-  Write your own notes, manage your tasks, and let Pluto take notes in meetings.
-  Ask Pluto what was decided, what you promised, or what needs your attention next.
+  A free, open-source alternative to Granola for Mac. No bot joins your call.
+  Pluto transcribes on your Mac, writes the summary, and puts every promise
+  from the meeting on your task list.
 </p>
 
 <p align="center">
-  <a href="#get-started"><strong>Get Pluto</strong></a> ·
+  <a href="https://github.com/metagrover/pluto/releases"><strong>Download for Mac</strong></a> ·
+  <a href="#get-started">Install in one command</a> ·
+  <a href="#see-it-in-action">Watch the demo</a>
+</p>
+
+<p align="center"><sub>MIT licensed · No account needed · Works offline · Apple Silicon, macOS 14.2+</sub></p>
+
+<p align="center">
   <a href="https://metagrover.github.io/get-pluto/">Website</a> ·
-  <a href="#see-it-in-action">Demo</a> ·
   <a href="#privacy">Privacy</a> ·
   <a href="#faq">FAQ</a>
 </p>
-
-<p align="center"><sub>Free and open source · Apple Silicon Macs · Runs on your Mac</sub></p>
 
 <a id="see-it-in-action"></a>
 
