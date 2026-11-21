@@ -1612,18 +1612,18 @@
     @apply mt-1 text-xs text-pro-text-muted;
   }
   .meeting-transcript-row {
-    @apply grid gap-3 border-b py-6 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-5;
+    @apply grid grid-cols-1 gap-3 border-b py-6 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-5;
     border-color: var(--notes-rule);
   }
   .meeting-transcript-row > div {
-    @apply flex items-baseline justify-between gap-3 sm:block;
+    @apply flex min-w-0 items-baseline justify-between gap-3 sm:block;
   }
   .meeting-transcript-row strong {
-    @apply block text-[0.8rem] font-semibold leading-5;
+    @apply block w-fit max-w-full truncate text-[0.8rem] font-semibold leading-5;
     color: var(--notes-ink);
   }
   .meeting-transcript-row time {
-    @apply mt-0.5 block text-[0.75rem] leading-5 tabular-nums;
+    @apply mt-0.5 block shrink-0 text-[0.75rem] leading-5 tabular-nums;
     color: var(--notes-muted);
   }
   .meeting-transcript-row p {

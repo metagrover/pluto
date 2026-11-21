@@ -420,6 +420,41 @@ describe('MeetingView Navigation and Participants', () => {
     ).toBeNull();
   });
 
+  it('exposes the full label on hover for a transcript speaker without a profile action', async () => {
+    const speaker = 'a-very-long-synthetic-speaker@example.invalid';
+    const meeting = {
+      ...mockMeeting,
+      id: 'meeting-long-speaker-label',
+      speaker_display_names: { 'Speaker 1': speaker },
+      meeting_entities: [],
+    };
+    vi.mocked(window.ipcRenderer.invoke).mockResolvedValue(null);
+
+    await act(async () => {
+      root.render(
+        <MeetingView
+          selectedMeeting={meeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={meeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible
+          setTranscriptVisible={vi.fn()}
+        />,
+      );
+    });
+
+    const speakerLabel = Array.from(
+      container.querySelectorAll('.meeting-transcript-row strong'),
+    ).find((label) => label.textContent === speaker);
+    expect(speakerLabel?.getAttribute('title')).toBe(speaker);
+  });
+
   it('allows clicking identified speaker name in transcript turns to open their profile', async () => {
     const onOpenPerson = vi.fn();
 
